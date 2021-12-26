@@ -1,11 +1,7 @@
-#include <fmt/core.h>
-
-#include <iostream>
-
+#include "reduct/config.h"
 #include "reduct/core/logger.h"
 
 int main() {
-
-  LOG_INFO("Reduct Storage {}", 1);
+  LOG_INFO("Reduct Storage {}", reduct::kVersion);
   return 0;
 }

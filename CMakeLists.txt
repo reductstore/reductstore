@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.18)
 
-project(reduct_storage VERSION 0.1.0)
+set(MAJOR_VERSION 0)
+set(MINOR_VERSION 1)
+set(PATCH_VERSION 0)
+set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
+
+project(reduct_storage VERSION ${FULL_VERSION})
+
+message(STATUS "Version ${FULL_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -28,5 +35,7 @@ include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+include_directories(${CMAKE_BINARY_DIR})
+
 
 add_subdirectory(src)

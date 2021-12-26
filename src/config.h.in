@@ -1,0 +1,11 @@
+// Copyright 2021 Alexey Timin
+
+#ifndef REDUCT_STORAGE_CONFIG_H
+#define REDUCT_STORAGE_CONFIG_H
+
+namespace reduct {
+
+static const char* kVersion = "@FULL_VERSION@";
+
+}
+#endif  // REDUCT_STORAGE_CONFIG_H
