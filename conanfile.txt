@@ -1,0 +1,5 @@
+[requires]
+fmt/8.0.1
+
+[generators]
+cmake
