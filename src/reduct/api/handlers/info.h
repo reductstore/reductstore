@@ -10,6 +10,14 @@
 
 namespace reduct::api::handlers {
 
+/**
+ * @brief Handle Info request
+ * Calls the corresponding callback and wrap data to JSON
+ * @tparam SSL
+ * @param handler Handler class with all callbacks
+ * @param res HTTP response
+ * @param req HTTP request
+ */
 template <bool SSL = false>
 void HandleInfo(const IApiHandler &handler, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req);
 

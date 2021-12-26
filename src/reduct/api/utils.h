@@ -11,8 +11,14 @@
 
 namespace reduct::api {
 
+/**
+ * Serialize error to JSON and set HTTP status
+ * @tparam SSL
+ * @param res
+ * @param error
+ */
 template <bool SSL>
-inline void HandleError(uWS::HttpResponse<SSL> *res, const core::Error &error) {
+inline void ResponseError(uWS::HttpResponse<SSL> *res, const core::Error &error) {
   nlohmann::json data;
   res->writeStatus(std::to_string(error.code));
 

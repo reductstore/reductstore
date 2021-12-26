@@ -14,7 +14,7 @@ void HandleInfo(const IApiHandler &handler, uWS::HttpResponse<SSL> *res, uWS::Ht
   IApiHandler::InfoResponse info;
   if (auto err = handler.OnInfoRequest(&info)) {
     LOG_ERROR("{}: {}", req->getUrl(), err.ToString());
-    HandleError<SSL>(res, err);
+    ResponseError<SSL>(res, err);
     return;
   }
 

@@ -1,6 +1,8 @@
 // Copyright 2021 Alexey Timin
 #include "reduct/storage/storage.h"
 
+#include "reduct/config.h"
+
 namespace reduct::storage {
 
 using core::Error;
@@ -13,7 +15,8 @@ class Storage : public IStorage {
     class ApiHandler : public reduct::api::IApiHandler {
      public:
       [[nodiscard]] Error OnInfoRequest(InfoResponse *res) const override {
-        return Error{.code = 500, .message = "Failed"};
+        res->version = reduct::kVersion;
+        return {};
       }
     };
 

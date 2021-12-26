@@ -6,7 +6,7 @@
 
 namespace reduct::core {
 
-Error::operator bool() const { return code != 1; }
+Error::operator bool() const { return code != 0; }
 
 std::string Error::ToString() const { return fmt::format("[{}] {}", code, message); }
 

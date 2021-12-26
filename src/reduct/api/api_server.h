@@ -11,15 +11,29 @@
 
 namespace reduct::api {
 
+/**
+ * API handler with all the request callbacks
+ */
 class IApiHandler {
  public:
+  /**
+   * Response on info request
+   */
   struct InfoResponse {
     std::string version;
   };
 
+  /**
+   * Callback for info request
+   * @param info response
+   * @return
+   */
   [[nodiscard]] virtual core::Error OnInfoRequest(InfoResponse* info) const = 0;
 };
 
+/**
+ * HTTP API Server
+ */
 class IApiServer {
  public:
   struct Options {
@@ -28,6 +42,12 @@ class IApiServer {
     std::string base_path;
   };
 
+  /**
+   * Build implementation of API Server
+   * @param handler Handler with all the callbacks to process HTTP request separately
+   * @param options
+   * @return pointer to the implementation
+   */
   static std::unique_ptr<IApiServer> Build(std::unique_ptr<IApiHandler> handler, Options options);
 
   /**
