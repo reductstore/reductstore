@@ -10,6 +10,8 @@ project(reduct_storage VERSION ${FULL_VERSION})
 message(STATUS "Version ${FULL_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 if (FULL_STATIC_BINARY)
     set(CMAKE_EXE_LINKER_FLAGS " -static")
@@ -39,4 +41,4 @@ include_directories(${CMAKE_BINARY_DIR})
 
 
 add_subdirectory(src)
-add_subdirectory(test)
+add_subdirectory(unit_tests)

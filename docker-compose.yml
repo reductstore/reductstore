@@ -1,0 +1,12 @@
+version: '3'
+
+services:
+  api_tests:
+    build: api_tests
+    environment:
+      STORAGE_HOST: reduct_storage
+    depends_on:
+      - reduct_storage
+
+  reduct_storage:
+    build: .

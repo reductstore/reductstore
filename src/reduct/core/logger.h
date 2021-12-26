@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <iostream>
 
 namespace reduct::core {
 /**
@@ -40,8 +41,8 @@ class Logger {
       ss << std::put_time(gtime, "%F %T");
       auto thid = std::this_thread::get_id();
       auto msg = fmt::vformat(message, fmt::make_format_args(args...));
-      fmt::print("{}.{:03d} ({:>5}) {}:{}\t {} {}\n", ss.str(), milliseconds, reinterpret_cast<uint16_t &>(thid), file,
-                 line, kLoglevelNames.at(level), msg);
+      std::cout << fmt::format("{}.{:03d} ({:>5}) {}:{}\t {} {}\n", ss.str(), milliseconds, reinterpret_cast<uint16_t &>(thid), file,
+                 line, kLoglevelNames.at(level), msg) << std::endl;
     }
   }
 
