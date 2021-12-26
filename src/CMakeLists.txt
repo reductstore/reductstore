@@ -1,6 +1,12 @@
 set(SRC_FILES
+        reduct/api/handlers/info.cc
+        reduct/api/api_server.cc
+
+        reduct/core/env_variable.cc
         reduct/core/logger.cc
-        )
+        reduct/core/error.cc
+
+        reduct/storage/storage.cc)
 
 
 add_library(reduct_lib STATIC ${SRC_FILES})

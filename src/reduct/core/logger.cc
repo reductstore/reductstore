@@ -6,6 +6,7 @@
 
 namespace reduct::core {
 
+LogLevels Logger::log_level_ = LogLevels::kInfo;
 
 void Logger::SetLogLevel(LogLevels print_level) { log_level_ = print_level; }
 
