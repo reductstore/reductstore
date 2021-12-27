@@ -50,7 +50,7 @@ jobs:
           docker image ls -a
 
       - name: Run tests
-        run: docke run ${{github.repository}} reduct_tests
+        run: docker run ${{github.repository}} reduct_tests
 #
 #  api_test:
 #    runs-on: ubuntu-latest
