@@ -6,11 +6,11 @@
 
 #include <chrono>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <iostream>
 
 namespace reduct::core {
 /**
@@ -41,8 +41,9 @@ class Logger {
       ss << std::put_time(gtime, "%F %T");
       auto thid = std::this_thread::get_id();
       auto msg = fmt::vformat(message, fmt::make_format_args(args...));
-      std::cout << fmt::format("{}.{:03d} ({:>5}) {}:{}\t {} {}\n", ss.str(), milliseconds, reinterpret_cast<uint16_t &>(thid), file,
-                 line, kLoglevelNames.at(level), msg) << std::endl;
+      std::cout << fmt::format("{}.{:03d} ({:>5}) {}:{}\t {} {}\n", ss.str(), milliseconds,
+                               reinterpret_cast<uint16_t &>(thid), file, line, kLoglevelNames.at(level), msg)
+                << std::endl;
     }
   }
 
@@ -52,7 +53,6 @@ class Logger {
  private:
   static LogLevels log_level_;
 };
-
 
 }  // namespace reduct::core
 
@@ -66,22 +66,22 @@ constexpr const char *file_name(const char *str) { return str_slant(str) ? r_sla
 
 #define LOG_ERROR(msg, ...)                                                 \
   reduct::core::Logger::Log(reduct::core::LogLevels::kError, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)
+                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
 #define LOG_WARNING(msg, ...)                                                 \
   reduct::core::Logger::Log(reduct::core::LogLevels::kWarning, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)
+                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
 #define LOG_INFO(msg, ...)                                                 \
   reduct::core::Logger::Log(reduct::core::LogLevels::kInfo, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)
+                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
 #define LOG_DEBUG(msg, ...)                                                 \
   reduct::core::Logger::Log(reduct::core::LogLevels::kDebug, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)
+                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
 #define LOG_TRACE(msg, ...)                                                 \
   reduct::core::Logger::Log(reduct::core::LogLevels::kTrace, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)
+                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
 #endif  //  REDUCT_CORE_LOGGER_H_

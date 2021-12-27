@@ -1,4 +1,4 @@
-
+// Copyright 2021 Alexey Timin
 #include "reduct/api/api_server.h"
 #include "reduct/config.h"
 #include "reduct/core/env_variable.h"

@@ -6,10 +6,12 @@ RUN pip3 install conan
 
 WORKDIR /src
 
-ADD conanfile.txt .
+COPY conanfile.txt .
 RUN conan install . --build=missing
 
-ADD . .
+COPY src src
+COPY unit_tests unit_tests
+COPY CMakeLists.txt .
 
 WORKDIR /build
 

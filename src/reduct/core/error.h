@@ -3,13 +3,13 @@
 #ifndef REDUCT_STORAGE_ERROR_H
 #define REDUCT_STORAGE_ERROR_H
 
-#include <string>
 #include <ostream>
+#include <string>
 #include <variant>
 
 namespace reduct::core {
 
-struct [[nodiscard]]  Error {
+struct [[nodiscard]] Error { // NOLINT
   int code = 0;
   std::string message{};
 

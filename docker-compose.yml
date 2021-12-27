@@ -2,13 +2,13 @@ version: '3'
 
 services:
   cpplint_src:
-    build: docker/cpplint
+    build: cpplint
     command: bash -c "find src/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
     volumes:
       - .:/app/
 
   cpplint_test:
-    build: docker/cpplint
+    build: cpplint
     command: bash -c "find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
     volumes:
       - .:/app/

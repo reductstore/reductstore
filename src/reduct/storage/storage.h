@@ -11,9 +11,7 @@ namespace reduct::storage {
  */
 class IStorage {
  public:
-  struct Options {
-
-  };
+  struct Options {};
 
   /**
    * Binds storage with HTT API
