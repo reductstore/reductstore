@@ -11,11 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Get cpp script
-        run: wget https://raw.githubusercontent.com/google/styleguide/gh-pages/cpplint/cpplint.py
+        run: |
+          wget  --output-file=/usr/local/bin/cpplint.py https://raw.githubusercontent.com/google/styleguide/gh-pages/cpplint/cpplint.py 
+          chmod +x /usr/local/bin/cpplint.py
       - name: Check code in /src
-        run: bash -c "find src/ -name "*.cc" -o -name "*.h"  | xargs ./cpplint.py"
+        run: find src/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py
       - name: Check code in /unit_tests
-        run: bash -c "find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs ./cpplint.py"
+        run: find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py
 
   build:
     runs-on: ubuntu-latest
@@ -70,6 +72,6 @@ jobs:
       - name: Build API tests
         run: docker build -t api_tests ./api_tests
       - name: Run Storage
-        run: docker run -p 8383:8383 -d ${{github.repository}}
+        run: docker run --network=host -d ${{github.repository}}
       - name: Run API tests
-        run: docker run api_tests
+        run: docker run --network=host api_tests
