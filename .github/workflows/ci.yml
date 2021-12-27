@@ -26,7 +26,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          tags: myimage:latest
+          tags: ${{github.repository}}:latest
           outputs: type=docker,dest=/tmp/image.tar
       - name: Upload artifact
         uses: actions/upload-artifact@v2
@@ -50,7 +50,7 @@ jobs:
           docker image ls -a
 
       - name: Run tests
-        run: docker run ghcr.io/${{github.repository}} reduct_tests
+        run: docke run ${{github.repository}} reduct_tests
 #
 #  api_test:
 #    runs-on: ubuntu-latest
