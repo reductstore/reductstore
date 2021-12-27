@@ -34,7 +34,7 @@ jobs:
           name: image
           path: /tmp/image.tar
 
-  unit_test:
+  unit_tests:
     needs: build
     runs-on: ubuntu-latest
 
@@ -51,7 +51,7 @@ jobs:
       - name: Run tests
         run: docker run ${{github.repository}} reduct_tests
 
-  api_test:
+  api_tests:
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -70,4 +70,4 @@ jobs:
       - name: Build API tests
         run: docker build -t api_tests ./api_tests
       - name: Run API tests
-        run: docker run --rm apt_tests
+        run: docker run --rm api_tests
