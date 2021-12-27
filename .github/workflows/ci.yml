@@ -34,7 +34,7 @@ jobs:
           images: ghcr.io/${{github.repository}}
 
   unit_test:
-    needs: build
+    needs: build_and_push
     runs-on: ubuntu-latest
 
     steps:
@@ -50,7 +50,7 @@ jobs:
 
   api_test:
     runs-on: ubuntu-latest
-    needs: build
+    needs: build_and_push
     steps:
       - uses: actions/checkout@v2
       - name: Log in to the Container registry
