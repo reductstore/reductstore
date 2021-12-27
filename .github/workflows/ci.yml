@@ -25,12 +25,13 @@ jobs:
       - name: Run tests
         run: docker-compose run unit_tests
 
-#  api_test:
-#    runs-on: ubuntu-latest
-#
-#    steps:
-#      - uses: actions/checkout@v2
-#      - name: Build code in Docker
-#        run: docker-compose build
-#      - name: Run tests
-#        run: docker-compose up
+  api_test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run Storage
+        run: docker-compose up -d reduct_storage
+      - name: Run API tests
+        run: docker-compose run api_tests
+      - name: Down Storage
+        run: docker-compose dowm
