@@ -10,10 +10,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - name: Get cpp script
+        run: wget https://raw.githubusercontent.com/google/styleguide/gh-pages/cpplint/cpplint.py
       - name: Check code in /src
-        run: docker-compose run cpplint_src
-      - name: Check code in /test
-        run: docker-compose run cpplint_test
+        run: bash -c "find src/ -name "*.cc" -o -name "*.h"  | xargs ./cpplint.py"
+      - name: Check code in /unit_tests
+        run: bash -c "find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs ./cpplint.py"
 
   build:
     runs-on: ubuntu-latest
@@ -65,9 +67,9 @@ jobs:
         run: |
           docker load --input /tmp/image.tar
           docker image ls -a
-      - name: Run Storage
-        run: docker run --rm -p 8383:8383 -d ${{github.repository}}
       - name: Build API tests
         run: docker build -t api_tests ./api_tests
+      - name: Run Storage
+        run: docker run -p 8383:8383 -d ${{github.repository}}
       - name: Run API tests
-        run: docker run --rm api_tests
+        run: docker run api_tests
