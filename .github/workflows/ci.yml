@@ -16,14 +16,23 @@ jobs:
         run: docker-compose run cpplint_test
 
   build_and_test:
+    needs: cpplint
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v2
       - name: Build code in Docker
-        run: docker-compose build unit_tests
+        run: docker-compose build
+
+  unit_test:
+    needs: cpplint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
       - name: Run tests
         run: docker-compose run unit_tests
+
 
   api_test:
     runs-on: ubuntu-latest
@@ -34,4 +43,5 @@ jobs:
       - name: Run API tests
         run: docker-compose run api_tests
       - name: Down Storage
-        run: docker-compose dowm
+        run: docker-compose down
+        if: always()
