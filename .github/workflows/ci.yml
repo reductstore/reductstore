@@ -1,0 +1,36 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  cpplint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check code in /src
+        run: docker-compose run cpplint_src
+      - name: Check code in /test
+        run: docker-compose run cpplint_test
+
+  build_and_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build code in Docker
+        run: docker-compose build unit_tests
+      - name: Run tests
+        run: docker-compose run unit_tests
+
+#  api_test:
+#    runs-on: ubuntu-latest
+#
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Build code in Docker
+#        run: docker-compose build
+#      - name: Run tests
+#        run: docker-compose up
