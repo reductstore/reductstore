@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.8-slim
 
 RUN pip install -U pip
 
