@@ -14,7 +14,7 @@ services:
       - .:/app/
 
   unit_tests:
-    build: .
+    image: ghcr.io/reduct-storage/reduct-
     command: reduct_tests
 
   api_tests:
