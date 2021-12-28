@@ -5,6 +5,7 @@
 #include <App.h>
 #include <nlohmann/json.hpp>
 
+#include "reduct/api/handlers/bucket.h"
 #include "reduct/api/handlers/info.h"
 #include "reduct/api/utils.h"
 #include "reduct/core/logger.h"
@@ -24,13 +25,16 @@ class ApiServer : public IApiServer {
     const auto &[host, port, base_path] = options_;
 
     uWS::App()
-        .get(base_path + "info/", [this](auto *res, auto req) { handlers::HandleInfo(*handler_, res, req); })
+        .get(base_path + "info", [this](auto *res, auto *req) { handlers::HandleInfo(*handler_, res, req); })
+        // Bucket API
+        .post(base_path + ":bucket_name",
+              [this](auto *res, auto *req) { handlers::HandleCreateBucket(*handler_, res, req, req->getParameter(0)); })
         .listen(host, port, 0,
                 [&](auto sock) {
                   if (sock) {
                     LOG_INFO("Run HTTP server on {}:{}", host, port);
                   } else {
-                    LOG_ERROR("Failed start HTTP server");
+                    LOG_ERROR("Failed to listen to {}:{}", host, port);
                   }
                 })
         .run();

@@ -16,16 +16,20 @@ int main() {
   EnvVariable env;
   auto host = env.Get<std::string>("HOST", "0.0.0.0");
   auto port = env.Get<int>("PORT", 8383);
-  auto base_path = env.Get<std::string>("BASE_PATH", "/");
+  auto api_base_path = env.Get<std::string>("API_BASE_PATH", "/");
+  auto data_path = env.Get<std::string>("DATA_PATH", "/var/reduct-storage/data");
 
   LOG_INFO("Configuration: \n {}", env.Print());
 
-  auto storage = IStorage::Build({});
-  auto server = IApiServer::Build(storage->BindWithApi(), {
-                                                                      .host = host,
-                                                                      .port = port,
-                                                                      .base_path = base_path,
-                                                                  });
+  auto storage = IStorage::Build({
+      .data_path = data_path,
+  });
+
+  auto server = IApiServer::Build(std::move(storage), {
+                                                          .host = host,
+                                                          .port = port,
+                                                          .base_path = api_base_path,
+                                                      });
   server->Run();
 
   return 0;

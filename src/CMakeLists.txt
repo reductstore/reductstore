@@ -1,4 +1,5 @@
 set(SRC_FILES
+        reduct/api/handlers/bucket.cc
         reduct/api/handlers/info.cc
         reduct/api/api_server.cc
 
@@ -6,6 +7,7 @@ set(SRC_FILES
         reduct/core/logger.cc
         reduct/core/error.cc
 
+        reduct/storage/bucket.cc
         reduct/storage/storage.cc)
 
 

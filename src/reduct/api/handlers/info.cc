@@ -10,9 +10,9 @@
 namespace reduct::api::handlers {
 
 template <bool SSL>
-void HandleInfo(const IApiHandler &handler, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) {
-  IApiHandler::InfoResponse info;
-  if (auto err = handler.OnInfoRequest(&info)) {
+void HandleInfo(const IInfoCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) {
+  IInfoCallback::Response info;
+  if (auto err = callback.OnInfo(&info, {})) {
     LOG_ERROR("{}: {}", req->getUrl(), err.ToString());
     ResponseError<SSL>(res, err);
     return;
@@ -23,7 +23,7 @@ void HandleInfo(const IApiHandler &handler, uWS::HttpResponse<SSL> *res, uWS::Ht
   res->end(data.dump());
 }
 
-template void HandleInfo<>(const IApiHandler &handler, uWS::HttpResponse<false> *res, uWS::HttpRequest *req);
-template void HandleInfo<>(const IApiHandler &handler, uWS::HttpResponse<true> *res, uWS::HttpRequest *req);
+template void HandleInfo<>(const IInfoCallback &handler, uWS::HttpResponse<false> *res, uWS::HttpRequest *req);
+template void HandleInfo<>(const IInfoCallback &handler, uWS::HttpResponse<true> *res, uWS::HttpRequest *req);
 
 }  // namespace reduct::api::handlers
