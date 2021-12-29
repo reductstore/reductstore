@@ -2,8 +2,8 @@
 #include "reduct/storage/storage.h"
 
 #include <filesystem>
-#include <utility>
 #include <shared_mutex>
+#include <utility>
 
 #include "reduct/config.h"
 #include "reduct/core/logger.h"
@@ -34,10 +34,9 @@ class Storage : public IStorage {
    */
   Error OnInfo(api::IInfoCallback::Response* info, const api::IInfoCallback::Request& res) const override {
     info->version = reduct::kVersion;
-    {
-      std::shared_lock lock(mutex_);
-      info->bucket_number = buckets_.size();
-    }
+
+    info->bucket_number = buckets_.size();
+
     return {};
   }
 
@@ -52,17 +51,13 @@ class Storage : public IStorage {
       return Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
     }
 
-    {
-      std::unique_lock lock(mutex_);
-      buckets_[req.name] = std::move(bucket);
-    }
+    buckets_[req.name] = std::move(bucket);
     return {};
   }
 
  private:
   Options options_;
   std::map<std::string, std::unique_ptr<IBucket>> buckets_;
-  mutable std::shared_mutex mutex_;
 };
 
 std::unique_ptr<IStorage> IStorage::Build(IStorage::Options options) {

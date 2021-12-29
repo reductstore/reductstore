@@ -3,6 +3,8 @@ set(SRC_FILES
         reduct/api/handlers/info.cc
         reduct/api/api_server.cc
 
+        reduct/async/loop.cc
+
         reduct/core/env_variable.cc
         reduct/core/logger.cc
         reduct/core/error.cc
