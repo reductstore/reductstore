@@ -8,9 +8,7 @@ namespace reduct::core {
 
 LogLevels Logger::log_level_ = LogLevels::kInfo;
 
-void Logger::SetLogLevel(LogLevels print_level) { log_level_ = print_level; }
-
-void Logger::SetLogLevel(const std::string &print_level) {
+void Logger::set_level(const std::string &print_level) {
   static const std::map<std::string, LogLevels> kIdsLoglevel = {
       std::make_pair("TRACE", LogLevels::kTrace), std::make_pair("DEBUG", LogLevels::kDebug),
       std::make_pair("INFO", LogLevels::kInfo),   std::make_pair("WARNING", LogLevels::kWarning),

@@ -15,23 +15,11 @@ using reduct::async::Task;
 using Clock = std::chrono::steady_clock;
 using namespace std::chrono_literals;
 
-class Loop : public ILoop {
- public:
-  void Defer(Task&& task) override {
-    std::thread t([task = std::move(task)]() mutable {
-      std::this_thread::sleep_for(5ms);
-      task();
-    });
-    t.detach();
-  }
-};
 
 Task<int> sleep_coro(std::chrono::milliseconds sleep) {
   co_await Sleep(sleep);
   co_return 100;
 };
-
-static Loop loop;
 
 template <typename T>
 struct SimpleThreadExecutor {
@@ -52,7 +40,6 @@ Task<int> run_coro(std::function<int()>&& task) {
 Task<int> run_in_loop(std::function<int()>&& task) { co_return co_await Run(std::move(task)); };
 
 TEST_CASE("async::Sleep should sleep in loop") {
-  ILoop::set_loop(&loop);
   auto start = Clock::now();
   auto task = sleep_coro(50ms);
 
@@ -61,8 +48,6 @@ TEST_CASE("async::Sleep should sleep in loop") {
 }
 
 TEST_CASE("async::Run should run task in executor") {
-  ILoop::set_loop(&loop);
-
   auto start = Clock::now();
   auto task = run_coro([] { return 100; });
 
@@ -70,8 +55,6 @@ TEST_CASE("async::Run should run task in executor") {
 }
 
 TEST_CASE("async::Run should run task in loop by default") {
-  ILoop::set_loop(&loop);
-
   auto task = run_in_loop([] {
     return 100;
   });

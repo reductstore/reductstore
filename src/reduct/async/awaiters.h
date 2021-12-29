@@ -12,8 +12,9 @@
 
 namespace reduct::async {
 
+template <typename R, typename P>
 struct Sleep {
-  Sleep(std::chrono::milliseconds delay) : delay_{delay}, start_{std::chrono::steady_clock::now()} {}
+  Sleep(std::chrono::duration<R, P> delay) : delay_{delay}, start_{std::chrono::steady_clock::now()} {}
 
   bool await_ready() const noexcept { return decltype(start_)::clock::now() - start_ > delay_; }
 
@@ -28,7 +29,7 @@ struct Sleep {
   void await_resume() const noexcept {}
 
  private:
-  std::chrono::milliseconds delay_;
+  std::chrono::duration<R, P> delay_;
   std::chrono::time_point<std::chrono::steady_clock> start_;
 };
 

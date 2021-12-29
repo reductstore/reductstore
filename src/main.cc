@@ -12,6 +12,7 @@ using reduct::api::IApiServer;
 using reduct::async::ILoop;
 using reduct::core::EnvVariable;
 using reduct::core::Error;
+using reduct::core::Logger;
 using reduct::storage::IStorage;
 
 class Loop : public ILoop {
@@ -23,10 +24,13 @@ int main() {
   LOG_INFO("Reduct Storage {}", reduct::kVersion);
 
   EnvVariable env;
+  auto log_level = env.Get<std::string>("LOG_LEVEL", "INFO");
   auto host = env.Get<std::string>("HOST", "0.0.0.0");
   auto port = env.Get<int>("PORT", 8383);
   auto api_base_path = env.Get<std::string>("API_BASE_PATH", "/");
   auto data_path = env.Get<std::string>("DATA_PATH", "/var/reduct-storage/data");
+
+  Logger::set_level(log_level);
 
   LOG_INFO("Configuration: \n {}", env.Print());
 

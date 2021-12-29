@@ -3,9 +3,10 @@
 #ifndef REDUCT_STORAGE_BUCKET_H
 #define REDUCT_STORAGE_BUCKET_H
 
-#include <App.h>
+#include <uWebSockets/App.h>
 
 #include "reduct/api/api_server.h"
+#include "reduct/async/task.h"
 
 namespace reduct::api::handlers {
 

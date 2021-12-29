@@ -34,9 +34,7 @@ class Storage : public IStorage {
    */
   Error OnInfo(api::IInfoCallback::Response* info, const api::IInfoCallback::Request& res) const override {
     info->version = reduct::kVersion;
-
     info->bucket_number = buckets_.size();
-
     return {};
   }
 

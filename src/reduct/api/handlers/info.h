@@ -6,6 +6,7 @@
 #include <App.h>
 
 #include "reduct/api/api_server.h"
+#include "reduct/async/task.h"
 
 namespace reduct::api::handlers {
 

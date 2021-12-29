@@ -4,23 +4,23 @@
 
 #include <nlohmann/json.hpp>
 
-#include "reduct/api/utils.h"
+#include "reduct/api/handlers/common.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api::handlers {
 
+using async::Task;
+
 template <bool SSL>
 void HandleInfo(const IInfoCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) {
-  IInfoCallback::Response info;
-  if (auto err = callback.OnInfo(&info, {})) {
-    LOG_ERROR("{}: {}", req->getUrl(), err.ToString());
-    ResponseError<SSL>(res, err);
-    return;
-  }
-
-  nlohmann::json data;
-  data["version"] = info.version;
-  res->end(data.dump());
+  BasicHandle<SSL, IInfoCallback>(res, req)
+      .OnSuccess([](IInfoCallback::Response app_resp) {
+        nlohmann::json data;
+        data["version"] = app_resp.version;
+        data["bucket_number"] = app_resp.bucket_number;
+        return data.dump();
+      })
+      .Run([&callback](auto app_resp, auto app_req) { return callback.OnInfo(app_resp, app_req); });
 }
 
 template void HandleInfo<>(const IInfoCallback &handler, uWS::HttpResponse<false> *res, uWS::HttpRequest *req);

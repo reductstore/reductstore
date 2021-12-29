@@ -7,6 +7,22 @@
 #include <gmock/gmock.h>
 
 #include <string>
+#include <thread>
+
+#include "reduct/async/loop.h"
+
+using reduct::async::ILoop;
+
+class Loop : public ILoop {
+ public:
+  void Defer(Task&& task) override {
+    std::thread t([task = std::move(task)]() mutable {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      task();
+    });
+    t.detach();
+  }
+};
 
 /**
  * Main function for Catch2 tests to work with GMock
@@ -17,6 +33,9 @@
  */
 
 int main(int argc, char** argv) {
+  Loop loop;
+  ILoop::set_loop(&loop);
+
   int gmockArgC = 1;
   ::testing::InitGoogleMock(&gmockArgC, argv);
 
@@ -37,16 +56,13 @@ int main(int argc, char** argv) {
       ::Catch::SourceLineInfo sourceLineInfo(filename.c_str(), linenumber);
 
       if (result.fatally_failed()) {
-        ::Catch::AssertionHandler assertion("GTEST", sourceLineInfo, "",
-                                            ::Catch::ResultDisposition::Normal);
+        ::Catch::AssertionHandler assertion("GTEST", sourceLineInfo, "", ::Catch::ResultDisposition::Normal);
 
         assertion.handleMessage(::Catch::ResultWas::ExplicitFailure, message);
 
         assertion.setCompleted();
       } else if (result.nonfatally_failed()) {
-        ::Catch::AssertionHandler assertion(
-            "GTEST", sourceLineInfo, "",
-            ::Catch::ResultDisposition::ContinueOnFailure);
+        ::Catch::AssertionHandler assertion("GTEST", sourceLineInfo, "", ::Catch::ResultDisposition::ContinueOnFailure);
 
         assertion.handleMessage(::Catch::ResultWas::ExplicitFailure, message);
 

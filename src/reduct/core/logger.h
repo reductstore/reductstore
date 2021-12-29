@@ -47,8 +47,7 @@ class Logger {
     }
   }
 
-  static void SetLogLevel(LogLevels print_level);
-  static void SetLogLevel(const std::string &print_level);
+  static void set_level(const std::string &print_level);
 
  private:
   static LogLevels log_level_;

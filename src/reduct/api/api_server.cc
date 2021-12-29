@@ -6,8 +6,8 @@
 #include <nlohmann/json.hpp>
 
 #include "reduct/api/handlers/bucket.h"
+#include "reduct/api/handlers/common.h"
 #include "reduct/api/handlers/info.h"
-#include "reduct/api/utils.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api {
@@ -25,11 +25,7 @@ class ApiServer : public IApiServer {
     const auto &[host, port, base_path] = options_;
 
     uWS::App()
-        .get(base_path + "info",
-             [this](auto *res, auto *req) {
-               res->onAborted([] { LOG_ERROR("Aborted"); });
-               uWS::Loop::get()->defer([&] { handlers::HandleInfo(*handler_, res, req); });
-             })
+        .get(base_path + "info", [this](auto *res, auto *req) { handlers::HandleInfo(*handler_, res, req); })
         // Bucket API
         .post(base_path + ":bucket_name",
               [this](auto *res, auto *req) { handlers::HandleCreateBucket(*handler_, res, req, req->getParameter(0)); })

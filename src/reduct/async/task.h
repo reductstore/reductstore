@@ -7,6 +7,7 @@
 #include <functional>
 #include <optional>
 
+#include "reduct/async/loop.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::async {
@@ -29,7 +30,9 @@ struct Task {
       is_done_ = true;
       return {};
     }
+
     void return_value(T val) noexcept { value_ = val; }
+
     void unhandled_exception() { LOG_ERROR("Unhandled exception in coroutine"); }
 
     T value_;
