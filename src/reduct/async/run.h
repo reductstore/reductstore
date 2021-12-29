@@ -1,7 +1,7 @@
 // Copyright 2021 Alexey Timin
 
-#ifndef REDUCT_STORAGE_SLEEP_H
-#define REDUCT_STORAGE_SLEEP_H
+#ifndef REDUCT_ASYNC_RUN_H
+#define REDUCT_ASYNC_RUN_H
 
 #include <chrono>
 #include <coroutine>
@@ -12,27 +12,12 @@
 
 namespace reduct::async {
 
-template <typename R, typename P>
-struct Sleep {
-  Sleep(std::chrono::duration<R, P> delay) : delay_{delay}, start_{std::chrono::steady_clock::now()} {}
-
-  bool await_ready() const noexcept { return decltype(start_)::clock::now() - start_ > delay_; }
-
-  void await_suspend(std::coroutine_handle<> h) const noexcept {
-    if (decltype(start_)::clock::now() - start_ > delay_) {
-      h.resume();
-    } else {
-      ILoop::loop().Defer([this, h] { await_suspend(h); });
-    }
-  }
-
-  void await_resume() const noexcept {}
-
- private:
-  std::chrono::duration<R, P> delay_;
-  std::chrono::time_point<std::chrono::steady_clock> start_;
-};
-
+/**
+ * Push a task to an executor
+ * by default use LoopExecutor so it defers the tasks thread safely
+ * @tparam T
+ * @tparam Executor
+ */
 template <typename T, typename Executor = LoopExecutor<T>>
 struct Run {
   using Us = std::chrono::microseconds;
@@ -44,8 +29,10 @@ struct Run {
 
   void await_suspend(std::coroutine_handle<> h) const noexcept {
     if (CheckTask()) {
+      LOG_TRACE("Resume {}", *(int*)h.address());
       h.resume();
     } else {
+      LOG_TRACE("Deffer {}", *(int*)h.address());
       ILoop::loop().Defer([this, h] { await_suspend(h); });
     }
   }
@@ -58,4 +45,4 @@ struct Run {
   std::future<T> task_;
 };
 }  // namespace reduct::async
-#endif  // REDUCT_STORAGE_SLEEP_H
+#endif  // REDUCT_ASYNC_RUN_H

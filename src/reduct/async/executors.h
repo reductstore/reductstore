@@ -10,6 +10,10 @@
 
 namespace reduct::async {
 
+/**
+ * Thread safe executor in the main event loop
+ * @tparam T
+ */
 template <typename T>
 struct LoopExecutor {
   std::future<T> Commit(std::function<T()>&& task) {

@@ -11,7 +11,6 @@ namespace reduct::api {
 
 class IInfoCallback {
  public:
-
   struct Response {
     std::string version;
     size_t bucket_number;
