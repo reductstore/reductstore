@@ -5,6 +5,7 @@
 
 #include <string>
 
+#include "reduct/async/run.h"
 #include "reduct/core/error.h"
 
 namespace reduct::api {
@@ -15,21 +16,19 @@ class IInfoCallback {
     std::string version;
     size_t bucket_number;
   };
-
   struct Request {};
-
-  virtual core::Error OnInfo(Response* res, const Request& req) const = 0;
+  using Result = std::pair<Response, core::Error>;
+  virtual async::Run<Result> OnInfo(const Request& req) const = 0;
 };
 
 class ICreateBucketCallback {
  public:
   struct Response {};
-
   struct Request {
     std::string name;
   };
-
-  virtual core::Error OnCreateBucket(Response* res, const Request& req) = 0;
+  using Result = std::pair<Response, core::Error>;
+  virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
 };
 
 }  // namespace reduct::api

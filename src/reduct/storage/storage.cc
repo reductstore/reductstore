@@ -1,6 +1,7 @@
 // Copyright 2021 Alexey Timin
 #include "reduct/storage/storage.h"
 
+#include <coroutine>
 #include <filesystem>
 #include <shared_mutex>
 #include <utility>
@@ -11,7 +12,11 @@
 
 namespace reduct::storage {
 
+using api::ICreateBucketCallback;
+using api::IInfoCallback;
+using async::Run;
 using core::Error;
+
 namespace fs = std::filesystem;
 
 class Storage : public IStorage {
@@ -32,25 +37,32 @@ class Storage : public IStorage {
   /**
    * API Implementation
    */
-  Error OnInfo(api::IInfoCallback::Response* info, const api::IInfoCallback::Request& res) const override {
-    info->version = reduct::kVersion;
-    info->bucket_number = buckets_.size();
-    return {};
+  [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
+    return Run<IInfoCallback::Result>([this] {
+      api::IInfoCallback::Response resp;
+      resp.version = reduct::kVersion;
+      resp.bucket_number = buckets_.size();
+      return IInfoCallback::Result{std::move(resp), Error{}};
+    });
   }
 
-  Error OnCreateBucket(api::ICreateBucketCallback::Response* res,
-                       const api::ICreateBucketCallback::Request& req) override {
-    if (buckets_.find(req.name) != buckets_.end()) {
-      return Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.name)};
-    }
+  [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
+    return Run<ICreateBucketCallback::Result>([this, req] {
+      if (buckets_.find(req.name) != buckets_.end()) {
+        return ICreateBucketCallback::Result{
+            {}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.name)}};
+      }
 
-    auto bucket = IBucket::Build({.name = req.name, .path = options_.data_path});
-    if (!bucket) {
-      return Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
-    }
+      auto bucket = IBucket::Build({.name = req.name, .path = options_.data_path});
+      if (!bucket) {
+        auto err =Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
+        return ICreateBucketCallback::Result{
+            {}, Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")}};
+      }
 
-    buckets_[req.name] = std::move(bucket);
-    return {};
+      buckets_[req.name] = std::move(bucket);
+      return ICreateBucketCallback::Result{{}, Error{}};
+    });
   }
 
  private:

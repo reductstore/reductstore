@@ -1,6 +1,6 @@
 // Copyright 2021 Alexey Timin
 
-#include "reduct/api/handlers/info.h"
+#include "reduct/api/handlers/handle_info.h"
 
 #include <nlohmann/json.hpp>
 
@@ -20,7 +20,7 @@ void HandleInfo(const IInfoCallback &callback, uWS::HttpResponse<SSL> *res, uWS:
         data["bucket_number"] = app_resp.bucket_number;
         return data.dump();
       })
-      .Run([&callback](auto app_resp, auto app_req) { return callback.OnInfo(app_resp, app_req); });
+      .Run(callback.OnInfo({}));
 }
 
 template void HandleInfo<>(const IInfoCallback &handler, uWS::HttpResponse<false> *res, uWS::HttpRequest *req);

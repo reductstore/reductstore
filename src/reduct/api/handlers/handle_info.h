@@ -1,7 +1,7 @@
 // Copyright 2021 Alexey Timin
 
-#ifndef REDUCT_STORAGE_INFO_H
-#define REDUCT_STORAGE_INFO_H
+#ifndef REDUCT_STORAGE_HANDLE_INFO_H
+#define REDUCT_STORAGE_HANDLE_INFO_H
 
 #include <App.h>
 
@@ -23,4 +23,4 @@ void HandleInfo(const IInfoCallback &callback, uWS::HttpResponse<SSL> *res, uWS:
 
 }  // namespace reduct::api::handlers
 
-#endif  // REDUCT_STORAGE_INFO_H
+#endif  // REDUCT_STORAGE_HANDLE_INFO_H

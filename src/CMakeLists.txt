@@ -1,6 +1,6 @@
 set(SRC_FILES
-        reduct/api/handlers/bucket.cc
-        reduct/api/handlers/info.cc
+        reduct/api/handlers/handle_bucket.cc
+        reduct/api/handlers/handle_info.cc
         reduct/api/api_server.cc
 
         reduct/async/loop.cc

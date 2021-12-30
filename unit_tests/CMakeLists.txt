@@ -5,6 +5,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 set (SRC_FILES
         reduct/async/run_test.cc
         reduct/async/sleep_test.cc
+        reduct/async/task_test.cc
+
         reduct/storage/bucket_test.cc
         reduct/storage/storage_test.cc
         test.cc)

@@ -19,44 +19,38 @@ struct Task {
     using Handle = std::coroutine_handle<promise_type>;
 
     promise_type() = default;
+    ~promise_type() { LOG_TRACE("~promise_type"); };
 
-    Task get_return_object() { return Task{Handle::from_promise(*this)}; }
+    Task get_return_object() {
+      LOG_TRACE("get_return_object");
+      return Task{Handle::from_promise(*this)};
+    }
 
     std::suspend_never initial_suspend() {
-      is_done_ = false;
+      LOG_TRACE("initial_suspend");
       return {};
     }
-    std::suspend_never final_suspend() noexcept {
-      is_done_ = true;
+    std::suspend_always final_suspend() noexcept {
+      LOG_TRACE("final_suspend");
       return {};
     }
 
-    void return_value(T val) noexcept { value_ = val; }
-
+    void return_value(T val) noexcept {
+      LOG_TRACE("return_value");
+      value_ = std::move(val);
+    }
     void unhandled_exception() { LOG_ERROR("Unhandled exception in coroutine"); }
 
     T value_;
-    mutable std::atomic<bool> is_done_;
   };
 
   explicit Task(typename promise_type::Handle coro) : coro_(coro) {}
+  ~Task() { coro_.destroy(); }
 
-  std::optional<T> Get() {
-    return coro_.promise().is_done_ ? std::make_optional(coro_.promise().value_) : std::nullopt;
-  }
-
-  template <typename R, typename P>
-  inline std::optional<T> WaitFor(const std::chrono::duration<R, P>& time) {
-    using Clock = std::chrono::steady_clock;
-    auto start = Clock::now();
-
-    std::optional<T> ret = Get();
-    while (!ret && Clock::now() - start < time) {
-      std::this_thread::sleep_for(kTick);
-      ret = Get();
-    }
-
-    return ret;
+  T Get() {
+    LOG_TRACE("Get");
+    if (!coro_.done()) coro_.resume();
+    return coro_.promise().value_;
   }
 
  private:

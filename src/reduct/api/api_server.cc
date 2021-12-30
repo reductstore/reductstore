@@ -5,9 +5,9 @@
 #include <App.h>
 #include <nlohmann/json.hpp>
 
-#include "reduct/api/handlers/bucket.h"
+#include "reduct/api/handlers/handle_bucket.h"
 #include "reduct/api/handlers/common.h"
-#include "reduct/api/handlers/info.h"
+#include "reduct/api/handlers/handle_info.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api {

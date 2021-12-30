@@ -23,6 +23,6 @@ TEST_CASE("async::Sleep should sleep in loop") {
   auto start = Clock::now();
   auto task = sleep_coro(50ms);
 
-  REQUIRE(task.WaitFor(60ms) == 100);
+  REQUIRE(task.Get() == 100);
   REQUIRE(Clock::now() - start > 50ms);
 }

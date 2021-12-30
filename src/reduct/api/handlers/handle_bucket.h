@@ -1,7 +1,7 @@
 // Copyright 2021 Alexey Timin
 
-#ifndef REDUCT_STORAGE_BUCKET_H
-#define REDUCT_STORAGE_BUCKET_H
+#ifndef REDUCT_STORAGE_HANDLE_BUCKET_H
+#define REDUCT_STORAGE_HANDLE_BUCKET_H
 
 #include <uWebSockets/App.h>
 
@@ -24,4 +24,4 @@ void HandleCreateBucket(ICreateBucketCallback &callback, uWS::HttpResponse<SSL> 
 
 }  // namespace reduct::api::handlers
 
-#endif  // REDUCT_STORAGE_BUCKET_H
+#endif  // REDUCT_STORAGE_HANDLE_BUCKET_H

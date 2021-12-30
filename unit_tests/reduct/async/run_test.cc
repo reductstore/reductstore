@@ -32,14 +32,12 @@ Task<int> run_coro(std::function<int()>&& task) {
 Task<int> run_in_loop(std::function<int()>&& task) { co_return co_await Run(std::move(task)); };
 
 TEST_CASE("async::Run should run task in executor") {
-  auto start = Clock::now();
   auto task = run_coro([] { return 100; });
-
-  REQUIRE(task.WaitFor(10ms) == 100);
+  REQUIRE(task.Get() == 100);
 }
 
 TEST_CASE("async::Run should run task in loop by default") {
   auto task = run_in_loop([] { return 100; });
 
-  REQUIRE(task.WaitFor(100ms) == 100);
+  REQUIRE(task.Get() == 100);
 }
