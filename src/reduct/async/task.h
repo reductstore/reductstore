@@ -12,6 +12,12 @@
 
 namespace reduct::async {
 
+/**
+ * Task with return value,
+ * it destroys the promise object in destructor, so for define behaviour you should call Get() before the task
+ * destructed
+ * @tparam T - return type
+ */
 template <typename T>
 struct Task {
  public:
@@ -45,10 +51,15 @@ struct Task {
   };
 
   explicit Task(typename promise_type::Handle coro) : coro_(coro) {}
-  ~Task() { coro_.destroy(); }
+  ~Task() {
+    if (coro_) coro_.destroy();
+  }
 
-  T Get() {
-    LOG_TRACE("Get");
+  /**
+   * Resume the corutine if it is needed and return result
+   * @return
+   */
+  T Get() const {
     if (!coro_.done()) coro_.resume();
     return coro_.promise().value_;
   }
@@ -57,5 +68,38 @@ struct Task {
   typename promise_type::Handle coro_;
 };
 
-};      // namespace reduct::async
+/**
+ * Simple task, promise_type is destroyed automatically
+ */
+struct VoidTask {
+ public:
+  struct promise_type {
+    using Handle = std::coroutine_handle<promise_type>;
+
+    promise_type() = default;
+    ~promise_type() { LOG_TRACE("~promise_type"); };
+
+    VoidTask get_return_object() {
+      LOG_TRACE("get_return_object");
+      return {};
+    }
+
+    std::suspend_never initial_suspend() {
+      LOG_TRACE("initial_suspend");
+      return {};
+    }
+    std::suspend_never final_suspend() noexcept {
+      LOG_TRACE("final_suspend");
+      return {};
+    }
+
+    void return_void() noexcept { LOG_TRACE("return_void"); }
+    void unhandled_exception() { LOG_ERROR("Unhandled exception in coroutine"); }
+  };
+
+  VoidTask() = default;
+  ~VoidTask() = default;
+};
+
+}  // namespace reduct::async
 #endif  // REDUCT_STORAGE_TASK_H

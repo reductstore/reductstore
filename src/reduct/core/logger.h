@@ -41,8 +41,8 @@ class Logger {
       ss << std::put_time(gtime, "%F %T");
       auto thid = std::this_thread::get_id();
       auto msg = fmt::vformat(message, fmt::make_format_args(args...));
-      std::cout << fmt::format("{}.{:03d} ({:>5}) {}:{}\t {} {}", ss.str(), milliseconds,
-                               reinterpret_cast<uint16_t &>(thid), file, line, kLoglevelNames.at(level), msg)
+      std::cout << fmt::format("{}.{:03d} ({:>5}){} -- {}:{} {}", ss.str(), milliseconds,
+                               reinterpret_cast<uint16_t &>(thid), kLoglevelNames.at(level), file, line, msg)
                 << std::endl;
     }
   }

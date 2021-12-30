@@ -19,8 +19,8 @@ namespace reduct::api::handlers {
  * @param name name of bucket
  */
 template <bool SSL = false>
-void HandleCreateBucket(ICreateBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                        std::string_view name);
+async::VoidTask HandleCreateBucket(ICreateBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                                   std::string_view name);
 
 }  // namespace reduct::api::handlers
 

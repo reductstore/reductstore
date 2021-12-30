@@ -9,6 +9,8 @@
 #include "reduct/async/run.h"
 
 using reduct::async::Task;
+using reduct::async::VoidTask;
+
 using Clock = std::chrono::steady_clock;
 using namespace std::chrono_literals;
 
@@ -22,15 +24,30 @@ Task<int> NotSuspended() {
   co_return 100;
 };
 
-TEST_CASE("async::Task should resume and return value") {
+VoidTask VoidSuspended() {
+  co_await std::suspend_always();
+  co_return;
+}
+
+VoidTask VoidNotSuspended() {
+  co_await std::suspend_never();
+  co_return;
+}
+
+TEST_CASE("async::Task should resume and return value", "[task]") {
   auto task = Suspended();
-  LOG_ERROR("!!!");
   REQUIRE(task.Get() == 100);
 }
 
-TEST_CASE("async::Task should return value") {
+TEST_CASE("async::Task should return value", "[task]") {
   auto task = NotSuspended();
-  LOG_ERROR("!!!");
-
   REQUIRE(task.Get() == 100);
+}
+
+TEST_CASE("async::VoidTask should run async suspended coro", "[task]") {
+  auto task = VoidSuspended();
+}
+
+TEST_CASE("async::VoidTask should run async not suspended coro", "[task]") {
+  auto task = VoidNotSuspended();
 }
