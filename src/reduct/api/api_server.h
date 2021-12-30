@@ -15,7 +15,7 @@ namespace reduct::api {
 /**
  * API handler with all the request callbacks
  */
-class IApiHandler : public IInfoCallback, public ICreateBucketCallback {};
+class IApiHandler : public IInfoCallback, public ICreateBucketCallback, public IGetBucketCallback {};
 
 /**
  * HTTP API Server

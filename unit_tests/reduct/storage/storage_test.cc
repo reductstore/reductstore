@@ -9,6 +9,7 @@
 #include "reduct/helpers.h"
 
 using reduct::api::ICreateBucketCallback;
+using reduct::api::IGetBucketCallback;
 using reduct::api::IInfoCallback;
 using reduct::async::Run;
 using reduct::async::Task;
@@ -17,11 +18,6 @@ using reduct::storage::IStorage;
 
 Task<IInfoCallback::Result> OnInfo(IStorage& storage) {
   auto result = co_await storage.OnInfo({});
-  co_return result;
-}
-
-Task<ICreateBucketCallback::Result> OnCreateBucket(IStorage& storage, ICreateBucketCallback::Request req) {
-  auto result = co_await storage.OnCreateBucket(std::move(req));
   co_return result;
 }
 
@@ -35,20 +31,46 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage]") {
   REQUIRE(info.version == reduct::kVersion);
 }
 
-TEST_CASE("storage::Storage should create a bucket", "[storage]") {
+Task<ICreateBucketCallback::Result> OnCreateBucket(IStorage& storage, ICreateBucketCallback::Request req) {
+  auto result = co_await storage.OnCreateBucket(std::move(req));
+  co_return result;
+}
+
+TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   ICreateBucketCallback::Request req{.name = "bucket"};
-  auto [_, err] = OnCreateBucket(*storage, req).Get();
+  Error err = OnCreateBucket(*storage, req).Get();
   REQUIRE_FALSE(err);
 
   SECTION("error if already exists") {
-    auto [_, err1] = OnCreateBucket(*storage, req).Get();
-    REQUIRE(err1 == Error{.code = 409, .message = "Bucket 'bucket' already exists"});
+    err = OnCreateBucket(*storage, req).Get();
+    REQUIRE(err == Error{.code = 409, .message = "Bucket 'bucket' already exists"});
   }
 
   SECTION("error if failed to create") {
-    auto [_, err1] = OnCreateBucket(*storage, {.name = ""}).Get();
-    REQUIRE(err1 == Error{.code = 500, .message = "Internal error: Failed to create bucket"});
+    err = OnCreateBucket(*storage, {.name = ""}).Get();
+    REQUIRE(err == Error{.code = 500, .message = "Internal error: Failed to create bucket"});
+  }
+}
+
+Task<IGetBucketCallback::Result> OnGetBucket(IStorage& storage, IGetBucketCallback::Request req) {
+  auto result = co_await storage.OnGetBucket(std::move(req));
+  co_return result;
+}
+
+TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+
+  ICreateBucketCallback::Request req{.name = "bucket"};
+  Error err = OnCreateBucket(*storage, req).Get();
+  REQUIRE_FALSE(err);
+
+  err = OnGetBucket(*storage, {.name = "bucket"}).Get();
+  REQUIRE_FALSE(err);
+
+  SECTION("error if not exist") {
+    err = OnGetBucket(*storage, {.name = "X"}).Get();
+    REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
 }

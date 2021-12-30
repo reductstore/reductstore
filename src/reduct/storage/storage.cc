@@ -38,30 +38,42 @@ class Storage : public IStorage {
    * API Implementation
    */
   [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
-    return Run<IInfoCallback::Result>([this] {
-      api::IInfoCallback::Response resp;
+    using Callback = IInfoCallback;
+    return Run<Callback::Result>([this] {
+      Callback::Response resp;
       resp.version = reduct::kVersion;
       resp.bucket_number = buckets_.size();
-      return IInfoCallback::Result{std::move(resp), Error{}};
+      return Callback::Result{std::move(resp), Error{}};
     });
   }
 
   [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
-    return Run<ICreateBucketCallback::Result>([this, req] {
+    using Callback = ICreateBucketCallback;
+    return Run<Callback::Result>([this, req] {
       if (buckets_.find(req.name) != buckets_.end()) {
-        return ICreateBucketCallback::Result{
-            {}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.name)}};
+        return Callback::Result{{}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.name)}};
       }
 
       auto bucket = IBucket::Build({.name = req.name, .path = options_.data_path});
       if (!bucket) {
-        auto err =Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
-        return ICreateBucketCallback::Result{
-            {}, Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")}};
+        auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
+        return Callback::Result{{},
+                                Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")}};
       }
 
       buckets_[req.name] = std::move(bucket);
-      return ICreateBucketCallback::Result{{}, Error{}};
+      return Callback::Result{{}, Error{}};
+    });
+  }
+
+  Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) override {
+    using Callback = IGetBucketCallback;
+    return Run<Callback::Result>([this, req] {
+      if (buckets_.find(req.name) == buckets_.end()) {
+        return Callback::Result{{}, Error{.code = 404, .message = fmt::format("Bucket '{}' is not found", req.name)}};
+      }
+
+      return Callback::Result{{}, Error{}};
     });
   }
 

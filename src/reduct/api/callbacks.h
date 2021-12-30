@@ -10,6 +10,14 @@
 
 namespace reduct::api {
 
+template <typename Response>
+struct CallbackResult {
+  Response response;
+  core::Error error;
+
+  operator const core::Error&() const { return error; }
+};
+
 class IInfoCallback {
  public:
   struct Response {
@@ -17,7 +25,7 @@ class IInfoCallback {
     size_t bucket_number;
   };
   struct Request {};
-  using Result = std::pair<Response, core::Error>;
+  using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnInfo(const Request& req) const = 0;
 };
 
@@ -27,8 +35,18 @@ class ICreateBucketCallback {
   struct Request {
     std::string name;
   };
-  using Result = std::pair<Response, core::Error>;
+  using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
+};
+
+class IGetBucketCallback {
+ public:
+  struct Response {};
+  struct Request {
+    std::string name;
+  };
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnGetBucket(const Request& req) = 0;
 };
 
 }  // namespace reduct::api
