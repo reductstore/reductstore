@@ -2,6 +2,7 @@
 #ifndef REDUCT_CORE_LOGGER_H_
 #define REDUCT_CORE_LOGGER_H_
 
+#include <fmt/color.h>
 #include <fmt/core.h>
 
 #include <chrono>
@@ -21,13 +22,16 @@ enum class LogLevels { kNone = 0, kError, kWarning, kInfo, kDebug, kTrace };
 class Logger {
  public:
   template <typename... T>
-  static void Log(LogLevels level, std::string_view message, int line, std::string_view file, T &&...args) {
+  static void Log(LogLevels level, std::string_view message, int line, std::string_view file, std::string_view func,
+                  T &&...args) {
     using Clock = std::chrono::system_clock;
 
-    static const std::map<LogLevels, std::string> kLoglevelNames = {
-        std::make_pair(LogLevels::kTrace, "[TRACE]"), std::make_pair(LogLevels::kDebug, "[DEBUG]"),
-        std::make_pair(LogLevels::kInfo, "[INFO]"),   std::make_pair(LogLevels::kWarning, "[WARNING]"),
-        std::make_pair(LogLevels::kError, "[ERROR]"),
+    static const std::map<LogLevels, std::pair<std::string, fmt::color> > kLoglevelMap = {
+        std::make_pair(LogLevels::kTrace, std::make_pair("[TRACE]", fmt::color::gray)),
+        std::make_pair(LogLevels::kDebug, std::make_pair("[DEBUG]", fmt::color::gray)),
+        std::make_pair(LogLevels::kInfo, std::make_pair("[INFO]", fmt::color::white)),
+        std::make_pair(LogLevels::kWarning, std::make_pair("[WARNING]", fmt::color::yellow)),
+        std::make_pair(LogLevels::kError, std::make_pair("[ERROR]", fmt::color::red)),
     };
 
     if (log_level_ != LogLevels::kNone && level <= log_level_) {
@@ -41,8 +45,11 @@ class Logger {
       ss << std::put_time(gtime, "%F %T");
       auto thid = std::this_thread::get_id();
       auto msg = fmt::vformat(message, fmt::make_format_args(args...));
-      std::cout << fmt::format("{}.{:03d} ({:>5}){} -- {}:{} {}", ss.str(), milliseconds,
-                               reinterpret_cast<uint16_t &>(thid), kLoglevelNames.at(level), file, line, msg)
+      const auto &[level_str, color] = kLoglevelMap.at(level);
+
+      auto func_name = log_level_ >= LogLevels::kDebug ? fmt::format(" --> {}", func) : "";
+      std::cout << fmt::format(fmt::fg(color), "{}.{:03d} ({:>5}) {:>7} -- {}:{} {} {}", ss.str(), milliseconds,
+                               reinterpret_cast<uint16_t &>(thid), level_str, file, line, msg, func_name)
                 << std::endl;
     }
   }
@@ -63,24 +70,24 @@ constexpr const char *r_slant(const char *str) { return *str == '/' ? (str + 1) 
 
 constexpr const char *file_name(const char *str) { return str_slant(str) ? r_slant(str_end(str)) : str; }
 
-#define LOG_ERROR(msg, ...)                                                 \
-  reduct::core::Logger::Log(reduct::core::LogLevels::kError, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
+#define LOG_ERROR(msg, ...)                                                                      \
+  reduct::core::Logger::Log(reduct::core::LogLevels::kError, msg, __LINE__, file_name(__FILE__), \
+                            __PRETTY_FUNCTION__ __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
-#define LOG_WARNING(msg, ...)                                                 \
-  reduct::core::Logger::Log(reduct::core::LogLevels::kWarning, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
+#define LOG_WARNING(msg, ...)                                                                      \
+  reduct::core::Logger::Log(reduct::core::LogLevels::kWarning, msg, __LINE__, file_name(__FILE__), \
+                            __PRETTY_FUNCTION__ __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
-#define LOG_INFO(msg, ...)                                                 \
-  reduct::core::Logger::Log(reduct::core::LogLevels::kInfo, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
+#define LOG_INFO(msg, ...)                                                                      \
+  reduct::core::Logger::Log(reduct::core::LogLevels::kInfo, msg, __LINE__, file_name(__FILE__), \
+                            __PRETTY_FUNCTION__ __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
-#define LOG_DEBUG(msg, ...)                                                 \
-  reduct::core::Logger::Log(reduct::core::LogLevels::kDebug, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
+#define LOG_DEBUG(msg, ...)                                                                      \
+  reduct::core::Logger::Log(reduct::core::LogLevels::kDebug, msg, __LINE__, file_name(__FILE__), \
+                            __PRETTY_FUNCTION__ __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
-#define LOG_TRACE(msg, ...)                                                 \
-  reduct::core::Logger::Log(reduct::core::LogLevels::kTrace, msg, __LINE__, \
-                            file_name(__FILE__) __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
+#define LOG_TRACE(msg, ...)                                                                      \
+  reduct::core::Logger::Log(reduct::core::LogLevels::kTrace, msg, __LINE__, file_name(__FILE__), \
+                            __PRETTY_FUNCTION__ __VA_OPT__(, ) __VA_ARGS__)  // NOLINT
 
 #endif  //  REDUCT_CORE_LOGGER_H_
