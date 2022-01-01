@@ -66,13 +66,26 @@ class Storage : public IStorage {
     });
   }
 
-  Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) override {
+  [[nodiscard]] Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) const override {
     using Callback = IGetBucketCallback;
     return Run<Callback::Result>([this, req] {
       if (buckets_.find(req.name) == buckets_.end()) {
         return Callback::Result{{}, Error{.code = 404, .message = fmt::format("Bucket '{}' is not found", req.name)}};
       }
 
+      return Callback::Result{{}, Error{}};
+    });
+  }
+
+  [[nodiscard]] Run<IRemoveBucketCallback::Result> OnRemoveBucket(const IRemoveBucketCallback::Request& req) override {
+    using Callback = IRemoveBucketCallback;
+
+    return Run<Callback::Result>([this, req] {
+      auto it = buckets_.find(req.name);
+      if (buckets_.find(req.name) == buckets_.end()) {
+        return Callback::Result{{}, Error{.code = 404, .message = fmt::format("Bucket '{}' is not found", req.name)}};
+      }
+      buckets_.erase(it);
       return Callback::Result{{}, Error{}};
     });
   }

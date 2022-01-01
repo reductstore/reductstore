@@ -22,7 +22,7 @@ class Bucket : public IBucket {
   Options options_;
 };
 
-std::unique_ptr<IBucket> IBucket::Build(Options options) {
+std::unique_ptr<IBucket> IBucket::Build(const Options& options) {
   if (options.name.empty()) {
     LOG_ERROR("Bucket must have a name");
     return nullptr;

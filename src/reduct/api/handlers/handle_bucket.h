@@ -35,6 +35,19 @@ template <bool SSL = false>
 async::VoidTask HandleGetBucket(IGetBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                                 std::string_view name);
 
+/**
+ * Handle HTTP request to remove a bucket
+ * @tparam SSL
+ * @tparam SSL
+ * @param callback Handler class with all callbacks
+ * @param res HTTP response
+ * @param req HTTP request
+ * @param name name of bucket
+ */
+template <bool SSL = false>
+async::VoidTask HandleRemoveBucket(IRemoveBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                                std::string_view name);
+
 }  // namespace reduct::api::handlers
 
 #endif  // REDUCT_STORAGE_HANDLE_BUCKET_H

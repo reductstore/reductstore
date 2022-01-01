@@ -13,7 +13,7 @@ class IBucket {
     std::filesystem::path path;
   };
 
-  static std::unique_ptr<IBucket> Build(Options options);
+  static std::unique_ptr<IBucket> Build(const Options& options);
 };
 
 }  // namespace reduct::storage

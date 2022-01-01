@@ -18,6 +18,9 @@ struct CallbackResult {
   operator const core::Error&() const { return error; }
 };
 
+/**
+ * Get info callback
+ */
 class IInfoCallback {
  public:
   struct Response {
@@ -29,6 +32,13 @@ class IInfoCallback {
   virtual async::Run<Result> OnInfo(const Request& req) const = 0;
 };
 
+//---------------------
+// Bucket API
+//---------------------
+
+/**
+ * Create bucket callback
+ */
 class ICreateBucketCallback {
  public:
   struct Response {};
@@ -39,6 +49,9 @@ class ICreateBucketCallback {
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
 };
 
+/**
+ * Get bucket callback
+ */
 class IGetBucketCallback {
  public:
   struct Response {};
@@ -46,7 +59,20 @@ class IGetBucketCallback {
     std::string name;
   };
   using Result = CallbackResult<Response>;
-  virtual async::Run<Result> OnGetBucket(const Request& req) = 0;
+  virtual async::Run<Result> OnGetBucket(const Request& req) const = 0;
+};
+
+/**
+ * Remove bucket callback
+ */
+class IRemoveBucketCallback {
+ public:
+  struct Response {};
+  struct Request {
+    std::string name;
+  };
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
 };
 
 }  // namespace reduct::api
