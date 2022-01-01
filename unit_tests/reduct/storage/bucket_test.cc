@@ -22,7 +22,7 @@ TEST_CASE("storage::Bucket should create folder", "[bucket]") {
   }
 
   SECTION("return nullptr if something got wrong") {
-    REQUIRE_FALSE(IBucket::Build({.name = "bucket", .path = "/non-existing/path"}));
+    REQUIRE_FALSE(IBucket::Build({.name = "", .path = "/non-existing/path"}));
   }
 
   SECTION("name cannot be empty") {
