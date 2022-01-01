@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_ASYNC_SLEEP_H
 #define REDUCT_ASYNC_SLEEP_H
@@ -14,7 +14,7 @@ namespace reduct::async {
 
 template <typename R, typename P>
 struct Sleep {
-  Sleep(std::chrono::duration<R, P> delay) : delay_{delay}, start_{std::chrono::steady_clock::now()} {}
+  explicit Sleep(std::chrono::duration<R, P> delay) : delay_{delay}, start_{std::chrono::steady_clock::now()} {}
 
   bool await_ready() const noexcept { return decltype(start_)::clock::now() - start_ > delay_; }
 

@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #include "reduct/storage/bucket.h"
 

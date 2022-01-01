@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_ASYNC_RUN_H
 #define REDUCT_ASYNC_RUN_H
@@ -22,8 +22,8 @@ template <typename T, typename Executor = LoopExecutor<T>>
 struct Run {
   using Us = std::chrono::microseconds;
 
-  Run(std::function<T()>&& task, Executor& executor) { task_ = executor.Commit(std::move(task)); }
-  Run(std::function<T()>&& task) { task_ = LoopExecutor<T>().Commit(std::move(task)); }
+  Run(std::function<T()>&& task, Executor* executor) { task_ = executor->Commit(std::move(task)); }
+  explicit Run(std::function<T()>&& task) { task_ = LoopExecutor<T>().Commit(std::move(task)); }
 
   bool await_ready() const noexcept { return CheckTask(); }
 

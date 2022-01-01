@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_STORAGE_TASK_H
 #define REDUCT_STORAGE_TASK_H
@@ -25,7 +25,7 @@ struct Task {
     using Handle = std::coroutine_handle<promise_type>;
 
     promise_type() = default;
-    ~promise_type() { LOG_TRACE("~promise_type"); };
+    ~promise_type() { LOG_TRACE("~promise_type"); }
 
     Task get_return_object() {
       LOG_TRACE("get_return_object");
@@ -77,7 +77,7 @@ struct VoidTask {
     using Handle = std::coroutine_handle<promise_type>;
 
     promise_type() = default;
-    ~promise_type() { LOG_TRACE("~promise_type"); };
+    ~promise_type() { LOG_TRACE("~promise_type"); }
 
     VoidTask get_return_object() {
       LOG_TRACE("get_return_object");

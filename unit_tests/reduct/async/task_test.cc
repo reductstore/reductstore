@@ -11,18 +11,15 @@
 using reduct::async::Task;
 using reduct::async::VoidTask;
 
-using Clock = std::chrono::steady_clock;
-using namespace std::chrono_literals;
-
 Task<int> Suspended() {
   co_await std::suspend_always();
   co_return 100;
-};
+}
 
 Task<int> NotSuspended() {
   co_await std::suspend_never();
   co_return 100;
-};
+}
 
 VoidTask VoidSuspended() {
   co_await std::suspend_always();

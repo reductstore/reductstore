@@ -10,8 +10,6 @@
 
 using reduct::async::Run;
 using reduct::async::Task;
-using Clock = std::chrono::steady_clock;
-using namespace std::chrono_literals;
 
 template <typename T>
 struct SimpleThreadExecutor {
@@ -24,20 +22,19 @@ struct SimpleThreadExecutor {
   }
 };
 
-Task<int> run_coro(std::function<int()>&& task) {
+Task<int> RunCoro(std::function<int()>&& task) {
   SimpleThreadExecutor<int> executor;
-  co_return co_await Run(std::move(task), executor);
-};
+  co_return co_await Run(std::move(task), &executor);
+}
 
-Task<int> run_in_loop(std::function<int()>&& task) { co_return co_await Run(std::move(task)); };
+Task<int> RunInLoop(std::function<int()>&& task) { co_return co_await Run(std::move(task)); }
 
 TEST_CASE("async::Run should run task in executor") {
-  auto task = run_coro([] { return 100; });
+  auto task = RunCoro([] { return 100; });
   REQUIRE(task.Get() == 100);
 }
 
 TEST_CASE("async::Run should run task in loop by default") {
-  auto task = run_in_loop([] { return 100; });
-
+  auto task = RunInLoop([] { return 100; });
   REQUIRE(task.Get() == 100);
 }

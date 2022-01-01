@@ -19,7 +19,7 @@ namespace reduct::api::handlers {
  * @param req HTTP request
  */
 template <bool SSL = false>
-async::VoidTask HandleInfo(const IInfoCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req);
+async::VoidTask HandleInfo(const IInfoCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req);
 
 }  // namespace reduct::api::handlers
 

@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_STORAGE_HANDLERS_COMMON_H
 #define REDUCT_STORAGE_HANDLERS_COMMON_H
@@ -9,11 +9,6 @@
 #include "reduct/async/run.h"
 
 namespace reduct::api {
-
-// template <bool SSL>
-// async::Task<core::Error> BasicHandle(uWS::HttpResponse<SSL> *http_resp_, uWS::HttpRequest *http_req_,
-//                                      std::function<core::Error()> &&handler,
-//                                      std::function<void(uWS::HttpResponse<SSL> *http_resp_)> OnSuccess);
 
 template <bool SSL, typename Callback>
 class BasicHandle {
@@ -27,7 +22,7 @@ class BasicHandle {
   BasicHandle OnSuccess(std::function<std::string(typename Callback::Response)> func) {
     on_success_ = std::move(func);
     return std::move(*this);
-  };
+  }
 
   core::Error Run(typename Callback::Result result) {
     auto [resp, err] = std::move(result);

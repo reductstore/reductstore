@@ -19,7 +19,7 @@ namespace reduct::api::handlers {
  * @param name name of bucket
  */
 template <bool SSL = false>
-async::VoidTask HandleCreateBucket(ICreateBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+async::VoidTask HandleCreateBucket(ICreateBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                                    std::string_view name);
 
 /**
@@ -32,7 +32,7 @@ async::VoidTask HandleCreateBucket(ICreateBucketCallback &callback, uWS::HttpRes
  * @param name name of bucket
  */
 template <bool SSL = false>
-async::VoidTask HandleGetBucket(IGetBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+async::VoidTask HandleGetBucket(IGetBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                                 std::string_view name);
 
 /**
@@ -45,7 +45,7 @@ async::VoidTask HandleGetBucket(IGetBucketCallback &callback, uWS::HttpResponse<
  * @param name name of bucket
  */
 template <bool SSL = false>
-async::VoidTask HandleRemoveBucket(IRemoveBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+async::VoidTask HandleRemoveBucket(IRemoveBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                                 std::string_view name);
 
 }  // namespace reduct::api::handlers

@@ -25,14 +25,14 @@ class ApiServer : public IApiServer {
     const auto &[host, port, base_path] = options_;
 
     uWS::App()
-        .get(base_path + "info", [this](auto *res, auto *req) { handlers::HandleInfo(*handler_, res, req); })
+        .get(base_path + "info", [this](auto *res, auto *req) { handlers::HandleInfo(handler_.get(), res, req); })
         // Bucket API
         .post(base_path + ":bucket_name",
-              [this](auto *res, auto *req) { handlers::HandleCreateBucket(*handler_, res, req, req->getParameter(0)); })
+              [this](auto *res, auto *req) { handlers::HandleCreateBucket(handler_.get(), res, req, req->getParameter(0)); })
         .get(base_path + ":bucket_name",
-             [this](auto *res, auto *req) { handlers::HandleGetBucket(*handler_, res, req, req->getParameter(0)); })
+             [this](auto *res, auto *req) { handlers::HandleGetBucket(handler_.get(), res, req, req->getParameter(0)); })
         .del(base_path + ":bucket_name",
-             [this](auto *res, auto *req) { handlers::HandleRemoveBucket(*handler_, res, req, req->getParameter(0)); })
+             [this](auto *res, auto *req) { handlers::HandleRemoveBucket(handler_.get(), res, req, req->getParameter(0)); })
         .listen(host, port, 0,
                 [&](auto sock) {
                   if (sock) {
