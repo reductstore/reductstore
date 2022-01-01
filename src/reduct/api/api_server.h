@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 
+#include "reduct/api/callbacks.h"
 #include "reduct/core/error.h"
 
 namespace reduct::api {
@@ -14,22 +15,10 @@ namespace reduct::api {
 /**
  * API handler with all the request callbacks
  */
-class IApiHandler {
- public:
-  /**
-   * Response on info request
-   */
-  struct InfoResponse {
-    std::string version;
-  };
-
-  /**
-   * Callback for info request
-   * @param info response
-   * @return
-   */
-  [[nodiscard]] virtual core::Error OnInfoRequest(InfoResponse* info) const = 0;
-};
+class IApiHandler : public IInfoCallback,
+                    public ICreateBucketCallback,
+                    public IGetBucketCallback,
+                    public IRemoveBucketCallback {};
 
 /**
  * HTTP API Server

@@ -14,4 +14,9 @@ bool Error::operator==(const Error& rhs) const { return code == rhs.code && mess
 
 bool Error::operator!=(const Error& rhs) const { return !(rhs == *this); }
 
+std::ostream& operator<<(std::ostream& os, const Error& error) {
+  os << error.ToString();
+  return os;
+}
+
 }  // namespace reduct::core

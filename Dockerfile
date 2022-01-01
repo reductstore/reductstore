@@ -1,5 +1,4 @@
-FROM gcc:9.3 AS builder
-
+FROM gcc:11.2 AS builder
 RUN apt update && apt install -y cmake python3-pip
 
 RUN pip3 install conan
@@ -19,7 +18,8 @@ ARG BUILD_TYPE=Release
 RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} /src
 RUN make -j4
 
-FROM ubuntu:20.04
+FROM ubuntu:21.10
 
 COPY --from=builder /build/bin/ /usr/local/bin/
-CMD ["reduct_storage"]
+RUN mkdir /var/reduct-storage/data -p
+CMD ["reduct-storage"]
