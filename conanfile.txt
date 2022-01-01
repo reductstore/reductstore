@@ -2,6 +2,7 @@
 fmt/8.0.1
 uwebsockets/20.8.0
 nlohmann_json/3.9.1
+protobuf/3.19.1
 gtest/1.11.0
 catch2/2.13.7
 

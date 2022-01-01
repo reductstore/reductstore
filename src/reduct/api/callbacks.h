@@ -75,5 +75,24 @@ class IRemoveBucketCallback {
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
 };
 
+
+//---------------------
+// Entry API
+//---------------------
+
+class IRecordEntry {
+ public:
+  struct Response {};
+  struct Request {
+    std::string bucket_name;
+    std::string entry_name;
+    uint64_t timestamp;
+    std::string blob;
+  };
+
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnRecordEntry(const Request& req) = 0;
+};
+
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

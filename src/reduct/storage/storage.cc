@@ -12,8 +12,6 @@
 
 namespace reduct::storage {
 
-using api::ICreateBucketCallback;
-using api::IInfoCallback;
 using async::Run;
 using core::Error;
 
@@ -35,7 +33,7 @@ class Storage : public IStorage {
   }
 
   /**
-   * API Implementation
+   * Info API
    */
   [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
     using Callback = IInfoCallback;
@@ -47,6 +45,9 @@ class Storage : public IStorage {
     });
   }
 
+  /**
+   * Bucket API
+   */
   [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
     using Callback = ICreateBucketCallback;
     return Run<Callback::Result>([this, req] {
@@ -88,6 +89,15 @@ class Storage : public IStorage {
       buckets_.erase(it);
       return Callback::Result{{}, Error{}};
     });
+  }
+
+  /**
+   * Entry API
+   */
+  [[nodiscard]] Run<IRecordEntry::Result> OnRecordEntry(const IRecordEntry::Request& req) override {
+    using Callback = IRecordEntry;
+
+    return Run<Callback::Result>([this, req] { return Callback::Result{{}, Error{}}; });
   }
 
  private:

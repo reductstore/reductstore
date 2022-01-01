@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package reduct.proto;
+
+import "google/protobuf/timestamp.proto";
+
+message EntrySettings {
+  uint64 min_block_size = 1;
+}
+
+message EntryDescriptor {
+  message Record {
+    google.protobuf.Timestamp timestamp = 1;
+    uint64 begin = 2;
+    uint64 end = 3;
+  }
+
+  message Block {
+    uint64 id = 1;
+    google.protobuf.Timestamp first_record_time = 2;
+    google.protobuf.Timestamp last_record_time = 3;
+    uint64 size = 4;
+    repeated Record records = 5;
+  }
+
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Timestamp first_record_time = 2;
+  google.protobuf.Timestamp last_record_time = 3;
+  uint64 size = 4;
+  repeated Block blocks = 5;
+}
+
+message EntryRecord {
+  google.protobuf.Timestamp timestamp = 1;
+  string blob = 2;
+}
