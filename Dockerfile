@@ -1,5 +1,4 @@
-FROM gcc:9.3 AS builder
-
+FROM gcc:11.2 AS builder
 RUN apt update && apt install -y cmake python3-pip
 
 RUN pip3 install conan
