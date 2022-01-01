@@ -11,5 +11,5 @@ set (SRC_FILES
         reduct/storage/storage_test.cc
         test.cc)
 
-add_executable(reduct_tests ${SRC_FILES})
-target_link_libraries(reduct_tests reduct ${CONAN_LIBS})
+add_executable(reduct-tests ${SRC_FILES})
+target_link_libraries(reduct-tests reduct ${CONAN_LIBS})
