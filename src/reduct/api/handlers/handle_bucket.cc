@@ -14,9 +14,9 @@ using core::Error;
 template <bool SSL>
 VoidTask HandleCreateBucket(ICreateBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                             std::string_view name) {
-  ICreateBucketCallback::Request data{.name = std::string(name)};
+  ICreateBucketCallback::Request app_request{.name = std::string(name)};
   [[maybe_unused]] auto err =
-      BasicHandle<SSL, ICreateBucketCallback>(res, req).Run(co_await callback.OnCreateBucket(data));
+      BasicHandle<SSL, ICreateBucketCallback>(res, req).Run(co_await callback.OnCreateBucket(app_request));
   co_return;
 }
 
@@ -24,5 +24,20 @@ template VoidTask HandleCreateBucket<>(ICreateBucketCallback &handler, uWS::Http
                                        uWS::HttpRequest *req, std::string_view name);
 template VoidTask HandleCreateBucket<>(ICreateBucketCallback &handler, uWS::HttpResponse<true> *res,
                                        uWS::HttpRequest *req, std::string_view name);
+
+template <bool SSL>
+VoidTask HandleGetBucket(IGetBucketCallback &callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                         std::string_view name) {
+  IGetBucketCallback::Request app_request{.name = std::string(name)};
+  [[maybe_unused]] auto err =
+      BasicHandle<SSL, IGetBucketCallback>(res, req).Run(co_await callback.OnGetBucket(app_request));
+  co_return;
+}
+
+template VoidTask HandleGetBucket<>(IGetBucketCallback &handler, uWS::HttpResponse<false> *res,
+                                       uWS::HttpRequest *req, std::string_view name);
+template VoidTask HandleGetBucket<>(IGetBucketCallback &handler, uWS::HttpResponse<true> *res,
+                                       uWS::HttpRequest *req, std::string_view name);
+
 
 }  // namespace reduct::api::handlers

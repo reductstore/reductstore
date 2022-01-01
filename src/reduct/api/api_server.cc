@@ -29,6 +29,8 @@ class ApiServer : public IApiServer {
         // Bucket API
         .post(base_path + ":bucket_name",
               [this](auto *res, auto *req) { handlers::HandleCreateBucket(*handler_, res, req, req->getParameter(0)); })
+        .get(base_path + ":bucket_name",
+             [this](auto *res, auto *req) { handlers::HandleGetBucket(*handler_, res, req, req->getParameter(0)); })
         .listen(host, port, 0,
                 [&](auto sock) {
                   if (sock) {

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import os
 import random
@@ -11,3 +13,7 @@ def _base_url() -> str:
 @pytest.fixture(name='bucket_name')
 def _gen_bucket_name() -> str:
     return f'buket_{random.randint(0, 10000)}'
+
+
+def get_detail(resp) -> str:
+    return json.loads(resp.content)["detail"]
