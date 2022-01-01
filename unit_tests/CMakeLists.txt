@@ -12,4 +12,4 @@ set (SRC_FILES
         test.cc)
 
 add_executable(reduct_tests ${SRC_FILES})
-target_link_libraries(reduct_tests reduct_lib ${CONAN_LIBS})
+target_link_libraries(reduct_tests reduct ${CONAN_LIBS})

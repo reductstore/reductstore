@@ -13,11 +13,11 @@ set(SRC_FILES
         reduct/storage/storage.cc)
 
 
-add_library(reduct_lib STATIC ${SRC_FILES})
+add_library(reduct STATIC ${SRC_FILES})
 
 
 configure_file(config.h.in ${CMAKE_BINARY_DIR}/reduct/config.h @ONLY)
 
 
-add_executable(reduct_storage main.cc config.h.in)
-target_link_libraries(reduct_storage reduct_lib ${CONAN_LIBS})
+add_executable(reduct-storage main.cc config.h.in)
+target_link_libraries(reduct-storage reduct ${CONAN_LIBS})
