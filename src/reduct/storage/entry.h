@@ -32,6 +32,8 @@ class IEntry {
     }
 
     bool operator!=(const ReadResult& rhs) const { return !(rhs == *this); }
+
+    friend std::ostream& operator<<(std::ostream& os, const ReadResult& result);
   };
 
   struct Info {

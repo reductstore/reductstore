@@ -29,7 +29,7 @@ class Entry : public IEntry {
     settings.set_min_block_size(options_.min_block_size);
 
     auto settings_path = full_path_ / kSettingsName;
-    std::ofstream settings_file(settings_path);
+    std::ofstream settings_file(settings_path, std::ios::binary);
     if (settings_file) {
       settings.SerializeToOstream(&settings_file);
     } else {
@@ -45,7 +45,7 @@ class Entry : public IEntry {
     current_block_->set_size(0);
 
     auto descriptor_path = full_path_ / kDescriptorName;
-    std::ofstream descriptor_file(descriptor_path);
+    std::ofstream descriptor_file(descriptor_path, std::ios::binary);
     if (descriptor_file) {
       descriptor_.SerializeToOstream(&descriptor_file);
     } else {
@@ -55,23 +55,43 @@ class Entry : public IEntry {
   }
 
   [[nodiscard]] Error Write(std::string&& blob, const Time& time) override {
+    enum class RecordType { kLatest, kBelated, kBelatedFirst };
+
     const auto proto_ts = FromTimePoint(time);
-    const auto block_path = full_path_ / fmt::format("{:08d}", current_block_->id());
 
-    LOG_DEBUG("Write a record_entry for time={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
-              block_path.string());
+    auto block = current_block_;
+    RecordType type = RecordType::kLatest;
+    if (descriptor_.has_last_record_time() && descriptor_.last_record_time() >= proto_ts) {
+      LOG_DEBUG("Timestamp {} is belated. Finding proper block", TimeUtil::ToString(proto_ts));
 
-    if (!current_block_->has_first_record_time()) {
+      if (descriptor_.first_record_time() > proto_ts) {
+        LOG_DEBUG("Timestamp earlier than first record");
+        block = descriptor_.mutable_blocks(0);
+        type = RecordType::kBelatedFirst;
+      } else {
+        auto block_index = FindBlock(proto_ts);
+        if (block_index == -1) {
+          return {.code = 500, .message = "No proper block"};
+        }
+
+        block = descriptor_.mutable_blocks(block_index);
+        type = RecordType::kBelated;
+      }
+    }
+
+    if (!block->has_first_record_time()) {
       LOG_DEBUG("First record_entry for current block");
-      current_block_->mutable_first_record_time()->CopyFrom(proto_ts);
-      if (current_block_->id() == 0) {
+      block->mutable_first_record_time()->CopyFrom(proto_ts);
+      if (block->id() == 0) {
         descriptor_.mutable_first_record_time()->CopyFrom(proto_ts);
       }
     }
 
-    // TODO(Alexey Timin): the time maybe less then first_record_time. but we write it anyway
+    const auto block_path = full_path_ / fmt::format("{:08d}", block->id());
 
-    std::ofstream block_file(block_path, std::ios::app);
+    LOG_DEBUG("Write a record_entry for kTimestamp={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
+              block_path.string());
+    std::ofstream block_file(block_path, std::ios::app | std::ios::binary);
     if (!block_file) {
       return {.code = 500, .message = "Failed open a block_file for writing"};
     }
@@ -84,24 +104,36 @@ class Entry : public IEntry {
       return {.code = 500, .message = "Failed write a record_entry to a block_file"};
     }
 
+    LOG_TRACE("Record {} bytes to {}", data.size(), block_path.string());
     block_file << data;
 
-    auto record = current_block_->add_records();
+    auto record = block->add_records();
     record->mutable_timestamp()->CopyFrom(proto_ts);
-    record->set_begin(current_block_->size());
-    record->set_end(current_block_->size() + data.size());
+    record->set_begin(block->size());
+    record->set_end(block->size() + data.size());
 
-    current_block_->set_size(current_block_->size() + data.size());
-    current_block_->mutable_last_record_time()->CopyFrom(proto_ts);
-
+    block->set_size(block->size() + data.size());
     descriptor_.set_size(descriptor_.size() + data.size());
-    descriptor_.mutable_last_record_time()->CopyFrom(proto_ts);
 
-    if (current_block_->size() > options_.min_block_size) {
-      LOG_DEBUG("Block {} is full. Create a new one", current_block_->id());
-      auto id = current_block_->id();
-      current_block_ = descriptor_.add_blocks();
-      current_block_->set_id(id + 1);
+    switch (type) {
+      case RecordType::kLatest:
+        block->mutable_last_record_time()->CopyFrom(proto_ts);
+        descriptor_.mutable_last_record_time()->CopyFrom(proto_ts);
+
+        if (current_block_->size() > options_.min_block_size) {
+          LOG_DEBUG("Block {} is full. Create a new one", current_block_->id());
+          auto id = current_block_->id();
+          current_block_ = descriptor_.add_blocks();
+          current_block_->set_id(id + 1);
+          current_block_->mutable_first_record_time()->CopyFrom(proto_ts);
+        }
+        break;
+      case RecordType::kBelatedFirst:
+        block->mutable_first_record_time()->CopyFrom(proto_ts);
+        descriptor_.mutable_first_record_time()->CopyFrom(proto_ts);
+        break;
+      case RecordType::kBelated:
+        break;
     }
 
     auto descriptor_path = full_path_ / kDescriptorName;
@@ -118,21 +150,13 @@ class Entry : public IEntry {
   [[nodiscard]] ReadResult Read(const Time& time) const override {
     const auto proto_ts = FromTimePoint(time);
 
-    LOG_DEBUG("Read a record for time={}", TimeUtil::ToString(proto_ts));
+    LOG_DEBUG("Read a record for kTimestamp={}", TimeUtil::ToString(proto_ts));
 
     if (proto_ts < descriptor_.first_record_time() || proto_ts > descriptor_.last_record_time()) {
       return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
     }
 
-    auto block_index = -1;
-    for (auto i = 0; i < descriptor_.blocks_size(); ++i) {
-      const auto& current_block = descriptor_.blocks(i);
-      if (proto_ts >= current_block.first_record_time() && proto_ts <= current_block.last_record_time()) {
-        block_index = i;
-        break;
-      }
-    }
-
+    int block_index = FindBlock(proto_ts);
     if (block_index == -1) {
       return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}, time};
     }
@@ -154,7 +178,7 @@ class Entry : public IEntry {
     const auto block_path = full_path_ / fmt::format("{:08d}", block.id());
     LOG_DEBUG("Found block {} with needed record", block_path.string());
 
-    std::ifstream block_file(block_path);
+    std::ifstream block_file(block_path, std::ios::binary);
     if (!block_file) {
       return {{}, {.code = 500, .message = "Failed open a block for reading"}, time};
     }
@@ -171,6 +195,17 @@ class Entry : public IEntry {
     }
 
     return {entry_record.blob(), {}, time};
+  }
+  int FindBlock(const google::protobuf::Timestamp& proto_ts) const {
+    auto block_index = -1;
+    for (auto i = 0; i < descriptor_.blocks_size(); ++i) {
+      const auto& current_block = descriptor_.blocks(i);
+      if (proto_ts >= current_block.first_record_time() && proto_ts <= current_block.last_record_time()) {
+        block_index = i;
+        break;
+      }
+    }
+    return block_index;
   }
 
   Info GetInfo() const override {
@@ -203,9 +238,20 @@ class Entry : public IEntry {
 
 std::unique_ptr<IEntry> IEntry::Build(IEntry::Options options) { return std::make_unique<Entry>(std::move(options)); }
 
+/**
+ * Streams
+ */
+
+std::ostream& operator<<(std::ostream& os, const IEntry::ReadResult& result) {
+  os << fmt::format("<IEntry::ReadResult data={}  error={} time={}>", result.data, result.error.ToString(),
+                    IEntry::Time::clock::to_time_t(result.time));
+  return os;
+}
+
 std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
   os << fmt::format("<IEntry::Info block_count={}  record_count={} bytes={}>", info.block_count, info.record_count,
                     info.bytes);
   return os;
 }
+
 };  // namespace reduct::storage
