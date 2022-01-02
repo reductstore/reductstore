@@ -29,9 +29,8 @@ include(${CMAKE_BINARY_DIR}/conan.cmake)
 conan_cmake_autodetect(settings)
 conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
         BUILD missing
-        UPDATE ON
-        SETTINGS ${settings}
-        PROFILE ${CONAN_PROFILE})
+        UPDATE OFF
+        SETTINGS ${settings})
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup()
