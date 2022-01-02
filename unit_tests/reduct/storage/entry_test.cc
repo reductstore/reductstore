@@ -26,13 +26,13 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
 
   REQUIRE(entry->Write("some_data", kTimestamp) == Error::kOk);
 
-  SECTION("one point") {
+  SECTION("one record") {
     auto ret = entry->Read(kTimestamp);
     REQUIRE(ret == IEntry::ReadResult{"some_data", Error{}, kTimestamp});
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 1, .bytes = 11});
   }
 
-  SECTION("few points") {
+  SECTION("few records") {
     REQUIRE(entry->Write("other_data1", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(entry->Write("other_data2", kTimestamp + seconds(10)) == Error::kOk);
     REQUIRE(entry->Write("other_data3", kTimestamp + seconds(15)) == Error::kOk);
@@ -58,13 +58,13 @@ TEST_CASE("storage::Entry should create a new block if the current > min_block_s
 
   REQUIRE(entry->Write(std::string(100, 'c'), kTimestamp) == Error::kOk);
 
-  SECTION("one point") {
+  SECTION("one record") {
     auto ret = entry->Read(kTimestamp);
     REQUIRE(ret == IEntry::ReadResult{std::string(100, 'c'), Error{}, kTimestamp});
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2, .record_count = 1, .bytes = 102});
   }
 
-  SECTION("two points in different blocks") {
+  SECTION("two records in different blocks") {
     REQUIRE(entry->Write("other_data1", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2, .record_count = 2, .bytes = 115});
 
@@ -79,13 +79,13 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
 
   REQUIRE(entry->Write(std::string(100, 'c'), kTimestamp) == Error::kOk);
 
-  SECTION("a point older than first in entry") {
+  SECTION("a record older than first in entry") {
     REQUIRE(entry->Write("belated_data", kTimestamp - seconds(5)) == Error::kOk);
     REQUIRE(entry->Read(kTimestamp - seconds(5)) ==
             IEntry::ReadResult{"belated_data", Error::kOk, kTimestamp - seconds(5)});
   }
 
-  SECTION("a belated point") {
+  SECTION("a belated record") {
     REQUIRE(entry->GetInfo().block_count == 2);
     REQUIRE(entry->Write("latest_data", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(entry->Write("latest_data", kTimestamp + seconds(15)) == Error::kOk);
@@ -94,4 +94,17 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
     REQUIRE(entry->Read(kTimestamp + seconds(10)) ==
             IEntry::ReadResult{"belated_data", Error::kOk, kTimestamp + seconds(10)});
   }
+}
+
+TEST_CASE("storage::Entry should restore itself from descriptors", "[entry]") {
+  const auto options = MakeDefaultOptions();
+  auto entry = IEntry::Build(options);
+  REQUIRE(entry);
+
+  REQUIRE(entry->Write("some_data", kTimestamp) == Error::kOk);
+
+  entry = IEntry::Restore(options.path / options.name);
+  REQUIRE(entry->GetOptions() == options);
+
+  REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 1, .bytes = 11});
 }

@@ -24,7 +24,13 @@ class Entry : public IEntry {
    * @param options
    */
   explicit Entry(Options options) : options_(std::move(options)) {
-    full_path_ = options_.path / options.name;
+    full_path_ = options_.path / options_.name;
+    if (fs::exists(full_path_)) {
+      throw std::runtime_error(fmt::format("Initialization error: directory {} already exists", full_path_.string()));
+    }
+
+    fs::create_directories(full_path_);
+
     proto::EntrySettings settings;
     settings.set_min_block_size(options_.min_block_size);
 
@@ -51,6 +57,41 @@ class Entry : public IEntry {
     } else {
       throw std::runtime_error(
           fmt::format("Initialization error: Failed to save descriptor to {}", descriptor_path.string()));
+    }
+  }
+
+  /**
+   * Restore entry from folder
+   * @param full_path
+   */
+  explicit Entry(fs::path full_path) : full_path_(std::move(full_path)) {
+    auto settings_path = full_path_ / kSettingsName;
+    std::ifstream settings_file(settings_path, std::ios::binary);
+    if (!settings_file) {
+      throw std::runtime_error(
+          fmt::format("Initialization error: Failed to open settings file: {}", settings_path.string()));
+    }
+
+    proto::EntrySettings settings;
+    if (!settings.ParseFromIstream(&settings_file)) {
+      throw std::runtime_error(
+          fmt::format("Initialization error: Failed to parse settings from {}", settings_path.string()));
+    }
+
+    options_ = {.name = full_path_.filename().string(),
+                .path = full_path_.parent_path(),
+                .min_block_size = settings.min_block_size()};
+
+    auto descriptor_path = full_path_ / kDescriptorName;
+    std::ifstream descriptor_file(descriptor_path, std::ios::binary);
+    if (!descriptor_file) {
+      throw std::runtime_error(
+          fmt::format("Initialization error: Failed to open descriptor file: {}", descriptor_path.string()));
+    }
+
+    if (!descriptor_.ParseFromIstream(&descriptor_file)) {
+      throw std::runtime_error(
+          fmt::format("Initialization error: Failed to parse descriptor from {}", descriptor_path.string()));
     }
   }
 
@@ -87,7 +128,7 @@ class Entry : public IEntry {
       }
     }
 
-    const auto block_path = full_path_ / fmt::format("{:08d}", block->id());
+    const auto block_path = full_path_ / fmt::format(kBlockNameFormat, block->id());
 
     LOG_DEBUG("Write a record_entry for kTimestamp={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
               block_path.string());
@@ -175,7 +216,7 @@ class Entry : public IEntry {
       return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
     }
 
-    const auto block_path = full_path_ / fmt::format("{:08d}", block.id());
+    const auto block_path = full_path_ / fmt::format(kBlockNameFormat, block.id());
     LOG_DEBUG("Found block {} with needed record", block_path.string());
 
     std::ifstream block_file(block_path, std::ios::binary);
@@ -221,14 +262,17 @@ class Entry : public IEntry {
     };
   }
 
+  const Options& GetOptions() const override { return options_; }
+
  private:
   static google::protobuf::Timestamp FromTimePoint(const Time& time) {
     auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(time.time_since_epoch()).count();
     return TimeUtil::MicrosecondsToTimestamp(microseconds);
   }
 
-  static constexpr std::string_view kSettingsName = "entry.settings";
-  static constexpr std::string_view kDescriptorName = "entry.descriptor";
+  static constexpr std::string_view kBlockNameFormat = "{:08d}.block";
+  static constexpr std::string_view kSettingsName = ".settings";
+  static constexpr std::string_view kDescriptorName = ".descriptor";
 
   Options options_;
   fs::path full_path_;
@@ -237,6 +281,10 @@ class Entry : public IEntry {
 };
 
 std::unique_ptr<IEntry> IEntry::Build(IEntry::Options options) { return std::make_unique<Entry>(std::move(options)); }
+
+std::unique_ptr<IEntry> IEntry::Restore(std::filesystem::path full_path) {
+  return std::make_unique<Entry>(std::move(full_path));
+}
 
 /**
  * Streams

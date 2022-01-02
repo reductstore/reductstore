@@ -19,6 +19,12 @@ class IEntry {
     std::string name;
     std::filesystem::path path;
     size_t min_block_size;
+
+    bool operator==(const Options& rhs) const {
+      return std::tie(name, path, min_block_size) == std::tie(rhs.name, rhs.path, rhs.min_block_size);
+    }
+
+    bool operator!=(const Options& rhs) const { return !(rhs == *this); }
   };
 
   using Time = std::chrono::system_clock::time_point;
@@ -53,8 +59,12 @@ class IEntry {
   [[nodiscard]] virtual core::Error Write(std::string&& blob, const Time& time) = 0;
   [[nodiscard]] virtual ReadResult Read(const Time& time) const = 0;
   [[nodiscard]] virtual Info GetInfo() const = 0;
+  [[nodiscard]] virtual const Options& GetOptions() const = 0;
+
 
   static std::unique_ptr<IEntry> Build(Options options);
+  static std::unique_ptr<IEntry> Restore(std::filesystem::path full_path);
+
 };
 
 }  // namespace reduct::storage
