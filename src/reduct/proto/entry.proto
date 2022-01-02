@@ -31,6 +31,11 @@ message EntryDescriptor {
 }
 
 message EntryRecord {
-  google.protobuf.Timestamp timestamp = 1;
-  string blob = 2;
+  message Meta {
+    string key = 1;
+    string value = 2;
+  }
+
+  string blob = 1;
+  repeated Meta meta_data = 2;
 }

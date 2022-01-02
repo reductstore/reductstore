@@ -77,7 +77,6 @@ class Entry : public IEntry {
     }
 
     proto::EntryRecord record_entry;
-    record_entry.mutable_timestamp()->CopyFrom(proto_ts);
     record_entry.set_blob(std::move(blob));
 
     std::string data;
@@ -98,6 +97,13 @@ class Entry : public IEntry {
     descriptor_.set_size(descriptor_.size() + data.size());
     descriptor_.mutable_last_record_time()->CopyFrom(proto_ts);
 
+    if (current_block_->size() > options_.min_block_size) {
+      LOG_DEBUG("Block {} is full. Create a new one", current_block_->id());
+      auto id = current_block_->id();
+      current_block_ = descriptor_.add_blocks();
+      current_block_->set_id(id + 1);
+    }
+
     auto descriptor_path = full_path_ / kDescriptorName;
     std::ofstream descriptor_file(descriptor_path);
     if (descriptor_file) {
@@ -106,7 +112,6 @@ class Entry : public IEntry {
       return {.code = 500, .message = "Failed save a descriptor"};
     }
 
-    // TODO(Alexey Timin): create a new block when the current is too big
     return {};
   }
 
@@ -122,7 +127,7 @@ class Entry : public IEntry {
     auto block_index = -1;
     for (auto i = 0; i < descriptor_.blocks_size(); ++i) {
       const auto& current_block = descriptor_.blocks(i);
-      if (proto_ts >= current_block.first_record_time() || proto_ts <= current_block.last_record_time()) {
+      if (proto_ts >= current_block.first_record_time() && proto_ts <= current_block.last_record_time()) {
         block_index = i;
         break;
       }
@@ -135,7 +140,7 @@ class Entry : public IEntry {
     auto record_index = -1;
     const auto& block = descriptor_.blocks(block_index);
     for (int i = 0; i < block.records_size(); ++i) {
-      const auto &current_record = block.records(i);
+      const auto& current_record = block.records(i);
       if (current_record.timestamp() == proto_ts) {
         record_index = i;
         break;
@@ -165,11 +170,20 @@ class Entry : public IEntry {
       return {{}, {.code = 500, .message = "Failed parse a block"}, time};
     }
 
-    if (entry_record.timestamp() != proto_ts) {
-      return {{}, {.code = 500, .message = "Failed to find the needed data in block"}, time};
+    return {entry_record.blob(), {}, time};
+  }
+
+  Info GetInfo() const override {
+    size_t record_count = 0;
+    for (int i = 0; i < descriptor_.blocks_size(); ++i) {
+      record_count += descriptor_.blocks(i).records_size();
     }
 
-    return {entry_record.blob(), {}, time};
+    return {
+        .block_count = static_cast<size_t>(descriptor_.blocks_size()),
+        .record_count = record_count,
+        .bytes = descriptor_.size(),
+    };
   }
 
  private:
@@ -189,4 +203,9 @@ class Entry : public IEntry {
 
 std::unique_ptr<IEntry> IEntry::Build(IEntry::Options options) { return std::make_unique<Entry>(std::move(options)); }
 
+std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
+  os << fmt::format("<IEntry::Info block_count={}  record_count={} bytes={}>", info.block_count, info.record_count,
+                    info.bytes);
+  return os;
+}
 };  // namespace reduct::storage
