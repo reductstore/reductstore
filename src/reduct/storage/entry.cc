@@ -32,7 +32,7 @@ class Entry : public IEntry {
     fs::create_directories(full_path_);
 
     proto::EntrySettings settings;
-    settings.set_min_block_size(options_.min_block_size);
+    settings.set_max_block_size(options_.max_block_size);
 
     auto settings_path = full_path_ / kSettingsName;
     std::ofstream settings_file(settings_path, std::ios::binary);
@@ -80,7 +80,7 @@ class Entry : public IEntry {
 
     options_ = {.name = full_path_.filename().string(),
                 .path = full_path_.parent_path(),
-                .min_block_size = settings.min_block_size()};
+                .max_block_size = settings.max_block_size()};
 
     auto descriptor_path = full_path_ / kDescriptorName;
     std::ifstream descriptor_file(descriptor_path, std::ios::binary);
@@ -102,10 +102,10 @@ class Entry : public IEntry {
 
     auto block = current_block_;
     RecordType type = RecordType::kLatest;
-    if (descriptor_.has_last_record_time() && descriptor_.last_record_time() >= proto_ts) {
+    if (descriptor_.has_latest_record_time() && descriptor_.latest_record_time() >= proto_ts) {
       LOG_DEBUG("Timestamp {} is belated. Finding proper block", TimeUtil::ToString(proto_ts));
 
-      if (descriptor_.first_record_time() > proto_ts) {
+      if (descriptor_.oldest_record_time() > proto_ts) {
         LOG_DEBUG("Timestamp earlier than first record");
         block = descriptor_.mutable_blocks(0);
         type = RecordType::kBelatedFirst;
@@ -120,11 +120,11 @@ class Entry : public IEntry {
       }
     }
 
-    if (!block->has_first_record_time()) {
+    if (!block->has_begin_time()) {
       LOG_DEBUG("First record_entry for current block");
-      block->mutable_first_record_time()->CopyFrom(proto_ts);
+      block->mutable_begin_time()->CopyFrom(proto_ts);
       if (block->id() == 0) {
-        descriptor_.mutable_first_record_time()->CopyFrom(proto_ts);
+        descriptor_.mutable_oldest_record_time()->CopyFrom(proto_ts);
       }
     }
 
@@ -158,20 +158,20 @@ class Entry : public IEntry {
 
     switch (type) {
       case RecordType::kLatest:
-        block->mutable_last_record_time()->CopyFrom(proto_ts);
-        descriptor_.mutable_last_record_time()->CopyFrom(proto_ts);
+        block->mutable_latest_record_time()->CopyFrom(proto_ts);
+        descriptor_.mutable_latest_record_time()->CopyFrom(proto_ts);
 
-        if (current_block_->size() > options_.min_block_size) {
+        if (current_block_->size() > options_.max_block_size) {
           LOG_DEBUG("Block {} is full. Create a new one", current_block_->id());
           auto id = current_block_->id();
           current_block_ = descriptor_.add_blocks();
           current_block_->set_id(id + 1);
-          current_block_->mutable_first_record_time()->CopyFrom(proto_ts);
+          current_block_->mutable_begin_time()->CopyFrom(proto_ts);
         }
         break;
       case RecordType::kBelatedFirst:
-        block->mutable_first_record_time()->CopyFrom(proto_ts);
-        descriptor_.mutable_first_record_time()->CopyFrom(proto_ts);
+        block->mutable_begin_time()->CopyFrom(proto_ts);
+        descriptor_.mutable_oldest_record_time()->CopyFrom(proto_ts);
         break;
       case RecordType::kBelated:
         break;
@@ -193,7 +193,7 @@ class Entry : public IEntry {
 
     LOG_DEBUG("Read a record for kTimestamp={}", TimeUtil::ToString(proto_ts));
 
-    if (proto_ts < descriptor_.first_record_time() || proto_ts > descriptor_.last_record_time()) {
+    if (proto_ts < descriptor_.oldest_record_time() || proto_ts > descriptor_.latest_record_time()) {
       return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
     }
 
@@ -241,7 +241,7 @@ class Entry : public IEntry {
     auto block_index = -1;
     for (auto i = 0; i < descriptor_.blocks_size(); ++i) {
       const auto& current_block = descriptor_.blocks(i);
-      if (proto_ts >= current_block.first_record_time() && proto_ts <= current_block.last_record_time()) {
+      if (proto_ts >= current_block.begin_time() && proto_ts <= current_block.latest_record_time()) {
         block_index = i;
         break;
       }

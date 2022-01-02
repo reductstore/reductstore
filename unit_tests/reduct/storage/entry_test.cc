@@ -14,7 +14,7 @@ static auto MakeDefaultOptions() {
   return IEntry::Options{
       .name = "entry_1",
       .path = BuildTmpDirectory(),
-      .min_block_size = 100,
+      .max_block_size = 100,
   };
 }
 
@@ -52,7 +52,7 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   }
 }
 
-TEST_CASE("storage::Entry should create a new block if the current > min_block_size", "[entry]") {
+TEST_CASE("storage::Entry should create a new block if the current > max_block_size", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
 
