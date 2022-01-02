@@ -19,9 +19,9 @@ class IEntry {
    * Options
    */
   struct Options {
-    std::string name;           // name of entry
-    std::filesystem::path path; // path to entry (path to bucket)
-    size_t max_block_size;      // max block size after that we create a new one
+    std::string name;             // name of entry
+    std::filesystem::path path;   // path to entry (path to bucket)
+    size_t max_block_size;        // max block size after that we create a new one
 
     bool operator==(const Options& rhs) const {
       return std::tie(name, path, max_block_size) == std::tie(rhs.name, rhs.path, rhs.max_block_size);
@@ -112,7 +112,6 @@ class IEntry {
    * @return pointer to entre or nullptr if failed to create
    */
   static std::unique_ptr<IEntry> Restore(std::filesystem::path full_path);
-
 };
 
 }  // namespace reduct::storage
