@@ -291,7 +291,7 @@ std::unique_ptr<IEntry> IEntry::Restore(std::filesystem::path full_path) {
  */
 
 std::ostream& operator<<(std::ostream& os, const IEntry::ReadResult& result) {
-  os << fmt::format("<IEntry::ReadResult data={}  error={} time={}>", result.data, result.error.ToString(),
+  os << fmt::format("<IEntry::ReadResult data={}  error={} time={}>", result.blob, result.error.ToString(),
                     IEntry::Time::clock::to_time_t(result.time));
   return os;
 }

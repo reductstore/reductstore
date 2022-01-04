@@ -38,7 +38,7 @@ class Bucket : public IBucket {
     if (it != entry_map_.end()) {
       return {it->second, Error::kOk};
     } else {
-      LOG_DEBUG("No '{}' entry in a bucket. Try to create one");
+      LOG_DEBUG("No '{}' entry in a bucket. Try to create one", name);
       auto entry = IEntry::Build({
           .name = name,
           .path = options_.path / options_.name,

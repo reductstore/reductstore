@@ -75,23 +75,38 @@ class IRemoveBucketCallback {
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
 };
 
-
 //---------------------
 // Entry API
 //---------------------
 
-class IRecordEntry {
+class IWriteEntryCallback {
  public:
   struct Response {};
   struct Request {
     std::string bucket_name;
     std::string entry_name;
-    uint64_t timestamp;
+    int64_t timestamp;
     std::string blob;
   };
 
   using Result = CallbackResult<Response>;
-  virtual async::Run<Result> OnRecordEntry(const Request& req) = 0;
+  virtual async::Run<Result> OnWriteEntry(Request req) = 0;
+};
+
+class IReadEntryCallback {
+ public:
+  struct Response {
+    std::string blob;
+    int64_t timestamp;
+  };
+  struct Request {
+    std::string bucket_name;
+    std::string entry_name;
+    int64_t timestamp;
+  };
+
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnReadEntry(const Request& req) = 0;
 };
 
 }  // namespace reduct::api

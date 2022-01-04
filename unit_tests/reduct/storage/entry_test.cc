@@ -40,10 +40,10 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 4, .bytes = 50});
 
     auto ret = entry->Read(kTimestamp);
-    REQUIRE(ret.data == "some_data");
+    REQUIRE(ret.blob == "some_data");
 
     ret = entry->Read(kTimestamp + seconds(15));
-    REQUIRE(ret.data == "other_data3");
+    REQUIRE(ret.blob == "other_data3");
   }
 
   SECTION("error 404 if request out of  interval") {
@@ -69,7 +69,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2, .record_count = 2, .bytes = 115});
 
     auto ret = entry->Read(kTimestamp + seconds(5));
-    REQUIRE(ret.data == "other_data1");
+    REQUIRE(ret.blob == "other_data1");
   }
 }
 

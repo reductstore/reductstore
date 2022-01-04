@@ -4,6 +4,8 @@
 
 #include <catch2/catch.hpp>
 
+#include <filesystem>
+
 #include "reduct/async/task.h"
 #include "reduct/config.h"
 #include "reduct/helpers.h"
@@ -11,11 +13,16 @@
 using reduct::api::ICreateBucketCallback;
 using reduct::api::IGetBucketCallback;
 using reduct::api::IInfoCallback;
+using reduct::api::IReadEntryCallback;
 using reduct::api::IRemoveBucketCallback;
+using reduct::api::IWriteEntryCallback;
+
 using reduct::async::Run;
 using reduct::async::Task;
 using reduct::core::Error;
 using reduct::storage::IStorage;
+
+namespace fs = std::filesystem;
 
 Task<IInfoCallback::Result> OnInfo(IStorage* storage) {
   auto result = co_await storage->OnInfo({});
@@ -82,14 +89,17 @@ Task<IRemoveBucketCallback::Result> OnRemoveBucket(IStorage* storage, IRemoveBuc
 }
 
 TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
-  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+  auto data_path = BuildTmpDirectory();
+  auto storage = IStorage::Build({.data_path = data_path});
 
   ICreateBucketCallback::Request req{.name = "bucket"};
   Error err = OnCreateBucket(storage.get(), req).Get();
-  REQUIRE_FALSE(err);
+  REQUIRE(err == Error::kOk);
+  REQUIRE(fs::exists(data_path / "bucket"));
 
   err = OnRemoveBucket(storage.get(), {.name = "bucket"}).Get();
-  REQUIRE_FALSE(err);
+  REQUIRE(err == Error::kOk);
+  REQUIRE_FALSE(fs::exists(data_path / "bucket"));
 
   err = OnGetBucket(storage.get(), {.name = "bucket"}).Get();
   REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
@@ -97,5 +107,81 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   SECTION("error if bucket is not found") {
     err = OnRemoveBucket(storage.get(), {.name = "X"}).Get();
     REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
+  }
+}
+
+Task<IWriteEntryCallback::Result> OnWriteEntry(IStorage* storage, IWriteEntryCallback::Request req) {
+  auto result = co_await storage->OnWriteEntry(std::move(req));
+  co_return result;
+}
+
+Task<IReadEntryCallback::Result> OnReadEntry(IStorage* storage, IReadEntryCallback::Request req) {
+  auto result = co_await storage->OnReadEntry(std::move(req));
+  co_return result;
+}
+
+TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+
+  REQUIRE(OnCreateBucket(storage.get(), {.name = "bucket"}).Get() == Error::kOk);
+
+  int64_t ts = 1000;
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {
+                           .bucket_name = "bucket",
+                           .entry_name = "entry",
+                           .timestamp = ts,
+                           .blob = "some_data",
+
+                       })
+              .Get() == Error::kOk);
+  auto [resp, err] = OnReadEntry(storage.get(),
+                                 {
+                                     .bucket_name = "bucket",
+                                     .entry_name = "entry",
+                                     .timestamp = ts,
+
+                                 })
+                         .Get();
+  REQUIRE(err == Error::kOk);
+  REQUIRE(resp.blob == "some_data");
+  REQUIRE(resp.timestamp == ts);
+
+  SECTION("error if bucket is not found during writing") {
+    Error error = OnWriteEntry(storage.get(),
+                               {
+                                   .bucket_name = "X",
+                                   .entry_name = "entry",
+                                   .timestamp = ts,
+                                   .blob = "some_data",
+
+                               })
+                      .Get();
+
+    REQUIRE(error == Error{.code = 404, .message = "Bucket 'X' is not found"});
+  }
+
+  SECTION("error if bucket is not found during reading") {
+    Error error = OnReadEntry(storage.get(),
+                               {
+                                   .bucket_name = "X",
+                                   .entry_name = "entry",
+                                   .timestamp = ts,
+                               })
+                      .Get();
+
+    REQUIRE(error == Error{.code = 404, .message = "Bucket 'X' is not found"});
+  }
+
+  SECTION("error if the record not found") {
+    Error error = OnReadEntry(storage.get(),
+                              {
+                                  .bucket_name = "bucket",
+                                  .entry_name = "entry",
+                                  .timestamp = 200,
+                              })
+                      .Get();
+
+    REQUIRE(error == Error{.code = 404, .message = "No records for this timestamp"});
   }
 }

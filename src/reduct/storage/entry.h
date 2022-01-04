@@ -36,12 +36,12 @@ class IEntry {
    * Result of reading
    */
   struct ReadResult {
-    std::string data;   // blob of data
+    std::string blob;   // blob of data
     core::Error error;  // error (Error::kOk if no errors)
     Time time;          // timestamp of blob
 
     bool operator==(const ReadResult& rhs) const {
-      return std::tie(data, error, time) == std::tie(rhs.data, rhs.error, rhs.time);
+      return std::tie(blob, error, time) == std::tie(rhs.blob, rhs.error, rhs.time);
     }
 
     bool operator!=(const ReadResult& rhs) const { return !(rhs == *this); }
