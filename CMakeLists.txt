@@ -4,6 +4,7 @@ set(MAJOR_VERSION 0)
 set(MINOR_VERSION 1)
 set(PATCH_VERSION 0)
 set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
+set(DEFAULT_MAX_BLOCK_SIZE 1048576 CACHE STRING "Default max size for block with data")
 
 project(reduct_storage VERSION ${FULL_VERSION})
 
