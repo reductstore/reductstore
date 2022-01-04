@@ -127,61 +127,28 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
 
   int64_t ts = 1000;
   REQUIRE(OnWriteEntry(storage.get(),
-                       {
-                           .bucket_name = "bucket",
-                           .entry_name = "entry",
-                           .timestamp = ts,
-                           .blob = "some_data",
-
-                       })
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = ts, .blob = "some_data"})
               .Get() == Error::kOk);
-  auto [resp, err] = OnReadEntry(storage.get(),
-                                 {
-                                     .bucket_name = "bucket",
-                                     .entry_name = "entry",
-                                     .timestamp = ts,
-
-                                 })
-                         .Get();
+  auto [resp, err] =
+      OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = ts}).Get();
   REQUIRE(err == Error::kOk);
   REQUIRE(resp.blob == "some_data");
   REQUIRE(resp.timestamp == ts);
 
   SECTION("error if bucket is not found during writing") {
-    Error error = OnWriteEntry(storage.get(),
-                               {
-                                   .bucket_name = "X",
-                                   .entry_name = "entry",
-                                   .timestamp = ts,
-                                   .blob = "some_data",
-
-                               })
-                      .Get();
-
+    Error error =
+        OnWriteEntry(storage.get(), {.bucket_name = "X", .entry_name = "entry", .timestamp = ts, .blob = "some_data"})
+            .Get();
     REQUIRE(error == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
 
   SECTION("error if bucket is not found during reading") {
-    Error error = OnReadEntry(storage.get(),
-                               {
-                                   .bucket_name = "X",
-                                   .entry_name = "entry",
-                                   .timestamp = ts,
-                               })
-                      .Get();
-
+    Error error = OnReadEntry(storage.get(), {.bucket_name = "X", .entry_name = "entry", .timestamp = ts}).Get();
     REQUIRE(error == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
 
   SECTION("error if the record not found") {
-    Error error = OnReadEntry(storage.get(),
-                              {
-                                  .bucket_name = "bucket",
-                                  .entry_name = "entry",
-                                  .timestamp = 200,
-                              })
-                      .Get();
-
+    Error error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = 200}).Get();
     REQUIRE(error == Error{.code = 404, .message = "No records for this timestamp"});
   }
 }
