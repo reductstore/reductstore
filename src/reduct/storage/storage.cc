@@ -99,10 +99,10 @@ class Storage : public IStorage {
   /**
    * Entry API
    */
-  [[nodiscard]] Run<IWriteEntryCallback::Result> OnWriteEntry(IWriteEntryCallback::Request req) override {
+  [[nodiscard]] Run<IWriteEntryCallback::Result> OnWriteEntry(const IWriteEntryCallback::Request& req) override {
     using Callback = IWriteEntryCallback;
 
-    return Run<Callback::Result>([this, req = std::move(req)]() mutable {
+    return Run<Callback::Result>([this, &req]() mutable {
       auto [bucket_it, err] = FindBucket(req.bucket_name);
       if (err) {
         return Callback::Result{{}, err};
@@ -114,7 +114,7 @@ class Storage : public IStorage {
             {}, Error{.code = 500, .message = fmt::format("Failed to create entry {}", req.entry_name)}};
       }
 
-      err = ret.entry.lock()->Write(std::move(req.blob), IEntry::Time() + std::chrono::microseconds(req.timestamp));
+      err = ret.entry.lock()->Write(req.blob, IEntry::Time() + std::chrono::microseconds(req.timestamp));
       return Callback::Result{{}, err};
     });
   }

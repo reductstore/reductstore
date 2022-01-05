@@ -90,7 +90,7 @@ class IWriteEntryCallback {
   };
 
   using Result = CallbackResult<Response>;
-  virtual async::Run<Result> OnWriteEntry(Request req) = 0;
+  virtual async::Run<Result> OnWriteEntry(const Request& req) = 0;
 };
 
 class IReadEntryCallback {

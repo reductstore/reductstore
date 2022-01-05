@@ -7,6 +7,8 @@
 #include <uWebSockets/App.h>
 
 #include "reduct/async/run.h"
+#include "reduct/core/error.h"
+#include "reduct/core/logger.h"
 
 namespace reduct::api {
 

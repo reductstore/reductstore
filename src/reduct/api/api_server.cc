@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #include "reduct/api/api_server.h"
 
@@ -7,6 +7,7 @@
 
 #include "reduct/api/handlers/common.h"
 #include "reduct/api/handlers/handle_bucket.h"
+#include "reduct/api/handlers/handle_entry.h"
 #include "reduct/api/handlers/handle_info.h"
 #include "reduct/core/logger.h"
 
@@ -38,6 +39,13 @@ class ApiServer : public IApiServer {
              [this](auto *res, auto *req) {
                handlers::HandleRemoveBucket(handler_.get(), res, req, req->getParameter(0));
              })
+        // Entry API
+        .post(base_path + ":bucket_name/:entry_name",
+              [this](auto *res, auto *req) {
+                handlers::HandleWriteEntry(handler_.get(), res, req, req->getParameter(0), req->getParameter(1),
+                                           std::chrono::system_clock::now().time_since_epoch().count());
+              })
+
         .listen(host, port, 0,
                 [&](auto sock) {
                   if (sock) {

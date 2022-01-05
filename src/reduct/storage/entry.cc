@@ -95,7 +95,7 @@ class Entry : public IEntry {
     }
   }
 
-  [[nodiscard]] Error Write(std::string&& blob, const Time& time) override {
+  [[nodiscard]] Error Write(const std::string& blob, const Time& time) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
 
     const auto proto_ts = FromTimePoint(time);
@@ -138,7 +138,8 @@ class Entry : public IEntry {
     }
 
     proto::EntryRecord record_entry;
-    record_entry.set_blob(std::move(blob));
+    record_entry.set_blob(blob);
+    record_entry.mutable_meta_data()->Clear();
 
     std::string data;
     if (!record_entry.SerializeToString(&data)) {
@@ -158,7 +159,8 @@ class Entry : public IEntry {
 
     switch (type) {
       case RecordType::kLatest:
-        block->mutable_latest_record_time()->CopyFrom(proto_ts);
+        assert(current_block_ == block);
+        current_block_->mutable_latest_record_time()->CopyFrom(proto_ts);
         descriptor_.mutable_latest_record_time()->CopyFrom(proto_ts);
 
         if (current_block_->size() > options_.max_block_size) {

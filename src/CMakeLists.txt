@@ -20,6 +20,7 @@ add_custom_command(OUTPUT ${PROTOBUF_FILES}
 
 set(SRC_FILES
         reduct/api/handlers/handle_bucket.cc
+        reduct/api/handlers/handle_entry.cc
         reduct/api/handlers/handle_info.cc
         reduct/api/api_server.cc
 

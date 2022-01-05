@@ -74,7 +74,7 @@ class IEntry {
    * @param time timestamp of the data
    * @return error 500 if failed to write data
    */
-  [[nodiscard]] virtual core::Error Write(std::string&& blob, const Time& time) = 0;
+  [[nodiscard]] virtual core::Error Write(const std::string& blob, const Time& time) = 0;
 
   /**
    * @brief Finds the record for the timestamp and read the blob
