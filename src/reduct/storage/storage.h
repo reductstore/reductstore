@@ -2,6 +2,8 @@
 #ifndef REDUCT_STORAGE_STORAGE_H
 #define REDUCT_STORAGE_STORAGE_H
 
+#include <filesystem>
+
 #include "reduct/api/api_server.h"
 
 namespace reduct::storage {
@@ -12,7 +14,7 @@ namespace reduct::storage {
 class IStorage : public api::IApiHandler {
  public:
   struct Options {
-    std::string data_path;
+    std::filesystem::path data_path;
   };
 
   /**

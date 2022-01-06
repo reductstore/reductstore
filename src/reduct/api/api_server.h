@@ -18,7 +18,9 @@ namespace reduct::api {
 class IApiHandler : public IInfoCallback,
                     public ICreateBucketCallback,
                     public IGetBucketCallback,
-                    public IRemoveBucketCallback {};
+                    public IRemoveBucketCallback,
+                    public IWriteEntryCallback,
+                    public IReadEntryCallback {};
 
 /**
  * HTTP API Server

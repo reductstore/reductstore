@@ -1,11 +1,12 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_STORAGE_CONFIG_H
 #define REDUCT_STORAGE_CONFIG_H
 
 namespace reduct {
 
-static const char* kVersion = "@FULL_VERSION@";
+static constexpr const char* kVersion = "@FULL_VERSION@";
+static constexpr size_t kDefaultMaxBlockSize = @DEFAULT_MAX_BLOCK_SIZE@;
 
 }
 #endif  // REDUCT_STORAGE_CONFIG_H

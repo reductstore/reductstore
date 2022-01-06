@@ -6,6 +6,8 @@
 
 namespace reduct::core {
 
+const Error Error::kOk = Error{};
+
 Error::operator bool() const { return code != 0; }
 
 std::string Error::ToString() const { return fmt::format("[{}] {}", code, message); }

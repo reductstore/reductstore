@@ -43,7 +43,7 @@ class ICreateBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string name;
+    std::string_view name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
@@ -56,7 +56,7 @@ class IGetBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string name;
+    std::string_view name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnGetBucket(const Request& req) const = 0;
@@ -69,10 +69,44 @@ class IRemoveBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string name;
+    std::string_view name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
+};
+
+//---------------------
+// Entry API
+//---------------------
+
+class IWriteEntryCallback {
+ public:
+  struct Response {};
+  struct Request {
+    std::string_view bucket_name;
+    std::string_view entry_name;
+    std::string_view timestamp;
+    std::string_view blob;
+  };
+
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnWriteEntry(const Request& req) = 0;
+};
+
+class IReadEntryCallback {
+ public:
+  struct Response {
+    std::string blob;
+    std::string timestamp;
+  };
+  struct Request {
+    std::string_view bucket_name;
+    std::string_view entry_name;
+    std::string_view timestamp;
+  };
+
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnReadEntry(const Request& req) = 0;
 };
 
 }  // namespace reduct::api

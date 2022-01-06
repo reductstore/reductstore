@@ -12,8 +12,6 @@
 
 namespace reduct::storage {
 
-using api::ICreateBucketCallback;
-using api::IInfoCallback;
 using async::Run;
 using core::Error;
 
@@ -35,7 +33,7 @@ class Storage : public IStorage {
   }
 
   /**
-   * API Implementation
+   * Info API
    */
   [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
     using Callback = IInfoCallback;
@@ -47,21 +45,25 @@ class Storage : public IStorage {
     });
   }
 
+  /**
+   * Bucket API
+   */
   [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
     using Callback = ICreateBucketCallback;
     return Run<Callback::Result>([this, req] {
-      if (buckets_.find(req.name) != buckets_.end()) {
+      std::string bucket_name{req.name};
+      if (buckets_.find(bucket_name) != buckets_.end()) {
         return Callback::Result{{}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.name)}};
       }
 
-      auto bucket = IBucket::Build({.name = req.name, .path = options_.data_path});
+      auto bucket = IBucket::Build({.name = bucket_name, .path = options_.data_path});
       if (!bucket) {
         auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
         return Callback::Result{{},
                                 Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")}};
       }
 
-      buckets_[req.name] = std::move(bucket);
+      buckets_[bucket_name] = std::move(bucket);
       return Callback::Result{{}, Error{}};
     });
   }
@@ -69,8 +71,9 @@ class Storage : public IStorage {
   [[nodiscard]] Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) const override {
     using Callback = IGetBucketCallback;
     return Run<Callback::Result>([this, req] {
-      if (buckets_.find(req.name) == buckets_.end()) {
-        return Callback::Result{{}, Error{.code = 404, .message = fmt::format("Bucket '{}' is not found", req.name)}};
+      auto [bucket_it, err] = FindBucket(req.name);
+      if (err) {
+        return Callback::Result{{}, err};
       }
 
       return Callback::Result{{}, Error{}};
@@ -81,18 +84,112 @@ class Storage : public IStorage {
     using Callback = IRemoveBucketCallback;
 
     return Run<Callback::Result>([this, req] {
-      auto it = buckets_.find(req.name);
-      if (buckets_.find(req.name) == buckets_.end()) {
-        return Callback::Result{{}, Error{.code = 404, .message = fmt::format("Bucket '{}' is not found", req.name)}};
+      auto [bucket_it, err] = FindBucket(req.name);
+      if (err) {
+        return Callback::Result{{}, err};
       }
-      buckets_.erase(it);
-      return Callback::Result{{}, Error{}};
+
+      err = bucket_it->second->Clean();
+      fs::remove(options_.data_path / req.name);
+      buckets_.erase(bucket_it);
+
+      return Callback::Result{{}, err};
+    });
+  }
+
+  /**
+   * Entry API
+   */
+  [[nodiscard]] Run<IWriteEntryCallback::Result> OnWriteEntry(const IWriteEntryCallback::Request& req) override {
+    using Callback = IWriteEntryCallback;
+
+    return Run<Callback::Result>([this, &req]() mutable {
+      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      if (err) {
+        return Callback::Result{{}, err};
+      }
+
+      auto [ts, parse_err] = ParseTimestmap(req.timestamp);
+      if (parse_err) {
+        return Callback::Result{{}, parse_err};
+      }
+
+      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+      if (ref_error) {
+        return Callback::Result{{}, ref_error};
+      }
+
+      err = entry.lock()->Write(req.blob, ts);
+      return Callback::Result{{}, err};
+    });
+  }
+
+  Run<IReadEntryCallback::Result> OnReadEntry(const IReadEntryCallback::Request& req) override {
+    using Callback = IReadEntryCallback;
+
+    return Run<Callback::Result>([this, req] {
+      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      if (err) {
+        return Callback::Result{{}, err};
+      }
+
+      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+      if (ref_error) {
+        return Callback::Result{{}, ref_error};
+      }
+
+      auto [ts, parse_err] = ParseTimestmap(req.timestamp);
+      if (parse_err) {
+        return Callback::Result{{}, parse_err};
+      }
+
+      auto read_result = entry.lock()->Read(ts);
+      return Callback::Result{
+          {
+              .blob = read_result.blob,
+              .timestamp = std::to_string(
+                  std::chrono::duration_cast<std::chrono::microseconds>(read_result.time.time_since_epoch()).count()),
+          },
+          read_result.error,
+      };
     });
   }
 
  private:
+  using BucketMap = std::map<std::string, std::unique_ptr<IBucket>>;
+
+  [[nodiscard]] std::pair<BucketMap::const_iterator, Error> FindBucket(std::string_view name) const {
+    auto it = buckets_.find(std::string{name});
+    if (it == buckets_.end()) {
+      return {buckets_.end(), Error{.code = 404, .message = fmt::format("Bucket '{}' is not found", name)}};
+    }
+
+    return {it, Error::kOk};
+  }
+
+  static std::tuple<IEntry::Time, Error> ParseTimestmap(std::string_view timestamp) {
+    auto ts = IEntry::Time::clock::now();
+    if (timestamp.empty()) {
+      return {IEntry::Time{}, Error{
+                                  .code = 400,
+                                  .message = "'ts' parameter can't be empty",
+                              }};
+    }
+    try {
+      ts = IEntry::Time{} + std::chrono::microseconds(std::stoi(std::string{timestamp}));
+      return {ts, Error::kOk};
+    } catch (...) {
+      return {IEntry::Time{},
+              Error{
+                  .code = 400,
+                  .message = fmt::format("Failed to parse 'ts' parameter: {} should unix times in microseconds",
+                                         std::string{timestamp}),
+              }};
+    }
+  }
+
   Options options_;
-  std::map<std::string, std::unique_ptr<IBucket>> buckets_;
+  BucketMap buckets_;
 };
 
 std::unique_ptr<IStorage> IStorage::Build(IStorage::Options options) {
