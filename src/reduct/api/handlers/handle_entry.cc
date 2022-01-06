@@ -14,7 +14,7 @@ using core::Error;
 
 template <bool SSL>
 async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                 std::string_view bucket, std::string_view entry, std::string_view ts) {
+                                 std::string bucket, std::string entry, std::string ts) {
   auto basic = BasicHandle<SSL, IWriteEntryCallback>(res, req);
 
   std::string full_blob;
@@ -40,14 +40,13 @@ async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpRespons
 }
 
 template VoidTask HandleWriteEntry<>(IWriteEntryCallback *callback, uWS::HttpResponse<false> *res,
-                                     uWS::HttpRequest *req, std::string_view bucket, std::string_view entry,
-                                     std::string_view ts);
+                                     uWS::HttpRequest *req, std::string bucket, std::string entry, std::string ts);
 template VoidTask HandleWriteEntry<>(IWriteEntryCallback *callback, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
-                                     std::string_view bucket, std::string_view entry, std::string_view ts);
+                                     std::string bucket, std::string entry, std::string ts);
 
 template <bool SSL = false>
 async::VoidTask HandleReadEntry(IReadEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                std::string_view bucket, std::string_view entry, std::string_view ts) {
+                                std::string bucket, std::string entry, std::string ts) {
   IReadEntryCallback::Request data{
       .bucket_name = bucket,
       .entry_name = entry,
@@ -61,8 +60,8 @@ async::VoidTask HandleReadEntry(IReadEntryCallback *callback, uWS::HttpResponse<
 }
 
 template VoidTask HandleReadEntry<>(IReadEntryCallback *callback, uWS::HttpResponse<false> *res, uWS::HttpRequest *req,
-                                    std::string_view bucket, std::string_view entry, std::string_view ts);
+                                    std::string bucket, std::string entry, std::string ts);
 template VoidTask HandleReadEntry<>(IReadEntryCallback *callback, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
-                                    std::string_view bucket, std::string_view entry, std::string_view ts);
+                                    std::string bucket, std::string entry, std::string ts);
 
 }  // namespace reduct::api::handlers

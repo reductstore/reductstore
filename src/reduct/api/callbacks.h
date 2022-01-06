@@ -43,7 +43,7 @@ class ICreateBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string name;
+    std::string_view name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
@@ -56,7 +56,7 @@ class IGetBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string name;
+    std::string_view name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnGetBucket(const Request& req) const = 0;
@@ -69,7 +69,7 @@ class IRemoveBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string name;
+    std::string_view name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;

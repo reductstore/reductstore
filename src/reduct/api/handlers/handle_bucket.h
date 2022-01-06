@@ -20,7 +20,7 @@ namespace reduct::api::handlers {
  */
 template <bool SSL = false>
 async::VoidTask HandleCreateBucket(ICreateBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                   std::string_view name);
+                                   std::string name);
 
 /**
  * Handle HTTP request to get info about bucket
@@ -33,7 +33,7 @@ async::VoidTask HandleCreateBucket(ICreateBucketCallback *callback, uWS::HttpRes
  */
 template <bool SSL = false>
 async::VoidTask HandleGetBucket(IGetBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                std::string_view name);
+                                std::string name);
 
 /**
  * Handle HTTP request to remove a bucket
@@ -46,7 +46,7 @@ async::VoidTask HandleGetBucket(IGetBucketCallback *callback, uWS::HttpResponse<
  */
 template <bool SSL = false>
 async::VoidTask HandleRemoveBucket(IRemoveBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                std::string_view name);
+                                std::string name);
 
 }  // namespace reduct::api::handlers
 

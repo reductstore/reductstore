@@ -51,18 +51,19 @@ class Storage : public IStorage {
   [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
     using Callback = ICreateBucketCallback;
     return Run<Callback::Result>([this, req] {
-      if (buckets_.find(req.name) != buckets_.end()) {
+      std::string bucket_name{req.name};
+      if (buckets_.find(bucket_name) != buckets_.end()) {
         return Callback::Result{{}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.name)}};
       }
 
-      auto bucket = IBucket::Build({.name = req.name, .path = options_.data_path});
+      auto bucket = IBucket::Build({.name = bucket_name, .path = options_.data_path});
       if (!bucket) {
         auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
         return Callback::Result{{},
                                 Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")}};
       }
 
-      buckets_[req.name] = std::move(bucket);
+      buckets_[bucket_name] = std::move(bucket);
       return Callback::Result{{}, Error{}};
     });
   }

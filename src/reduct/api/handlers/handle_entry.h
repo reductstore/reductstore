@@ -20,7 +20,7 @@ namespace reduct::api::handlers {
  */
 template <bool SSL = false>
 async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                 std::string_view bucket, std::string_view entry, std::string_view ts);
+                                 std::string bucket, std::string entry, std::string ts);
 
 /**
  * @brief Handle ReadEntry request
@@ -35,7 +35,7 @@ async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpRespons
  */
 template <bool SSL = false>
 async::VoidTask HandleReadEntry(IReadEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                 std::string_view bucket, std::string_view entry, std::string_view ts);
+                                 std::string bucket, std::string entry, std::string ts);
 
 }  // namespace reduct::api::handlers
 

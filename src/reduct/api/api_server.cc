@@ -30,25 +30,26 @@ class ApiServer : public IApiServer {
         // Bucket API
         .post(base_path + ":bucket_name",
               [this](auto *res, auto *req) {
-                handlers::HandleCreateBucket(handler_.get(), res, req, req->getParameter(0));
+                handlers::HandleCreateBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
               })
-        .get(
-            base_path + ":bucket_name",
-            [this](auto *res, auto *req) { handlers::HandleGetBucket(handler_.get(), res, req, req->getParameter(0)); })
+        .get(base_path + ":bucket_name",
+             [this](auto *res, auto *req) {
+               handlers::HandleGetBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
+             })
         .del(base_path + ":bucket_name",
              [this](auto *res, auto *req) {
-               handlers::HandleRemoveBucket(handler_.get(), res, req, req->getParameter(0));
+               handlers::HandleRemoveBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
              })
         // Entry API
         .post(base_path + ":bucket_name/:entry_name",
               [this](auto *res, auto *req) {
-                handlers::HandleWriteEntry(handler_.get(), res, req, req->getParameter(0), req->getParameter(1),
-                                           req->getQuery("ts"));
+                handlers::HandleWriteEntry(handler_.get(), res, req, std::string(req->getParameter(0)),
+                                           std::string(req->getParameter(1)), std::string(req->getQuery("ts")));
               })
         .get(base_path + ":bucket_name/:entry_name",
              [this](auto *res, auto *req) {
-               handlers::HandleReadEntry(handler_.get(), res, req, req->getParameter(0), req->getParameter(1),
-                                         req->getQuery("ts"));
+               handlers::HandleReadEntry(handler_.get(), res, req, std::string(req->getParameter(0)),
+                                         std::string(req->getParameter(1)), std::string(req->getQuery("ts")));
              })
         .listen(host, port, 0,
                 [&](auto sock) {
