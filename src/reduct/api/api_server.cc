@@ -43,9 +43,13 @@ class ApiServer : public IApiServer {
         .post(base_path + ":bucket_name/:entry_name",
               [this](auto *res, auto *req) {
                 handlers::HandleWriteEntry(handler_.get(), res, req, req->getParameter(0), req->getParameter(1),
-                                           std::chrono::system_clock::now().time_since_epoch().count());
+                                           req->getQuery("ts"));
               })
-
+        .get(base_path + ":bucket_name/:entry_name",
+             [this](auto *res, auto *req) {
+               handlers::HandleReadEntry(handler_.get(), res, req, req->getParameter(0), req->getParameter(1),
+                                         req->getQuery("ts"));
+             })
         .listen(host, port, 0,
                 [&](auto sock) {
                   if (sock) {

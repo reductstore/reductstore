@@ -108,13 +108,17 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      auto ret = bucket_it->second->GetOrCreateEntry(req.entry_name);
-      if (ret.error) {
-        return Callback::Result{
-            {}, Error{.code = 500, .message = fmt::format("Failed to create entry {}", req.entry_name)}};
+      auto [ts, parse_err] = ParseTimestmap(req.timestamp);
+      if (parse_err) {
+        return Callback::Result{{}, parse_err};
       }
 
-      err = ret.entry.lock()->Write(req.blob, IEntry::Time() + std::chrono::microseconds(req.timestamp));
+      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+      if (ref_error) {
+        return Callback::Result{{}, ref_error};
+      }
+
+      err = entry.lock()->Write(req.blob, ts);
       return Callback::Result{{}, err};
     });
   }
@@ -128,18 +132,22 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      auto ret = bucket_it->second->GetOrCreateEntry(req.entry_name);
-      if (ret.error) {
-        return Callback::Result{
-            {}, Error{.code = 500, .message = fmt::format("Failed to create entry {}", req.entry_name)}};
+      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+      if (ref_error) {
+        return Callback::Result{{}, ref_error};
       }
 
-      auto read_result = ret.entry.lock()->Read(IEntry::Time() + std::chrono::microseconds(req.timestamp));
+      auto [ts, parse_err] = ParseTimestmap(req.timestamp);
+      if (parse_err) {
+        return Callback::Result{{}, parse_err};
+      }
+
+      auto read_result = entry.lock()->Read(ts);
       return Callback::Result{
           {
               .blob = read_result.blob,
-              .timestamp =
-                  std::chrono::duration_cast<std::chrono::microseconds>(read_result.time.time_since_epoch()).count(),
+              .timestamp = std::to_string(
+                  std::chrono::duration_cast<std::chrono::microseconds>(read_result.time.time_since_epoch()).count()),
           },
           read_result.error,
       };
@@ -149,13 +157,34 @@ class Storage : public IStorage {
  private:
   using BucketMap = std::map<std::string, std::unique_ptr<IBucket>>;
 
-  [[nodiscard]] std::pair<BucketMap::const_iterator, Error> FindBucket(const std::string& name) const {
-    auto it = buckets_.find(name);
-    if (buckets_.find(name) == buckets_.end()) {
+  [[nodiscard]] std::pair<BucketMap::const_iterator, Error> FindBucket(std::string_view name) const {
+    auto it = buckets_.find(std::string{name});
+    if (it == buckets_.end()) {
       return {buckets_.end(), Error{.code = 404, .message = fmt::format("Bucket '{}' is not found", name)}};
     }
 
     return {it, Error::kOk};
+  }
+
+  static std::tuple<IEntry::Time, Error> ParseTimestmap(std::string_view timestamp) {
+    auto ts = IEntry::Time::clock::now();
+    if (timestamp.empty()) {
+      return {IEntry::Time{}, Error{
+                                  .code = 400,
+                                  .message = "'ts' parameter can't be empty",
+                              }};
+    }
+    try {
+      ts = IEntry::Time{} + std::chrono::microseconds(std::stoi(std::string{timestamp}));
+      return {ts, Error::kOk};
+    } catch (...) {
+      return {
+          IEntry::Time{},
+          Error{
+              .code = 400,
+              .message = fmt::format("Failed to parse 'ts' parameter: {} should unix times in microseconds", std::string{timestamp}),
+          }};
+    }
   }
 
   Options options_;

@@ -83,10 +83,10 @@ class IWriteEntryCallback {
  public:
   struct Response {};
   struct Request {
-    std::string bucket_name;
-    std::string entry_name;
-    int64_t timestamp;
-    std::string blob;
+    std::string_view bucket_name;
+    std::string_view entry_name;
+    std::string_view timestamp;
+    std::string_view blob;
   };
 
   using Result = CallbackResult<Response>;
@@ -97,12 +97,12 @@ class IReadEntryCallback {
  public:
   struct Response {
     std::string blob;
-    int64_t timestamp;
+    std::string timestamp;
   };
   struct Request {
-    std::string bucket_name;
-    std::string entry_name;
-    int64_t timestamp;
+    std::string_view bucket_name;
+    std::string_view entry_name;
+    std::string_view timestamp;
   };
 
   using Result = CallbackResult<Response>;

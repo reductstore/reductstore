@@ -14,7 +14,7 @@ using core::Error;
 
 template <bool SSL>
 async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                 std::string_view bucket, std::string_view entry, int64_t ts) {
+                                 std::string_view bucket, std::string_view entry, std::string_view ts) {
   auto basic = BasicHandle<SSL, IWriteEntryCallback>(res, req);
 
   std::string full_blob;
@@ -28,22 +28,41 @@ async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpRespons
     co_await async::Sleep(async::kTick);
   }
 
-  LOG_DEBUG("Received data");
-
   IWriteEntryCallback::Request data{
-      .bucket_name = std::string(bucket),
-      .entry_name = std::string(entry),
+      .bucket_name = bucket,
+      .entry_name = entry,
       .timestamp = ts,
       .blob = full_blob,
   };
-  [[maybe_unused]] auto err =basic.Run(co_await callback->OnWriteEntry(data)); // TODO(Alexey Timin): std::move crushes
+  [[maybe_unused]] auto err =
+      basic.Run(co_await callback->OnWriteEntry(data));  // TODO(Alexey Timin): std::move crushes
   co_return;
 }
 
 template VoidTask HandleWriteEntry<>(IWriteEntryCallback *callback, uWS::HttpResponse<false> *res,
                                      uWS::HttpRequest *req, std::string_view bucket, std::string_view entry,
-                                     int64_t ts);
+                                     std::string_view ts);
 template VoidTask HandleWriteEntry<>(IWriteEntryCallback *callback, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
-                                     std::string_view bucket, std::string_view entry, int64_t ts);
+                                     std::string_view bucket, std::string_view entry, std::string_view ts);
+
+template <bool SSL = false>
+async::VoidTask HandleReadEntry(IReadEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                                std::string_view bucket, std::string_view entry, std::string_view ts) {
+  IReadEntryCallback::Request data{
+      .bucket_name = bucket,
+      .entry_name = entry,
+      .timestamp = ts,
+  };
+
+  [[maybe_unused]] auto err = BasicHandle<SSL, IReadEntryCallback>(res, req)
+                                  .OnSuccess([](IReadEntryCallback::Response app_resp) { return app_resp.blob; })
+                                  .Run(co_await callback->OnReadEntry(data));
+  co_return;
+}
+
+template VoidTask HandleReadEntry<>(IReadEntryCallback *callback, uWS::HttpResponse<false> *res, uWS::HttpRequest *req,
+                                    std::string_view bucket, std::string_view entry, std::string_view ts);
+template VoidTask HandleReadEntry<>(IReadEntryCallback *callback, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
+                                    std::string_view bucket, std::string_view entry, std::string_view ts);
 
 }  // namespace reduct::api::handlers

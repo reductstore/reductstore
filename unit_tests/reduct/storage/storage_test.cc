@@ -125,30 +125,51 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
 
   REQUIRE(OnCreateBucket(storage.get(), {.name = "bucket"}).Get() == Error::kOk);
 
-  int64_t ts = 1000;
   REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = ts, .blob = "some_data"})
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
               .Get() == Error::kOk);
   auto [resp, err] =
-      OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = ts}).Get();
+      OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000"}).Get();
   REQUIRE(err == Error::kOk);
   REQUIRE(resp.blob == "some_data");
-  REQUIRE(resp.timestamp == ts);
+  REQUIRE(resp.timestamp == "1000");
 
   SECTION("error if bucket is not found during writing") {
-    Error error =
-        OnWriteEntry(storage.get(), {.bucket_name = "X", .entry_name = "entry", .timestamp = ts, .blob = "some_data"})
-            .Get();
+    Error error = OnWriteEntry(storage.get(),
+                               {.bucket_name = "X", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
+                      .Get();
     REQUIRE(error == Error{.code = 404, .message = "Bucket 'X' is not found"});
+  }
+
+  SECTION("error if ts is empty or bad  during writing") {
+    Error error =
+        OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "", .blob = ""})
+            .Get();
+    REQUIRE(error == Error{.code = 400, .message = "'ts' parameter can't be empty"});
+
+    error =
+        OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "XXXX", .blob = ""})
+            .Get();
+    REQUIRE(error ==
+            Error{.code = 400, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
   }
 
   SECTION("error if bucket is not found during reading") {
-    Error error = OnReadEntry(storage.get(), {.bucket_name = "X", .entry_name = "entry", .timestamp = ts}).Get();
+    Error error = OnReadEntry(storage.get(), {.bucket_name = "X", .entry_name = "entry", .timestamp = "1000"}).Get();
     REQUIRE(error == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
 
+  SECTION("error if ts is empty or bad  during reading") {
+    Error error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = ""}).Get();
+    REQUIRE(error == Error{.code = 400, .message = "'ts' parameter can't be empty"});
+
+    error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "XXXX"}).Get();
+    REQUIRE(error ==
+            Error{.code = 400, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
+  }
+
   SECTION("error if the record not found") {
-    Error error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = 200}).Get();
+    Error error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "10"}).Get();
     REQUIRE(error == Error{.code = 404, .message = "No records for this timestamp"});
   }
 }

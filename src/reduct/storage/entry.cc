@@ -96,7 +96,7 @@ class Entry : public IEntry {
     current_block_ = descriptor_.mutable_blocks(descriptor_.blocks_size() - 1);
   }
 
-  [[nodiscard]] Error Write(const std::string& blob, const Time& time) override {
+  [[nodiscard]] Error Write(std::string_view  blob, const Time& time) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
 
     const auto proto_ts = FromTimePoint(time);
@@ -139,7 +139,7 @@ class Entry : public IEntry {
     }
 
     proto::EntryRecord record_entry;
-    record_entry.set_blob(blob);
+    record_entry.set_blob(std::string{blob});
     record_entry.mutable_meta_data()->Clear();
 
     std::string data;
