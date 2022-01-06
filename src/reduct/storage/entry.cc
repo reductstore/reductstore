@@ -93,6 +93,7 @@ class Entry : public IEntry {
       throw std::runtime_error(
           fmt::format("Initialization error: Failed to parse descriptor from {}", descriptor_path.string()));
     }
+    current_block_ = descriptor_.mutable_blocks(descriptor_.blocks_size() - 1);
   }
 
   [[nodiscard]] Error Write(const std::string& blob, const Time& time) override {

@@ -107,4 +107,10 @@ TEST_CASE("storage::Entry should restore itself from descriptors", "[entry]") {
   REQUIRE(entry->GetOptions() == options);
 
   REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 1, .bytes = 11});
+
+  SECTION("should work ok after restoring") {
+    REQUIRE(entry->Write("next_data", kTimestamp + seconds(5)) == Error::kOk);
+    REQUIRE(entry->Read(kTimestamp + seconds(5)) ==
+            IEntry::ReadResult{.blob = "next_data", .error = Error::kOk, .time = kTimestamp + seconds(5)});
+  }
 }
