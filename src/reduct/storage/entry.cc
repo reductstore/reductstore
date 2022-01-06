@@ -229,7 +229,7 @@ class Entry : public IEntry {
 
     auto record = block.records(record_index);
     auto data_size = record.end() - record.begin();
-    std::string data("", data_size);
+    std::string data(data_size, '\0');
     block_file.seekg(record.begin());
     block_file.read(data.data(), data_size);
 

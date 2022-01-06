@@ -20,6 +20,7 @@ async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpRespons
   std::string full_blob;
   bool finish = false;
   res->onData([&full_blob, &finish](std::string_view data, bool last) mutable {
+    LOG_DEBUG("Received chuck {} kB", data.size() / 1024);
     full_blob += std::string(data);
     finish = last;
   });
