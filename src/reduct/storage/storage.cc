@@ -179,12 +179,12 @@ class Storage : public IStorage {
       ts = IEntry::Time{} + std::chrono::microseconds(std::stoi(std::string{timestamp}));
       return {ts, Error::kOk};
     } catch (...) {
-      return {
-          IEntry::Time{},
-          Error{
-              .code = 400,
-              .message = fmt::format("Failed to parse 'ts' parameter: {} should unix times in microseconds", std::string{timestamp}),
-          }};
+      return {IEntry::Time{},
+              Error{
+                  .code = 400,
+                  .message = fmt::format("Failed to parse 'ts' parameter: {} should unix times in microseconds",
+                                         std::string{timestamp}),
+              }};
     }
   }
 
