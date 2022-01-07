@@ -1,8 +1,8 @@
 // Copyright 2021-2022 Alexey Timin
 #include "reduct/storage/storage.h"
 
-#include <coroutine>
 #include <filesystem>
+#include <numeric>
 #include <shared_mutex>
 #include <utility>
 
@@ -23,7 +23,7 @@ class Storage : public IStorage {
     for (const auto& folder : fs::directory_iterator(options_.data_path)) {
       if (folder.is_directory()) {
         auto bucket_name = folder.path().filename();
-        if (auto bucket = IBucket::Build({.name = bucket_name, .path = options_.data_path})) {
+        if (auto bucket = IBucket::Restore(folder)) {
           buckets_[bucket_name] = std::move(bucket);
         }
       }
@@ -40,7 +40,10 @@ class Storage : public IStorage {
     return Run<Callback::Result>([this] {
       Callback::Response resp;
       resp.version = reduct::kVersion;
-      resp.bucket_number = buckets_.size();
+      resp.bucket_count = buckets_.size();
+      resp.entry_count = std::accumulate(
+          buckets_.begin(), buckets_.end(), 0,
+          [](size_t a, const decltype(buckets_)::value_type& entry) { return entry.second->GetInfo().entry_count + a; });
       return Callback::Result{std::move(resp), Error{}};
     });
   }

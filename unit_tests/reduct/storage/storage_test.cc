@@ -173,3 +173,19 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
     REQUIRE(error == Error{.code = 404, .message = "No records for this timestamp"});
   }
 }
+
+TEST_CASE("storage::Storage should be restored from filesystem", "[entry]") {
+  const auto dir = BuildTmpDirectory();
+  auto storage = IStorage::Build({.data_path = dir});
+
+  REQUIRE(OnCreateBucket(storage.get(), {.name = "bucket"}).Get() == Error::kOk);
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
+              .Get() == Error::kOk);
+
+  storage = IStorage::Build({.data_path = dir});
+
+  auto [info, err] = OnInfo(storage.get()).Get();
+  REQUIRE(info.bucket_count == 1);
+  REQUIRE(info.entry_count == 1);
+}

@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_STORAGE_CALLBACKS_H
 #define REDUCT_STORAGE_CALLBACKS_H
@@ -25,7 +25,8 @@ class IInfoCallback {
  public:
   struct Response {
     std::string version;
-    size_t bucket_number;
+    size_t bucket_count;
+    size_t entry_count;
   };
   struct Request {};
   using Result = CallbackResult<Response>;

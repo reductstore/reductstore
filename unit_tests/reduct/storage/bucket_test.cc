@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #include "reduct/storage/bucket.h"
 
@@ -19,7 +19,7 @@ TEST_CASE("storage::Bucket should create folder", "[bucket]") {
   REQUIRE(bucket);
   REQUIRE(fs::exists(dir_path));
 
-  SECTION("it is ok, if directory already exist") { REQUIRE(IBucket::Build({.name = "bucket", .path = dir_path})); }
+  SECTION("error, if directory already exist") { REQUIRE_FALSE(IBucket::Build({.name = "bucket", .path = dir_path})); }
 
   SECTION("return nullptr if something got wrong") {
     REQUIRE_FALSE(IBucket::Build({.name = "", .path = "/non-existing/path"}));

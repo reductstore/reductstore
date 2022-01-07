@@ -14,20 +14,27 @@ using core::Error;
 class Bucket : public IBucket {
  public:
   explicit Bucket(Options options) : options_(std::move(options)), entry_map_() {
-    auto full_path = options_.path / options_.name;
-    if (!fs::exists(full_path)) {
-      LOG_DEBUG("Path {} doesn't exist. Create a new bucket.", full_path.string());
-      fs::create_directories(full_path);
-    } else if (fs::is_directory(full_path)) {
-      for (const auto& folder : fs::directory_iterator(full_path)) {
-        if (fs::is_directory(folder)) {
-          auto entry_name = folder.path().filename().string();
-          auto entry = IEntry::Restore(folder);
-          if (entry) {
-            entry_map_[entry_name] = std::move(entry);
-          } else {
-            LOG_ERROR("Failed to restore entry '{}'", entry_name);
-          }
+    full_path_ = options_.path / options_.name;
+    if (fs::exists(full_path_)) {
+      throw std::runtime_error(fmt::format("Path '{}' already exists", full_path_.string()));
+    }
+
+    fs::create_directories(full_path_);
+  }
+
+  explicit Bucket(fs::path full_path) : options_{}, full_path_(std::move(full_path)), entry_map_() {
+    if (!fs::exists(full_path_)) {
+      throw std::runtime_error(fmt::format("Path '{}' doesn't exist", full_path_.string()));
+    }
+
+    for (const auto& folder : fs::directory_iterator(full_path_)) {
+      if (fs::is_directory(folder)) {
+        auto entry_name = folder.path().filename().string();
+        auto entry = IEntry::Restore(folder);
+        if (entry) {
+          entry_map_[entry_name] = std::move(entry);
+        } else {
+          LOG_ERROR("Failed to restore entry '{}'", entry_name);
         }
       }
     }
@@ -41,7 +48,7 @@ class Bucket : public IBucket {
       LOG_DEBUG("No '{}' entry in a bucket. Try to create one", name);
       auto entry = IEntry::Build({
           .name = name,
-          .path = options_.path / options_.name,
+          .path = full_path_,
           .max_block_size = kDefaultMaxBlockSize,
       });
 
@@ -56,13 +63,7 @@ class Bucket : public IBucket {
   }
 
   Error Clean() override {
-    for (auto& [name, entry] : entry_map_) {
-      const auto entry_path = options_.path / options_.name / name;
-      if (fs::exists(entry_path)) {
-        fs::remove_all(entry_path);
-      }
-    }
-
+    fs::remove_all(full_path_);
     entry_map_ = {};
     return Error::kOk;
   }
@@ -73,8 +74,11 @@ class Bucket : public IBucket {
     };
   }
 
+  [[nodiscard]] const Options& GetOptions() const override { return options_; }
+
  private:
   Options options_;
+  fs::path full_path_;
   std::map<std::string, std::shared_ptr<IEntry>> entry_map_;
 };
 
@@ -87,11 +91,15 @@ std::unique_ptr<IBucket> IBucket::Build(const Options& options) {
   std::unique_ptr<IBucket> bucket;
   try {
     bucket = std::make_unique<Bucket>(options);
-  } catch (const fs::filesystem_error& err) {
+  } catch (const std::runtime_error& err) {
     LOG_ERROR("Failed create bucket '{}': {}", options.name, err.what());
   }
 
   return bucket;
+}
+
+std::unique_ptr<IBucket> IBucket::Restore(std::filesystem::path full_path) {
+  return std::make_unique<Bucket>(std::move(full_path));
 }
 
 }  // namespace reduct::storage

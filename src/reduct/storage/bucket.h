@@ -13,12 +13,21 @@ namespace reduct::storage {
  */
 class IBucket {
  public:
+  enum QuotaType { kNone = 1, kFifo = 2 };
+
+  struct QuotaOptions {
+    QuotaType type;
+    size_t size;
+  };
+
   /**
    * Options used for creating a bucket
    */
   struct Options {
     std::string name;
     std::filesystem::path path;
+
+    QuotaOptions quota;
   };
 
   /**
@@ -33,7 +42,7 @@ class IBucket {
    * Statistical information about a bucket
    */
   struct Info {
-    size_t entry_count;           // number of entries in the bucket
+    size_t entry_count;  // number of entries in the bucket
   };
 
   /**
@@ -49,9 +58,33 @@ class IBucket {
    * @return
    */
   [[nodiscard]] virtual core::Error Clean() = 0;
+
+  /**
+   * @brief Returns statistics about the bucket
+   * @return
+   */
   [[nodiscard]] virtual Info GetInfo() const = 0;
 
+  /**
+   * @brief Returns options of the bucket
+   * @return
+   */
+  [[nodiscard]] virtual const Options& GetOptions() const = 0;
+
+  /**
+   * @brief Builds a new bucket
+   * @param options
+   * @return
+   */
   static std::unique_ptr<IBucket> Build(const Options& options);
+
+  /**
+   * @brief Restores a bucket from folder
+   * @param full_path
+   * @return
+   */
+  static std::unique_ptr<IBucket> Restore(std::filesystem::path full_path);
+
 };
 
 }  // namespace reduct::storage

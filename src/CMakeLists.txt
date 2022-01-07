@@ -3,10 +3,12 @@ set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 # Generate protoc files
 set(PROTOBUF_SPEC_FILES
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/entry.proto
+        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/bucket.proto
         )
 
 set(PROTOBUF_FILES
         ${CMAKE_BINARY_DIR}/reduct/proto/entry.pb.cc
+        ${CMAKE_BINARY_DIR}/reduct/proto/bucket.pb.cc
         )
 
 
