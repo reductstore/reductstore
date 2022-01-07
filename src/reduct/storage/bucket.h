@@ -3,6 +3,7 @@
 #define REDUCT_STORAGE_BUCKET_H
 
 #include <filesystem>
+#include <ostream>
 
 #include "reduct/storage/entry.h"
 
@@ -18,6 +19,10 @@ class IBucket {
   struct QuotaOptions {
     QuotaType type;
     size_t size;
+
+    bool operator==(const QuotaOptions& rhs) const { return std::tie(type, size) == std::tie(rhs.type, rhs.size); }
+    bool operator!=(const QuotaOptions& rhs) const { return !(rhs == *this); }
+    friend std::ostream& operator<<(std::ostream& os, const QuotaOptions& options);
   };
 
   /**
@@ -28,6 +33,13 @@ class IBucket {
     std::filesystem::path path;
 
     QuotaOptions quota;
+
+    bool operator==(const Options& rhs) const {
+      return std::tie(name, path, quota) == std::tie(rhs.name, rhs.path, rhs.quota);
+    }
+
+    bool operator!=(const Options& rhs) const { return !(rhs == *this); }
+    friend std::ostream& operator<<(std::ostream& os, const Options& options);
   };
 
   /**
@@ -43,6 +55,9 @@ class IBucket {
    */
   struct Info {
     size_t entry_count;  // number of entries in the bucket
+
+    bool operator==(const Info& rhs) const { return entry_count == rhs.entry_count; }
+    bool operator!=(const Info& rhs) const { return !(rhs == *this); }
   };
 
   /**
