@@ -2,9 +2,9 @@
 #include "reduct/storage/bucket.h"
 
 #include <fstream>
+#include <numeric>
 #include <ranges>
 
-#include "reduct/config.h"
 #include "reduct/core/logger.h"
 #include "reduct/proto/bucket.pb.h"
 
@@ -25,6 +25,7 @@ class Bucket : public IBucket {
     fs::create_directories(full_path_);
 
     BucketSettings settings;
+    settings.set_max_block_size(options.max_block_size);
     settings.mutable_quota()->set_type(static_cast<proto::BucketSettings_QuotaType>(options.quota.type));
     settings.mutable_quota()->set_size(options.quota.size);
 
@@ -54,6 +55,7 @@ class Bucket : public IBucket {
     options_ = Options{
         .name = full_path_.filename(),
         .path = full_path_.parent_path(),
+        .max_block_size = settings.max_block_size(),
         .quota = {.type = static_cast<QuotaType>(settings.quota().type()), .size = settings.quota().size()},
     };
 
@@ -79,7 +81,7 @@ class Bucket : public IBucket {
       auto entry = IEntry::Build({
           .name = name,
           .path = full_path_,
-          .max_block_size = kDefaultMaxBlockSize,
+          .max_block_size = options_.max_block_size,
       });
 
       if (entry) {
@@ -92,16 +94,51 @@ class Bucket : public IBucket {
     return {std::weak_ptr<IEntry>(), Error{.code = 500, .message = fmt::format("Failed to create bucket '{}'", name)}};
   }
 
-  Error Clean() override {
+  [[nodiscard]] Error Clean() override {
     fs::remove_all(full_path_);
     entry_map_ = {};
     return Error::kOk;
   }
 
+  [[nodiscard]] Error KeepQuota() override {
+    switch (options_.quota.type) {
+      case IBucket::kNone:
+        break;
+      case IBucket::kFifo:
+        size_t bucket_size = GetInfo().size;
+        while (bucket_size > options_.quota.size) {
+          LOG_DEBUG("Size of bucket '{}' is {} bigger than quota {}. Remove the oldest record", options_.name,
+                    bucket_size, options_.quota.size);
+
+          auto current_entry = entry_map_.begin()->second;
+          for (const auto& [_, entry] : entry_map_) {
+            if (entry->GetInfo().oldest_record_time < current_entry->GetInfo().oldest_record_time) {
+              current_entry = entry;
+            }
+          }
+
+          LOG_DEBUG("Remove the oldest block in entry '{}'", current_entry->GetOptions().name);
+          auto err = current_entry->RemoveOldestBlock();
+          if (err) {
+            return err;
+          }
+
+          bucket_size = GetInfo().size;
+        }
+    }
+    return Error::kOk;
+  }
+
   [[nodiscard]] Info GetInfo() const override {
-    return {
-        .entry_count = entry_map_.size(),
-    };
+    size_t record_count = 0;
+    size_t size = 0;
+    for (const auto& [_, entry] : entry_map_) {
+      auto info = entry->GetInfo();
+      record_count += info.record_count;
+      size += info.bytes;
+    }
+
+    return {.entry_count = entry_map_.size(), .record_count = record_count, .size = size};
   }
 
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
@@ -136,12 +173,12 @@ std::unique_ptr<IBucket> IBucket::Restore(std::filesystem::path full_path) {
 std::ostream& operator<<(std::ostream& os, const IBucket::Options& options) {
   std::stringstream quota_ss;
   quota_ss << options.quota;
-  os << fmt::format("<IBucket::Options name={}, path={}, quota={}>", options.name, options.path.string(),
-                    quota_ss.str());
+  os << fmt::format("<IBucket::Options name={}, path={}, max_block_size={}, quota={}>", options.name,
+                    options.path.string(), options.max_block_size, quota_ss.str());
   return os;
 }
 std::ostream& operator<<(std::ostream& os, const IBucket::QuotaOptions& options) {
-  os << fmt::format("<IBucket::QuotaOptions type={}, size={}>", static_cast<int>(options.type), options.size);
+  os << fmt::format("<IBucket::QuotaOptions type={}, bucket_size={}>", static_cast<int>(options.type), options.size);
   return os;
 }
 }  // namespace reduct::storage

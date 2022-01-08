@@ -10,6 +10,7 @@ using reduct::core::Error;
 using reduct::storage::IBucket;
 using reduct::storage::IEntry;
 
+using std::chrono::seconds;
 namespace fs = std::filesystem;
 
 TEST_CASE("storage::Bucket should create folder", "[bucket]") {
@@ -33,6 +34,7 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   auto bucket = IBucket::Build({
       .name = "bucket",
       .path = dir_path,
+      .max_block_size = 100,
       .quota = IBucket::QuotaOptions{.type = IBucket::QuotaType::kFifo, .size = 1000},
   });
 
@@ -75,4 +77,30 @@ TEST_CASE("storage::Bucket should remove all entries", "[bucket]") {
   REQUIRE(bucket->GetInfo().entry_count == 0);
   REQUIRE_FALSE(fs::exists(dir_path / "bucket" / "entry_1"));
   REQUIRE_FALSE(fs::exists(dir_path / "bucket" / "entry_2"));
+}
+
+TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
+  auto bucket = IBucket::Build({
+      .name = "bucket",
+      .path = BuildTmpDirectory(),
+      .max_block_size = 100,
+      .quota = IBucket::QuotaOptions{.type = IBucket::QuotaType::kFifo, .size = 1000},
+  });
+
+  auto entry1 = bucket->GetOrCreateEntry("entry_1").entry.lock();
+  auto entry2 = bucket->GetOrCreateEntry("entry_2").entry.lock();
+
+  std::string blob(500, 'x');
+  const auto ts = IEntry::Time();
+  REQUIRE(entry1->Write(blob, ts + seconds(1)) == Error::kOk);
+  REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
+  REQUIRE(entry1->Write(blob, ts + seconds(3)) == Error::kOk);
+
+  REQUIRE(bucket->GetInfo().record_count == 3);
+  REQUIRE(bucket->KeepQuota() == Error::kOk);
+  REQUIRE(bucket->GetInfo().record_count == 1);
+
+  REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
+  REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+
 }

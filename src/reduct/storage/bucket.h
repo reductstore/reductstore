@@ -32,10 +32,11 @@ class IBucket {
     std::string name;
     std::filesystem::path path;
 
+    size_t max_block_size;
     QuotaOptions quota;
 
     bool operator==(const Options& rhs) const {
-      return std::tie(name, path, quota) == std::tie(rhs.name, rhs.path, rhs.quota);
+      return std::tie(name, path, max_block_size, quota) == std::tie(rhs.name, rhs.path, max_block_size, rhs.quota);
     }
 
     bool operator!=(const Options& rhs) const { return !(rhs == *this); }
@@ -54,9 +55,13 @@ class IBucket {
    * Statistical information about a bucket
    */
   struct Info {
-    size_t entry_count;  // number of entries in the bucket
+    size_t entry_count;   // number of entries in the bucket
+    size_t record_count;  // number of records in all the entries of the bucket
+    size_t size;          // size of stored in the bucket data in bytes
 
-    bool operator==(const Info& rhs) const { return entry_count == rhs.entry_count; }
+    bool operator==(const Info& rhs) const {
+      return std::tie(entry_count, record_count, size) == std::tie(rhs.entry_count, rhs.record_count, rhs.size);
+    }
     bool operator!=(const Info& rhs) const { return !(rhs == *this); }
   };
 
@@ -73,6 +78,15 @@ class IBucket {
    * @return
    */
   [[nodiscard]] virtual core::Error Clean() = 0;
+
+  /**
+   * @brief Bucket checks if it has data more than quota and remove some data
+   * Depends on quota type:
+   * kNone - does nothing
+   * kFifo - removes the oldest block in the bucket
+   * @return error 500 if something goes wrong
+   */
+  [[nodiscard]] virtual core::Error KeepQuota() = 0;
 
   /**
    * @brief Returns statistics about the bucket
@@ -99,7 +113,6 @@ class IBucket {
    * @return
    */
   static std::unique_ptr<IBucket> Restore(std::filesystem::path full_path);
-
 };
 
 }  // namespace reduct::storage

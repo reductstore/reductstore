@@ -19,9 +19,9 @@ class IEntry {
    * Options
    */
   struct Options {
-    std::string name;             // name of entry
-    std::filesystem::path path;   // path to entry (path to bucket)
-    size_t max_block_size;        // max block size after that we create a new one
+    std::string name;            // name of entry
+    std::filesystem::path path;  // path to entry (path to bucket)
+    size_t max_block_size;       // max block size after that we create a new one
 
     bool operator==(const Options& rhs) const {
       return std::tie(name, path, max_block_size) == std::tie(rhs.name, rhs.path, rhs.max_block_size);
@@ -53,12 +53,15 @@ class IEntry {
    * Statistic information about the entry
    */
   struct Info {
-    size_t block_count;   // stored blocks
-    size_t record_count;  // stored records
-    size_t bytes;         // stored data size with overhead
+    size_t block_count;       // stored blocks
+    size_t record_count;      // stored records
+    size_t bytes;             // stored data size with overhead
+    Time oldest_record_time;  // time of the oldest record
+    Time latest_record_time;  // time of the latest record
 
     bool operator==(const Info& rhs) const {
-      return std::tie(block_count, record_count, bytes) == std::tie(rhs.block_count, rhs.record_count, rhs.bytes);
+      return std::tie(block_count, record_count, bytes, oldest_record_time, latest_record_time) ==
+             std::tie(rhs.block_count, rhs.record_count, rhs.bytes, oldest_record_time, latest_record_time);
     }
 
     bool operator!=(const Info& rhs) const { return !(rhs == *this); }
@@ -85,6 +88,11 @@ class IEntry {
   [[nodiscard]] virtual ReadResult Read(const Time& time) const = 0;
 
   /**
+   * @brief Remove the oldest block from disk
+   * @return
+   */
+  virtual core::Error RemoveOldestBlock() = 0;
+  /**
    * @brief Provides statistical information about the entry
    * @return
    */
@@ -95,7 +103,6 @@ class IEntry {
    * @return
    */
   [[nodiscard]] virtual const Options& GetOptions() const = 0;
-
 
   /**
    * @brief Creates a new entry.

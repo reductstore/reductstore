@@ -12,5 +12,6 @@ message BucketSettings {
     uint64 size = 2;
   }
 
-  QuotaSettings quota = 1;
+  uint64 max_block_size = 1;
+  QuotaSettings quota = 2;
 }

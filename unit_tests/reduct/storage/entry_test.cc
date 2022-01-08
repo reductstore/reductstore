@@ -114,3 +114,10 @@ TEST_CASE("storage::Entry should restore itself from descriptors", "[entry]") {
             IEntry::ReadResult{.blob = "next_data", .error = Error::kOk, .time = kTimestamp + seconds(5)});
   }
 }
+
+TEST_CASE("storage::Entry should read from empty entry with 404", "[entry]") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+
+  REQUIRE(entry);
+  REQUIRE(entry->Read(IEntry::Time()).error.code == 404);
+}
