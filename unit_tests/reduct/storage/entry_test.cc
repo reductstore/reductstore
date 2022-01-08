@@ -121,3 +121,39 @@ TEST_CASE("storage::Entry should read from empty entry with 404", "[entry]") {
   REQUIRE(entry);
   REQUIRE(entry->Read(IEntry::Time()).error.code == 404);
 }
+
+TEST_CASE("storage::Entry should remove last block", "[entry]") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  const std::string blob(entry->GetOptions().max_block_size, 'x');
+  REQUIRE(entry->Write(blob, kTimestamp) == Error::kOk);
+  REQUIRE(entry->Write(blob, kTimestamp + seconds(1)) == Error::kOk);
+  REQUIRE(entry->Write(blob, kTimestamp + seconds(2)) == Error::kOk);
+  REQUIRE(entry->GetInfo().block_count == 4);
+
+  SECTION("remove one block") {
+    REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
+    REQUIRE(entry->GetInfo().block_count == 3);
+    REQUIRE(entry->Read(kTimestamp).error.code == 404);
+
+    SECTION("write should be ok") {
+      REQUIRE(entry->Write("some_data", kTimestamp) == Error::kOk);
+      REQUIRE(entry->Read(kTimestamp).error == Error::kOk);
+    }
+
+    SECTION("remove two block") {
+      REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
+      REQUIRE(entry->GetInfo().block_count == 2);
+      REQUIRE(entry->Read(kTimestamp + seconds(1)).error.code == 404);
+    }
+
+    SECTION("recovery") {
+      auto info = entry->GetInfo();
+      entry = IEntry::Restore(entry->GetOptions().path / "entry_1");
+
+      REQUIRE(entry);
+      REQUIRE(entry->GetInfo() == info);
+    }
+  }
+}
