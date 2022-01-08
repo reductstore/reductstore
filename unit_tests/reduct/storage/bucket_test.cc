@@ -90,17 +90,38 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   auto entry1 = bucket->GetOrCreateEntry("entry_1").entry.lock();
   auto entry2 = bucket->GetOrCreateEntry("entry_2").entry.lock();
 
-  std::string blob(500, 'x');
   const auto ts = IEntry::Time();
-  REQUIRE(entry1->Write(blob, ts + seconds(1)) == Error::kOk);
-  REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
-  REQUIRE(entry1->Write(blob, ts + seconds(3)) == Error::kOk);
+  std::string blob(700, 'x');
 
-  REQUIRE(bucket->GetInfo().record_count == 3);
-  REQUIRE(bucket->KeepQuota() == Error::kOk);
-  REQUIRE(bucket->GetInfo().record_count == 1);
+  SECTION("3 big blobs 3*700 should be shrunk to 1") {
+    REQUIRE(entry1->Write(blob, ts + seconds(1)) == Error::kOk);
+    REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
+    REQUIRE(entry1->Write(blob, ts + seconds(3)) == Error::kOk);
 
-  REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
-  REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+    REQUIRE(bucket->GetInfo().record_count == 3);
+    REQUIRE(bucket->KeepQuota() == Error::kOk);
+    REQUIRE(bucket->GetInfo().record_count == 1);
 
+    REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
+    REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+
+    SECTION("the same state after restoring") {
+      auto info = bucket->GetInfo();
+
+      bucket = IBucket::Restore(bucket->GetOptions().path / "bucket" );
+      REQUIRE(bucket);
+      REQUIRE(info == bucket->GetInfo());
+    }
+  }
+
+  SECTION("should clean current block") {
+    REQUIRE(entry1->Write("little_fist_chunk", ts + seconds(1)) == Error::kOk);
+    REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
+    REQUIRE(entry2->Write(blob, ts + seconds(3)) == Error::kOk);
+
+    REQUIRE(bucket->KeepQuota() == Error::kOk);
+
+    REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
+    REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+  }
 }

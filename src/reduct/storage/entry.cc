@@ -177,14 +177,9 @@ class Entry : public IEntry {
         break;
     }
 
-    auto descriptor_path = full_path_ / kDescriptorName;
-    std::ofstream descriptor_file(descriptor_path);
-    if (descriptor_file) {
-      descriptor_.SerializeToOstream(&descriptor_file);
-    } else {
-      return {.code = 500, .message = "Failed save a descriptor"};
+    if (auto err = SaveDescriptor()) {
+      return err;
     }
-
     return {};
   }
 
@@ -245,7 +240,7 @@ class Entry : public IEntry {
     fs::remove(full_path_ / fmt::format(kBlockNameFormat, block.id()));
 
     if (descriptor_.blocks_size() == 1) {
-      current_block_ = StartNextBlock();  // TODO(issue-3): Test this case
+      current_block_ = StartNextBlock();
       descriptor_.clear_oldest_record_time();
     } else {
       const auto& next_block = descriptor_.blocks(1);
@@ -259,7 +254,9 @@ class Entry : public IEntry {
     descriptor_.set_size(descriptor_.size() - descriptor_.blocks(0).size());
     descriptor_.mutable_blocks()->DeleteSubrange(0, 1);
 
-    // TODO(issue-3): Save descriptor in file
+    if (auto err = SaveDescriptor()) {
+      return err;
+    }
     return Error::kOk;
   }
 
@@ -308,6 +305,18 @@ class Entry : public IEntry {
 
   static Time ToTimePoint(const google::protobuf::Timestamp& time) {
     return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
+  }
+
+  Error SaveDescriptor() const {
+    auto descriptor_path = full_path_ / kDescriptorName;
+    std::ofstream descriptor_file(descriptor_path);
+    if (descriptor_file) {
+      descriptor_.SerializeToOstream(&descriptor_file);
+    } else {
+      return {.code = 500, .message = "Failed save a descriptor"};
+    }
+
+    return Error::kOk;
   }
 
   static constexpr std::string_view kBlockNameFormat = "{:08d}.block";

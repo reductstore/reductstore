@@ -63,6 +63,7 @@ class IBucket {
       return std::tie(entry_count, record_count, size) == std::tie(rhs.entry_count, rhs.record_count, rhs.size);
     }
     bool operator!=(const Info& rhs) const { return !(rhs == *this); }
+    friend std::ostream& operator<<(std::ostream& os, const Info& info);
   };
 
   /**

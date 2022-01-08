@@ -110,9 +110,11 @@ class Bucket : public IBucket {
           LOG_DEBUG("Size of bucket '{}' is {} bigger than quota {}. Remove the oldest record", options_.name,
                     bucket_size, options_.quota.size);
 
-          auto current_entry = entry_map_.begin()->second;
+          std::shared_ptr<IEntry> current_entry = nullptr;
           for (const auto& [_, entry] : entry_map_) {
-            if (entry->GetInfo().oldest_record_time < current_entry->GetInfo().oldest_record_time) {
+            auto entry_info = entry->GetInfo();
+            if ((!current_entry && entry_info.bytes > 0) ||  // first not empty
+                (current_entry && entry_info.oldest_record_time < current_entry->GetInfo().oldest_record_time)) {
               current_entry = entry;
             }
           }
@@ -179,6 +181,11 @@ std::ostream& operator<<(std::ostream& os, const IBucket::Options& options) {
 }
 std::ostream& operator<<(std::ostream& os, const IBucket::QuotaOptions& options) {
   os << fmt::format("<IBucket::QuotaOptions type={}, bucket_size={}>", static_cast<int>(options.type), options.size);
+  return os;
+}
+std::ostream& operator<<(std::ostream& os, const IBucket::Info& info) {
+  os << fmt::format("<IBucket::Info entry_count={} record_count={} size={}>", info.entry_count, info.record_count,
+                    info.size);
   return os;
 }
 }  // namespace reduct::storage
