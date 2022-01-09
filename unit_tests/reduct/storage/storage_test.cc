@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #include "reduct/storage/storage.h"
 
@@ -10,6 +10,7 @@
 #include "reduct/config.h"
 #include "reduct/helpers.h"
 
+using reduct::api::IChangeBucketSettingsCallback;
 using reduct::api::ICreateBucketCallback;
 using reduct::api::IGetBucketCallback;
 using reduct::api::IInfoCallback;
@@ -23,6 +24,9 @@ using reduct::core::Error;
 using reduct::storage::IStorage;
 
 namespace fs = std::filesystem;
+
+static const reduct::api::BucketSettings kDefaultBucketSettings = {
+    .max_block_size = 1000, .quota_type = "NONE", .quota_size = 10};
 
 Task<IInfoCallback::Result> OnInfo(IStorage* storage) {
   auto result = co_await storage->OnInfo({});
@@ -47,7 +51,7 @@ Task<ICreateBucketCallback::Result> OnCreateBucket(IStorage* storage, ICreateBuc
 TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  ICreateBucketCallback::Request req{.name = "bucket"};
+  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings};
   Error err = OnCreateBucket(storage.get(), req).Get();
   REQUIRE_FALSE(err);
 
@@ -57,7 +61,7 @@ TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
   }
 
   SECTION("error if failed to create") {
-    err = OnCreateBucket(storage.get(), {.name = ""}).Get();
+    err = OnCreateBucket(storage.get(), {.bucket_name = "", .bucket_settings = kDefaultBucketSettings}).Get();
     REQUIRE(err == Error{.code = 500, .message = "Internal error: Failed to create bucket"});
   }
 }
@@ -70,17 +74,45 @@ Task<IGetBucketCallback::Result> OnGetBucket(IStorage* storage, IGetBucketCallba
 TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  ICreateBucketCallback::Request req{.name = "bucket"};
-  Error err = OnCreateBucket(storage.get(), req).Get();
-  REQUIRE_FALSE(err);
+  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings};
+  REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
-  err = OnGetBucket(storage.get(), {.name = "bucket"}).Get();
-  REQUIRE_FALSE(err);
+  auto [resp, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+  REQUIRE(err == Error::kOk);
+  REQUIRE(resp.bucket_settings.max_block_size == kDefaultBucketSettings.max_block_size);
+  REQUIRE(resp.bucket_settings.quota_type == kDefaultBucketSettings.quota_type);
+  REQUIRE(resp.bucket_settings.quota_size == kDefaultBucketSettings.quota_size);
 
   SECTION("error if not exist") {
-    err = OnGetBucket(storage.get(), {.name = "X"}).Get();
+    err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();
     REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
+}
+
+Task<IChangeBucketSettingsCallback::Result> OnChangeBucketSettings(IStorage* storage,
+                                                                   IChangeBucketSettingsCallback::Request req) {
+  auto result = co_await storage->OnChangeBucketSettings(std::move(req));
+  co_return result;
+}
+
+TEST_CASE("storage::Storage should change settings of bucket", "[entry]") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+
+  ICreateBucketCallback::Request req{
+      .bucket_name = "bucket",
+      .bucket_settings = kDefaultBucketSettings,
+  };
+  REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
+
+  IChangeBucketSettingsCallback::Request change_req{
+      .bucket_name = "bucket", .new_settings = {.max_block_size = 10, .quota_type = "FIFO", .quota_size = 1000}};
+  REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
+
+  auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+  REQUIRE(err == Error::kOk);
+  REQUIRE(info.bucket_settings.max_block_size == change_req.new_settings.max_block_size);
+  REQUIRE(info.bucket_settings.quota_type == change_req.new_settings.quota_type);
+  REQUIRE(info.bucket_settings.quota_size == change_req.new_settings.quota_size);
 }
 
 Task<IRemoveBucketCallback::Result> OnRemoveBucket(IStorage* storage, IRemoveBucketCallback::Request req) {
@@ -92,20 +124,20 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   auto data_path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = data_path});
 
-  ICreateBucketCallback::Request req{.name = "bucket"};
+  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings};
   Error err = OnCreateBucket(storage.get(), req).Get();
   REQUIRE(err == Error::kOk);
   REQUIRE(fs::exists(data_path / "bucket"));
 
-  err = OnRemoveBucket(storage.get(), {.name = "bucket"}).Get();
+  err = OnRemoveBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error::kOk);
   REQUIRE_FALSE(fs::exists(data_path / "bucket"));
 
-  err = OnGetBucket(storage.get(), {.name = "bucket"}).Get();
+  err = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
 
   SECTION("error if bucket is not found") {
-    err = OnRemoveBucket(storage.get(), {.name = "X"}).Get();
+    err = OnRemoveBucket(storage.get(), {.bucket_name = "X"}).Get();
     REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
 }
@@ -123,7 +155,8 @@ Task<IReadEntryCallback::Result> OnReadEntry(IStorage* storage, IReadEntryCallba
 TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  REQUIRE(OnCreateBucket(storage.get(), {.name = "bucket"}).Get() == Error::kOk);
+  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings}).Get() ==
+          Error::kOk);
 
   REQUIRE(OnWriteEntry(storage.get(),
                        {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
@@ -178,7 +211,12 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[entry]") {
   const auto dir = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = dir});
 
-  REQUIRE(OnCreateBucket(storage.get(), {.name = "bucket"}).Get() == Error::kOk);
+  REQUIRE(OnCreateBucket(storage.get(),
+                         {
+                             .bucket_name = "bucket",
+                             .bucket_settings = {.max_block_size = 1000, .quota_type = "NONE", .quota_size = 0},
+                         })
+              .Get() == Error::kOk);
   REQUIRE(OnWriteEntry(storage.get(),
                        {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
               .Get() == Error::kOk);

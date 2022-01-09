@@ -16,6 +16,9 @@ class IBucket {
  public:
   enum QuotaType { kNone = 1, kFifo = 2 };
 
+  static std::pair<QuotaType, core::Error> ParseQuotaType(std::string_view quota_type_str);
+  static std::string_view GetQuotaTypeName(QuotaType type);
+
   struct QuotaOptions {
     QuotaType type;
     size_t size;
@@ -57,7 +60,7 @@ class IBucket {
   struct Info {
     size_t entry_count;   // number of entries in the bucket
     size_t record_count;  // number of records in all the entries of the bucket
-    size_t size;          // size of stored in the bucket data in bytes
+    size_t size;          // quota_size of stored in the bucket data in bytes
 
     bool operator==(const Info& rhs) const {
       return std::tie(entry_count, record_count, size) == std::tie(rhs.entry_count, rhs.record_count, rhs.size);
@@ -89,6 +92,13 @@ class IBucket {
    */
   [[nodiscard]] virtual core::Error KeepQuota() = 0;
 
+  /**
+   * @brief SetS bucket settings and save in descriptor
+   * @note It doesnt change name and path
+   * @param options
+   * @return
+   */
+  virtual core::Error SetOptions(Options options) = 0;
   /**
    * @brief Returns statistics about the bucket
    * @return

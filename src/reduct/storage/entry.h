@@ -21,7 +21,7 @@ class IEntry {
   struct Options {
     std::string name;            // name of entry
     std::filesystem::path path;  // path to entry (path to bucket)
-    size_t max_block_size;       // max block size after that we create a new one
+    size_t max_block_size;       // max block quota_size after that we create a new one
 
     bool operator==(const Options& rhs) const {
       return std::tie(name, path, max_block_size) == std::tie(rhs.name, rhs.path, rhs.max_block_size);
@@ -55,7 +55,7 @@ class IEntry {
   struct Info {
     size_t block_count;       // stored blocks
     size_t record_count;      // stored records
-    size_t bytes;             // stored data size with overhead
+    size_t bytes;             // stored data quota_size with overhead
     Time oldest_record_time;  // time of the oldest record
     Time latest_record_time;  // time of the latest record
 

@@ -108,7 +108,7 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     SECTION("the same state after restoring") {
       auto info = bucket->GetInfo();
 
-      bucket = IBucket::Restore(bucket->GetOptions().path / "bucket" );
+      bucket = IBucket::Restore(bucket->GetOptions().path / "bucket");
       REQUIRE(bucket);
       REQUIRE(info == bucket->GetInfo());
     }
@@ -124,4 +124,23 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
     REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
   }
+}
+
+TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]") {
+  const auto dir_path = BuildTmpDirectory();
+  auto bucket = IBucket::Build({
+      .name = "bucket",
+      .path = dir_path,
+      .max_block_size = 100,
+  });
+
+  IBucket::Options options = {.max_block_size = 600, .quota = {.type = IBucket::kFifo, .size = 1000}};
+
+  REQUIRE(bucket->SetOptions(options) == Error::kOk);
+  options.name = "bucket";
+  options.path = dir_path;
+  REQUIRE(bucket->GetOptions() == options);
+
+  bucket = IBucket::Restore(dir_path / "bucket");
+  REQUIRE(bucket->GetOptions() == options);
 }

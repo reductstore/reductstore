@@ -36,6 +36,12 @@ class IInfoCallback {
 //---------------------
 // Bucket API
 //---------------------
+struct BucketSettings {
+  uint64_t max_block_size;
+  std::string_view quota_type;
+  uint64_t quota_size;
+};
+
 
 /**
  * Create bucket callback
@@ -44,7 +50,8 @@ class ICreateBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string_view name;
+    std::string_view bucket_name;
+    BucketSettings bucket_settings;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
@@ -55,9 +62,12 @@ class ICreateBucketCallback {
  */
 class IGetBucketCallback {
  public:
-  struct Response {};
+  struct Response {
+    BucketSettings bucket_settings;
+  };
+
   struct Request {
-    std::string_view name;
+    std::string_view bucket_name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnGetBucket(const Request& req) const = 0;
@@ -70,12 +80,24 @@ class IRemoveBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string_view name;
+    std::string_view bucket_name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
 };
 
+
+class IChangeBucketSettingsCallback {
+ public:
+  struct Response {};
+  struct Request {
+    std::string_view bucket_name;
+    BucketSettings new_settings;
+  };
+
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnChangeBucketSettings(const Request& req) = 0;
+};
 //---------------------
 // Entry API
 //---------------------

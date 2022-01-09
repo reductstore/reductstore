@@ -14,6 +14,31 @@ namespace fs = std::filesystem;
 using core::Error;
 using proto::BucketSettings;
 
+
+ std::pair<IBucket::QuotaType, Error> IBucket::ParseQuotaType(std::string_view quota_type_str) {
+  IBucket::QuotaType type;
+
+  if (quota_type_str == "NONE") {
+    type = IBucket::QuotaType ::kNone;
+  } else if (quota_type_str == "FIFO") {
+    type = IBucket::QuotaType ::kFifo;
+  } else {
+    return {type, Error{.code = 419, .message = fmt::format("Unknown type of quota: {}", quota_type_str)}};
+  }
+
+  return {type, Error::kOk};
+}
+
+std::string_view IBucket::GetQuotaTypeName(QuotaType type) {
+  switch (type) {
+    case kNone:
+      return "NONE";
+    case kFifo:
+      return "FIFO";
+  }
+}
+
+
 class Bucket : public IBucket {
  public:
   explicit Bucket(Options options) : options_(std::move(options)), entry_map_() {
@@ -23,19 +48,10 @@ class Bucket : public IBucket {
     }
 
     fs::create_directories(full_path_);
-
-    BucketSettings settings;
-    settings.set_max_block_size(options.max_block_size);
-    settings.mutable_quota()->set_type(static_cast<proto::BucketSettings_QuotaType>(options.quota.type));
-    settings.mutable_quota()->set_size(options.quota.size);
-
-    const auto settings_path = full_path_ / kSettingsName;
-    std::ofstream settings_file(settings_path, std::ios::binary);
-    if (!settings_file) {
-      throw std::runtime_error(fmt::format("Failed to open file {}", settings_path.string()));
+    auto err = SaveDescriptor();
+    if (err) {
+      throw std::runtime_error(err.message);
     }
-
-    settings.SerializeToOstream(&settings_file);
   }
 
   explicit Bucket(fs::path full_path) : options_{}, full_path_(std::move(full_path)), entry_map_() {
@@ -131,6 +147,13 @@ class Bucket : public IBucket {
     return Error::kOk;
   }
 
+  Error SetOptions(Options options) override {
+    options_.max_block_size = options.max_block_size;
+    options_.quota = options.quota;
+
+    return SaveDescriptor();
+  }
+
   [[nodiscard]] Info GetInfo() const override {
     size_t record_count = 0;
     size_t size = 0;
@@ -146,6 +169,31 @@ class Bucket : public IBucket {
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
  private:
+  core::Error SaveDescriptor() const {
+    BucketSettings settings;
+    settings.set_max_block_size(options_.max_block_size);
+    settings.mutable_quota()->set_type(static_cast<proto::BucketSettings_QuotaType>(options_.quota.type));
+    settings.mutable_quota()->set_size(options_.quota.size);
+
+    const auto settings_path = full_path_ / kSettingsName;
+    std::ofstream settings_file(settings_path, std::ios::binary);
+    if (!settings_file) {
+      return {
+          .code = 500,
+          .message = "Failed to open file of bucket settings",
+      };
+    }
+
+    if (!settings.SerializeToOstream(&settings_file)) {
+      return {
+          .code = 500,
+          .message = "Failed to serialize bucket settings",
+      };
+    }
+
+    return Error::kOk;
+  }
+
   constexpr static std::string_view kSettingsName = "bucket.settings";
   Options options_;
   fs::path full_path_;
@@ -184,7 +232,7 @@ std::ostream& operator<<(std::ostream& os, const IBucket::QuotaOptions& options)
   return os;
 }
 std::ostream& operator<<(std::ostream& os, const IBucket::Info& info) {
-  os << fmt::format("<IBucket::Info entry_count={} record_count={} size={}>", info.entry_count, info.record_count,
+  os << fmt::format("<IBucket::Info entry_count={} record_count={} quota_size={}>", info.entry_count, info.record_count,
                     info.size);
   return os;
 }

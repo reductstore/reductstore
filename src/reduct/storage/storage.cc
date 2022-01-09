@@ -41,9 +41,10 @@ class Storage : public IStorage {
       Callback::Response resp;
       resp.version = reduct::kVersion;
       resp.bucket_count = buckets_.size();
-      resp.entry_count = std::accumulate(
-          buckets_.begin(), buckets_.end(), 0,
-          [](size_t a, const decltype(buckets_)::value_type& entry) { return entry.second->GetInfo().entry_count + a; });
+      resp.entry_count = std::accumulate(buckets_.begin(), buckets_.end(), 0,
+                                         [](size_t a, const decltype(buckets_)::value_type& entry) {
+                                           return entry.second->GetInfo().entry_count + a;
+                                         });
       return Callback::Result{std::move(resp), Error{}};
     });
   }
@@ -54,12 +55,23 @@ class Storage : public IStorage {
   [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
     using Callback = ICreateBucketCallback;
     return Run<Callback::Result>([this, req] {
-      std::string bucket_name{req.name};
+      std::string bucket_name{req.bucket_name};
       if (buckets_.find(bucket_name) != buckets_.end()) {
-        return Callback::Result{{}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.name)}};
+        return Callback::Result{
+            {}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.bucket_name)}};
       }
 
-      auto bucket = IBucket::Build({.name = bucket_name, .path = options_.data_path});
+      auto [quota_type, parse_err] = IBucket::ParseQuotaType(req.bucket_settings.quota_type);
+      if (parse_err) {
+        return Callback::Result{{}, parse_err};
+      }
+
+      auto bucket = IBucket::Build({
+          .name = bucket_name,
+          .path = options_.data_path,
+          .max_block_size = req.bucket_settings.max_block_size,
+          .quota = {.type = quota_type, .size = req.bucket_settings.quota_size},
+      });
       if (!bucket) {
         auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
         return Callback::Result{{},
@@ -74,12 +86,19 @@ class Storage : public IStorage {
   [[nodiscard]] Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) const override {
     using Callback = IGetBucketCallback;
     return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.name);
+      auto [bucket_it, err] = FindBucket(req.bucket_name);
       if (err) {
         return Callback::Result{{}, err};
       }
 
-      return Callback::Result{{}, Error{}};
+      const auto& settings = bucket_it->second->GetOptions();
+      return Callback::Result{{.bucket_settings =
+                                   {
+                                       .max_block_size = settings.max_block_size,
+                                       .quota_type = IBucket::GetQuotaTypeName(settings.quota.type),
+                                       .quota_size = settings.quota.size,
+                                   }},
+                              Error{}};
     });
   }
 
@@ -87,19 +106,42 @@ class Storage : public IStorage {
     using Callback = IRemoveBucketCallback;
 
     return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.name);
+      auto [bucket_it, err] = FindBucket(req.bucket_name);
       if (err) {
         return Callback::Result{{}, err};
       }
 
       err = bucket_it->second->Clean();
-      fs::remove(options_.data_path / req.name);
+      fs::remove(options_.data_path / req.bucket_name);
       buckets_.erase(bucket_it);
 
       return Callback::Result{{}, err};
     });
   }
 
+  Run<IChangeBucketSettingsCallback::Result> OnChangeBucketSettings(
+      const IChangeBucketSettingsCallback::Request& req) override {
+    using Callback = IChangeBucketSettingsCallback;
+    return Run<Callback::Result>([this, req] {
+      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      if (err) {
+        return Callback::Result{{}, err};
+      }
+
+      auto [quota_type, parse_err] = IBucket::ParseQuotaType(req.new_settings.quota_type);
+      if (parse_err) {
+        return Callback::Result{{}, parse_err};
+      }
+
+      err = bucket_it->second->SetOptions({
+          .name = "",
+          .path = {},
+          .max_block_size = req.new_settings.max_block_size,
+          .quota = {.type = quota_type, .size = req.new_settings.quota_size},
+      });
+      return Callback::Result{{}, Error::kOk};
+    });
+  }
   /**
    * Entry API
    */
@@ -112,7 +154,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      auto [ts, parse_err] = ParseTimestmap(req.timestamp);
+      auto [ts, parse_err] = ParseTimestamp(req.timestamp);
       if (parse_err) {
         return Callback::Result{{}, parse_err};
       }
@@ -123,6 +165,11 @@ class Storage : public IStorage {
       }
 
       err = entry.lock()->Write(req.blob, ts);
+      if (!err) {
+        auto quota_error = bucket_it->second->KeepQuota();
+        LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
+      }
+
       return Callback::Result{{}, err};
     });
   }
@@ -141,7 +188,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, ref_error};
       }
 
-      auto [ts, parse_err] = ParseTimestmap(req.timestamp);
+      auto [ts, parse_err] = ParseTimestamp(req.timestamp);
       if (parse_err) {
         return Callback::Result{{}, parse_err};
       }
@@ -170,24 +217,19 @@ class Storage : public IStorage {
     return {it, Error::kOk};
   }
 
-  static std::tuple<IEntry::Time, Error> ParseTimestmap(std::string_view timestamp) {
+  static std::tuple<IEntry::Time, Error> ParseTimestamp(std::string_view timestamp) {
     auto ts = IEntry::Time::clock::now();
     if (timestamp.empty()) {
-      return {IEntry::Time{}, Error{
-                                  .code = 400,
-                                  .message = "'ts' parameter can't be empty",
-                              }};
+      return {IEntry::Time{}, Error{.code = 400, .message = "'ts' parameter can't be empty"}};
     }
     try {
       ts = IEntry::Time{} + std::chrono::microseconds(std::stoi(std::string{timestamp}));
       return {ts, Error::kOk};
     } catch (...) {
       return {IEntry::Time{},
-              Error{
-                  .code = 400,
-                  .message = fmt::format("Failed to parse 'ts' parameter: {} should unix times in microseconds",
-                                         std::string{timestamp}),
-              }};
+              Error{.code = 400,
+                    .message = fmt::format("Failed to parse 'ts' parameter: {} should unix times in microseconds",
+                                           std::string{timestamp})}};
     }
   }
 
