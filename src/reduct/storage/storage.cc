@@ -92,12 +92,9 @@ class Storage : public IStorage {
       }
 
       const auto& settings = bucket_it->second->GetOptions();
-      return Callback::Result{{.bucket_settings =
-                                   {
-                                       .max_block_size = settings.max_block_size,
-                                       .quota_type = IBucket::GetQuotaTypeName(settings.quota.type),
-                                       .quota_size = settings.quota.size,
-                                   }},
+      return Callback::Result{{.bucket_settings = {.max_block_size = settings.max_block_size,
+                                                   .quota_type = IBucket::GetQuotaTypeName(settings.quota.type),
+                                                   .quota_size = settings.quota.size}},
                               Error{}};
     });
   }
@@ -119,8 +116,7 @@ class Storage : public IStorage {
     });
   }
 
-  Run<IUpdateBucketCallback::Result> OnUpdateCallback(
-      const IUpdateBucketCallback::Request& req) override {
+  Run<IUpdateBucketCallback::Result> OnUpdateCallback(const IUpdateBucketCallback::Request& req) override {
     using Callback = IUpdateBucketCallback;
     return Run<Callback::Result>([this, req] {
       auto [bucket_it, err] = FindBucket(req.bucket_name);
