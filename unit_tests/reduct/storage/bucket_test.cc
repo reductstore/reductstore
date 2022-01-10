@@ -39,9 +39,15 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   });
 
   REQUIRE(bucket->GetOrCreateEntry("entry1").error == Error::kOk);
+
   auto restored_bucket = IBucket::Restore(dir_path / "bucket");
   REQUIRE(restored_bucket->GetInfo() == bucket->GetInfo());
   REQUIRE(restored_bucket->GetOptions() == bucket->GetOptions());
+
+  SECTION("empty folder") {
+    fs::create_directory(dir_path / "empty_folder");
+    REQUIRE_FALSE(IBucket::Restore(dir_path / "empty_folder"));
+  }
 }
 
 TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]") {

@@ -86,7 +86,9 @@ class IRemoveBucketCallback {
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
 };
 
-
+/**
+ * Change bucket settings callback
+ */
 class IChangeBucketSettingsCallback {
  public:
   struct Response {};

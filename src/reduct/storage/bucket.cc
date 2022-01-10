@@ -14,8 +14,7 @@ namespace fs = std::filesystem;
 using core::Error;
 using proto::BucketSettings;
 
-
- std::pair<IBucket::QuotaType, Error> IBucket::ParseQuotaType(std::string_view quota_type_str) {
+std::pair<IBucket::QuotaType, Error> IBucket::ParseQuotaType(std::string_view quota_type_str) {
   IBucket::QuotaType type;
 
   if (quota_type_str == "NONE") {
@@ -36,8 +35,9 @@ std::string_view IBucket::GetQuotaTypeName(QuotaType type) {
     case kFifo:
       return "FIFO";
   }
-}
 
+  return "Unknown type";
+}
 
 class Bucket : public IBucket {
  public:
@@ -217,7 +217,13 @@ std::unique_ptr<IBucket> IBucket::Build(const Options& options) {
 }
 
 std::unique_ptr<IBucket> IBucket::Restore(std::filesystem::path full_path) {
-  return std::make_unique<Bucket>(std::move(full_path));
+  try {
+    return std::make_unique<Bucket>(std::move(full_path));
+  } catch (const std::exception& err) {
+    LOG_ERROR(err.what());
+  }
+
+  return nullptr;
 }
 
 std::ostream& operator<<(std::ostream& os, const IBucket::Options& options) {

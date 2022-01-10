@@ -28,6 +28,14 @@ namespace fs = std::filesystem;
 static const reduct::api::BucketSettings kDefaultBucketSettings = {
     .max_block_size = 1000, .quota_type = "NONE", .quota_size = 10};
 
+TEST_CASE("storage::Storage should recover at start", "[storage][bucket]") {
+  SECTION("broken bucket") {
+    auto dir = BuildTmpDirectory();
+    fs::create_directory(dir / "broker_bucket");
+    REQUIRE(IStorage::Build({.data_path = dir}));
+  }
+}
+
 Task<IInfoCallback::Result> OnInfo(IStorage* storage) {
   auto result = co_await storage->OnInfo({});
   co_return result;
@@ -212,10 +220,8 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[entry]") {
   auto storage = IStorage::Build({.data_path = dir});
 
   REQUIRE(OnCreateBucket(storage.get(),
-                         {
-                             .bucket_name = "bucket",
-                             .bucket_settings = {.max_block_size = 1000, .quota_type = "NONE", .quota_size = 0},
-                         })
+                         {.bucket_name = "bucket",
+                          .bucket_settings = {.max_block_size = 1000, .quota_type = "NONE", .quota_size = 0}})
               .Get() == Error::kOk);
   REQUIRE(OnWriteEntry(storage.get(),
                        {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
