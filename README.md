@@ -16,6 +16,29 @@ Reduct Storage is a blob storage engine with a simple HTTP API. If the cloud sto
 * has a hard FIFO quota, so the oldest bock of data is removed immediately when you reach the quota of the bucket
 * provides data by time, so you don't need to have some IDs for your blobs. You should know only time interval for the HTTP request
 
+
+##  API Example
+
+Get information about the server:
+```shell
+curl http://127.0.0.1:8383/info #-> {"bucket_count":183,"version":"0.1.0"}
+```
+
+Create a bucket with FIFO quota:
+```shell
+ curl -d "{\"quot_type\":\"FIFO\", \"quota_size\":10000}" -X POST -a http://127.0.0.1:8383/my_data
+```
+
+Write some data with timestamp 100000:
+```shell
+curl -d "some_data" -X POST -a http://127.0.0.1:8383/my_data/data?ts=10000
+```
+
+Reade data by timestamp:
+```shell
+curl  http://127.0.0.1:8383/my_data/data?ts=10000 #-> "some_data"
+```
+
 ## Build
 
 TODO
