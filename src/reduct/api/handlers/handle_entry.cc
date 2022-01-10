@@ -17,18 +17,7 @@ async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpRespons
                                  std::string bucket, std::string entry, std::string ts) {
   auto basic = BasicHandle<SSL, IWriteEntryCallback>(res, req);
 
-  std::string full_blob;
-  bool finish = false;
-  res->onData([&full_blob, &finish](std::string_view data, bool last) mutable {
-    LOG_DEBUG("Received chuck {} kB", data.size() / 1024);
-    full_blob += std::string(data);
-    finish = last;
-  });
-
-  while (!finish) {
-    co_await async::Sleep(async::kTick);
-  }
-
+  auto full_blob = co_await AsyncHttpReceiver<SSL>(res);
   IWriteEntryCallback::Request data{
       .bucket_name = bucket,
       .entry_name = entry,

@@ -119,9 +119,9 @@ class Storage : public IStorage {
     });
   }
 
-  Run<IChangeBucketSettingsCallback::Result> OnChangeBucketSettings(
-      const IChangeBucketSettingsCallback::Request& req) override {
-    using Callback = IChangeBucketSettingsCallback;
+  Run<IUpdateBucketCallback::Result> OnUpdateCallback(
+      const IUpdateBucketCallback::Request& req) override {
+    using Callback = IUpdateBucketCallback;
     return Run<Callback::Result>([this, req] {
       auto [bucket_it, err] = FindBucket(req.bucket_name);
       if (err) {

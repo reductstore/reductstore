@@ -22,7 +22,7 @@ std::pair<IBucket::QuotaType, Error> IBucket::ParseQuotaType(std::string_view qu
   } else if (quota_type_str == "FIFO") {
     type = IBucket::QuotaType ::kFifo;
   } else {
-    return {type, Error{.code = 419, .message = fmt::format("Unknown type of quota: {}", quota_type_str)}};
+    return {type, Error{.code = 422, .message = fmt::format("Unknown type of quota: {}", quota_type_str)}};
   }
 
   return {type, Error::kOk};

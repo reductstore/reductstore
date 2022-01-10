@@ -19,7 +19,7 @@ class IApiHandler : public IInfoCallback,
                     public ICreateBucketCallback,
                     public IGetBucketCallback,
                     public IRemoveBucketCallback,
-                    public IChangeBucketSettingsCallback,
+                    public IUpdateBucketCallback,
                     public IWriteEntryCallback,
                     public IReadEntryCallback {};
 

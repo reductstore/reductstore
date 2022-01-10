@@ -10,7 +10,7 @@
 #include "reduct/config.h"
 #include "reduct/helpers.h"
 
-using reduct::api::IChangeBucketSettingsCallback;
+using reduct::api::IUpdateBucketCallback;
 using reduct::api::ICreateBucketCallback;
 using reduct::api::IGetBucketCallback;
 using reduct::api::IInfoCallback;
@@ -97,9 +97,8 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   }
 }
 
-Task<IChangeBucketSettingsCallback::Result> OnChangeBucketSettings(IStorage* storage,
-                                                                   IChangeBucketSettingsCallback::Request req) {
-  auto result = co_await storage->OnChangeBucketSettings(std::move(req));
+Task<IUpdateBucketCallback::Result> OnChangeBucketSettings(IStorage* storage, IUpdateBucketCallback::Request req) {
+  auto result = co_await storage->OnUpdateCallback(std::move(req));
   co_return result;
 }
 
@@ -112,7 +111,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[entry]") {
   };
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
-  IChangeBucketSettingsCallback::Request change_req{
+  IUpdateBucketCallback::Request change_req{
       .bucket_name = "bucket", .new_settings = {.max_block_size = 10, .quota_type = "FIFO", .quota_size = 1000}};
   REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
 

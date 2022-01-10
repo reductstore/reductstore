@@ -89,7 +89,7 @@ class IRemoveBucketCallback {
 /**
  * Change bucket settings callback
  */
-class IChangeBucketSettingsCallback {
+class IUpdateBucketCallback {
  public:
   struct Response {};
   struct Request {
@@ -98,7 +98,7 @@ class IChangeBucketSettingsCallback {
   };
 
   using Result = CallbackResult<Response>;
-  virtual async::Run<Result> OnChangeBucketSettings(const Request& req) = 0;
+  virtual async::Run<Result> OnUpdateCallback(const Request& req) = 0;
 };
 //---------------------
 // Entry API
