@@ -6,11 +6,40 @@
 #include <nlohmann/json.hpp>
 #include <uWebSockets/App.h>
 
+#include "reduct/async/loop.h"
 #include "reduct/async/run.h"
 #include "reduct/core/error.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api {
+
+template <bool SSL>
+struct AsyncHttpReceiver {
+  explicit AsyncHttpReceiver(uWS::HttpResponse<SSL> *res) : data_(), finish_(false), res_(res) {
+    res->onData([this](std::string_view data, bool last) mutable {
+      LOG_TRACE("Received chuck {} kB", data.size() / 1024);
+      data_ += data;
+      finish_ = last;
+    });
+  }
+
+  bool await_ready() const noexcept { return finish_; }
+
+  void await_suspend(std::coroutine_handle<> h) const noexcept {
+    if (finish_) {
+      h.resume();
+    } else {
+      async::ILoop::loop().Defer([this, h] { await_suspend(h); });
+    }
+  }
+
+  [[nodiscard]] std::string await_resume() noexcept { return std::move(data_); }
+
+ private:
+  std::string data_;
+  bool finish_;
+  uWS::HttpResponse<SSL> *res_;
+};
 
 template <bool SSL, typename Callback>
 class BasicHandle {
@@ -29,18 +58,22 @@ class BasicHandle {
   core::Error Run(typename Callback::Result result) {
     auto [resp, err] = std::move(result);
     if (err) {
-      LOG_ERROR("{} {}: {}", method_, url_, err.ToString());
-      nlohmann::json data;
-      http_resp_->writeStatus(std::to_string(err.code));
-
-      data["detail"] = err.message;
-      http_resp_->end(data.dump());
+      SendError(err);
       return err;
     }
 
     LOG_DEBUG("{} {}: OK", method_, url_);
     http_resp_->end(on_success_ ? on_success_(std::move(resp)) : "");
     return {};
+  }
+
+  void SendError(core::Error err) const {
+    LOG_ERROR("{} {}: {}", method_, url_, err.ToString());
+    nlohmann::json data;
+    http_resp_->writeStatus(std::to_string(err.code));
+
+    data["detail"] = err.message;
+    http_resp_->end(data.dump());
   }
 
  private:

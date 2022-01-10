@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package reduct.proto;
+
+message BucketSettings {
+  enum QuotaType {
+    kNone = 0;
+    kFifo = 1;
+  }
+  message QuotaSettings {
+    QuotaType type = 1;
+    uint64 size = 2;
+  }
+
+  uint64 max_block_size = 1;
+  QuotaSettings quota = 2;
+}

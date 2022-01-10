@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_STORAGE_CALLBACKS_H
 #define REDUCT_STORAGE_CALLBACKS_H
@@ -25,7 +25,8 @@ class IInfoCallback {
  public:
   struct Response {
     std::string version;
-    size_t bucket_number;
+    size_t bucket_count;
+    size_t entry_count;
   };
   struct Request {};
   using Result = CallbackResult<Response>;
@@ -35,6 +36,12 @@ class IInfoCallback {
 //---------------------
 // Bucket API
 //---------------------
+struct BucketSettings {
+  uint64_t max_block_size;
+  std::string_view quota_type;
+  uint64_t quota_size;
+};
+
 
 /**
  * Create bucket callback
@@ -43,7 +50,8 @@ class ICreateBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string_view name;
+    std::string_view bucket_name;
+    BucketSettings bucket_settings;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
@@ -54,9 +62,12 @@ class ICreateBucketCallback {
  */
 class IGetBucketCallback {
  public:
-  struct Response {};
+  struct Response {
+    BucketSettings bucket_settings;
+  };
+
   struct Request {
-    std::string_view name;
+    std::string_view bucket_name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnGetBucket(const Request& req) const = 0;
@@ -69,12 +80,26 @@ class IRemoveBucketCallback {
  public:
   struct Response {};
   struct Request {
-    std::string_view name;
+    std::string_view bucket_name;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
 };
 
+/**
+ * Change bucket settings callback
+ */
+class IUpdateBucketCallback {
+ public:
+  struct Response {};
+  struct Request {
+    std::string_view bucket_name;
+    BucketSettings new_settings;
+  };
+
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnUpdateCallback(const Request& req) = 0;
+};
 //---------------------
 // Entry API
 //---------------------

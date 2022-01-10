@@ -9,4 +9,4 @@ def test_get_info(base_url):
     assert resp.status_code == 200
     data = json.loads(resp.content)
     assert data['version'] == '0.1.0'
-    assert data['bucket_number'] > 0
+    assert data['bucket_count'] > 0

@@ -96,7 +96,7 @@ class Entry : public IEntry {
     current_block_ = descriptor_.mutable_blocks(descriptor_.blocks_size() - 1);
   }
 
-  [[nodiscard]] Error Write(std::string_view  blob, const Time& time) override {
+  [[nodiscard]] Error Write(std::string_view blob, const Time& time) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
 
     const auto proto_ts = FromTimePoint(time);
@@ -124,14 +124,14 @@ class Entry : public IEntry {
     if (!block->has_begin_time()) {
       LOG_DEBUG("First record_entry for current block");
       block->mutable_begin_time()->CopyFrom(proto_ts);
-      if (block->id() == 0) {
+      if (block->id() == descriptor_.blocks(0).id()) {
         descriptor_.mutable_oldest_record_time()->CopyFrom(proto_ts);
       }
     }
 
     const auto block_path = full_path_ / fmt::format(kBlockNameFormat, block->id());
 
-    LOG_DEBUG("Write a record_entry for kTimestamp={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
+    LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
               block_path.string());
     std::ofstream block_file(block_path, std::ios::app | std::ios::binary);
     if (!block_file) {
@@ -166,10 +166,7 @@ class Entry : public IEntry {
 
         if (current_block_->size() > options_.max_block_size) {
           LOG_DEBUG("Block {} is full. Create a new one", current_block_->id());
-          auto id = current_block_->id();
-          current_block_ = descriptor_.add_blocks();
-          current_block_->set_id(id + 1);
-          current_block_->mutable_begin_time()->CopyFrom(proto_ts);
+          current_block_ = StartNextBlock();
         }
         break;
       case RecordType::kBelatedFirst:
@@ -180,28 +177,25 @@ class Entry : public IEntry {
         break;
     }
 
-    auto descriptor_path = full_path_ / kDescriptorName;
-    std::ofstream descriptor_file(descriptor_path);
-    if (descriptor_file) {
-      descriptor_.SerializeToOstream(&descriptor_file);
-    } else {
-      return {.code = 500, .message = "Failed save a descriptor"};
+    if (auto err = SaveDescriptor()) {
+      return err;
     }
-
     return {};
   }
 
   [[nodiscard]] ReadResult Read(const Time& time) const override {
     const auto proto_ts = FromTimePoint(time);
 
-    LOG_DEBUG("Read a record for kTimestamp={}", TimeUtil::ToString(proto_ts));
+    LOG_DEBUG("Read a record for ts={}", TimeUtil::ToString(proto_ts));
 
-    if (proto_ts < descriptor_.oldest_record_time() || proto_ts > descriptor_.latest_record_time()) {
+    if (!descriptor_.has_oldest_record_time() ||
+        (proto_ts < descriptor_.oldest_record_time() || proto_ts > descriptor_.latest_record_time())) {
       return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
     }
 
     int block_index = FindBlock(proto_ts);
     if (block_index == -1) {
+      LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(proto_ts));
       return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}, time};
     }
 
@@ -240,16 +234,30 @@ class Entry : public IEntry {
 
     return {entry_record.blob(), {}, time};
   }
-  int FindBlock(const google::protobuf::Timestamp& proto_ts) const {
-    auto block_index = -1;
-    for (auto i = 0; i < descriptor_.blocks_size(); ++i) {
-      const auto& current_block = descriptor_.blocks(i);
-      if (proto_ts >= current_block.begin_time() && proto_ts <= current_block.latest_record_time()) {
-        block_index = i;
-        break;
+
+  Error RemoveOldestBlock() override {
+    auto& block = descriptor_.blocks(0);
+    fs::remove(full_path_ / fmt::format(kBlockNameFormat, block.id()));
+
+    if (descriptor_.blocks_size() == 1) {
+      current_block_ = StartNextBlock();
+      descriptor_.clear_oldest_record_time();
+    } else {
+      const auto& next_block = descriptor_.blocks(1);
+      if (!next_block.has_begin_time()) {
+        descriptor_.clear_oldest_record_time();
+      } else {
+        descriptor_.mutable_oldest_record_time()->CopyFrom(next_block.begin_time());
       }
     }
-    return block_index;
+
+    descriptor_.set_size(descriptor_.size() - descriptor_.blocks(0).size());
+    descriptor_.mutable_blocks()->DeleteSubrange(0, 1);
+
+    if (auto err = SaveDescriptor()) {
+      return err;
+    }
+    return Error::kOk;
   }
 
   Info GetInfo() const override {
@@ -262,15 +270,53 @@ class Entry : public IEntry {
         .block_count = static_cast<size_t>(descriptor_.blocks_size()),
         .record_count = record_count,
         .bytes = descriptor_.size(),
+        .oldest_record_time = ToTimePoint(descriptor_.oldest_record_time()),
+        .latest_record_time = ToTimePoint(descriptor_.latest_record_time()),
     };
   }
 
   const Options& GetOptions() const override { return options_; }
 
  private:
+  proto::EntryDescriptor::Block* StartNextBlock() {
+    auto id = current_block_->id();
+    auto block = descriptor_.add_blocks();
+    block->set_id(id + 1);
+
+    return block;
+  }
+
+  int FindBlock(const google::protobuf::Timestamp& proto_ts) const {
+    auto block_index = -1;
+    for (auto i = 0; i < descriptor_.blocks_size(); ++i) {
+      const auto& current_block = descriptor_.blocks(i);
+      if (proto_ts >= current_block.begin_time() && proto_ts <= current_block.latest_record_time()) {
+        block_index = i;
+        break;
+      }
+    }
+    return block_index;
+  }
+
   static google::protobuf::Timestamp FromTimePoint(const Time& time) {
     auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(time.time_since_epoch()).count();
     return TimeUtil::MicrosecondsToTimestamp(microseconds);
+  }
+
+  static Time ToTimePoint(const google::protobuf::Timestamp& time) {
+    return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
+  }
+
+  Error SaveDescriptor() const {
+    auto descriptor_path = full_path_ / kDescriptorName;
+    std::ofstream descriptor_file(descriptor_path);
+    if (descriptor_file) {
+      descriptor_.SerializeToOstream(&descriptor_file);
+    } else {
+      return {.code = 500, .message = "Failed save a descriptor"};
+    }
+
+    return Error::kOk;
   }
 
   static constexpr std::string_view kBlockNameFormat = "{:08d}.block";
@@ -300,8 +346,11 @@ std::ostream& operator<<(std::ostream& os, const IEntry::ReadResult& result) {
 }
 
 std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
-  os << fmt::format("<IEntry::Info block_count={}  record_count={} bytes={}>", info.block_count, info.record_count,
-                    info.bytes);
+  auto to_time_t = IEntry::Time::clock::to_time_t;
+  os << fmt::format(
+      "<IEntry::Info block_count={}  record_count={} bytes={} oldest_record_time={} latest_record_time={}>",
+      info.block_count, info.record_count, info.bytes, to_time_t(info.oldest_record_time),
+      to_time_t(info.latest_record_time));
   return os;
 }
 

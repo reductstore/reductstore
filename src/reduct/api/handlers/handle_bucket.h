@@ -35,6 +35,20 @@ template <bool SSL = false>
 async::VoidTask HandleGetBucket(IGetBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                                 std::string name);
 
+
+/**
+ * Handle HTTP request to get info about bucket
+ * @tparam SSL
+ * @tparam SSL
+ * @param callback Handler class with all callbacks
+ * @param res HTTP response
+ * @param req HTTP request
+ * @param name name of bucket
+ */
+template <bool SSL = false>
+async::VoidTask HandleUpdateBucket(IUpdateBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                                std::string name);
+
 /**
  * Handle HTTP request to remove a bucket
  * @tparam SSL

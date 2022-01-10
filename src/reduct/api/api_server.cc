@@ -36,6 +36,10 @@ class ApiServer : public IApiServer {
              [this](auto *res, auto *req) {
                handlers::HandleGetBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
              })
+        .put(base_path + ":bucket_name",
+             [this](auto *res, auto *req) {
+               handlers::HandleUpdateBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
+             })
         .del(base_path + ":bucket_name",
              [this](auto *res, auto *req) {
                handlers::HandleRemoveBucket(handler_.get(), res, req, std::string(req->getParameter(0)));

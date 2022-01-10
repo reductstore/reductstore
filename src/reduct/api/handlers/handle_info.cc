@@ -18,7 +18,7 @@ async::VoidTask HandleInfo(const IInfoCallback *callback, uWS::HttpResponse<SSL>
                                   .OnSuccess([](IInfoCallback::Response app_resp) {
                                     nlohmann::json data;
                                     data["version"] = app_resp.version;
-                                    data["bucket_number"] = app_resp.bucket_number;
+                                    data["bucket_count"] = app_resp.bucket_count;
                                     return data.dump();
                                   })
                                   .Run(co_await callback->OnInfo({}));

@@ -1,12 +1,40 @@
+import json
+
 import requests
 from conftest import get_detail
 
 
 def test_create_bucket_ok(base_url, bucket_name):
-    """Should create a bucket"""
+    """Should create a bucket with default settings"""
     resp = requests.post(f'{base_url}/{bucket_name}')
 
     assert resp.status_code == 200
+    resp = requests.get(f'{base_url}/{bucket_name}')
+    assert resp.status_code == 200
+
+    data = json.loads(resp.content)
+    assert data == {"max_block_size": 1024 * 1024, "quota_type": "NONE", "quota_size": 0}
+
+
+def test_create_bucket_bad_format(base_url, bucket_name):
+    """Should not create a bucket if JSON data is invalid """
+    resp = requests.post(f'{base_url}/{bucket_name}', data="xxx")
+    assert resp.status_code == 422
+
+    resp = requests.post(f'{base_url}/{bucket_name}', json={"quota_type": "UNKNOWN"})
+    assert resp.status_code == 422
+
+
+def test_create_bucket_custom(base_url, bucket_name):
+    """Should create a bucket with some settings"""
+    resp = requests.post(f'{base_url}/{bucket_name}', json={"max_block_size": 500})
+    assert resp.status_code == 200
+
+    resp = requests.get(f'{base_url}/{bucket_name}')
+    assert resp.status_code == 200
+
+    data = json.loads(resp.content)
+    assert data == {"max_block_size": 500, "quota_type": "NONE", "quota_size": 0}
 
 
 def test_create_twice_bucket(base_url, bucket_name):
@@ -18,20 +46,50 @@ def test_create_twice_bucket(base_url, bucket_name):
     assert "already exists" in get_detail(resp)
 
 
-def test_get_bucket_ok(base_url, bucket_name):
-    """Should provide information about bucket"""
-    resp = requests.post(f'{base_url}/{bucket_name}')
-    assert resp.status_code == 200
-
-    resp = requests.get(f'{base_url}/{bucket_name}')
-    assert resp.status_code == 200
-
-
 def test_get_bucket_not_exist(base_url, bucket_name):
     """Should return error if the bucket is not found"""
     resp = requests.get(f'{base_url}/{bucket_name}')
     assert resp.status_code == 404
     assert "is not found" in get_detail(resp)
+
+
+def test_update_bucket_ok(base_url, bucket_name):
+    """Should update setting of the bucket"""
+    requests.post(f'{base_url}/{bucket_name}')
+
+    new_settings = {"max_block_size": 1000, "quota_type": "FIFO", "quota_size": 500}
+    resp = requests.put(f'{base_url}/{bucket_name}',
+                        json=new_settings)
+    assert resp.status_code == 200
+
+    resp = requests.get(f'{base_url}/{bucket_name}')
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert data == new_settings
+
+
+def test_update_bucket_bad_format(base_url, bucket_name):
+    """Should not update setting if JSON format is bad"""
+    requests.post(f'{base_url}/{bucket_name}')
+
+    resp = requests.put(f'{base_url}/{bucket_name}',
+                        json={"max_block_size": 1000, "quota_type": "FIFO"})
+    assert resp.status_code == 422
+
+    resp = requests.put(f'{base_url}/{bucket_name}',
+                        json={"max_block_size": 1000, "quota_type": "UNKNOWN", "quota_size": 500})
+    assert resp.status_code == 422
+
+    resp = requests.put(f'{base_url}/{bucket_name}',
+                        data="NOT_JSON")
+    assert resp.status_code == 422
+
+
+def test_update_bucket_not_found(base_url, bucket_name):
+    """Should not update setting if no bucket is found"""
+    resp = requests.put(f'{base_url}/{bucket_name}',
+                        json={"max_block_size": 1000, "quota_type": "FIFO", "quota_size": 500})
+    assert resp.status_code == 404
 
 
 def test_remove_bucket_ok(base_url, bucket_name):

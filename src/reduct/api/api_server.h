@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 
 #ifndef REDUCT_STORAGE_API_SERVER_H
 #define REDUCT_STORAGE_API_SERVER_H
@@ -19,6 +19,7 @@ class IApiHandler : public IInfoCallback,
                     public ICreateBucketCallback,
                     public IGetBucketCallback,
                     public IRemoveBucketCallback,
+                    public IUpdateBucketCallback,
                     public IWriteEntryCallback,
                     public IReadEntryCallback {};
 

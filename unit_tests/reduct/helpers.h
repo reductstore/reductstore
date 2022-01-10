@@ -16,7 +16,7 @@ inline std::filesystem::path BuildTmpDirectory() {
   std::random_device r;
 
   std::default_random_engine e1(r());
-  std::uniform_int_distribution<int> uniform_dist(1, 100000);
+  std::uniform_int_distribution<int> uniform_dist(1, 10000000);
 
   std::filesystem::path path = std::filesystem::temp_directory_path() / fmt::format("reduct_{}", uniform_dist(e1));
   std::filesystem::create_directories(path);
