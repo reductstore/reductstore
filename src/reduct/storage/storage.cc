@@ -163,7 +163,9 @@ class Storage : public IStorage {
       err = entry.lock()->Write(req.blob, ts);
       if (!err) {
         auto quota_error = bucket_it->second->KeepQuota();
-        LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
+        if (quota_error) {
+          LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
+        }
       }
 
       return Callback::Result{{}, err};
