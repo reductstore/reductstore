@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <ostream>
+#include <vector>
 
 #include "reduct/core/error.h"
 
@@ -50,6 +51,27 @@ class IEntry {
   };
 
   /**
+   * Info about a record in a block
+   */
+  struct RecordInfo {
+    Time time;    // time when it was created
+    size_t size;  // size in bytes
+
+    bool operator==(const RecordInfo& rhs) const { return std::tie(time, size) == std::tie(rhs.time, rhs.size); }
+    bool operator!=(const RecordInfo& rhs) const { return !(rhs == *this); }
+
+    friend std::ostream& operator<<(std::ostream& os, const RecordInfo& info);
+  };
+
+  /**
+   * Result of the list request
+   */
+  struct ListResult {
+    std::vector<RecordInfo> records;
+    core::Error error;
+  };
+
+  /**
    * Statistic information about the entry
    */
   struct Info {
@@ -86,6 +108,14 @@ class IEntry {
    * @return blob and timestamp of data, or error (404 - if no record found, 500 some internal errors)
    */
   [[nodiscard]] virtual ReadResult Read(const Time& time) const = 0;
+
+  /**
+   * @brief List records for the time interval
+   * @param start
+   * @param stop
+   * @return return time stamps and size of records,  empty if no data
+   */
+  [[nodiscard]] virtual ListResult List(const Time& start, const Time& stop) const = 0;
 
   /**
    * @brief Remove the oldest block from disk

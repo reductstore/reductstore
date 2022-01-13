@@ -18,7 +18,8 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time::clock::now();
+static const auto kTimestamp = IEntry::Time() + std::chrono::duration_cast<std::chrono::microseconds>(
+                                                    IEntry::Time::clock::now().time_since_epoch());
 
 TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
@@ -154,6 +155,87 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
 
       REQUIRE(entry);
       REQUIRE(entry->GetInfo() == info);
+    }
+  }
+}
+
+TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  SECTION("empty record") {
+    auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(1));
+    REQUIRE(err == Error{.code = 404, .message = "No records in the entry"});
+    REQUIRE(records.empty());
+  }
+
+  SECTION("some records in few blocks") {
+    const std::string blob(entry->GetOptions().max_block_size, 'x');
+    REQUIRE(entry->Write(blob, kTimestamp) == Error::kOk);
+    REQUIRE(entry->Write(blob, kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(entry->Write(blob, kTimestamp + seconds(2)) == Error::kOk);
+
+    auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
+
+    REQUIRE(err == Error::kOk);
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 102});
+    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 102});
+  }
+
+  SECTION("some records in one block") {
+    REQUIRE(entry->Write("blob", kTimestamp) == Error::kOk);
+    REQUIRE(entry->Write("blob", kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(entry->Write("blob", kTimestamp + seconds(2)) == Error::kOk);
+
+    auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
+
+    REQUIRE(err == Error::kOk);
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 6});
+    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 6});
+  }
+
+  SECTION("list should be sorted") {
+    REQUIRE(entry->Write("blob", kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(entry->Write("blob", kTimestamp) == Error::kOk);
+    REQUIRE(entry->Write("blob", kTimestamp + seconds(2)) == Error::kOk);
+
+    auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
+
+    REQUIRE(err == Error::kOk);
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 6});
+    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 6});
+  }
+
+  SECTION("extreme cases") {
+    REQUIRE(entry->Write("blob", kTimestamp) == Error::kOk);
+    REQUIRE(entry->Write("blob", kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(entry->Write("blob", kTimestamp + seconds(2)) == Error::kOk);
+
+    SECTION("request data before first record") {
+      auto [records, err] = entry->List(kTimestamp - seconds(2), kTimestamp - seconds(1));
+      REQUIRE(err == Error{.code = 404, .message = "No records for the time interval"});
+      REQUIRE(records.empty());
+    }
+
+    SECTION("request data after last record") {
+      auto [records, err] = entry->List(kTimestamp + seconds(3), kTimestamp + seconds(4));
+      REQUIRE(err == Error{.code = 404, .message = "No records for the time interval"});
+      REQUIRE(records.empty());
+    }
+
+    SECTION("if there is overlap it is ok") {
+      auto records = entry->List(kTimestamp + seconds(1), kTimestamp + seconds(4)).records;
+      REQUIRE(records.size() == 2);
+      REQUIRE(records[0].time == kTimestamp + seconds(1));
+      REQUIRE(records[1].time == kTimestamp + seconds(2));
+
+      records = entry->List(kTimestamp - seconds(1), kTimestamp + seconds(2)).records;
+      REQUIRE(records.size() == 2);
+      REQUIRE(records[0].time == kTimestamp);
+      REQUIRE(records[1].time == kTimestamp + seconds(1));
     }
   }
 }
