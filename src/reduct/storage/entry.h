@@ -110,7 +110,7 @@ class IEntry {
   [[nodiscard]] virtual ReadResult Read(const Time& time) const = 0;
 
   /**
-   * @brief List records for the time interval
+   * @brief List records for the time interval [start, stop)
    * @param start
    * @param stop
    * @return return time stamps and size of records,  empty if no data

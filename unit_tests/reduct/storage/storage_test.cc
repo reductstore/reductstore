@@ -10,12 +10,13 @@
 #include "reduct/config.h"
 #include "reduct/helpers.h"
 
-using reduct::api::IUpdateBucketCallback;
 using reduct::api::ICreateBucketCallback;
 using reduct::api::IGetBucketCallback;
 using reduct::api::IInfoCallback;
+using reduct::api::IListEntryCallback;
 using reduct::api::IReadEntryCallback;
 using reduct::api::IRemoveBucketCallback;
+using reduct::api::IUpdateBucketCallback;
 using reduct::api::IWriteEntryCallback;
 
 using reduct::async::Run;
@@ -28,17 +29,52 @@ namespace fs = std::filesystem;
 static const reduct::api::BucketSettings kDefaultBucketSettings = {
     .max_block_size = 1000, .quota_type = "NONE", .quota_size = 10};
 
+Task<IInfoCallback::Result> OnInfo(IStorage* storage) {
+  auto result = co_await storage->OnInfo({});
+  co_return result;
+}
+
+Task<ICreateBucketCallback::Result> OnCreateBucket(IStorage* storage, ICreateBucketCallback::Request req) {
+  auto result = co_await storage->OnCreateBucket(std::move(req));
+  co_return result;
+}
+
+Task<IGetBucketCallback::Result> OnGetBucket(IStorage* storage, IGetBucketCallback::Request req) {
+  auto result = co_await storage->OnGetBucket(std::move(req));
+  co_return result;
+}
+
+Task<IUpdateBucketCallback::Result> OnChangeBucketSettings(IStorage* storage, IUpdateBucketCallback::Request req) {
+  auto result = co_await storage->OnUpdateCallback(std::move(req));
+  co_return result;
+}
+
+Task<IRemoveBucketCallback::Result> OnRemoveBucket(IStorage* storage, IRemoveBucketCallback::Request req) {
+  auto result = co_await storage->OnRemoveBucket(std::move(req));
+  co_return result;
+}
+
+Task<IWriteEntryCallback::Result> OnWriteEntry(IStorage* storage, IWriteEntryCallback::Request req) {
+  auto result = co_await storage->OnWriteEntry(std::move(req));
+  co_return result;
+}
+
+Task<IReadEntryCallback::Result> OnReadEntry(IStorage* storage, IReadEntryCallback::Request req) {
+  auto result = co_await storage->OnReadEntry(std::move(req));
+  co_return result;
+}
+
+Task<IListEntryCallback::Result> OnListEntry(IStorage* storage, IListEntryCallback::Request req) {
+  auto result = co_await storage->OnListEntry(std::move(req));
+  co_return result;
+}
+
 TEST_CASE("storage::Storage should recover at start", "[storage][bucket]") {
   SECTION("broken bucket") {
     auto dir = BuildTmpDirectory();
     fs::create_directory(dir / "broker_bucket");
     REQUIRE(IStorage::Build({.data_path = dir}));
   }
-}
-
-Task<IInfoCallback::Result> OnInfo(IStorage* storage) {
-  auto result = co_await storage->OnInfo({});
-  co_return result;
 }
 
 TEST_CASE("storage::Storage should provide info about itself", "[storage]") {
@@ -49,11 +85,6 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage]") {
 
   REQUIRE_FALSE(err);
   REQUIRE(info.version == reduct::kVersion);
-}
-
-Task<ICreateBucketCallback::Result> OnCreateBucket(IStorage* storage, ICreateBucketCallback::Request req) {
-  auto result = co_await storage->OnCreateBucket(std::move(req));
-  co_return result;
 }
 
 TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
@@ -74,11 +105,6 @@ TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
   }
 }
 
-Task<IGetBucketCallback::Result> OnGetBucket(IStorage* storage, IGetBucketCallback::Request req) {
-  auto result = co_await storage->OnGetBucket(std::move(req));
-  co_return result;
-}
-
 TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
@@ -95,11 +121,6 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
     err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();
     REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
-}
-
-Task<IUpdateBucketCallback::Result> OnChangeBucketSettings(IStorage* storage, IUpdateBucketCallback::Request req) {
-  auto result = co_await storage->OnUpdateCallback(std::move(req));
-  co_return result;
 }
 
 TEST_CASE("storage::Storage should change settings of bucket", "[entry]") {
@@ -122,11 +143,6 @@ TEST_CASE("storage::Storage should change settings of bucket", "[entry]") {
   REQUIRE(info.bucket_settings.quota_size == change_req.new_settings.quota_size);
 }
 
-Task<IRemoveBucketCallback::Result> OnRemoveBucket(IStorage* storage, IRemoveBucketCallback::Request req) {
-  auto result = co_await storage->OnRemoveBucket(std::move(req));
-  co_return result;
-}
-
 TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   auto data_path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = data_path});
@@ -147,16 +163,6 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
     err = OnRemoveBucket(storage.get(), {.bucket_name = "X"}).Get();
     REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
-}
-
-Task<IWriteEntryCallback::Result> OnWriteEntry(IStorage* storage, IWriteEntryCallback::Request req) {
-  auto result = co_await storage->OnWriteEntry(std::move(req));
-  co_return result;
-}
-
-Task<IReadEntryCallback::Result> OnReadEntry(IStorage* storage, IReadEntryCallback::Request req) {
-  auto result = co_await storage->OnReadEntry(std::move(req));
-  co_return result;
 }
 
 TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
@@ -185,13 +191,13 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
     Error error =
         OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "", .blob = ""})
             .Get();
-    REQUIRE(error == Error{.code = 400, .message = "'ts' parameter can't be empty"});
+    REQUIRE(error == Error{.code = 422, .message = "'ts' parameter can't be empty"});
 
     error =
         OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "XXXX", .blob = ""})
             .Get();
     REQUIRE(error ==
-            Error{.code = 400, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
+            Error{.code = 422, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
   }
 
   SECTION("error if bucket is not found during reading") {
@@ -201,11 +207,11 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
 
   SECTION("error if ts is empty or bad  during reading") {
     Error error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = ""}).Get();
-    REQUIRE(error == Error{.code = 400, .message = "'ts' parameter can't be empty"});
+    REQUIRE(error == Error{.code = 422, .message = "'ts' parameter can't be empty"});
 
     error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "XXXX"}).Get();
     REQUIRE(error ==
-            Error{.code = 400, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
+            Error{.code = 422, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
   }
 
   SECTION("error if the record not found") {
@@ -214,7 +220,64 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
   }
 }
 
-TEST_CASE("storage::Storage should be restored from filesystem", "[entry]") {
+TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry]") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+
+  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings}).Get() ==
+          Error::kOk);
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
+              .Get() == Error::kOk);
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1100", .blob = "some_data"})
+              .Get() == Error::kOk);
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1200", .blob = "some_data"})
+              .Get() == Error::kOk);
+
+  auto [result, err] =
+      OnListEntry(storage.get(),
+                  {.bucket_name = "bucket", .entry_name = "entry", .start_timestamp = "1000", .stop_timestamp = "1200"})
+          .Get();
+
+  REQUIRE(err == Error::kOk);
+  REQUIRE(result.records.size() == 2);
+  REQUIRE(result.records[0].timestamp == 1000);
+  REQUIRE(result.records[0].size == 11);
+  REQUIRE(result.records[1].timestamp == 1100);
+  REQUIRE(result.records[1].size == 11);
+
+  SECTION("error if bad timestamps") {
+    Error bad_ts_err =
+        OnListEntry(
+            storage.get(),
+            {.bucket_name = "bucket", .entry_name = "entry", .start_timestamp = "XXX", .stop_timestamp = "1200"})
+            .Get();
+    REQUIRE(bad_ts_err ==
+            Error{.code = 422,
+                  .message = "Failed to parse 'start_timestamp' parameter: XXX should unix times in microseconds"});
+
+    bad_ts_err =
+        OnListEntry(
+            storage.get(),
+            {.bucket_name = "bucket", .entry_name = "entry", .start_timestamp = "1000", .stop_timestamp = "XXX"})
+            .Get();
+    REQUIRE(bad_ts_err ==
+            Error{.code = 422,
+                  .message = "Failed to parse 'stop_timestamp' parameter: XXX should unix times in microseconds"});
+  }
+
+  SECTION("error, if bucket not found") {
+    REQUIRE(OnListEntry(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
+                                        .entry_name = "entry",
+                                        .start_timestamp = "1000",
+                                        .stop_timestamp = "1200"})
+                .Get()
+                .error == Error{.code = 404, .message = "Bucket 'UNKNOWN_BUCKET' is not found"});
+  }
+}
+
+TEST_CASE("storage::Storage should be restored from filesystem", "[storage][entry]") {
   const auto dir = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = dir});
 

@@ -21,7 +21,8 @@ class IApiHandler : public IInfoCallback,
                     public IRemoveBucketCallback,
                     public IUpdateBucketCallback,
                     public IWriteEntryCallback,
-                    public IReadEntryCallback {};
+                    public IReadEntryCallback,
+                    public IListEntryCallback {};
 
 /**
  * HTTP API Server

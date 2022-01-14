@@ -42,7 +42,6 @@ struct BucketSettings {
   uint64_t quota_size;
 };
 
-
 /**
  * Create bucket callback
  */
@@ -103,7 +102,9 @@ class IUpdateBucketCallback {
 //---------------------
 // Entry API
 //---------------------
-
+/**
+ * Write a new record to the entry
+ */
 class IWriteEntryCallback {
  public:
   struct Response {};
@@ -118,6 +119,9 @@ class IWriteEntryCallback {
   virtual async::Run<Result> OnWriteEntry(const Request& req) = 0;
 };
 
+/**
+ * Read a record by its timestamp
+ */
 class IReadEntryCallback {
  public:
   struct Response {
@@ -132,6 +136,28 @@ class IReadEntryCallback {
 
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnReadEntry(const Request& req) = 0;
+};
+
+class IListEntryCallback {
+ public:
+  struct RecordInfo {
+    int64_t timestamp;
+    size_t size;
+  };
+
+  struct Response {
+    std::vector<RecordInfo> records;
+  };
+
+  struct Request {
+    std::string_view bucket_name;
+    std::string_view entry_name;
+    std::string_view start_timestamp;
+    std::string_view stop_timestamp;
+  };
+
+  using Result = CallbackResult<Response>;
+  [[nodiscard]] virtual async::Run<Result> OnListEntry(const Request& req) const = 0;
 };
 
 }  // namespace reduct::api
