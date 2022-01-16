@@ -35,7 +35,20 @@ async::VoidTask HandleWriteEntry(IWriteEntryCallback *callback, uWS::HttpRespons
  */
 template <bool SSL = false>
 async::VoidTask HandleReadEntry(IReadEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                                 std::string bucket, std::string entry, std::string ts);
+                                std::string bucket, std::string entry, std::string ts);
+
+/**
+ * Handle HTTP request to list records for a time interval
+ * @tparam SSL
+ * @param callback
+ * @param res
+ * @param req
+ * @param name
+ * @return
+ */
+template <bool SSL = false>
+async::VoidTask HandleListEntry(IListEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                                std::string bucket, std::string entry, std::string start_ts, std::string stop_ts);
 
 }  // namespace reduct::api::handlers
 
