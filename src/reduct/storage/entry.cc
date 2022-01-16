@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <ranges>
 
 #include "reduct/core/logger.h"
 #include "reduct/proto/entry.pb.h"
@@ -15,6 +16,9 @@ namespace reduct::storage {
 
 using core::Error;
 using google::protobuf::util::TimeUtil;
+
+auto to_time_t = IEntry::Time::clock::to_time_t;
+
 namespace fs = std::filesystem;
 
 class Entry : public IEntry {
@@ -235,16 +239,65 @@ class Entry : public IEntry {
     return {entry_record.blob(), {}, time};
   }
 
+  ListResult List(const Time& start, const Time& stop) const override {
+    auto start_ts = FromTimePoint(start);
+    auto stop_ts = FromTimePoint(stop);
+    LOG_DEBUG("List records for interval: ({}, {})", TimeUtil::ToString(start_ts), TimeUtil::ToString(stop_ts));
+    if (start_ts > stop_ts) {
+      return {{}, {.code = 422, .message = "Start timestamp cannot be older stop timestamp"}};
+    }
+
+    if (!descriptor_.has_oldest_record_time()) {
+      return {{}, {.code = 404, .message = "No records in the entry"}};
+    }
+
+    if (stop_ts < descriptor_.oldest_record_time() || start_ts > descriptor_.latest_record_time()) {
+      return {{}, {.code = 404, .message = "No records for the time interval"}};
+    }
+
+    int start_block_index = FindBlock(std::max(descriptor_.oldest_record_time(), start_ts));
+    if (start_block_index == -1) {
+      LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(start_ts));
+      return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
+    }
+
+    int stop_block_index = FindBlock(std::min(descriptor_.latest_record_time(), stop_ts));
+    if (stop_block_index == -1) {
+      LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(stop_ts));
+      return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
+    }
+
+    std::vector<RecordInfo> records;
+    for (auto block_index = start_block_index; block_index <= stop_block_index; ++block_index) {
+      auto block = descriptor_.blocks(block_index);
+      for (auto record_index = 0; record_index < block.records_size(); ++record_index) {
+        const auto& record = block.records(record_index);
+        if (record.timestamp() >= start_ts && record.timestamp() < stop_ts) {
+          records.push_back(RecordInfo{.time = ToTimePoint(record.timestamp()), .size = record.end() - record.begin()});
+        }
+      }
+    }
+
+    if (records.empty()) {
+      return {{}, {.code = 404, .message = "No records for time interval"}};
+    }
+
+    std::ranges::sort(records, {}, &RecordInfo::time);
+    return {records, {}};
+  }
+
   Error RemoveOldestBlock() override {
     auto& block = descriptor_.blocks(0);
     fs::remove(full_path_ / fmt::format(kBlockNameFormat, block.id()));
 
     if (descriptor_.blocks_size() == 1) {
+      // if it is the first block to be deleted, create a new one before
       current_block_ = StartNextBlock();
       descriptor_.clear_oldest_record_time();
     } else {
       const auto& next_block = descriptor_.blocks(1);
       if (!next_block.has_begin_time()) {
+        // no records in the next block , so we will be empty after removing
         descriptor_.clear_oldest_record_time();
       } else {
         descriptor_.mutable_oldest_record_time()->CopyFrom(next_block.begin_time());
@@ -254,10 +307,7 @@ class Entry : public IEntry {
     descriptor_.set_size(descriptor_.size() - descriptor_.blocks(0).size());
     descriptor_.mutable_blocks()->DeleteSubrange(0, 1);
 
-    if (auto err = SaveDescriptor()) {
-      return err;
-    }
-    return Error::kOk;
+    return SaveDescriptor();
   }
 
   Info GetInfo() const override {
@@ -346,7 +396,6 @@ std::ostream& operator<<(std::ostream& os, const IEntry::ReadResult& result) {
 }
 
 std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
-  auto to_time_t = IEntry::Time::clock::to_time_t;
   os << fmt::format(
       "<IEntry::Info block_count={}  record_count={} bytes={} oldest_record_time={} latest_record_time={}>",
       info.block_count, info.record_count, info.bytes, to_time_t(info.oldest_record_time),
@@ -354,4 +403,8 @@ std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
   return os;
 }
 
+std::ostream& operator<<(std::ostream& os, const IEntry::RecordInfo& info) {
+  os << fmt::format("<IEntry::RecordInfo time={}, size={}>", to_time_t(info.time), info.size);
+  return os;
+}
 };  // namespace reduct::storage

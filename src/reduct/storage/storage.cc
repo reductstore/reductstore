@@ -1,6 +1,7 @@
 // Copyright 2021-2022 Alexey Timin
 #include "reduct/storage/storage.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <numeric>
 #include <shared_mutex>
@@ -203,6 +204,46 @@ class Storage : public IStorage {
     });
   }
 
+  [[nodiscard]] Run<IListEntryCallback::Result> OnListEntry(const IListEntryCallback::Request& req) const override {
+    using Callback = IListEntryCallback;
+
+    return Run<Callback::Result>([this, req] {
+      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      if (err) {
+        return Callback::Result{{}, err};
+      }
+
+      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+      if (ref_error) {
+        return Callback::Result{{}, ref_error};
+      }
+
+      auto [start_ts, parse_start_err] = ParseTimestamp(req.start_timestamp, "start_timestamp");
+      if (parse_start_err) {
+        return Callback::Result{{}, parse_start_err};
+      }
+
+      auto [stop_ts, parse_stop_err] = ParseTimestamp(req.stop_timestamp, "stop_timestamp");
+      if (parse_stop_err) {
+        return Callback::Result{{}, parse_stop_err};
+      }
+
+      auto [list, list_err] = entry.lock()->List(start_ts, stop_ts);
+      if (list_err) {
+        return Callback::Result{{}, list_err};
+      }
+
+      Callback::Response resp;
+      std::ranges::transform(list, std::back_inserter(resp.records), [](const IEntry::RecordInfo& info) {
+        return Callback::RecordInfo{
+            .timestamp = std::chrono::duration_cast<std::chrono::microseconds>(info.time.time_since_epoch()).count(),
+            .size = info.size};
+      });
+
+      return Callback::Result{std::move(resp), {}};
+    });
+  }
+
  private:
   using BucketMap = std::map<std::string, std::unique_ptr<IBucket>>;
 
@@ -215,19 +256,20 @@ class Storage : public IStorage {
     return {it, Error::kOk};
   }
 
-  static std::tuple<IEntry::Time, Error> ParseTimestamp(std::string_view timestamp) {
+  static std::tuple<IEntry::Time, Error> ParseTimestamp(std::string_view timestamp,
+                                                        std::string_view param_name = "ts") {
     auto ts = IEntry::Time::clock::now();
     if (timestamp.empty()) {
-      return {IEntry::Time{}, Error{.code = 400, .message = "'ts' parameter can't be empty"}};
+      return {IEntry::Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
     }
     try {
       ts = IEntry::Time{} + std::chrono::microseconds(std::stoi(std::string{timestamp}));
       return {ts, Error::kOk};
     } catch (...) {
       return {IEntry::Time{},
-              Error{.code = 400,
-                    .message = fmt::format("Failed to parse 'ts' parameter: {} should unix times in microseconds",
-                                           std::string{timestamp})}};
+              Error{.code = 422,
+                    .message = fmt::format("Failed to parse '{}' parameter: {} should unix times in microseconds",
+                                           param_name, std::string{timestamp})}};
     }
   }
 

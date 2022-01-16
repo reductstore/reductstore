@@ -54,4 +54,34 @@ template VoidTask HandleReadEntry<>(IReadEntryCallback *callback, uWS::HttpRespo
 template VoidTask HandleReadEntry<>(IReadEntryCallback *callback, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
                                     std::string bucket, std::string entry, std::string ts);
 
+template <bool SSL = false>
+async::VoidTask HandleListEntry(IListEntryCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                                std::string bucket, std::string entry, std::string start_ts, std::string stop_ts) {
+  IListEntryCallback::Request data{
+      .bucket_name = bucket,
+      .entry_name = entry,
+      .start_timestamp = start_ts,
+      .stop_timestamp = stop_ts,
+  };
+
+  [[maybe_unused]] auto err = BasicHandle<SSL, IListEntryCallback>(res, req)
+                                  .OnSuccess([](IListEntryCallback::Response app_resp) {
+                                    nlohmann::json data;
+                                    for (const auto &rec : app_resp.records) {
+                                      nlohmann::json record;
+                                      record["ts"] = rec.timestamp;
+                                      record["size"] = rec.size;
+                                      data["records"].push_back(record);
+                                    }
+                                    return data.dump();
+                                  })
+                                  .Run(co_await callback->OnListEntry(data));
+  co_return;
+}
+
+template VoidTask HandleListEntry(IListEntryCallback *callback, uWS::HttpResponse<false> *res, uWS::HttpRequest *req,
+                                  std::string bucket, std::string entry, std::string start_ts, std::string stop_ts);
+
+template VoidTask HandleListEntry(IListEntryCallback *callback, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
+                                  std::string bucket, std::string entry, std::string start_ts, std::string stop_ts);
 }  // namespace reduct::api::handlers
