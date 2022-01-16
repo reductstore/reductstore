@@ -5,7 +5,7 @@ set(MINOR_VERSION 1)
 set(PATCH_VERSION 0)
 set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
 
-option(REDUCT_BUILD_TEST ON "Build unit tests")
+option(REDUCT_BUILD_TEST "Build unit tests" ON)
 
 
 set(DEFAULT_MAX_BLOCK_SIZE 1048576 CACHE STRING "Default max size for block with data")
@@ -47,6 +47,7 @@ message(STATUS "Protobuf exe  ${Protobuf_PROTOC_EXECUTABLE}")
 
 add_subdirectory(src)
 
+message(STATUS "REDUCT_BUILD_TEST=${REDUCT_BUILD_TEST}")
 if (REDUCT_BUILD_TEST)
     add_subdirectory(unit_tests)
 endif ()
