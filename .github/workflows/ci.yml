@@ -80,6 +80,7 @@ jobs:
     needs:
       - unit_tests
       - api_tests
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v2
       - name: Log in to the Container registry
