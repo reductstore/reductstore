@@ -17,6 +17,15 @@ Reduct Storage is a blob storage engine with a simple HTTP API. If the cloud sto
 * provides data by time, so you don't need to have some IDs for your blobs. You should know only time interval for the HTTP request
 
 
+## Get started
+
+The easiest way to start is to use Docker image:
+
+```shell
+mkdir data
+docker run -p 8181:8181 -v ${PWD}/data:/var/reduct-storage/data ghcr.io/reduct-storage/reduct-storage
+```
+
 ##  API Example
 
 Get information about the server:
