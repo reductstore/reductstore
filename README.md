@@ -26,17 +26,17 @@ curl http://127.0.0.1:8383/info #-> {"bucket_count":183,"version":"0.1.0"}
 
 Create a bucket with FIFO quota:
 ```shell
- curl -d "{\"quot_type\":\"FIFO\", \"quota_size\":10000}" -X POST -a http://127.0.0.1:8383/my_data
+ curl -d "{\"quot_type\":\"FIFO\", \"quota_size\":10000}" -X POST -a http://127.0.0.1:8383/b/my_data
 ```
 
 Write some data with timestamp 100000:
 ```shell
-curl -d "some_data" -X POST -a http://127.0.0.1:8383/my_data/entry_1?ts=10000
+curl -d "some_data" -X POST -a http://127.0.0.1:8383/b/my_data/entry_1?ts=10000
 ```
 
-Reade data by timestamp:
+Read data by timestamp:
 ```shell
-curl  http://127.0.0.1:8383/my_data/entry_1?ts=10000 #-> "some_data"
+curl  http://127.0.0.1:8383/b/my_data/entry_1?ts=10000 #-> "some_data"
 ```
 
 ## Build
