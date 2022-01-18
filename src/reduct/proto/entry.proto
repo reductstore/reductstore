@@ -42,7 +42,7 @@ message EntryRecord {
     string value = 2;
   }
 
-  string blob = 1;                      // blob of data
+  bytes blob = 1;                       // blob of data
   repeated MetaEntry meta_data = 2;     // meta information as list of key-values
 
 }
