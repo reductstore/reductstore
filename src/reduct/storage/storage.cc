@@ -263,7 +263,7 @@ class Storage : public IStorage {
       return {IEntry::Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
     }
     try {
-      ts = IEntry::Time{} + std::chrono::microseconds(std::stoi(std::string{timestamp}));
+      ts = IEntry::Time{} + std::chrono::microseconds(std::stol(std::string{timestamp}));
       return {ts, Error::kOk};
     } catch (...) {
       return {IEntry::Time{},
