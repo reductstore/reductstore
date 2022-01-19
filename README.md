@@ -23,7 +23,7 @@ The easiest way to start is to use Docker image:
 
 ```shell
 mkdir data
-docker run -p 8181:8181 -v ${PWD}/data:/var/reduct-storage/data ghcr.io/reduct-storage/reduct-storage:main
+docker run -p 8383:8383 -v ${PWD}/data:/var/reduct-storage/data ghcr.io/reduct-storage/reduct-storage:main
 ```
 
 ##  API Example
