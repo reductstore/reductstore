@@ -1,5 +1,6 @@
 // Copyright 2021 Alexey Timin
 #include <uWebSockets/Loop.h>
+
 #include <csignal>
 
 #include "reduct/api/api_server.h"
@@ -22,12 +23,9 @@ class Loop : public ILoop {
 };
 
 static bool running = true;
-static void SignalHandler(auto signal) {
-    running = false;
-}
+static void SignalHandler(auto signal) { running = false; }
 
 int main() {
-
   std::signal(SIGINT, SignalHandler);
   std::signal(SIGTERM, SignalHandler);
 

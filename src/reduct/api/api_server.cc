@@ -67,10 +67,9 @@ class ApiServer : public IApiServer {
                res->end({});
              })
         .listen(host, port, 0,
-                [&](us_listen_socket_t* sock) {
+                [&](us_listen_socket_t *sock) {
                   if (sock) {
                     LOG_INFO("Run HTTP server on {}:{}", host, port);
-
 
                     std::thread stopper([sock, &running] {
                       while (running) {
