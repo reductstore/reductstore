@@ -1,6 +1,8 @@
 // Copyright 2021 Alexey Timin
 #include <uWebSockets/Loop.h>
 
+#include <csignal>
+
 #include "reduct/api/api_server.h"
 #include "reduct/async/loop.h"
 #include "reduct/config.h"
@@ -20,7 +22,13 @@ class Loop : public ILoop {
   void Defer(Task&& task) override { uWS::Loop::get()->defer(std::move(task)); }
 };
 
+static bool running = true;
+static void SignalHandler(auto signal) { running = false; }
+
 int main() {
+  std::signal(SIGINT, SignalHandler);
+  std::signal(SIGTERM, SignalHandler);
+
   LOG_INFO("Reduct Storage {}", reduct::kVersion);
 
   EnvVariable env;
@@ -45,7 +53,7 @@ int main() {
                                                           .port = port,
                                                           .base_path = api_base_path,
                                                       });
-  server->Run();
+  server->Run(running);
 
   return 0;
 }
