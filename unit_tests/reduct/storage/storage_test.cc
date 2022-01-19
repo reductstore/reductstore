@@ -171,14 +171,16 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
   REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings}).Get() ==
           Error::kOk);
 
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .blob = "some_data"})
               .Get() == Error::kOk);
   auto [resp, err] =
-      OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000"}).Get();
+      OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000"})
+          .Get();
   REQUIRE(err == Error::kOk);
   REQUIRE(resp.blob == "some_data");
-  REQUIRE(resp.timestamp == "1000");
+  REQUIRE(resp.timestamp == "1610387457862000");
 
   SECTION("error if bucket is not found during writing") {
     Error error = OnWriteEntry(storage.get(),
@@ -225,26 +227,30 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
 
   REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings}).Get() ==
           Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .blob = "some_data"})
               .Get() == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1100", .blob = "some_data"})
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862001", .blob = "some_data"})
               .Get() == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1200", .blob = "some_data"})
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862002", .blob = "some_data"})
               .Get() == Error::kOk);
 
-  auto [result, err] =
-      OnListEntry(storage.get(),
-                  {.bucket_name = "bucket", .entry_name = "entry", .start_timestamp = "1000", .stop_timestamp = "1200"})
-          .Get();
+  auto [result, err] = OnListEntry(storage.get(), {.bucket_name = "bucket",
+                                                   .entry_name = "entry",
+                                                   .start_timestamp = "1610387457862000",
+                                                   .stop_timestamp = "1610387457862002"})
+                           .Get();
 
   REQUIRE(err == Error::kOk);
   REQUIRE(result.records.size() == 2);
-  REQUIRE(result.records[0].timestamp == 1000);
+  REQUIRE(result.records[0].timestamp == 1610387457862000);
   REQUIRE(result.records[0].size == 11);
-  REQUIRE(result.records[1].timestamp == 1100);
+  REQUIRE(result.records[1].timestamp == 1610387457862001);
   REQUIRE(result.records[1].size == 11);
 
   SECTION("error if bad timestamps") {
