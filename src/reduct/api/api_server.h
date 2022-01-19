@@ -46,7 +46,7 @@ class IApiServer {
   /**
    * Runs HTTP server
    */
-  virtual void Run() const = 0;
+  virtual void Run(const bool &running) const = 0;
 };
 
 }  // namespace reduct::api

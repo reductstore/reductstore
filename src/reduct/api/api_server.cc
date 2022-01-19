@@ -22,7 +22,7 @@ class ApiServer : public IApiServer {
   explicit ApiServer(std::unique_ptr<IApiHandler> handler, Options options)
       : handler_(std::move(handler)), options_(std::move(options)) {}
 
-  void Run() const override {
+  void Run(const bool &running) const override {
     const auto &[host, port, base_path] = options_;
 
     uWS::App()
@@ -67,9 +67,22 @@ class ApiServer : public IApiServer {
                res->end({});
              })
         .listen(host, port, 0,
-                [&](auto sock) {
+                [&](us_listen_socket_t* sock) {
                   if (sock) {
                     LOG_INFO("Run HTTP server on {}:{}", host, port);
+
+
+                    std::thread stopper([sock, &running] {
+                      while (running) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                      }
+
+                      LOG_INFO("Stopping storage...");
+                      us_listen_socket_close(0, sock);
+                    });
+
+                    stopper.detach();
+
                   } else {
                     LOG_ERROR("Failed to listen to {}:{}", host, port);
                   }
