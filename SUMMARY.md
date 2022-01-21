@@ -2,12 +2,12 @@
 
 * [Reduct Storage](README.md)
 
-## Getting Started <a href="#docs/getting_started" id="docs/getting_started"></a>
+## Documentation
 
-* [Installing](docs/getting\_started/installing.md)
-* [Settings](docs/getting\_started/settings.md)
-
-## HTTP API <a href="#docs/http-api" id="docs/http-api"></a>
-
-* [Bucket API](docs/http-api/bucket-api.md)
-* [Entry API](docs/http-api/entry-api.md)
+* [Getting Started](documentation/getting-started/README.md)
+  * [Installing](documentation/getting-started/installing.md)
+  * [Settings](documentation/getting-started/settings.md)
+* [HTTP API](documentation/http-api/README.md)
+  * [Server API](documentation/http-api/server-api.md)
+  * [Bucket API](documentation/http-api/bucket-api.md)
+  * [Entry API](documentation/http-api/entry-api.md)
