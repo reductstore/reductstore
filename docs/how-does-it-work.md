@@ -17,7 +17,36 @@ In comparison with other S3 like blob storage, Reduct Storage does its job diffe
 
 ## Internal Structure
 
+![](<.gitbook/assets/Untitled Diagram.svg>)
+
 As was mentioned above, Reduct Storage has flat structure:
 
-* **Bucket** - the collections of entries. It contains settings that a common for all the entries
-* **Entry— TODO**
+#### **Bucket**
+
+A container for entries which provides the storage settings:
+
+* **Maximal block size.** The size of the block, when the storage creates a new one after it finishes the current write operation. A block might be bigger than this size because the storage can write a belated record. &#x20;
+* **Quota type.** The storage supports two types:
+  * No quota. A bucket will consume the whole free disk space.
+  * FIFO. A bucket removes the oldest block of some entry, when it reaches the quota limit.
+* **Quota size.**
+
+A user can manage bucket with[ Bucket API](http-api/bucket-api.md).
+
+#### Entry
+
+The entry represents a source of data. For example,  It might be a camera or output of a model. The entry should have a unique name so that a user can address to it with [Entry API.](http-api/bucket-api.md)
+
+**Block**
+
+A block of records with unique ID. The storage batches the records by blocks for few reasons:
+
+* Reduce overhead to store little blobs. If you store a little chunk of information as separate files, they always consume at least one block of the file system. It maybe 512 bytes or bigger. So if you have a blob with 5 bytes of data, it consumes 512 bytes as a file.
+* Search records quickly. The storage finds the needed block first, then the record.&#x20;
+
+#### Record
+
+A blob with a timestamp
+
+
+
