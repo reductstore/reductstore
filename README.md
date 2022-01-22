@@ -1,6 +1,6 @@
 # Reduct Storage
 
-Cloud\Edge blob storage with focus on AI\ML systems.
+Historian blob storage with focus on AI\ML systems.
 
 Features: 
 
