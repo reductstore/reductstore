@@ -17,7 +17,7 @@ The storage uses HTTP API and stores the data as blobs. Read more [here](https:/
 The easiest way to start is to use Docker image:
 
 ```shell
-docker run -p 8383:8383 -v ${PWD}/data:/var/reduct-storage/data ghcr.io/reduct-storage/reduct-storage:main
+docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-storage:main
 ```
 
 ## API Example

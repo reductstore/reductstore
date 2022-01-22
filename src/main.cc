@@ -32,11 +32,11 @@ int main() {
   LOG_INFO("Reduct Storage {}", reduct::kVersion);
 
   EnvVariable env;
-  auto log_level = env.Get<std::string>("LOG_LEVEL", "INFO");
-  auto host = env.Get<std::string>("HOST", "0.0.0.0");
-  auto port = env.Get<int>("PORT", 8383);
-  auto api_base_path = env.Get<std::string>("API_BASE_PATH", "/");
-  auto data_path = env.Get<std::string>("DATA_PATH", "/var/reduct-storage/data");
+  auto log_level = env.Get<std::string>("RS_LOG_LEVEL", "INFO");
+  auto host = env.Get<std::string>("RS_HOST", "0.0.0.0");
+  auto port = env.Get<int>("RS_PORT", 8383);
+  auto api_base_path = env.Get<std::string>("RS_API_BASE_PATH", "/");
+  auto data_path = env.Get<std::string>("RS_DATA_PATH", "/data");
 
   Logger::set_level(log_level);
 
