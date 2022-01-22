@@ -1,7 +1,7 @@
 # Table of contents
 
 * [💡 Getting Started](README.md)
-* [😯 How does it work?](how-does-it-work.md)
+* [😯 How Does It Work?](how-does-it-work.md)
 * [⚙ HTTP API](http-api/README.md)
   * [Server API](http-api/server-api.md)
   * [Bucket API](http-api/bucket-api.md)
