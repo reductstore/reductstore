@@ -1,6 +1,9 @@
 # Reduct Storage
 
-Reduct Storage aims to solve the problem of storing data in a case where you need to write some data intensively and read it accidentally by some time interval. The storage uses HTTP API and stores the data as blobs. Read more [here](https://docs.reduct-storage.dev/http-api).
+Historian blob storage with focus on AI\ML systems.
+
+Reduct Storage aims to solve the problem of storing data in a case where you need to write some data intensively and read it accidentally by some time interval. 
+The storage uses HTTP API and stores the data as blobs. Read more [here](https://docs.reduct-storage.dev/http-api).
 
 ## Features:
 
