@@ -1,9 +1,6 @@
 # Table of contents
 
 * [Reduct Storage](Projects/flipback/reduct-storage/README.md)
-
-## Documentation
-
 * [Getting Started](Projects/flipback/reduct-storage/getting-started.md)
 * [HTTP API](Projects/flipback/reduct-storage/http-api/README.md)
   * [Server API](Projects/flipback/reduct-storage/http-api/server-api.md)
