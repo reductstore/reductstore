@@ -1,4 +1,10 @@
+---
+description: Server API provides information about the storage and its state
+---
+
 # Server API
+
+
 
 {% swagger method="get" path=" " baseUrl="/info" summary="Get infromation about the storage" %}
 {% swagger-description %}
