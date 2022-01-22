@@ -72,7 +72,7 @@ Size of quota in bytes (default: 0)
 {% swagger-response status="409: Conflict" description="A bucket with the same name already exists" %}
 ```javascript
 {
-    // Response
+    "detail": "string"
 }
 ```
 {% endswagger-response %}
@@ -80,7 +80,7 @@ Size of quota in bytes (default: 0)
 {% swagger-response status="422: Unprocessable Entity" description="JSON request is invalid" %}
 ```javascript
 {
-    // Response
+    "detail": "string"
 }
 ```
 {% endswagger-response %}
@@ -118,7 +118,7 @@ Size of quota in bytes
 {% swagger-response status="404: Not Found" description="Bucket doesn't exists" %}
 ```javascript
 {
-    // Response
+    "detail": "string"
 }
 ```
 {% endswagger-response %}
@@ -126,7 +126,7 @@ Size of quota in bytes
 {% swagger-response status="422: Unprocessable Entity" description="JSON request is invalid" %}
 ```javascript
 {
-    // Response
+    "detail": "string"
 }
 ```
 {% endswagger-response %}
@@ -154,7 +154,7 @@ Name of bucket to remove
 {% swagger-response status="404: Not Found" description="Bucket doesn't exists" %}
 ```javascript
 {
-    // Response
+    "detail": "string"
 }
 ```
 {% endswagger-response %}
