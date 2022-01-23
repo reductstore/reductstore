@@ -23,7 +23,14 @@ class ApiServer : public IApiServer {
       : handler_(std::move(handler)), options_(std::move(options)) {}
 
   void Run(const bool &running) const override {
-    const auto &[host, port, base_path] = options_;
+    auto [host, port, base_path] = options_;
+
+    if (!base_path.starts_with('/')) {
+      base_path = "/" + base_path;
+    }
+    if (!base_path.ends_with('/')) {
+      base_path.push_back('/');
+    }
 
     uWS::App()
         .get(base_path + "info", [this](auto *res, auto *req) { handlers::HandleInfo(handler_.get(), res, req); })
@@ -61,7 +68,7 @@ class ApiServer : public IApiServer {
                                          std::string(req->getParameter(1)), std::string(req->getQuery("start")),
                                          std::string(req->getQuery("stop")));
              })
-        .any(base_path + ":any",
+        .any("/*",
              [](auto *res, auto *req) {
                res->writeStatus("404");
                res->end({});
@@ -72,6 +79,7 @@ class ApiServer : public IApiServer {
                     LOG_INFO("Run HTTP server on {}:{}", host, port);
 
                     std::thread stopper([sock, &running] {
+                      // Checks running flag and closes the socket to stop the app gracefully
                       while (running) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
                       }
