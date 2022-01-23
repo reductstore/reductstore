@@ -10,3 +10,16 @@ def test_get_info(base_url):
     data = json.loads(resp.content)
     assert data['version'] == '0.1.0'
     assert data['bucket_count'] > 0
+
+
+def test_get_wrong_path(base_url):
+    """Should return 404"""
+
+    resp = requests.get(f'{base_url}/')
+    assert resp.status_code == 404
+
+    resp = requests.get(f'{base_url}/NOTEXIST')
+    assert resp.status_code == 404
+
+    resp = requests.get(f'{base_url}/NOTEXIST/XXXX')
+    assert resp.status_code == 404
