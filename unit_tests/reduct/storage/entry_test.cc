@@ -216,13 +216,13 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
 
     SECTION("request data before first record") {
       auto [records, err] = entry->List(kTimestamp - seconds(2), kTimestamp - seconds(1));
-      REQUIRE(err == Error{.code = 404, .message = "No records for the time interval"});
+      REQUIRE(err == Error{.code = 404, .message = "No records for time interval"});
       REQUIRE(records.empty());
     }
 
     SECTION("request data after last record") {
       auto [records, err] = entry->List(kTimestamp + seconds(3), kTimestamp + seconds(4));
-      REQUIRE(err == Error{.code = 404, .message = "No records for the time interval"});
+      REQUIRE(err == Error{.code = 404, .message = "No records for time interval"});
       REQUIRE(records.empty());
     }
 
