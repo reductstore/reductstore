@@ -82,11 +82,8 @@ jobs:
     needs:
       - api_tests
       - unit_tests
+    if: github.event.base_ref == 'refs/heads/main'
     steps:
-      - name: Exit if not on master branch
-        if: endsWith(github.ref, 'main') == false
-        run: exit -1
-
       - uses: actions/checkout@v2
       - name: Log in to the Container registry
         uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
