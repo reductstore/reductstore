@@ -82,7 +82,7 @@ jobs:
     needs:
       - api_tests
       - unit_tests
-    if: github.event.base_ref == 'refs/heads/main'
+    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@v2
       - name: Log in to the Container registry
