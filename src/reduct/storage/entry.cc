@@ -252,7 +252,7 @@ class Entry : public IEntry {
     }
 
     if (stop_ts < descriptor_.oldest_record_time() || start_ts > descriptor_.latest_record_time()) {
-      return {{}, {.code = 404, .message = "No records for the time interval"}};
+      return {{}, {.code = 404, .message = "No records for time interval"}};
     }
 
     int start_block_index = FindBlock(std::max(descriptor_.oldest_record_time(), start_ts));
