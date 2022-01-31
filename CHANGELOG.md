@@ -1,4 +1,4 @@
-## Relese 0.1.1 (in progress)
+## Release 0.1.1 (in progress)
 
 **Bugs**:
 
