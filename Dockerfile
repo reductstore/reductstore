@@ -21,5 +21,5 @@ RUN make -j4
 FROM ubuntu:21.10
 
 COPY --from=builder /build/bin/ /usr/local/bin/
-RUN mkdir /data -p
+RUN mkdir /data
 CMD ["reduct-storage"]
