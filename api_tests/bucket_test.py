@@ -109,3 +109,18 @@ def test_remove_bucket_not_exist(base_url, bucket_name):
     resp = requests.delete(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 404
     assert "is not found" in get_detail(resp)
+
+
+def test_head_bucket_ok(base_url, bucket_name):
+    """Should check if bucket exist"""
+    resp = requests.post(f'{base_url}/b/{bucket_name}')
+    assert resp.status_code == 200
+
+    resp = requests.head(f'{base_url}/b/{bucket_name}')
+    assert resp.status_code == 200
+    assert len(resp.content) == 0
+
+    resp = requests.head(f'{base_url}/b/{bucket_name}_________')
+    assert resp.status_code == 404
+    assert len(resp.content) == 0
+

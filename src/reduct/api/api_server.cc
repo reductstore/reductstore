@@ -43,6 +43,10 @@ class ApiServer : public IApiServer {
              [this](auto *res, auto *req) {
                handlers::HandleGetBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
              })
+        .head(base_path + "b/:bucket_name",
+              [this](auto *res, auto *req) {
+                handlers::HandleHeadBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
+              })
         .put(base_path + "b/:bucket_name",
              [this](auto *res, auto *req) {
                handlers::HandleUpdateBucket(handler_.get(), res, req, std::string(req->getParameter(0)));
