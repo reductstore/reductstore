@@ -1,6 +1,5 @@
 # Table of contents
 
-* [Stable Version](https://docs.reduct-storage.dev)
 * [💡 Getting Started](README.md)
 * [😯 How Does It Work?](how-does-it-work.md)
 * [⚙ HTTP API](http-api/README.md)
@@ -11,3 +10,7 @@
 ## SDKs
 
 * [C++ Client SDK](https://cpp.reduct-storage.dev)
+
+## Versions
+
+* [Stable](https://docs.reduct-storage.dev)
