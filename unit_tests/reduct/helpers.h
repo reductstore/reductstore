@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2022 Alexey Timin
 
 #ifndef REDUCT_STORAGE_HELPERS_H
 #define REDUCT_STORAGE_HELPERS_H
