@@ -1,4 +1,10 @@
-## Release 0.1.1 (in progress)
+## Release 0.2.0
+
+**Bugs**:
+
+* Fix docker build on ARM32, [PR-29](https://github.com/reduct-storage/reduct-storage/pull/29)
+
+## Release 0.1.1 (2022-02-13)
 
 **Bugs**:
 
