@@ -1,5 +1,9 @@
 ## Release 0.2.0 (in progress)
 
+**Features**:
+
+* Add HEAD method to Bucket API, [PR-30](https://github.com/reduct-storage/reduct-storage/pull/30)
+
 **Bugs**:
 
 * Fix docker build on ARM32, [PR-29](https://github.com/reduct-storage/reduct-storage/pull/29)

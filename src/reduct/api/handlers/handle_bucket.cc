@@ -13,6 +13,9 @@ namespace reduct::api::handlers {
 using async::VoidTask;
 using core::Error;
 
+/**
+ * POST
+ */
 template <bool SSL>
 VoidTask HandleCreateBucket(ICreateBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                             std::string name) {
@@ -42,7 +45,9 @@ template VoidTask HandleCreateBucket<>(ICreateBucketCallback *handler, uWS::Http
                                        uWS::HttpRequest *req, std::string name);
 template VoidTask HandleCreateBucket<>(ICreateBucketCallback *handler, uWS::HttpResponse<true> *res,
                                        uWS::HttpRequest *req, std::string name);
-
+/**
+ * GET
+ */
 template <bool SSL>
 VoidTask HandleGetBucket(IGetBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                          std::string name) {
@@ -64,6 +69,26 @@ template VoidTask HandleGetBucket<>(IGetBucketCallback *handler, uWS::HttpRespon
 template VoidTask HandleGetBucket<>(IGetBucketCallback *handler, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
                                     std::string name);
 
+/**
+ * HEAD
+ */
+template <bool SSL>
+VoidTask HandleHeadBucket(IGetBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                         std::string name) {
+  IGetBucketCallback::Request app_request{.bucket_name = name};
+  [[maybe_unused]] auto err = BasicHandle<SSL, IGetBucketCallback>(res, req)
+                                  .Run(co_await callback->OnGetBucket(app_request));
+  co_return;
+}
+
+template VoidTask HandleHeadBucket<>(IGetBucketCallback *handler, uWS::HttpResponse<false> *res, uWS::HttpRequest *req,
+                                    std::string name);
+template VoidTask HandleHeadBucket<>(IGetBucketCallback *handler, uWS::HttpResponse<true> *res, uWS::HttpRequest *req,
+                                    std::string name);
+
+/**
+ * PUT
+ */
 template <bool SSL>
 VoidTask HandleUpdateBucket(IUpdateBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                             std::string name) {
@@ -97,6 +122,9 @@ template VoidTask HandleUpdateBucket<>(IUpdateBucketCallback *callback, uWS::Htt
 template VoidTask HandleUpdateBucket<>(IUpdateBucketCallback *callback, uWS::HttpResponse<true> *res,
                                        uWS::HttpRequest *req, std::string name);
 
+/**
+ * DELETE
+ */
 template <bool SSL>
 VoidTask HandleRemoveBucket(IRemoveBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                             std::string name) {

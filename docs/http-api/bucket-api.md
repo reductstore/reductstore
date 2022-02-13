@@ -21,7 +21,7 @@ Read more about buckets in [How does it work?](../how-does-it-work.md)
 Name of bucket
 {% endswagger-parameter %}
 
-{% swagger-response status="200: OK" description="Information in JSON format" %}
+{% swagger-response status="200: OK" description="Information about the bucket in JSON format" %}
 ```javascript
 {
     "max_block_size": "integer",
@@ -31,10 +31,36 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="Bucket doesn't exists" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn't exists" %}
 ```javascript
 {
     "detail": "string"
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger method="head" path=" " baseUrl="/b/:bucket_name " summary="Check if a bucket exists" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="bucket_name" required="true" %}
+Name of bucket
+{% endswagger-parameter %}
+
+{% swagger-response status="200: OK" description="The bucket exists" %}
+```javascript
+{
+    // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="404: Not Found" description="The bucket doesn't exist" %}
+```javascript
+{
+    // Response
 }
 ```
 {% endswagger-response %}
@@ -49,15 +75,15 @@ To create a bucket, the request should contain a JSON document with some paramet
 Name of new bucket
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="max_block_size" type="Integer" %}
+{% swagger-parameter in="body" name="max_block_size" type="Integer" required="false" %}
 Maximal size of a data block in bytes (default: 1Mb)
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="quota_type" type="String" %}
-Type of quota. Can have values "NONE" or "FIFO"  (default: "NONE")
+{% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
+Type of quota. Can have values "NONE" or "FIFO" (default: "NONE")
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="quota_size" type="Integer" %}
+{% swagger-parameter in="body" name="quota_size" type="Integer" required="false" %}
 Size of quota in bytes (default: 0)
 {% endswagger-parameter %}
 
@@ -96,14 +122,14 @@ Name of bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="Integer" required="true" %}
-Maximal size of a data block in bytes 
+Maximal size of a data block in bytes
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="quota_type" type="String" %}
+{% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
 Type of quota. Can have values "NONE" or "FIFO"
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="quota_size" type="Integer" %}
+{% swagger-parameter in="body" name="quota_size" type="Integer" required="false" %}
 Size of quota in bytes
 {% endswagger-parameter %}
 
@@ -115,7 +141,7 @@ Size of quota in bytes
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="Bucket doesn't exists" %}
+{% swagger-response status="404: Not Found" description="Bucket doesn" %}
 ```javascript
 {
     "detail": "string"
@@ -134,7 +160,7 @@ Size of quota in bytes
 
 {% swagger method="delete" path=" " baseUrl="/b/:bucket_name " summary="Remove a bucket" %}
 {% swagger-description %}
-Remove a bucket with all 
+Remove a bucket with all
 
 **the stored data**
 {% endswagger-description %}
@@ -151,7 +177,7 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="Bucket doesn't exists" %}
+{% swagger-response status="404: Not Found" description="Bucket doesn" %}
 ```javascript
 {
     "detail": "string"
@@ -159,4 +185,3 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 {% endswagger %}
-

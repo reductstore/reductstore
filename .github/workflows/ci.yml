@@ -1,11 +1,11 @@
 name: ci
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, stable ]
     tags:
       - 'v*'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, stable ]
 jobs:
   cpplint:
     runs-on: ubuntu-latest
