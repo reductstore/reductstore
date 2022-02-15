@@ -106,10 +106,11 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
 
     REQUIRE(bucket->GetInfo().record_count == 3);
     REQUIRE(bucket->KeepQuota() == Error::kOk);
-    REQUIRE(bucket->GetInfo().record_count == 1);
+    REQUIRE(bucket->GetInfo().record_count == 2);
 
     REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
-    REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+    REQUIRE(entry1->Read(ts + seconds(3)).error == Error::kOk);
+    REQUIRE(entry2->Read(ts + seconds(2)).error == Error::kOk);
 
     SECTION("the same state after restoring") {
       auto info = bucket->GetInfo();
@@ -120,14 +121,14 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     }
   }
 
-  SECTION("should clean current block") {
+  SECTION("should keep current block") {
     REQUIRE(entry1->Write("little_fist_chunk", ts + seconds(1)) == Error::kOk);
     REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
     REQUIRE(entry2->Write(blob, ts + seconds(3)) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
 
-    REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
+    REQUIRE(entry1->Read(ts + seconds(1)).error == Error::kOk);
     REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
   }
 }
