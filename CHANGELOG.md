@@ -7,6 +7,7 @@
 **Bugs**:
 
 * Fix docker build on ARM32, [PR-29](https://github.com/reduct-storage/reduct-storage/pull/29)
+* Fix IBucket::List error 500 for timestamps between blocks, [PR-31](https://github.com/reduct-storage/reduct-storage/pull/31)
 
 ## Release 0.1.1 (2022-02-13)
 
