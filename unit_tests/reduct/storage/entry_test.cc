@@ -18,8 +18,7 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time() + std::chrono::duration_cast<std::chrono::microseconds>(
-                                                    IEntry::Time::clock::now().time_since_epoch());
+static const auto kTimestamp = IEntry::Time();
 
 TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
@@ -62,7 +61,13 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
   SECTION("one record") {
     auto ret = entry->Read(kTimestamp);
     REQUIRE(ret == IEntry::ReadResult{std::string(100, 'c'), Error{}, kTimestamp});
-    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2, .record_count = 1, .bytes = 102});
+    REQUIRE(entry->GetInfo() == IEntry::Info{
+                                    .block_count = 1,
+                                    .record_count = 1,
+                                    .bytes = 102,
+                                    .oldest_record_time = kTimestamp,
+                                    .latest_record_time = kTimestamp,
+                                });
   }
 
   SECTION("two records in different blocks") {
@@ -87,7 +92,7 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
   }
 
   SECTION("a belated record") {
-    REQUIRE(entry->GetInfo().block_count == 2);
+    REQUIRE(entry->GetInfo().block_count == 1);
     REQUIRE(entry->Write("latest_data", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(entry->Write("latest_data", kTimestamp + seconds(15)) == Error::kOk);
     REQUIRE(entry->Write("belated_data", kTimestamp + seconds(10)) == Error::kOk);
@@ -131,11 +136,11 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
   REQUIRE(entry->Write(blob, kTimestamp) == Error::kOk);
   REQUIRE(entry->Write(blob, kTimestamp + seconds(1)) == Error::kOk);
   REQUIRE(entry->Write(blob, kTimestamp + seconds(2)) == Error::kOk);
-  REQUIRE(entry->GetInfo().block_count == 4);
+  REQUIRE(entry->GetInfo().block_count == 3);
 
   SECTION("remove one block") {
     REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
-    REQUIRE(entry->GetInfo().block_count == 3);
+    REQUIRE(entry->GetInfo().block_count == 2);
     REQUIRE(entry->Read(kTimestamp).error.code == 404);
 
     SECTION("write should be ok") {
@@ -143,9 +148,9 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
       REQUIRE(entry->Read(kTimestamp).error == Error::kOk);
     }
 
-    SECTION("remove two block") {
+    SECTION("remove two blocks") {
       REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
-      REQUIRE(entry->GetInfo().block_count == 2);
+      REQUIRE(entry->GetInfo().block_count == 1);
       REQUIRE(entry->Read(kTimestamp + seconds(1)).error.code == 404);
     }
 
@@ -236,6 +241,18 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
       REQUIRE(records.size() == 2);
       REQUIRE(records[0].time == kTimestamp);
       REQUIRE(records[1].time == kTimestamp + seconds(1));
+    }
+
+    SECTION("if timestamp between two blocks") {
+      const std::string blob(entry->GetOptions().max_block_size / 2 + 10, 'x');
+
+      REQUIRE(entry->Write(blob, kTimestamp + seconds(3)) == Error::kOk);
+      REQUIRE(entry->Write(blob, kTimestamp + seconds(4)) == Error::kOk);
+
+      REQUIRE(entry->Write(blob, kTimestamp + seconds(10)) == Error::kOk);
+      REQUIRE(entry->Write(blob, kTimestamp + seconds(11)) == Error::kOk);
+
+      REQUIRE(entry->List(kTimestamp + seconds(5), kTimestamp + seconds(12)).error == Error::kOk);
     }
   }
 }

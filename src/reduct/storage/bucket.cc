@@ -129,10 +129,15 @@ class Bucket : public IBucket {
           std::shared_ptr<IEntry> current_entry = nullptr;
           for (const auto& [_, entry] : entry_map_) {
             auto entry_info = entry->GetInfo();
-            if ((!current_entry && entry_info.bytes > 0) ||  // first not empty
+            if (entry_info.block_count > 1  ||  // first not empty
                 (current_entry && entry_info.oldest_record_time < current_entry->GetInfo().oldest_record_time)) {
               current_entry = entry;
             }
+          }
+
+          if (!current_entry) {
+            LOG_DEBUG("Looks like all the entries have only one block");
+            return Error::kOk;
           }
 
           LOG_DEBUG("Remove the oldest block in entry '{}'", current_entry->GetOptions().name);
