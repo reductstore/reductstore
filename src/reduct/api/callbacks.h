@@ -7,6 +7,7 @@
 
 #include "reduct/async/run.h"
 #include "reduct/core/error.h"
+#include "reduct/proto/api/bucket_settings.pb.h"
 
 namespace reduct::api {
 
@@ -36,11 +37,6 @@ class IInfoCallback {
 //---------------------
 // Bucket API
 //---------------------
-struct BucketSettings {
-  uint64_t max_block_size;
-  std::string_view quota_type;
-  uint64_t quota_size;
-};
 
 /**
  * Create bucket callback
@@ -50,7 +46,7 @@ class ICreateBucketCallback {
   struct Response {};
   struct Request {
     std::string_view bucket_name;
-    BucketSettings bucket_settings;
+    proto::api::BucketSettings bucket_settings;
   };
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
@@ -62,7 +58,7 @@ class ICreateBucketCallback {
 class IGetBucketCallback {
  public:
   struct Response {
-    BucketSettings bucket_settings;
+    proto::api::BucketSettings bucket_settings;
   };
 
   struct Request {
@@ -93,7 +89,7 @@ class IUpdateBucketCallback {
   struct Response {};
   struct Request {
     std::string_view bucket_name;
-    BucketSettings new_settings;
+    proto::api::BucketSettings new_settings;
   };
 
   using Result = CallbackResult<Response>;

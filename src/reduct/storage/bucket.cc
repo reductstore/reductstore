@@ -5,46 +5,34 @@
 #include <numeric>
 #include <ranges>
 
+#include "reduct/config.h"
 #include "reduct/core/logger.h"
-#include "reduct/proto/bucket.pb.h"
+#include "reduct/proto/api/bucket_settings.pb.h"
 
 namespace reduct::storage {
 
 namespace fs = std::filesystem;
 using core::Error;
-using proto::BucketSettings;
-
-std::pair<IBucket::QuotaType, Error> IBucket::ParseQuotaType(std::string_view quota_type_str) {
-  IBucket::QuotaType type;
-
-  if (quota_type_str == "NONE") {
-    type = IBucket::QuotaType ::kNone;
-  } else if (quota_type_str == "FIFO") {
-    type = IBucket::QuotaType ::kFifo;
-  } else {
-    return {type, Error{.code = 422, .message = fmt::format("Unknown type of quota: {}", quota_type_str)}};
-  }
-
-  return {type, Error::kOk};
-}
-
-std::string_view IBucket::GetQuotaTypeName(QuotaType type) {
-  switch (type) {
-    case kNone:
-      return "NONE";
-    case kFifo:
-      return "FIFO";
-  }
-
-  return "Unknown type";
-}
+using proto::api::BucketSettings;
 
 class Bucket : public IBucket {
  public:
-  explicit Bucket(Options options) : options_(std::move(options)), entry_map_() {
-    full_path_ = options_.path / options_.name;
+  explicit Bucket(fs::path full_path, BucketSettings settings)
+      : full_path_(std::move(full_path)), settings_(std::move(settings)), entry_map_() {
     if (fs::exists(full_path_)) {
       throw std::runtime_error(fmt::format("Path '{}' already exists", full_path_.string()));
+    }
+
+    if (!settings_.has_max_block_size()) {
+      settings_.set_max_block_size(kDefaultMaxBlockSize);
+    }
+
+    if (!settings_.has_quota_type()) {
+      settings_.set_quota_type(BucketSettings::NONE);
+    }
+
+    if (!settings_.has_quota_size()) {
+      settings_.set_quota_size(0);
     }
 
     fs::create_directories(full_path_);
@@ -54,7 +42,7 @@ class Bucket : public IBucket {
     }
   }
 
-  explicit Bucket(fs::path full_path) : options_{}, full_path_(std::move(full_path)), entry_map_() {
+  explicit Bucket(fs::path full_path) : settings_{}, full_path_(std::move(full_path)), entry_map_() {
     if (!fs::exists(full_path_)) {
       throw std::runtime_error(fmt::format("Path '{}' doesn't exist", full_path_.string()));
     }
@@ -65,15 +53,7 @@ class Bucket : public IBucket {
       throw std::runtime_error(fmt::format("Failed to open file {}", settings_path.string()));
     }
 
-    BucketSettings settings;
-    settings.ParseFromIstream(&settings_file);
-
-    options_ = Options{
-        .name = full_path_.filename(),
-        .path = full_path_.parent_path(),
-        .max_block_size = settings.max_block_size(),
-        .quota = {.type = static_cast<QuotaType>(settings.quota().type()), .size = settings.quota().size()},
-    };
+    settings_.ParseFromIstream(&settings_file);
 
     for (const auto& folder : fs::directory_iterator(full_path_)) {
       if (fs::is_directory(folder)) {
@@ -97,7 +77,7 @@ class Bucket : public IBucket {
       auto entry = IEntry::Build({
           .name = name,
           .path = full_path_,
-          .max_block_size = options_.max_block_size,
+          .max_block_size = settings_.max_block_size(),
       });
 
       if (entry) {
@@ -117,19 +97,19 @@ class Bucket : public IBucket {
   }
 
   [[nodiscard]] Error KeepQuota() override {
-    switch (options_.quota.type) {
-      case IBucket::kNone:
+    switch (settings_.quota_type()) {
+      case BucketSettings::NONE:
         break;
-      case IBucket::kFifo:
+      case BucketSettings::FIFO:
         size_t bucket_size = GetInfo().size;
-        while (bucket_size > options_.quota.size) {
-          LOG_DEBUG("Size of bucket '{}' is {} bigger than quota {}. Remove the oldest record", options_.name,
-                    bucket_size, options_.quota.size);
+        while (bucket_size > settings_.quota_size()) {
+          LOG_DEBUG("Size of bucket '{}' is {} bigger than quota {}. Remove the oldest record",
+                    full_path_.filename().string(), bucket_size, settings_.quota_size());
 
           std::shared_ptr<IEntry> current_entry = nullptr;
           for (const auto& [_, entry] : entry_map_) {
             auto entry_info = entry->GetInfo();
-            if (entry_info.block_count > 1  ||  // first not empty
+            if (entry_info.block_count > 1 ||  // first not empty
                 (current_entry && entry_info.oldest_record_time < current_entry->GetInfo().oldest_record_time)) {
               current_entry = entry;
             }
@@ -152,10 +132,8 @@ class Bucket : public IBucket {
     return Error::kOk;
   }
 
-  Error SetOptions(Options options) override {
-    options_.max_block_size = options.max_block_size;
-    options_.quota = options.quota;
-
+  Error SetSettings(BucketSettings settings) override {
+    settings_ = std::move(settings);
     return SaveDescriptor();
   }
 
@@ -171,15 +149,10 @@ class Bucket : public IBucket {
     return {.entry_count = entry_map_.size(), .record_count = record_count, .size = size};
   }
 
-  [[nodiscard]] const Options& GetOptions() const override { return options_; }
+  [[nodiscard]] const BucketSettings& GetSettings() const override { return settings_; }
 
  private:
   core::Error SaveDescriptor() const {
-    BucketSettings settings;
-    settings.set_max_block_size(options_.max_block_size);
-    settings.mutable_quota()->set_type(static_cast<proto::BucketSettings_QuotaType>(options_.quota.type));
-    settings.mutable_quota()->set_size(options_.quota.size);
-
     const auto settings_path = full_path_ / kSettingsName;
     std::ofstream settings_file(settings_path, std::ios::binary);
     if (!settings_file) {
@@ -189,7 +162,7 @@ class Bucket : public IBucket {
       };
     }
 
-    if (!settings.SerializeToOstream(&settings_file)) {
+    if (!settings_.SerializeToOstream(&settings_file)) {
       return {
           .code = 500,
           .message = "Failed to serialize bucket settings",
@@ -200,22 +173,17 @@ class Bucket : public IBucket {
   }
 
   constexpr static std::string_view kSettingsName = "bucket.settings";
-  Options options_;
+  BucketSettings settings_;
   fs::path full_path_;
   std::map<std::string, std::shared_ptr<IEntry>> entry_map_;
 };
 
-std::unique_ptr<IBucket> IBucket::Build(const Options& options) {
-  if (options.name.empty()) {
-    LOG_ERROR("Bucket must have a name");
-    return nullptr;
-  }
-
+std::unique_ptr<IBucket> IBucket::Build(std::filesystem::path full_path, BucketSettings settings) {
   std::unique_ptr<IBucket> bucket;
   try {
-    bucket = std::make_unique<Bucket>(options);
+    bucket = std::make_unique<Bucket>(std::move(full_path), std::move(settings));
   } catch (const std::runtime_error& err) {
-    LOG_ERROR("Failed create bucket '{}': {}", options.name, err.what());
+    LOG_ERROR("Failed create bucket '{}': {}", full_path.string(), err.what());
   }
 
   return bucket;
@@ -231,17 +199,6 @@ std::unique_ptr<IBucket> IBucket::Restore(std::filesystem::path full_path) {
   return nullptr;
 }
 
-std::ostream& operator<<(std::ostream& os, const IBucket::Options& options) {
-  std::stringstream quota_ss;
-  quota_ss << options.quota;
-  os << fmt::format("<IBucket::Options name={}, path={}, max_block_size={}, quota={}>", options.name,
-                    options.path.string(), options.max_block_size, quota_ss.str());
-  return os;
-}
-std::ostream& operator<<(std::ostream& os, const IBucket::QuotaOptions& options) {
-  os << fmt::format("<IBucket::QuotaOptions type={}, bucket_size={}>", static_cast<int>(options.type), options.size);
-  return os;
-}
 std::ostream& operator<<(std::ostream& os, const IBucket::Info& info) {
   os << fmt::format("<IBucket::Info entry_count={} record_count={} quota_size={}>", info.entry_count, info.record_count,
                     info.size);

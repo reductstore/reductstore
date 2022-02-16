@@ -10,7 +10,7 @@
 #include <ranges>
 
 #include "reduct/core/logger.h"
-#include "reduct/proto/entry.pb.h"
+#include "reduct/proto/storage/entry.pb.h"
 
 namespace reduct::storage {
 

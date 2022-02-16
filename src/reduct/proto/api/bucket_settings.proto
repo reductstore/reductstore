@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package reduct.proto.api;
+
+message BucketSettings {
+  enum QuotaType {
+    NONE = 0;
+    FIFO = 1;
+  }
+
+  optional uint64 max_block_size = 1;
+  optional QuotaType quota_type = 2;
+  optional uint64 quota_size = 3;
+}
