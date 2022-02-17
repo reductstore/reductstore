@@ -10,11 +10,11 @@ Before starting recording, a user has to create a bucket with the following sett
 * Quota type
 * Quota size
 
-Read more about buckets in [How does it work?](../how-does-it-work.md)
+For more information, you can read more about buckets in [How does it work?](../how-does-it-work.md)
 
 {% swagger method="get" path=" " baseUrl="/b/:bucket_name " summary="Get information about a bucket" %}
 {% swagger-description %}
-
+The method returns the current settings of the bucket in JSON format. 
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name="bucket_name" required="true" %}
@@ -31,7 +31,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn't exists" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn" %}
 ```javascript
 {
     "detail": "string"
@@ -57,7 +57,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn't exist" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn" %}
 ```javascript
 {
     // Response
@@ -75,7 +75,7 @@ To create a bucket, the request should contain a JSON document with some paramet
 Name of new bucket
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="max_block_size" type="Integer" required="false" %}
+{% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
 Maximal size of a data block in bytes (default: 1Mb)
 {% endswagger-parameter %}
 
@@ -83,7 +83,7 @@ Maximal size of a data block in bytes (default: 1Mb)
 Type of quota. Can have values "NONE" or "FIFO" (default: "NONE")
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="quota_size" type="Integer" required="false" %}
+{% swagger-parameter in="body" name="quota_size" type="String/Integer" required="false" %}
 Size of quota in bytes (default: 0)
 {% endswagger-parameter %}
 
@@ -121,7 +121,7 @@ To update settings of a bucket, the request should have a JSON document with all
 Name of bucket
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="max_block_size" type="Integer" required="true" %}
+{% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
 Maximal size of a data block in bytes
 {% endswagger-parameter %}
 
@@ -129,7 +129,7 @@ Maximal size of a data block in bytes
 Type of quota. Can have values "NONE" or "FIFO"
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="quota_size" type="Integer" required="false" %}
+{% swagger-parameter in="body" name="quota_size" type="String/Integer" required="false" %}
 Size of quota in bytes
 {% endswagger-parameter %}
 
@@ -160,9 +160,9 @@ Size of quota in bytes
 
 {% swagger method="delete" path=" " baseUrl="/b/:bucket_name " summary="Remove a bucket" %}
 {% swagger-description %}
-Remove a bucket with all
+Remove a bucket with 
 
-**the stored data**
+**all its entries and stored data**
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}

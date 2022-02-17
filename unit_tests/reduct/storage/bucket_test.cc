@@ -7,42 +7,46 @@
 #include "reduct/helpers.h"
 
 using reduct::core::Error;
+using reduct::proto::api::BucketSettings;
 using reduct::storage::IBucket;
 using reduct::storage::IEntry;
 
 using std::chrono::seconds;
 namespace fs = std::filesystem;
 
+inline bool operator==(const google::protobuf::MessageLite& msg_a, const google::protobuf::MessageLite& msg_b) {
+  return (msg_a.GetTypeName() == msg_b.GetTypeName()) && (msg_a.SerializeAsString() == msg_b.SerializeAsString());
+}
+
 TEST_CASE("storage::Bucket should create folder", "[bucket]") {
   auto dir_path = BuildTmpDirectory();
-  auto bucket = IBucket::Build({.name = "bucket", .path = dir_path});
+  BucketSettings settings;
+  auto bucket = IBucket::Build(dir_path / "bucket", settings);
 
   REQUIRE(bucket);
   REQUIRE(fs::exists(dir_path));
 
-  SECTION("error, if directory already exist") { REQUIRE_FALSE(IBucket::Build({.name = "bucket", .path = dir_path})); }
+  SECTION("error, if directory already exist") { REQUIRE_FALSE(IBucket::Build(dir_path / "bucket", settings)); }
 
   SECTION("return nullptr if something got wrong") {
-    REQUIRE_FALSE(IBucket::Build({.name = "", .path = "/non-existing/path"}));
+    fs::create_directories("some/path");
+    REQUIRE_FALSE(IBucket::Build("some/path", settings));
   }
-
-  SECTION("name cannot be empty") { REQUIRE_FALSE(IBucket::Build({.name = "", .path = dir_path})); }
 }
 
 TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   auto dir_path = BuildTmpDirectory();
-  auto bucket = IBucket::Build({
-      .name = "bucket",
-      .path = dir_path,
-      .max_block_size = 100,
-      .quota = IBucket::QuotaOptions{.type = IBucket::QuotaType::kFifo, .size = 1000},
-  });
+  BucketSettings settings;
+  settings.set_max_block_size(100);
+  settings.set_quota_type(BucketSettings::FIFO);
+  settings.set_quota_size(1000);
+  auto bucket = IBucket::Build(dir_path / "bucket", settings);
 
   REQUIRE(bucket->GetOrCreateEntry("entry1").error == Error::kOk);
 
   auto restored_bucket = IBucket::Restore(dir_path / "bucket");
   REQUIRE(restored_bucket->GetInfo() == bucket->GetInfo());
-  REQUIRE(restored_bucket->GetOptions() == bucket->GetOptions());
+  REQUIRE(restored_bucket->GetSettings() == bucket->GetSettings());
 
   SECTION("empty folder") {
     fs::create_directory(dir_path / "empty_folder");
@@ -51,7 +55,7 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
 }
 
 TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]") {
-  auto bucket = IBucket::Build({.name = "bucket", .path = BuildTmpDirectory()});
+  auto bucket = IBucket::Build(BuildTmpDirectory() / "bucket");
 
   SECTION("create a new entry") {
     auto [entry, err] = bucket->GetOrCreateEntry("entry_1");
@@ -73,7 +77,7 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
 
 TEST_CASE("storage::Bucket should remove all entries", "[bucket]") {
   auto dir_path = BuildTmpDirectory();
-  auto bucket = IBucket::Build({.name = "bucket", .path = dir_path});
+  auto bucket = IBucket::Build(dir_path / "bucket");
 
   REQUIRE(bucket->GetOrCreateEntry("entry_1").error == Error::kOk);
   REQUIRE(bucket->GetOrCreateEntry("entry_2").error == Error::kOk);
@@ -86,12 +90,12 @@ TEST_CASE("storage::Bucket should remove all entries", "[bucket]") {
 }
 
 TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
-  auto bucket = IBucket::Build({
-      .name = "bucket",
-      .path = BuildTmpDirectory(),
-      .max_block_size = 100,
-      .quota = IBucket::QuotaOptions{.type = IBucket::QuotaType::kFifo, .size = 1000},
-  });
+  BucketSettings settings;
+  settings.set_max_block_size(100);
+  settings.set_quota_type(BucketSettings::FIFO);
+  settings.set_quota_size(1000);
+  const auto path = BuildTmpDirectory();
+  auto bucket = IBucket::Build(path / "bucket", std::move(settings));
 
   auto entry1 = bucket->GetOrCreateEntry("entry_1").entry.lock();
   auto entry2 = bucket->GetOrCreateEntry("entry_2").entry.lock();
@@ -115,7 +119,7 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     SECTION("the same state after restoring") {
       auto info = bucket->GetInfo();
 
-      bucket = IBucket::Restore(bucket->GetOptions().path / "bucket");
+      bucket = IBucket::Restore(path / "bucket");
       REQUIRE(bucket);
       REQUIRE(info == bucket->GetInfo());
     }
@@ -135,19 +139,16 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
 
 TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]") {
   const auto dir_path = BuildTmpDirectory();
-  auto bucket = IBucket::Build({
-      .name = "bucket",
-      .path = dir_path,
-      .max_block_size = 100,
-  });
+  auto bucket = IBucket::Build(dir_path/ "bucket");
 
-  IBucket::Options options = {.max_block_size = 600, .quota = {.type = IBucket::kFifo, .size = 1000}};
+  BucketSettings settings;
+  settings.set_max_block_size(600);
+  settings.set_quota_type(BucketSettings::FIFO);
+  settings.set_quota_size(1000);
 
-  REQUIRE(bucket->SetOptions(options) == Error::kOk);
-  options.name = "bucket";
-  options.path = dir_path;
-  REQUIRE(bucket->GetOptions() == options);
+  REQUIRE(bucket->SetSettings(settings) == Error::kOk);
+  REQUIRE(bucket->GetSettings() == settings);
 
   bucket = IBucket::Restore(dir_path / "bucket");
-  REQUIRE(bucket->GetOptions() == options);
+  REQUIRE(bucket->GetSettings() == settings);
 }

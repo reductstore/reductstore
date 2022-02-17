@@ -13,7 +13,7 @@ def test_create_bucket_ok(base_url, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data == {"max_block_size": 1024 * 1024, "quota_type": "NONE", "quota_size": 0}
+    assert data == {"max_block_size": str(1024 * 1024), "quota_type": "NONE", "quota_size": '0'}
 
 
 def test_create_bucket_bad_format(base_url, bucket_name):
@@ -34,7 +34,7 @@ def test_create_bucket_custom(base_url, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data == {"max_block_size": 500, "quota_type": "NONE", "quota_size": 0}
+    assert data == {"max_block_size": '500', "quota_type": "NONE", "quota_size": '0'}
 
 
 def test_create_twice_bucket(base_url, bucket_name):
@@ -57,7 +57,7 @@ def test_update_bucket_ok(base_url, bucket_name):
     """Should update setting of the bucket"""
     requests.post(f'{base_url}/b/{bucket_name}')
 
-    new_settings = {"max_block_size": 1000, "quota_type": "FIFO", "quota_size": 500}
+    new_settings = {"max_block_size": '1000', "quota_type": "FIFO", "quota_size": '500'}
     resp = requests.put(f'{base_url}/b/{bucket_name}',
                         json=new_settings)
     assert resp.status_code == 200
@@ -71,10 +71,6 @@ def test_update_bucket_ok(base_url, bucket_name):
 def test_update_bucket_bad_format(base_url, bucket_name):
     """Should not update setting if JSON format is bad"""
     requests.post(f'{base_url}/b/{bucket_name}')
-
-    resp = requests.put(f'{base_url}/b/{bucket_name}',
-                        json={"max_block_size": 1000, "quota_type": "FIFO"})
-    assert resp.status_code == 422
 
     resp = requests.put(f'{base_url}/b/{bucket_name}',
                         json={"max_block_size": 1000, "quota_type": "UNKNOWN", "quota_size": 500})

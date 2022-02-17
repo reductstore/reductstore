@@ -2,19 +2,22 @@ set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Generate protoc files
 set(PROTOBUF_SPEC_FILES
-        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/entry.proto
-        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/bucket.proto
+        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/storage/entry.proto
+        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/bucket_settings.proto
         )
 
 set(PROTOBUF_FILES
-        ${CMAKE_BINARY_DIR}/reduct/proto/entry.pb.cc
-        ${CMAKE_BINARY_DIR}/reduct/proto/bucket.pb.cc
+        ${CMAKE_BINARY_DIR}/reduct/proto/storage/entry.pb.cc
+        ${CMAKE_BINARY_DIR}/reduct/proto/api/bucket_settings.pb.cc
         )
 
 
 add_custom_command(OUTPUT ${PROTOBUF_FILES}
         COMMAND ${Protobuf_PROTOC_EXECUTABLE} -I=${PROTO_SPEC_ROOT_DIR}/
-        --cpp_out=${CMAKE_BINARY_DIR} ${PROTO_SPEC_ROOT_DIR}/reduct/proto/*
+        --cpp_out=${CMAKE_BINARY_DIR} ${PROTO_SPEC_ROOT_DIR}/reduct/proto/storage/*
+
+        COMMAND ${Protobuf_PROTOC_EXECUTABLE} -I=${PROTO_SPEC_ROOT_DIR}/
+        --cpp_out=${CMAKE_BINARY_DIR} ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/*
 
         DEPENDS ${PROTOBUF_SPEC_FILES}
         )

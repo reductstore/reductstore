@@ -22,12 +22,22 @@ using reduct::api::IWriteEntryCallback;
 using reduct::async::Run;
 using reduct::async::Task;
 using reduct::core::Error;
+using reduct::proto::api::BucketSettings;
 using reduct::storage::IStorage;
-
 namespace fs = std::filesystem;
 
-static const reduct::api::BucketSettings kDefaultBucketSettings = {
-    .max_block_size = 1000, .quota_type = "NONE", .quota_size = 10};
+inline bool operator==(const google::protobuf::MessageLite& msg_a, const google::protobuf::MessageLite& msg_b) {
+  return (msg_a.GetTypeName() == msg_b.GetTypeName()) && (msg_a.SerializeAsString() == msg_b.SerializeAsString());
+}
+
+static const BucketSettings MakeDefaultBucketSettings() {
+  BucketSettings settings;
+  settings.set_max_block_size(1000);
+  settings.set_quota_type(BucketSettings::NONE);
+  settings.set_quota_size(10);
+
+  return settings;
+}
 
 Task<IInfoCallback::Result> OnInfo(IStorage* storage) {
   auto result = co_await storage->OnInfo({});
@@ -90,7 +100,7 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage]") {
 TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings};
+  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()};
   Error err = OnCreateBucket(storage.get(), req).Get();
   REQUIRE_FALSE(err);
 
@@ -100,22 +110,22 @@ TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
   }
 
   SECTION("error if failed to create") {
-    err = OnCreateBucket(storage.get(), {.bucket_name = "", .bucket_settings = kDefaultBucketSettings}).Get();
+    err = OnCreateBucket(storage.get(), {.bucket_name = "", .bucket_settings = MakeDefaultBucketSettings()}).Get();
     REQUIRE(err == Error{.code = 500, .message = "Internal error: Failed to create bucket"});
   }
 }
 
 TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
-
-  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings};
+  const auto settings = MakeDefaultBucketSettings();
+  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = settings};
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
   auto [resp, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error::kOk);
-  REQUIRE(resp.bucket_settings.max_block_size == kDefaultBucketSettings.max_block_size);
-  REQUIRE(resp.bucket_settings.quota_type == kDefaultBucketSettings.quota_type);
-  REQUIRE(resp.bucket_settings.quota_size == kDefaultBucketSettings.quota_size);
+  REQUIRE(resp.bucket_settings.max_block_size() == settings.max_block_size());
+  REQUIRE(resp.bucket_settings.quota_type() == settings.quota_type());
+  REQUIRE(resp.bucket_settings.quota_size() == settings.quota_size());
 
   SECTION("error if not exist") {
     err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();
@@ -128,26 +138,30 @@ TEST_CASE("storage::Storage should change settings of bucket", "[entry]") {
 
   ICreateBucketCallback::Request req{
       .bucket_name = "bucket",
-      .bucket_settings = kDefaultBucketSettings,
+      .bucket_settings = MakeDefaultBucketSettings(),
   };
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
+  BucketSettings settings;
+  settings.set_max_block_size(10);
+  settings.set_quota_type(BucketSettings::FIFO);
+  settings.set_quota_size(1000);
   IUpdateBucketCallback::Request change_req{
-      .bucket_name = "bucket", .new_settings = {.max_block_size = 10, .quota_type = "FIFO", .quota_size = 1000}};
+      .bucket_name = "bucket",
+      .new_settings = settings,
+  };
   REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
 
   auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error::kOk);
-  REQUIRE(info.bucket_settings.max_block_size == change_req.new_settings.max_block_size);
-  REQUIRE(info.bucket_settings.quota_type == change_req.new_settings.quota_type);
-  REQUIRE(info.bucket_settings.quota_size == change_req.new_settings.quota_size);
+  REQUIRE(info.bucket_settings == change_req.new_settings);
 }
 
 TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   auto data_path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = data_path});
 
-  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings};
+  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()};
   Error err = OnCreateBucket(storage.get(), req).Get();
   REQUIRE(err == Error::kOk);
   REQUIRE(fs::exists(data_path / "bucket"));
@@ -168,8 +182,9 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
 TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings}).Get() ==
-          Error::kOk);
+  REQUIRE(
+      OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
+      Error::kOk);
 
   REQUIRE(OnWriteEntry(
               storage.get(),
@@ -225,8 +240,9 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
 TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = kDefaultBucketSettings}).Get() ==
-          Error::kOk);
+  REQUIRE(
+      OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
+      Error::kOk);
   REQUIRE(OnWriteEntry(
               storage.get(),
               {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .blob = "some_data"})
@@ -287,10 +303,8 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][entr
   const auto dir = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = dir});
 
-  REQUIRE(OnCreateBucket(storage.get(),
-                         {.bucket_name = "bucket",
-                          .bucket_settings = {.max_block_size = 1000, .quota_type = "NONE", .quota_size = 0}})
-              .Get() == Error::kOk);
+  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = BucketSettings()}).Get() ==
+          Error::kOk);
   REQUIRE(OnWriteEntry(storage.get(),
                        {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000", .blob = "some_data"})
               .Get() == Error::kOk);

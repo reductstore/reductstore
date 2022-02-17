@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <ostream>
 
+#include "reduct/proto/api/bucket_settings.pb.h"
 #include "reduct/storage/entry.h"
 
 namespace reduct::storage {
@@ -14,38 +15,6 @@ namespace reduct::storage {
  */
 class IBucket {
  public:
-  enum QuotaType { kNone = 1, kFifo = 2 };
-
-  static std::pair<QuotaType, core::Error> ParseQuotaType(std::string_view quota_type_str);
-  static std::string_view GetQuotaTypeName(QuotaType type);
-
-  struct QuotaOptions {
-    QuotaType type;
-    size_t size;
-
-    bool operator==(const QuotaOptions& rhs) const { return std::tie(type, size) == std::tie(rhs.type, rhs.size); }
-    bool operator!=(const QuotaOptions& rhs) const { return !(rhs == *this); }
-    friend std::ostream& operator<<(std::ostream& os, const QuotaOptions& options);
-  };
-
-  /**
-   * Options used for creating a bucket
-   */
-  struct Options {
-    std::string name;
-    std::filesystem::path path;
-
-    size_t max_block_size;
-    QuotaOptions quota;
-
-    bool operator==(const Options& rhs) const {
-      return std::tie(name, path, max_block_size, quota) == std::tie(rhs.name, rhs.path, max_block_size, rhs.quota);
-    }
-
-    bool operator!=(const Options& rhs) const { return !(rhs == *this); }
-    friend std::ostream& operator<<(std::ostream& os, const Options& options);
-  };
-
   /**
    * Reference to an entry in the bucket
    */
@@ -98,7 +67,7 @@ class IBucket {
    * @param options
    * @return
    */
-  virtual core::Error SetOptions(Options options) = 0;
+  virtual core::Error SetSettings(proto::api::BucketSettings options) = 0;
   /**
    * @brief Returns statistics about the bucket
    * @return
@@ -109,14 +78,14 @@ class IBucket {
    * @brief Returns options of the bucket
    * @return
    */
-  [[nodiscard]] virtual const Options& GetOptions() const = 0;
+  [[nodiscard]] virtual const proto::api::BucketSettings& GetSettings() const = 0;
 
   /**
    * @brief Builds a new bucket
    * @param options
    * @return
    */
-  static std::unique_ptr<IBucket> Build(const Options& options);
+  static std::unique_ptr<IBucket> Build(std::filesystem::path full_path, proto::api::BucketSettings options = {});
 
   /**
    * @brief Restores a bucket from folder

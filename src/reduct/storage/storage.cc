@@ -62,17 +62,7 @@ class Storage : public IStorage {
             {}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.bucket_name)}};
       }
 
-      auto [quota_type, parse_err] = IBucket::ParseQuotaType(req.bucket_settings.quota_type);
-      if (parse_err) {
-        return Callback::Result{{}, parse_err};
-      }
-
-      auto bucket = IBucket::Build({
-          .name = bucket_name,
-          .path = options_.data_path,
-          .max_block_size = req.bucket_settings.max_block_size,
-          .quota = {.type = quota_type, .size = req.bucket_settings.quota_size},
-      });
+      auto bucket = IBucket::Build(options_.data_path / bucket_name, req.bucket_settings);
       if (!bucket) {
         auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
         return Callback::Result{{},
@@ -92,11 +82,8 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      const auto& settings = bucket_it->second->GetOptions();
-      return Callback::Result{{.bucket_settings = {.max_block_size = settings.max_block_size,
-                                                   .quota_type = IBucket::GetQuotaTypeName(settings.quota.type),
-                                                   .quota_size = settings.quota.size}},
-                              Error{}};
+      const auto& settings = bucket_it->second->GetSettings();
+      return Callback::Result{{.bucket_settings = settings}, Error::kOk};
     });
   }
 
@@ -125,17 +112,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      auto [quota_type, parse_err] = IBucket::ParseQuotaType(req.new_settings.quota_type);
-      if (parse_err) {
-        return Callback::Result{{}, parse_err};
-      }
-
-      err = bucket_it->second->SetOptions({
-          .name = "",
-          .path = {},
-          .max_block_size = req.new_settings.max_block_size,
-          .quota = {.type = quota_type, .size = req.new_settings.quota_size},
-      });
+      err = bucket_it->second->SetSettings(std::move(req.new_settings));
       return Callback::Result{{}, Error::kOk};
     });
   }
