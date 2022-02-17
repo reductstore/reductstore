@@ -3,11 +3,10 @@
 #include "reduct/api/handlers/handle_bucket.h"
 
 #include <google/protobuf/util/json_util.h>
-#include <nlohmann/json.hpp>
 
 #include "reduct/api/handlers/common.h"
 #include "reduct/async/sleep.h"
-#include "reduct/config.h"
+
 namespace reduct::api::handlers {
 
 using async::VoidTask;
