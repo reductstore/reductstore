@@ -28,7 +28,10 @@ TEST_CASE("storage::Bucket should create folder", "[bucket]") {
 
   SECTION("error, if directory already exist") { REQUIRE_FALSE(IBucket::Build(dir_path / "bucket", settings)); }
 
-  SECTION("return nullptr if something got wrong") { REQUIRE_FALSE(IBucket::Build("/####/path", settings)); }
+  SECTION("return nullptr if something got wrong") {
+    fs::create_directories("some/path");
+    REQUIRE_FALSE(IBucket::Build("some/path", settings));
+  }
 }
 
 TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
