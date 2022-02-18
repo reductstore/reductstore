@@ -22,6 +22,7 @@ std::string PrintToJson(T &&msg) {
   std::string data;
   JsonPrintOptions options;
   options.preserve_proto_field_names = true;
+  options.always_print_primitive_fields = true;
   MessageToJsonString(msg, &data, options);
   return data;
 }

@@ -140,7 +140,8 @@ class Bucket : public IBucket {
   [[nodiscard]] Info GetInfo() const override {
     size_t record_count = 0;
     size_t size = 0;
-    IEntry::Time oldest_ts, latest_ts;
+    IEntry::Time oldest_ts = IEntry::Time::clock::now();
+    IEntry::Time latest_ts{};
 
     for (const auto& [_, entry] : entry_map_) {
       auto info = entry->GetInfo();

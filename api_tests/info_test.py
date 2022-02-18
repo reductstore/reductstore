@@ -1,4 +1,5 @@
 import json
+
 import requests
 
 
@@ -9,7 +10,10 @@ def test_get_info(base_url):
     assert resp.status_code == 200
     data = json.loads(resp.content)
     assert data['version'] == '0.2.0'
-    assert data['bucket_count'] > 0
+    assert int(data['bucket_count']) > 0
+    assert int(data['uptime']) >= 0
+    assert int(data['latest_record']) >= 0
+    assert int(data['oldest_record']) >= 0
 
 
 def test_get_wrong_path(base_url):

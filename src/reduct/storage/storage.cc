@@ -45,7 +45,8 @@ class Storage : public IStorage {
       using Clk = IEntry::Time::clock;
 
       size_t usage = 0;
-      IEntry::Time oldest_ts, latest_ts;
+      IEntry::Time oldest_ts = IEntry::Time::clock::now();
+      IEntry::Time latest_ts{};
 
       for (const auto& [_, bucket] : buckets_) {
         auto info = bucket->GetInfo();
