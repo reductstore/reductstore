@@ -2,13 +2,14 @@ syntax = "proto3";
 
 package reduct.proto.api;
 
+// Settings of bucket
 message BucketSettings {
   enum QuotaType {
-    NONE = 0;
-    FIFO = 1;
+    NONE = 0;   // No quota
+    FIFO = 1;   // Remove oldest block in the bucket if we reach quota
   }
 
-  optional uint64 max_block_size = 1;
+  optional uint64 max_block_size = 1; // max size of block in bytes
   optional QuotaType quota_type = 2;
-  optional uint64 quota_size = 3;
+  optional uint64 quota_size = 3;     // size of quota in bytes
 }

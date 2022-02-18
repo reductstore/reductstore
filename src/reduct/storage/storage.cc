@@ -31,6 +31,7 @@ class Storage : public IStorage {
     }
 
     LOG_INFO("Load {} buckets", buckets_.size());
+    start_time_ = decltype(start_time_)::clock::now();
   }
 
   /**
@@ -38,14 +39,32 @@ class Storage : public IStorage {
    */
   [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
     using Callback = IInfoCallback;
+
     return Run<Callback::Result>([this] {
-      Callback::Response resp;
-      resp.version = reduct::kVersion;
-      resp.bucket_count = buckets_.size();
-      resp.entry_count = std::accumulate(buckets_.begin(), buckets_.end(), 0,
-                                         [](size_t a, const decltype(buckets_)::value_type& entry) {
-                                           return entry.second->GetInfo().entry_count + a;
-                                         });
+      using proto::api::ServerInfo;
+      using Clk = IEntry::Time::clock;
+
+      size_t usage = 0;
+      IEntry::Time oldest_ts = IEntry::Time::clock::now();
+      IEntry::Time latest_ts{};
+
+      for (const auto& [_, bucket] : buckets_) {
+        auto info = bucket->GetInfo();
+        usage += info.size;
+        oldest_ts = std::min(oldest_ts, info.oldest_record_time);
+        latest_ts = std::max(latest_ts, info.latest_record_time);
+      }
+
+      ServerInfo info;
+      info.set_version(kVersion);
+      info.set_bucket_count(buckets_.size());
+      info.set_uptime(
+          std::chrono::duration_cast<std::chrono::seconds>(decltype(start_time_)::clock::now() - start_time_).count());
+      info.set_usage(usage);
+      info.set_oldest_record(Clk::to_time_t(oldest_ts));
+      info.set_latest_record(Clk::to_time_t(latest_ts));
+
+      Callback::Response resp{.info = std::move(info)};
       return Callback::Result{std::move(resp), Error{}};
     });
   }
@@ -252,6 +271,7 @@ class Storage : public IStorage {
 
   Options options_;
   BucketMap buckets_;
+  std::chrono::steady_clock::time_point start_time_;
 };
 
 std::unique_ptr<IStorage> IStorage::Build(IStorage::Options options) {

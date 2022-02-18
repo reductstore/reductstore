@@ -140,13 +140,25 @@ class Bucket : public IBucket {
   [[nodiscard]] Info GetInfo() const override {
     size_t record_count = 0;
     size_t size = 0;
+    IEntry::Time oldest_ts = IEntry::Time::clock::now();
+    IEntry::Time latest_ts{};
+
     for (const auto& [_, entry] : entry_map_) {
       auto info = entry->GetInfo();
       record_count += info.record_count;
       size += info.bytes;
+
+      oldest_ts = std::min(oldest_ts, info.oldest_record_time);
+      latest_ts = std::max(latest_ts, info.latest_record_time);
     }
 
-    return {.entry_count = entry_map_.size(), .record_count = record_count, .size = size};
+    return {
+        .entry_count = entry_map_.size(),
+        .record_count = record_count,
+        .size = size,
+        .oldest_record_time = oldest_ts,
+        .latest_record_time = latest_ts,
+    };
   }
 
   [[nodiscard]] const BucketSettings& GetSettings() const override { return settings_; }

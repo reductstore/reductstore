@@ -27,15 +27,13 @@ class IBucket {
    * Statistical information about a bucket
    */
   struct Info {
-    size_t entry_count;   // number of entries in the bucket
-    size_t record_count;  // number of records in all the entries of the bucket
-    size_t size;          // quota_size of stored in the bucket data in bytes
+    size_t entry_count;               // number of entries in the bucket
+    size_t record_count;              // number of records in all the entries of the bucket
+    size_t size;                      // quota_size of stored in the bucket data in bytes
+    IEntry::Time oldest_record_time;  // time of the oldest record in the bucket
+    IEntry::Time latest_record_time;  // time of the latest record in the bucket
 
-    bool operator==(const Info& rhs) const {
-      return std::tie(entry_count, record_count, size) == std::tie(rhs.entry_count, rhs.record_count, rhs.size);
-    }
-    bool operator!=(const Info& rhs) const { return !(rhs == *this); }
-    friend std::ostream& operator<<(std::ostream& os, const Info& info);
+    bool operator<=>(const Info& rhs) const = default;
   };
 
   /**
