@@ -2,7 +2,7 @@
 
 #include "reduct/api/handlers/handle_info.h"
 
-#include <nlohmann/json.hpp>
+#include <google/protobuf/util/json_util.h>
 
 #include "reduct/api/handlers/common.h"
 #include "reduct/core/logger.h"
@@ -14,14 +14,10 @@ using core::Error;
 
 template <bool SSL>
 async::VoidTask HandleInfo(const IInfoCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) {
-  [[maybe_unused]] auto err = BasicHandle<SSL, IInfoCallback>(res, req)
-                                  .OnSuccess([](IInfoCallback::Response app_resp) {
-                                    nlohmann::json data;
-                                    data["version"] = app_resp.version;
-                                    data["bucket_count"] = app_resp.bucket_count;
-                                    return data.dump();
-                                  })
-                                  .Run(co_await callback->OnInfo({}));
+  [[maybe_unused]] auto err =
+      BasicHandle<SSL, IInfoCallback>(res, req)
+          .OnSuccess([](IInfoCallback::Response app_resp) { return PrintToJson(std::move(app_resp.info)); })
+          .Run(co_await callback->OnInfo({}));
   co_return;
 }
 

@@ -8,6 +8,7 @@
 #include "reduct/async/run.h"
 #include "reduct/core/error.h"
 #include "reduct/proto/api/bucket_settings.pb.h"
+#include "reduct/proto/api/server_info.pb.h"
 
 namespace reduct::api {
 
@@ -25,9 +26,7 @@ struct CallbackResult {
 class IInfoCallback {
  public:
   struct Response {
-    std::string version;
-    size_t bucket_count;
-    size_t entry_count;
+    proto::api::ServerInfo info;
   };
   struct Request {};
   using Result = CallbackResult<Response>;

@@ -4,11 +4,13 @@ set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(PROTOBUF_SPEC_FILES
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/storage/entry.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/bucket_settings.proto
+        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/server_info.proto
         )
 
 set(PROTOBUF_FILES
         ${CMAKE_BINARY_DIR}/reduct/proto/storage/entry.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/bucket_settings.pb.cc
+        ${CMAKE_BINARY_DIR}/reduct/proto/api/server_info.pb.cc
         )
 
 

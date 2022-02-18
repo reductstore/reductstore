@@ -12,9 +12,7 @@ namespace reduct::api::handlers {
 using async::VoidTask;
 using core::Error;
 using google::protobuf::util::JsonParseOptions;
-using google::protobuf::util::JsonPrintOptions;
 using google::protobuf::util::JsonStringToMessage;
-using google::protobuf::util::MessageToJsonString;
 
 using proto::api::BucketSettings;
 /**
@@ -56,17 +54,10 @@ template <bool SSL>
 VoidTask HandleGetBucket(IGetBucketCallback *callback, uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
                          std::string name) {
   IGetBucketCallback::Request app_request{.bucket_name = name};
-  [[maybe_unused]] auto err = BasicHandle<SSL, IGetBucketCallback>(res, req)
-                                  .OnSuccess([](IGetBucketCallback::Response resp) {
-                                    std::string data;
-
-                                    JsonPrintOptions options;
-                                    options.preserve_proto_field_names = true;
-                                    options.always_print_primitive_fields = true;
-                                    MessageToJsonString(resp.bucket_settings, &data, options);
-                                    return data;
-                                  })
-                                  .Run(co_await callback->OnGetBucket(app_request));
+  [[maybe_unused]] auto err =
+      BasicHandle<SSL, IGetBucketCallback>(res, req)
+          .OnSuccess([](IGetBucketCallback::Response resp) { return PrintToJson(resp.bucket_settings); })
+          .Run(co_await callback->OnGetBucket(app_request));
   co_return;
 }
 

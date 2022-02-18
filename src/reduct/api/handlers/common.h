@@ -3,6 +3,7 @@
 #ifndef REDUCT_STORAGE_HANDLERS_COMMON_H
 #define REDUCT_STORAGE_HANDLERS_COMMON_H
 
+#include <google/protobuf/util/json_util.h>
 #include <nlohmann/json.hpp>
 #include <uWebSockets/App.h>
 
@@ -12,6 +13,18 @@
 #include "reduct/core/logger.h"
 
 namespace reduct::api {
+
+template <class T>
+std::string PrintToJson(T &&msg) {
+  using google::protobuf::util::JsonPrintOptions;
+  using google::protobuf::util::MessageToJsonString;
+
+  std::string data;
+  JsonPrintOptions options;
+  options.preserve_proto_field_names = true;
+  MessageToJsonString(msg, &data, options);
+  return data;
+}
 
 template <bool SSL>
 struct AsyncHttpReceiver {

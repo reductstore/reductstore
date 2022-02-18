@@ -91,10 +91,10 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   auto task = OnInfo(storage.get());
-  auto [info, err] = task.Get();
+  auto [resp, err] = task.Get();
 
   REQUIRE_FALSE(err);
-  REQUIRE(info.version == reduct::kVersion);
+  REQUIRE(resp.info.version() == reduct::kVersion);
 }
 
 TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
@@ -311,7 +311,7 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][entr
 
   storage = IStorage::Build({.data_path = dir});
 
-  auto [info, err] = OnInfo(storage.get()).Get();
-  REQUIRE(info.bucket_count == 1);
-  REQUIRE(info.entry_count == 1);
+  auto [resp, err] = OnInfo(storage.get()).Get();
+  REQUIRE(resp.info.bucket_count() == 1);
+  REQUIRE(resp.info.usage() == 11);
 }
