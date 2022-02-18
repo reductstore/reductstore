@@ -90,7 +90,7 @@ TEST_CASE("storage::Storage should recover at start", "[storage][bucket]") {
 TEST_CASE("storage::Storage should provide info about itself", "[storage]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  std::this_thread::sleep_for(std::chrono::seconds(1)); // uptime 1 second
+  std::this_thread::sleep_for(std::chrono::seconds(1));  // uptime 1 second
 
   auto task = OnInfo(storage.get());
   auto [resp, err] = task.Get();
@@ -98,7 +98,7 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage]") {
   REQUIRE_FALSE(err);
   REQUIRE(resp.info.version() == reduct::kVersion);
   REQUIRE(resp.info.bucket_count() == 0);
-  REQUIRE(resp.info.usage() ==0);
+  REQUIRE(resp.info.usage() == 0);
   REQUIRE(resp.info.uptime() >= 1);
 }
 
