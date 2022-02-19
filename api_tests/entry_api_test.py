@@ -2,6 +2,7 @@ import json
 
 import pytest
 import requests
+
 from conftest import get_detail
 
 

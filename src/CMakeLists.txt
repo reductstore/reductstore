@@ -36,6 +36,8 @@ set(SRC_FILES
 
         reduct/async/loop.cc
 
+        reduct/auth/token_auth.cc
+
         reduct/core/env_variable.cc
         reduct/core/logger.cc
         reduct/core/error.cc

@@ -26,23 +26,28 @@ class EnvVariable {
    * Make environment variable
    * @tparam T
    * @param name the name of env variable
-   * @param defaultValue the default value if it doesn't exists
+   * @param default_value the default value if it doesn't exists
+   * @param masked if true print **** instead of value
    */
   template <typename T>
-  T Get(const std::string &name, const T &defaultValue) {
+  T Get(const std::string &name, const T &default_value, bool masked = false) {
     T value;
     std::string additional_part;
-    auto envVar = std::getenv(name.c_str());
-    if (envVar == nullptr) {
-      value = defaultValue;
+    auto env_var = std::getenv(name.c_str());
+    if (env_var == nullptr) {
+      value = default_value;
       additional_part = "(default)";
     } else {
-      std::stringstream ss(envVar);
+      std::stringstream ss(env_var);
       ss >> value;
     }
 
     stream_ << "\t" << name << " = ";
-    stream_ << value << " " << additional_part << "\n";
+    if (masked) {
+      stream_ << "********** (masked)\n";
+    } else {
+      stream_ << value << " " << additional_part << "\n";
+    }
 
     return value;
   }

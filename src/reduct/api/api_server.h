@@ -8,6 +8,7 @@
 #include <string>
 
 #include "reduct/api/callbacks.h"
+#include "reduct/auth/token_auth.h"
 #include "reduct/core/error.h"
 
 namespace reduct::api {
@@ -30,6 +31,14 @@ class IApiHandler : public IInfoCallback,
  */
 class IApiServer {
  public:
+  /**
+   * Components of the API server
+   */
+  struct Components {
+    std::unique_ptr<IApiHandler> handler;
+    std::unique_ptr<auth::ITokenAuthentication> auth;
+  };
+
   struct Options {
     std::string host;
     int port;
@@ -42,7 +51,7 @@ class IApiServer {
    * @param options
    * @return pointer to the implementation
    */
-  static std::unique_ptr<IApiServer> Build(std::unique_ptr<IApiHandler> handler, Options options);
+  static std::unique_ptr<IApiServer> Build(Components components, Options options);
 
   /**
    * Runs HTTP server

@@ -16,10 +16,12 @@ using core::Error;
 using uWS::HttpRequest;
 using uWS::HttpResponse;
 
+using auth::ITokenAuthentication;
+
 class ApiServer : public IApiServer {
  public:
-  explicit ApiServer(std::unique_ptr<IApiHandler> handler, Options options)
-      : handler_(std::move(handler)), options_(std::move(options)) {}
+  explicit ApiServer(Components components, Options options)
+      : handler_(std::move(components.handler)), auth_(std::move(components.auth)), options_(std::move(options)) {}
 
   void Run(const bool &running) const override {
     auto [host, port, base_path] = options_;
@@ -105,10 +107,11 @@ class ApiServer : public IApiServer {
  private:
   Options options_;
   std::unique_ptr<IApiHandler> handler_;
+  std::unique_ptr<ITokenAuthentication> auth_;
 };
 
-std::unique_ptr<IApiServer> IApiServer::Build(std::unique_ptr<IApiHandler> handler, Options options) {
-  return std::make_unique<ApiServer>(std::move(handler), std::move(options));
+std::unique_ptr<IApiServer> IApiServer::Build(Components components, Options options) {
+  return std::make_unique<ApiServer>(std::move(components), std::move(options));
 }
 
 }  // namespace reduct::api

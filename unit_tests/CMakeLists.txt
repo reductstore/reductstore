@@ -7,6 +7,8 @@ set(SRC_FILES
         reduct/async/sleep_test.cc
         reduct/async/task_test.cc
 
+        reduct/core/env_test.cc
+
         reduct/storage/bucket_test.cc
         reduct/storage/entry_test.cc
         reduct/storage/storage_bucket_api_test.cc
