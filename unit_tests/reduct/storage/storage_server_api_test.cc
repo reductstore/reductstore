@@ -82,13 +82,10 @@ TEST_CASE("storage::Storage should provide list of buckets", "[storage][server_a
   REQUIRE(bucket.oldest_record() == 1);
   REQUIRE(bucket.latest_record() == 2);
 
-
-
   bucket = resp.buckets.buckets(1);
   REQUIRE(bucket.name() == "bucket_2");
   REQUIRE(bucket.size() == 11);
   REQUIRE(bucket.entry_count() == 1);
   REQUIRE(bucket.oldest_record() == 3);
   REQUIRE(bucket.latest_record() == 3);
-
 }
