@@ -63,7 +63,7 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   }
 }
 
-TEST_CASE("storage::Storage should change settings of bucket", "[entry]") {
+TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   ICreateBucketCallback::Request req{

@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <numeric>
 #include <shared_mutex>
 #include <utility>
 
@@ -69,9 +68,27 @@ class Storage : public IStorage {
     });
   }
 
-  [[nodiscard]] Run<IListStorageCallback::Result> OnStorageList(const IListStorageCallback::Request& req) const override {
+  [[nodiscard]] Run<IListStorageCallback::Result> OnStorageList(
+      const IListStorageCallback::Request& req) const override {
     using Callback = IListStorageCallback;
-    return Run<Callback::Result>([] { return Callback::Result{}; });
+    return Run<Callback::Result>([this] {
+      using proto::api::BucketInfoList;
+      using proto::api::BucketInfo;
+      using Clk = IEntry::Time::clock;
+
+      BucketInfoList list;
+      for (const auto& [name, bucket] : buckets_) {
+        auto bucket_info = bucket->GetInfo();
+
+        auto proto_info = list.add_buckets();
+        proto_info->set_name(name);
+        proto_info->set_size(bucket_info.size);
+        proto_info->set_entry_count(bucket_info.entry_count);
+        proto_info->set_oldest_record(Clk::to_time_t(bucket_info.oldest_record_time));
+        proto_info->set_latest_record(Clk::to_time_t(bucket_info.latest_record_time));
+      }
+      return Callback::Result{.response = {.buckets = std::move(list)}, .error = Error::kOk};
+    });
   }
   /**
    * Bucket API
