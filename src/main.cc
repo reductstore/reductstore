@@ -45,19 +45,15 @@ int main() {
 
   LOG_INFO("Configuration: \n {}", env.Print());
 
-  auto storage = IStorage::Build({
-      .data_path = data_path,
-  });
-
-  auto auth = ITokenAuthentication::Build(api_token);
-
   Loop loop;
   ILoop::set_loop(&loop);
-  auto server = IApiServer::Build(std::move(storage), std::move(){
-                                                          .host = host,
-                                                          .port = port,
-                                                          .base_path = api_base_path,
-                                                      });
+
+  IApiServer::Components components{
+      .handler = IStorage::Build({.data_path = data_path}),
+      .auth = ITokenAuthentication::Build(api_token),
+  };
+
+  auto server = IApiServer::Build(std::move(components), {.host = host, .port = port, .base_path = api_base_path});
   server->Run(running);
 
   return 0;

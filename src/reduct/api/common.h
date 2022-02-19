@@ -69,7 +69,15 @@ class BasicHandle {
     return std::move(*this);
   }
 
-  core::Error Run(typename Callback::Result result) {
+  core::Error Run(typename Callback::Result result, auth::ITokenAuthentication *auth = nullptr) {
+    if (auth) {
+      auto header_with_token = http_req_->getHeader("authorization");
+      if (auto err = auth->Check(header_with_token)) {
+        SendError(err);
+        return err;
+      }
+    }
+
     auto [resp, err] = std::move(result);
     if (err) {
       SendError(err);
@@ -78,7 +86,7 @@ class BasicHandle {
 
     LOG_DEBUG("{} {}: OK", method_, url_);
     http_resp_->end(on_success_ ? on_success_(std::move(resp)) : "");
-    return {};
+    return core::Error::kOk;
   }
 
   void SendError(core::Error err) const {
