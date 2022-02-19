@@ -5,6 +5,7 @@
 * Add HEAD method to Bucket API, [PR-30](https://github.com/reduct-storage/reduct-storage/pull/30)
 * PUT method of Bucket API has optional parameters, [PR-32](https://github.com/reduct-storage/reduct-storage/pull/32)
 * Extends information from GET method of Server API, [PR-33](https://github.com/reduct-storage/reduct-storage/pull/33)
+* Add GET /list end point to browse buckets, [PR-34](https://github.com/reduct-storage/reduct-storage/pull/34)
 
 **Bugs**:
 
