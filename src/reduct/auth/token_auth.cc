@@ -18,7 +18,7 @@ class NoAuthentication : public ITokenAuthentication {
 };
 
 std::unique_ptr<ITokenAuthentication> ITokenAuthentication::Build(std::string_view api_token) {
-  LOG_INFO("API token is empty. No authentication.");
+  LOG_WARNING("API token is empty. No authentication.");
   return std::unique_ptr<NoAuthentication>();
 }
 

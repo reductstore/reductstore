@@ -15,7 +15,6 @@ namespace reduct::auth {
  */
 class ITokenAuthentication {
  public:
-
   virtual core::Result<std::string> RefreshToken(std::string_view api_token) const = 0;
   virtual core::Error Check(std::string_view access_token) const = 0;
 

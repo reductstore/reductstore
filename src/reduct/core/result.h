@@ -30,6 +30,6 @@ struct [[nodiscard]] UPtrResult {  // NOLINT
   operator const Error&() const noexcept { return error; }
 };
 
-}  // namespace reduct
+}  // namespace reduct::core
 
 #endif  // REDUCT_CORE_RESULT_H
