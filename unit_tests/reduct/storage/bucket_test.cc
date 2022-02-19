@@ -14,10 +14,6 @@ using reduct::storage::IEntry;
 using std::chrono::seconds;
 namespace fs = std::filesystem;
 
-inline bool operator==(const google::protobuf::MessageLite& msg_a, const google::protobuf::MessageLite& msg_b) {
-  return (msg_a.GetTypeName() == msg_b.GetTypeName()) && (msg_a.SerializeAsString() == msg_b.SerializeAsString());
-}
-
 TEST_CASE("storage::Bucket should create folder", "[bucket]") {
   auto dir_path = BuildTmpDirectory();
   BucketSettings settings;
@@ -139,7 +135,7 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
 
 TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]") {
   const auto dir_path = BuildTmpDirectory();
-  auto bucket = IBucket::Build(dir_path/ "bucket");
+  auto bucket = IBucket::Build(dir_path / "bucket");
 
   BucketSettings settings;
   settings.set_max_block_size(600);
