@@ -7,9 +7,9 @@
 
 #include "reduct/async/run.h"
 #include "reduct/core/error.h"
+#include "reduct/proto/api/bucket_info.pb.h"
 #include "reduct/proto/api/bucket_settings.pb.h"
 #include "reduct/proto/api/server_info.pb.h"
-
 namespace reduct::api {
 
 template <typename Response>
@@ -19,6 +19,10 @@ struct CallbackResult {
 
   operator const core::Error&() const { return error; }
 };
+
+//---------------------
+// Server API
+//---------------------
 
 /**
  * Get info callback
@@ -31,6 +35,19 @@ class IInfoCallback {
   struct Request {};
   using Result = CallbackResult<Response>;
   virtual async::Run<Result> OnInfo(const Request& req) const = 0;
+};
+
+/**
+ * Get list of buckets
+ */
+class IListStorageCallback {
+ public:
+  struct Response {
+    proto::api::BucketInfoList buckets;
+  };
+  struct Request {};
+  using Result = CallbackResult<Response>;
+  virtual async::Run<Result> OnStorageList(const Request& req) const = 0;
 };
 
 //---------------------

@@ -35,7 +35,7 @@ class Storage : public IStorage {
   }
 
   /**
-   * Info API
+   * Server API
    */
   [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
     using Callback = IInfoCallback;
@@ -69,6 +69,10 @@ class Storage : public IStorage {
     });
   }
 
+  [[nodiscard]] Run<IListStorageCallback::Result> OnStorageList(const IListStorageCallback::Request& req) const override {
+    using Callback = IListStorageCallback;
+    return Run<Callback::Result>([] { return Callback::Result{}; });
+  }
   /**
    * Bucket API
    */
