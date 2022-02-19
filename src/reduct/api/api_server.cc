@@ -3,12 +3,11 @@
 #include "reduct/api/api_server.h"
 
 #include <App.h>
-#include <nlohmann/json.hpp>
 
 #include "reduct/api/handlers/common.h"
 #include "reduct/api/handlers/handle_bucket.h"
 #include "reduct/api/handlers/handle_entry.h"
-#include "reduct/api/handlers/handle_info.h"
+#include "reduct/api/handlers/handle_server.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api {
@@ -33,7 +32,9 @@ class ApiServer : public IApiServer {
     }
 
     uWS::App()
+        // Server API
         .get(base_path + "info", [this](auto *res, auto *req) { handlers::HandleInfo(handler_.get(), res, req); })
+        .get(base_path + "list", [this](auto *res, auto *req) { handlers::HandleList(handler_.get(), res, req); })
         // Bucket API
         .post(base_path + "b/:bucket_name",
               [this](auto *res, auto *req) {

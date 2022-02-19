@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package reduct.proto.api;
+
+message BucketInfo {
+  string name = 1;          // name of bucket
+  uint64 size = 2;          // size of bucket in bytes
+  uint64 entry_count = 3;   // number of entries
+  uint64 oldest_record = 5; // unix timestamp of oldest record in seconds
+  uint64 latest_record = 6; // unix timestamp of latest record in seconds
+}
+
+message BucketInfoList {
+  repeated BucketInfo buckets = 1;
+}

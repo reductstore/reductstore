@@ -1,9 +1,10 @@
 // Copyright 2021-2022 Alexey Timin
 
+#include "reduct/api/handlers/handle_entry.h"
+
 #include <nlohmann/json.hpp>
 
 #include "reduct/api/handlers/common.h"
-#include "reduct/api/handlers/handle_info.h"
 #include "reduct/async/sleep.h"
 #include "reduct/core/logger.h"
 

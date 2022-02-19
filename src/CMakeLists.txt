@@ -2,15 +2,18 @@ set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Generate protoc files
 set(PROTOBUF_SPEC_FILES
-        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/storage/entry.proto
+        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/bucket_info.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/bucket_settings.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/server_info.proto
+        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/storage/entry.proto
         )
 
 set(PROTOBUF_FILES
-        ${CMAKE_BINARY_DIR}/reduct/proto/storage/entry.pb.cc
+        ${CMAKE_BINARY_DIR}/reduct/proto/api/bucket_info.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/bucket_settings.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/server_info.pb.cc
+        ${CMAKE_BINARY_DIR}/reduct/proto/storage/entry.pb.cc
+
         )
 
 
@@ -28,7 +31,7 @@ add_custom_command(OUTPUT ${PROTOBUF_FILES}
 set(SRC_FILES
         reduct/api/handlers/handle_bucket.cc
         reduct/api/handlers/handle_entry.cc
-        reduct/api/handlers/handle_info.cc
+        reduct/api/handlers/handle_server.cc
         reduct/api/api_server.cc
 
         reduct/async/loop.cc

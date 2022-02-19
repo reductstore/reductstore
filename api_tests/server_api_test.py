@@ -16,6 +16,21 @@ def test_get_info(base_url):
     assert int(data['oldest_record']) >= 0
 
 
+def test_get_list_of_buckets(base_url):
+    """Should provide information about the storage"""
+    resp = requests.get(f'{base_url}/list')
+
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+
+    assert len(data["buckets"]) > 0
+    assert "bucket_" in data["buckets"][0]["name"]
+    assert int(data["buckets"][0]["size"]) >= 0
+    assert int(data["buckets"][0]["entry_count"]) >= 0
+    assert int(data["buckets"][0]["oldest_record"]) >= 0
+    assert int(data["buckets"][0]["latest_record"]) >= 0
+
+
 def test_get_wrong_path(base_url):
     """Should return 404"""
 
