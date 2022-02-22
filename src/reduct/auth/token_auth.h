@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "reduct/api/callbacks.h"
 #include "reduct/core/result.h"
 
 namespace reduct::auth {
@@ -13,12 +14,21 @@ namespace reduct::auth {
 /**
  *  Trivial Token Authentication w/o encoded subject
  */
-class ITokenAuthentication {
+class ITokenAuthentication : public api::IRefreshToken {
  public:
-  virtual core::Result<std::string> RefreshToken(std::string_view api_token) const = 0;
-  virtual core::Error Check(std::string_view access_token) const = 0;
+  struct Options {
+    int expiration_time_s;
+  };
 
-  static std::unique_ptr<ITokenAuthentication> Build(std::string_view api_token);
+  /**
+   * @brief Check if the access token is valid
+   * @param authorization_header The header with token
+   * @return 200 if Ok
+   */
+  virtual core::Error Check(std::string_view authorization_header) const = 0;
+
+  static std::unique_ptr<ITokenAuthentication> Build(std::string_view api_token,
+                                                     Options options = Options{.expiration_time_s = 300});
 };
 }  // namespace reduct::auth
 

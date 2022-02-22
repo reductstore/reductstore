@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <ostream>
 
-#include "reduct/proto/api/bucket_settings.pb.h"
+#include "reduct/proto/api/bucket.pb.h"
 #include "reduct/storage/entry.h"
 
 namespace reduct::storage {

@@ -8,6 +8,7 @@ set(SRC_FILES
         reduct/async/task_test.cc
 
         reduct/core/env_test.cc
+        reduct/auth/token_auth_test.cc
 
         reduct/storage/bucket_test.cc
         reduct/storage/entry_test.cc

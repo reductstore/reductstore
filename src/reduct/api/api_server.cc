@@ -40,6 +40,8 @@ class ApiServer : public IApiServer {
         // Server API
         .get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
         .get(base_path + "list", [this](auto *res, auto *req) { List(res, req); })
+        // Auth API
+        .put(base_path + "auth/refresh", [this](auto *res, auto *req) { RefreshToken(res, req); })
         // Bucket API
         .post(base_path + "b/:bucket_name",
               [this](auto *res, auto *req) { CreateBucket(res, req, std::string(req->getParameter(0))); })
@@ -120,6 +122,20 @@ class ApiServer : public IApiServer {
         BasicHandle<SSL, IListStorageCallback>(res, req)
             .OnSuccess([](IListStorageCallback::Response app_resp) { return PrintToJson(std::move(app_resp.buckets)); })
             .Run(co_await handler_->OnStorageList({}), auth_.get());
+    co_return;
+  }
+
+  // Auth API
+  /**
+   * GET /auth/refresh
+   */
+  template <bool SSL>
+  VoidTask RefreshToken(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
+    std::string header(req->getHeader("Authorization"));
+    [[maybe_unused]] auto err =
+        BasicHandle<SSL, IRefreshToken>(res, req)
+            .OnSuccess([](IRefreshToken::Response resp) { return PrintToJson(std::move(resp)); })
+            .Run(co_await auth_->OnRefreshToken(header));
     co_return;
   }
 

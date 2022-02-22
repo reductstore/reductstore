@@ -7,7 +7,7 @@
 
 #include "reduct/config.h"
 #include "reduct/core/logger.h"
-#include "reduct/proto/api/bucket_settings.pb.h"
+#include "reduct/proto/api/bucket.pb.h"
 
 namespace reduct::storage {
 
