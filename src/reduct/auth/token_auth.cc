@@ -59,7 +59,6 @@ class JwtAuthentication : public ITokenAuthentication {
       dec->set_key(key);
       dec->start(iv_);
       dec->finish(input_key);
-
     } catch (const std::exception& err) {
       return {.code = 401, .message = fmt::format("Invalid token")};
     }
