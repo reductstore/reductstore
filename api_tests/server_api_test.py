@@ -3,9 +3,9 @@ import json
 import requests
 
 
-def test_get_info(base_url):
+def test_get_info(base_url, headers):
     """Should provide information about the storage"""
-    resp = requests.get(f'{base_url}/info')
+    resp = requests.get(f'{base_url}/info', headers=headers)
 
     assert resp.status_code == 200
     data = json.loads(resp.content)
@@ -16,9 +16,9 @@ def test_get_info(base_url):
     assert int(data['oldest_record']) >= 0
 
 
-def test_get_list_of_buckets(base_url):
+def test_get_list_of_buckets(base_url, headers):
     """Should provide information about the storage"""
-    resp = requests.get(f'{base_url}/list')
+    resp = requests.get(f'{base_url}/list', headers=headers)
 
     assert resp.status_code == 200
     data = json.loads(resp.content)
@@ -31,14 +31,14 @@ def test_get_list_of_buckets(base_url):
     assert int(data["buckets"][0]["latest_record"]) >= 0
 
 
-def test_get_wrong_path(base_url):
+def test_get_wrong_path(base_url, headers):
     """Should return 404"""
 
-    resp = requests.get(f'{base_url}/')
+    resp = requests.get(f'{base_url}/', headers=headers)
     assert resp.status_code == 404
 
-    resp = requests.get(f'{base_url}/NOTEXIST')
+    resp = requests.get(f'{base_url}/NOTEXIST', headers=headers)
     assert resp.status_code == 404
 
-    resp = requests.get(f'{base_url}/NOTEXIST/XXXX')
+    resp = requests.get(f'{base_url}/NOTEXIST/XXXX', headers=headers)
     assert resp.status_code == 404
