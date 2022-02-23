@@ -22,20 +22,25 @@ TEST_CASE("auth::TokenAuthorization should return 401 if head is bad") {
 }
 
 TEST_CASE("auth::TokenAuthorization should refresh token") {
-  const std::string kApiToken = "sometoken";
-  auto auth = ITokenAuthentication::Build(kApiToken, {.expiration_time_s = 1});
+  const std::string kBearer = "Bearer sometoken";
+  auto auth = ITokenAuthentication::Build("sometoken", {.expiration_time_s = 1});
 
-  auto [resp, err] = OnRefreshToken(auth.get(), kApiToken).Get();
+  auto [resp, err] = OnRefreshToken(auth.get(), kBearer).Get();
   REQUIRE(err == Error::kOk);
   REQUIRE(auth->Check("Bearer " + resp.access_token()) == Error::kOk);
 
   SECTION("regenerate nonce") {
-    auto new_auth = ITokenAuthentication::Build(kApiToken);
+    auto new_auth = ITokenAuthentication::Build(kBearer);
     REQUIRE(new_auth->Check("Bearer " + resp.access_token()) == Error{.code = 401, .message = "Invalid token"});
   }
 
-  SECTION("check api token") {
+  SECTION("check format") {
     auto [_, refresh_err] = OnRefreshToken(auth.get(), "badtoken").Get();
+    REQUIRE(refresh_err == Error{.code = 401, .message = "No bearer token in response header"});
+  }
+
+  SECTION("schek api token") {
+    auto [_, refresh_err] = OnRefreshToken(auth.get(), "Bearer badtoken").Get();
     REQUIRE(refresh_err == Error{.code = 401, .message = "Invalid API token"});
   }
 
