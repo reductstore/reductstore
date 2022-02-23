@@ -59,7 +59,11 @@ template <bool SSL, typename Callback>
 class BasicHandle {
  public:
   BasicHandle(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req)
-      : http_resp_(res), http_req_(req), on_success_{}, url_(http_req_->getUrl()), method_(http_req_->getMethod()) {
+      : http_resp_(res),
+        authorization_(req->getHeader("authorization")),
+        on_success_{},
+        url_(req->getUrl()),
+        method_(req->getMethod()) {
     std::transform(method_.begin(), method_.end(), method_.begin(), [](auto &ch) { return std::toupper(ch); });
     http_resp_->onAborted([*this] { LOG_ERROR("{} {}: aborted", method_, url_); });
   }
@@ -71,8 +75,7 @@ class BasicHandle {
 
   core::Error Run(typename Callback::Result result, auth::ITokenAuthentication *auth = nullptr) {
     if (auth) {
-      auto header_with_token = http_req_->getHeader("authorization");
-      if (auto err = auth->Check(header_with_token)) {
+      if (auto err = auth->Check(authorization_)) {
         SendError(err);
         return err;
       }
@@ -100,9 +103,9 @@ class BasicHandle {
 
  private:
   uWS::HttpResponse<SSL> *http_resp_;
-  uWS::HttpRequest *http_req_;
   std::string url_;
   std::string method_;
+  std::string authorization_;
   std::function<std::string(typename Callback::Response)> on_success_;
 };
 }  // namespace reduct::api

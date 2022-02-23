@@ -76,8 +76,12 @@ class JwtAuthentication : public ITokenAuthentication {
   }
 
   [[nodiscard]] Run<Result> OnRefreshToken(const Request& req) const override {
-    return async::Run<Result>([this, &req] {
-      if (key_ != HashToken(req)) {
+    return async::Run<Result>([this, api_token = req] {
+      if (!api_token.starts_with("Bearer ")) {
+        return Result{{}, Error{.code = 401, .message = "No bearer token in response header"}};
+      }
+
+      if (key_ != HashToken(api_token.substr(7, api_token.size() - 7))) {
         return Result{{}, Error{.code = 401, .message = "Invalid API token"}};
       }
 
