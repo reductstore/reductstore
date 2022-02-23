@@ -101,7 +101,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs:
-      - api_tests
+      - api_tests_with_auth
+      - api_tests_without_auth
       - unit_tests
     if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
     steps:
