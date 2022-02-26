@@ -20,6 +20,11 @@ namespace fs = std::filesystem;
 class Storage : public IStorage {
  public:
   explicit Storage(Options options) : options_(std::move(options)), buckets_() {
+    if (!fs::exists(options_.data_path)) {
+      LOG_INFO("Folder '{}' doesn't exist. Create it.", options_.data_path.string());
+      fs::create_directories(options_.data_path);
+    }
+
     for (const auto& folder : fs::directory_iterator(options_.data_path)) {
       if (folder.is_directory()) {
         auto bucket_name = folder.path().filename();
@@ -87,7 +92,7 @@ class Storage : public IStorage {
         proto_info->set_oldest_record(Clk::to_time_t(bucket_info.oldest_record_time));
         proto_info->set_latest_record(Clk::to_time_t(bucket_info.latest_record_time));
       }
-      return Callback::Result{.response = {.buckets = std::move(list)}, .error = Error::kOk};
+      return Callback::Result{.result = {.buckets = std::move(list)}, .error = Error::kOk};
     });
   }
   /**

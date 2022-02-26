@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package reduct.proto.api;
 
+// Stats of server
 message ServerInfo {
   string version = 1;       // version of storage
   uint64 bucket_count = 2;  // number of buckets in storage

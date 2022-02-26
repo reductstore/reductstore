@@ -6,6 +6,7 @@
   * [Server API](http-api/server-api.md)
   * [Bucket API](http-api/bucket-api.md)
   * [Entry API](http-api/entry-api.md)
+  * [Token Authentication](http-api/token-authentication.md)
 
 ## SDKs
 

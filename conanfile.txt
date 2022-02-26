@@ -5,6 +5,7 @@ nlohmann_json/3.9.1
 protobuf/3.19.1
 gtest/1.11.0
 catch2/2.13.7
+botan/2.19.1
 
 [generators]
 cmake

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package reduct.proto.api;
 
+// Stats of bucket
 message BucketInfo {
   string name = 1;          // name of bucket
   uint64 size = 2;          // size of bucket in bytes
@@ -10,6 +11,19 @@ message BucketInfo {
   uint64 latest_record = 6; // unix timestamp of latest record in seconds
 }
 
+// List of buckets
 message BucketInfoList {
   repeated BucketInfo buckets = 1;
+}
+
+// Settings of bucket
+message BucketSettings {
+  enum QuotaType {
+    NONE = 0;   // No quota
+    FIFO = 1;   // Remove oldest block in the bucket if we reach quota
+  }
+
+  optional uint64 max_block_size = 1; // max size of block in bytes
+  optional QuotaType quota_type = 2;
+  optional uint64 quota_size = 3;     // size of quota in bytes
 }
