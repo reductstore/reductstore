@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <numeric>
 #include <shared_mutex>
 #include <utility>
 
@@ -21,6 +20,11 @@ namespace fs = std::filesystem;
 class Storage : public IStorage {
  public:
   explicit Storage(Options options) : options_(std::move(options)), buckets_() {
+    if (!fs::exists(options_.data_path)) {
+      LOG_INFO("Folder '{}' doesn't exist. Create it.", options_.data_path.string());
+      fs::create_directories(options_.data_path);
+    }
+
     for (const auto& folder : fs::directory_iterator(options_.data_path)) {
       if (folder.is_directory()) {
         auto bucket_name = folder.path().filename();
@@ -31,25 +35,66 @@ class Storage : public IStorage {
     }
 
     LOG_INFO("Load {} buckets", buckets_.size());
+    start_time_ = decltype(start_time_)::clock::now();
   }
 
   /**
-   * Info API
+   * Server API
    */
   [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
     using Callback = IInfoCallback;
+
     return Run<Callback::Result>([this] {
-      Callback::Response resp;
-      resp.version = reduct::kVersion;
-      resp.bucket_count = buckets_.size();
-      resp.entry_count = std::accumulate(buckets_.begin(), buckets_.end(), 0,
-                                         [](size_t a, const decltype(buckets_)::value_type& entry) {
-                                           return entry.second->GetInfo().entry_count + a;
-                                         });
+      using proto::api::ServerInfo;
+      using Clk = IEntry::Time::clock;
+
+      size_t usage = 0;
+      IEntry::Time oldest_ts = IEntry::Time::clock::now();
+      IEntry::Time latest_ts{};
+
+      for (const auto& [_, bucket] : buckets_) {
+        auto info = bucket->GetInfo();
+        usage += info.size;
+        oldest_ts = std::min(oldest_ts, info.oldest_record_time);
+        latest_ts = std::max(latest_ts, info.latest_record_time);
+      }
+
+      ServerInfo info;
+      info.set_version(kVersion);
+      info.set_bucket_count(buckets_.size());
+      info.set_uptime(
+          std::chrono::duration_cast<std::chrono::seconds>(decltype(start_time_)::clock::now() - start_time_).count());
+      info.set_usage(usage);
+      info.set_oldest_record(Clk::to_time_t(oldest_ts));
+      info.set_latest_record(Clk::to_time_t(latest_ts));
+
+      Callback::Response resp{.info = std::move(info)};
       return Callback::Result{std::move(resp), Error{}};
     });
   }
 
+  [[nodiscard]] Run<IListStorageCallback::Result> OnStorageList(
+      const IListStorageCallback::Request& req) const override {
+    using Callback = IListStorageCallback;
+    return Run<Callback::Result>([this] {
+      using proto::api::BucketInfoList;
+      using proto::api::BucketInfo;
+      using Clk = IEntry::Time::clock;
+
+      BucketInfoList list;
+      for (const auto& [name, bucket] : buckets_) {
+        auto bucket_info = bucket->GetInfo();
+
+        auto proto_info = list.add_buckets();
+        proto_info->set_name(name);
+        proto_info->set_size(bucket_info.size);
+        proto_info->set_entry_count(bucket_info.entry_count);
+        proto_info->set_oldest_record(Clk::to_time_t(bucket_info.oldest_record_time));
+        proto_info->set_latest_record(Clk::to_time_t(bucket_info.latest_record_time));
+      }
+      return Callback::Result{.result = {.buckets = std::move(list)}, .error = Error::kOk};
+    });
+  }
   /**
    * Bucket API
    */
@@ -62,17 +107,7 @@ class Storage : public IStorage {
             {}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.bucket_name)}};
       }
 
-      auto [quota_type, parse_err] = IBucket::ParseQuotaType(req.bucket_settings.quota_type);
-      if (parse_err) {
-        return Callback::Result{{}, parse_err};
-      }
-
-      auto bucket = IBucket::Build({
-          .name = bucket_name,
-          .path = options_.data_path,
-          .max_block_size = req.bucket_settings.max_block_size,
-          .quota = {.type = quota_type, .size = req.bucket_settings.quota_size},
-      });
+      auto bucket = IBucket::Build(options_.data_path / bucket_name, req.bucket_settings);
       if (!bucket) {
         auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
         return Callback::Result{{},
@@ -92,11 +127,8 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      const auto& settings = bucket_it->second->GetOptions();
-      return Callback::Result{{.bucket_settings = {.max_block_size = settings.max_block_size,
-                                                   .quota_type = IBucket::GetQuotaTypeName(settings.quota.type),
-                                                   .quota_size = settings.quota.size}},
-                              Error{}};
+      const auto& settings = bucket_it->second->GetSettings();
+      return Callback::Result{{.bucket_settings = settings}, Error::kOk};
     });
   }
 
@@ -125,17 +157,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      auto [quota_type, parse_err] = IBucket::ParseQuotaType(req.new_settings.quota_type);
-      if (parse_err) {
-        return Callback::Result{{}, parse_err};
-      }
-
-      err = bucket_it->second->SetOptions({
-          .name = "",
-          .path = {},
-          .max_block_size = req.new_settings.max_block_size,
-          .quota = {.type = quota_type, .size = req.new_settings.quota_size},
-      });
+      err = bucket_it->second->SetSettings(std::move(req.new_settings));
       return Callback::Result{{}, Error::kOk};
     });
   }
@@ -275,6 +297,7 @@ class Storage : public IStorage {
 
   Options options_;
   BucketMap buckets_;
+  std::chrono::steady_clock::time_point start_time_;
 };
 
 std::unique_ptr<IStorage> IStorage::Build(IStorage::Options options) {

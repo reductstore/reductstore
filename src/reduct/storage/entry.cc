@@ -10,7 +10,7 @@
 #include <ranges>
 
 #include "reduct/core/logger.h"
-#include "reduct/proto/entry.pb.h"
+#include "reduct/proto/storage/entry.pb.h"
 
 namespace reduct::storage {
 
@@ -133,6 +133,12 @@ class Entry : public IEntry {
       }
     }
 
+    if (type == RecordType::kLatest && current_block_->size() > options_.max_block_size) {
+      LOG_DEBUG("Block {} is full. Create a new one", current_block_->id());
+      current_block_ = StartNextBlock(current_block_->latest_record_time());
+      block = current_block_;
+    }
+
     const auto block_path = full_path_ / fmt::format(kBlockNameFormat, block->id());
 
     LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
@@ -167,11 +173,6 @@ class Entry : public IEntry {
         assert(current_block_ == block);
         current_block_->mutable_latest_record_time()->CopyFrom(proto_ts);
         descriptor_.mutable_latest_record_time()->CopyFrom(proto_ts);
-
-        if (current_block_->size() > options_.max_block_size) {
-          LOG_DEBUG("Block {} is full. Create a new one", current_block_->id());
-          current_block_ = StartNextBlock();
-        }
         break;
       case RecordType::kBelatedFirst:
         block->mutable_begin_time()->CopyFrom(proto_ts);
@@ -261,7 +262,7 @@ class Entry : public IEntry {
       return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
     }
 
-    int stop_block_index = FindBlock(std::min(descriptor_.latest_record_time(), stop_ts));
+    int stop_block_index = FindBlock(std::min(descriptor_.latest_record_time(), stop_ts), start_block_index);
     if (stop_block_index == -1) {
       LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(stop_ts));
       return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
@@ -287,22 +288,16 @@ class Entry : public IEntry {
   }
 
   Error RemoveOldestBlock() override {
+    if (descriptor_.blocks_size() == 1) {
+      return {};
+    }
+
     auto& block = descriptor_.blocks(0);
     fs::remove(full_path_ / fmt::format(kBlockNameFormat, block.id()));
 
-    if (descriptor_.blocks_size() == 1) {
-      // if it is the first block to be deleted, create a new one before
-      current_block_ = StartNextBlock();
-      descriptor_.clear_oldest_record_time();
-    } else {
-      const auto& next_block = descriptor_.blocks(1);
-      if (!next_block.has_begin_time()) {
-        // no records in the next block , so we will be empty after removing
-        descriptor_.clear_oldest_record_time();
-      } else {
-        descriptor_.mutable_oldest_record_time()->CopyFrom(next_block.begin_time());
-      }
-    }
+    // Don't remove the last block
+    const auto& next_block = descriptor_.blocks(1);
+    descriptor_.mutable_oldest_record_time()->CopyFrom(next_block.latest_record_time());
 
     descriptor_.set_size(descriptor_.size() - descriptor_.blocks(0).size());
     descriptor_.mutable_blocks()->DeleteSubrange(0, 1);
@@ -328,15 +323,15 @@ class Entry : public IEntry {
   const Options& GetOptions() const override { return options_; }
 
  private:
-  proto::EntryDescriptor::Block* StartNextBlock() {
+  proto::EntryDescriptor::Block* StartNextBlock(const google::protobuf::Timestamp& proto_ts) {
     auto id = current_block_->id();
     auto block = descriptor_.add_blocks();
     block->set_id(id + 1);
-
+    block->mutable_begin_time()->CopyFrom(proto_ts);
     return block;
   }
 
-  int FindBlock(const google::protobuf::Timestamp& proto_ts) const {
+  int FindBlock(const google::protobuf::Timestamp& proto_ts, int start_from = 0) const {
     auto block_index = -1;
     for (auto i = 0; i < descriptor_.blocks_size(); ++i) {
       const auto& current_block = descriptor_.blocks(i);

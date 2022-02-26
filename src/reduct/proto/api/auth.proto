@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package reduct.proto.api;
+
+message Token {
+  google.protobuf.Timestamp expired_at = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  uint64 expired_at = 2;
+}
+

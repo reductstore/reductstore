@@ -7,16 +7,16 @@
 
 #include "reduct/async/run.h"
 #include "reduct/core/error.h"
+#include "reduct/core/result.h"
+#include "reduct/proto/api/auth.pb.h"
+#include "reduct/proto/api/bucket.pb.h"
+#include "reduct/proto/api/server.pb.h"
 
 namespace reduct::api {
 
-template <typename Response>
-struct CallbackResult {
-  Response response;
-  core::Error error;
-
-  operator const core::Error&() const { return error; }
-};
+//---------------------
+// Server API
+//---------------------
 
 /**
  * Get info callback
@@ -24,23 +24,41 @@ struct CallbackResult {
 class IInfoCallback {
  public:
   struct Response {
-    std::string version;
-    size_t bucket_count;
-    size_t entry_count;
+    proto::api::ServerInfo info;
   };
   struct Request {};
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   virtual async::Run<Result> OnInfo(const Request& req) const = 0;
+};
+
+/**
+ * Get list of buckets
+ */
+class IListStorageCallback {
+ public:
+  struct Response {
+    proto::api::BucketInfoList buckets;
+  };
+  struct Request {};
+  using Result = core::Result<Response>;
+  virtual async::Run<Result> OnStorageList(const Request& req) const = 0;
+};
+
+//---------------------
+// Auth API
+//---------------------
+class IRefreshToken {
+ public:
+  using Request = std::string;
+  using Response = proto::api::RefreshTokenResponse;
+
+  using Result = core::Result<Response>;
+  virtual async::Run<Result> OnRefreshToken(const Request& req) const = 0;
 };
 
 //---------------------
 // Bucket API
 //---------------------
-struct BucketSettings {
-  uint64_t max_block_size;
-  std::string_view quota_type;
-  uint64_t quota_size;
-};
 
 /**
  * Create bucket callback
@@ -50,9 +68,9 @@ class ICreateBucketCallback {
   struct Response {};
   struct Request {
     std::string_view bucket_name;
-    BucketSettings bucket_settings;
+    proto::api::BucketSettings bucket_settings;
   };
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
 };
 
@@ -62,13 +80,13 @@ class ICreateBucketCallback {
 class IGetBucketCallback {
  public:
   struct Response {
-    BucketSettings bucket_settings;
+    proto::api::BucketSettings bucket_settings;
   };
 
   struct Request {
     std::string_view bucket_name;
   };
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   virtual async::Run<Result> OnGetBucket(const Request& req) const = 0;
 };
 
@@ -81,7 +99,7 @@ class IRemoveBucketCallback {
   struct Request {
     std::string_view bucket_name;
   };
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   virtual async::Run<Result> OnRemoveBucket(const Request& req) = 0;
 };
 
@@ -93,10 +111,10 @@ class IUpdateBucketCallback {
   struct Response {};
   struct Request {
     std::string_view bucket_name;
-    BucketSettings new_settings;
+    proto::api::BucketSettings new_settings;
   };
 
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   virtual async::Run<Result> OnUpdateCallback(const Request& req) = 0;
 };
 //---------------------
@@ -115,7 +133,7 @@ class IWriteEntryCallback {
     std::string_view blob;
   };
 
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   virtual async::Run<Result> OnWriteEntry(const Request& req) = 0;
 };
 
@@ -134,7 +152,7 @@ class IReadEntryCallback {
     std::string_view timestamp;
   };
 
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   virtual async::Run<Result> OnReadEntry(const Request& req) = 0;
 };
 
@@ -156,7 +174,7 @@ class IListEntryCallback {
     std::string_view stop_timestamp;
   };
 
-  using Result = CallbackResult<Response>;
+  using Result = core::Result<Response>;
   [[nodiscard]] virtual async::Run<Result> OnListEntry(const Request& req) const = 0;
 };
 

@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package reduct.proto.api;
+
+// Stats of server
+message ServerInfo {
+  string version = 1;       // version of storage
+  uint64 bucket_count = 2;  // number of buckets in storage
+  uint64 usage = 3;         // disk usage in bytes
+  uint64 uptime = 4;        // uptime in seconds
+  uint64 oldest_record = 5; // unix timestamp of oldest record in seconds
+  uint64 latest_record = 6; // unix timestamp of latest record in seconds
+}

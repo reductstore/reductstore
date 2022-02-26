@@ -11,6 +11,7 @@ The storage uses HTTP API and stores the data as blobs. Read more [here](https:/
 * Storing and access blobs as time series
 * Optimized for little files
 * Real-time quota for buckets
+* Token authentication
 
 ## Get started
 

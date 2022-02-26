@@ -69,7 +69,7 @@ A UNIX timestamp in microseconds
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucker or record with the timestamp doesn't exist" %}
+{% swagger-response status="404: Not Found" description="The bucker or record with the timestamp doesn" %}
 ```javascript
 {
    "detail": "string"
@@ -88,14 +88,14 @@ A UNIX timestamp in microseconds
 
 {% swagger method="get" path=" " baseUrl="/b/:bucket_name/:entry_name/list " summary="Get list of  records for a time interval" %}
 {% swagger-description %}
-The method responses with a JSON array that contains timestamps and sizes of the records.  The time interval is [start, stop).
+The method responses with a JSON array that contains timestamps and sizes of the records. The time interval is [start, stop).
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
 Name of bucket
 {% endswagger-parameter %}
 
-{% swagger-parameter in="path" name=":entry_name" %}
+{% swagger-parameter in="path" name=":entry_name" required="true" %}
 Name of entry
 {% endswagger-parameter %}
 
@@ -103,7 +103,7 @@ Name of entry
 A UNIX timestamp in microseconds
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="stop" type="Integer" %}
+{% swagger-parameter in="query" name="stop" type="Integer" required="true" %}
 A UNIX timestamp in microseconds
 {% endswagger-parameter %}
 
@@ -120,7 +120,7 @@ A UNIX timestamp in microseconds
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn't exist or no data for the interval" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn" %}
 ```javascript
 {
    "detail": "string"
