@@ -22,7 +22,7 @@ TEST_CASE("auth::TokenAuthorization should return 401 if head is bad") {
 }
 
 TEST_CASE("auth::TokenAuthorization should refresh token") {
-  const std::string kBearer = "Bearer sometoken";
+  const std::string kBearer = "Bearer 9C928547A5DCE2FCC2788DE34FE163942F64E50FEA570D33774822D5EACBF1EC";
   auto auth = ITokenAuthentication::Build("sometoken", {.expiration_time_s = 1});
 
   auto [resp, err] = OnRefreshToken(auth.get(), kBearer).Get();
@@ -39,7 +39,7 @@ TEST_CASE("auth::TokenAuthorization should refresh token") {
     REQUIRE(refresh_err == Error{.code = 401, .message = "No bearer token in response header"});
   }
 
-  SECTION("schek api token") {
+  SECTION("check api token") {
     auto [_, refresh_err] = OnRefreshToken(auth.get(), "Bearer badtoken").Get();
     REQUIRE(refresh_err == Error{.code = 401, .message = "Invalid API token"});
   }

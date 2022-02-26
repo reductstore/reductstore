@@ -53,10 +53,9 @@ class JwtAuthentication : public ITokenAuthentication {
     Botan::SecureVector<uint8_t> input_key;
     try {
       input_key = Botan::hex_decode_locked(access_token.data(), access_token.size());
-      const std::vector<uint8_t> key = Botan::hex_decode(key_);
 
       std::unique_ptr<Botan::Cipher_Mode> dec = Botan::Cipher_Mode::create("AES-256/CBC/PKCS7", Botan::DECRYPTION);
-      dec->set_key(key);
+      dec->set_key(key_);
       dec->start(iv_);
       dec->finish(input_key);
     } catch (const std::exception& err) {
@@ -81,7 +80,11 @@ class JwtAuthentication : public ITokenAuthentication {
         return Result{{}, Error{.code = 401, .message = "No bearer token in response header"}};
       }
 
-      if (key_ != HashToken(api_token.substr(7, api_token.size() - 7))) {
+      try {
+        if (key_ != Botan::hex_decode(api_token.substr(7, api_token.size() - 7))) {
+          throw;
+        }
+      } catch (...) {
         return Result{{}, Error{.code = 401, .message = "Invalid API token"}};
       }
 
@@ -91,10 +94,9 @@ class JwtAuthentication : public ITokenAuthentication {
       auto payload = token.SerializeAsString();
 
       Botan::SecureVector<uint8_t> input_key(payload.begin(), payload.end());
-      const std::vector<uint8_t> key = Botan::hex_decode(key_);
 
       std::unique_ptr<Botan::Cipher_Mode> enc = Botan::Cipher_Mode::create("AES-256/CBC/PKCS7", Botan::ENCRYPTION);
-      enc->set_key(key);
+      enc->set_key(key_);
       enc->start(iv_);
       enc->finish(input_key);
 
@@ -107,14 +109,14 @@ class JwtAuthentication : public ITokenAuthentication {
   }
 
  private:
-  static std::string HashToken(const std::string_view& api_token) {
+  static Botan::OctetString HashToken(const std::string_view& api_token) {
     auto hash = Botan::HashFunction::create("SHA-256");
     hash->update(std::string(api_token));
-    return Botan::hex_encode(hash->final());
+    return hash->final();
   }
 
   Options options_;
-  std::string key_;
+  Botan::OctetString key_;
   Botan::SecureVector<uint8_t> iv_;
 };
 
