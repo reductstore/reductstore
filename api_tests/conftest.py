@@ -28,7 +28,7 @@ def _headers(base_url) -> dict:
         # No JWT needed
         return {}
     elif resp.status_code == 401:
-        hasher = hashlib.sha256(bytes(os.getenv("API_TOKEN "), 'utf-8'))
+        hasher = hashlib.sha256(bytes(os.getenv("API_TOKEN"), 'utf-8'))
         resp = requests.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {hasher.hexdigest()}'})
         if resp.status_code == 200:
             return {'Authorization': f'Bearer {resp.json()["access_token"]}'}
