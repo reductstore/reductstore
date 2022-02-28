@@ -1,6 +1,6 @@
 # Reduct Storage
 
-Historian Object storage with focus on AI\ML applications.
+A time series storage to keep history of blob data.
 
 Reduct Storage aims to solve the problem of storing data in a case where you need to write some data intensively and read it accidentally by some time interval. 
 The storage uses HTTP API and stores the data as blobs. Read more [here](https://docs.reduct-storage.dev/http-api).
