@@ -1,6 +1,6 @@
 # 😯 How Does It Work?
 
-## What Is Historian Object Storage?
+## What Is Time Series Storage?
 
 Reduct Storage aims to solve the problem of storing data in a case where you need to write some data intensively and read it accidentally by some time interval. The storage uses [HTTP API ](http-api/) and stores the data as blobs. It means:
 
