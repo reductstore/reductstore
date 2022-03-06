@@ -41,7 +41,7 @@ TEST_CASE("auth::TokenAuthorization should refresh token") {
 
   SECTION("check api token") {
     auto [_, refresh_err] = OnRefreshToken(auth.get(), "Bearer badtoken").Get();
-    REQUIRE(refresh_err == Error{.code = 401, .message = "Invalid API token"});
+    REQUIRE(refresh_err == Error{.code = 401, .message = "Failed to decode API token"});
   }
 
   SECTION("token expires") {
