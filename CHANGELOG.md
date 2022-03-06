@@ -1,4 +1,8 @@
-## Release 0.2.0 (in progress)
+## Release 0.2.1 (in progress)
+
+**Bugs**:
+
+## Release 0.2.0 (2022-02-26)
 
 **Features**:
 
