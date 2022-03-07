@@ -2,7 +2,7 @@
 
 **Bugs**:
 
-* Fix crushing when API token is wrong, [PR-32](https://github.com/reduct-storage/reduct-storage/pull/42)
+* Fix crushing when API token is wrong, [PR-42](https://github.com/reduct-storage/reduct-storage/pull/42)
 
 ## Release 0.2.0 (2022-02-26)
 

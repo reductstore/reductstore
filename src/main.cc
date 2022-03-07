@@ -49,7 +49,7 @@ int main() {
   ILoop::set_loop(&loop);
 
   IApiServer::Components components{
-      .handler = IStorage::Build({.data_path = data_path}),
+      .storage = IStorage::Build({.data_path = data_path}),
       .auth = ITokenAuthentication::Build(api_token),
   };
 

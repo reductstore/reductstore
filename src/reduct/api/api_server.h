@@ -35,7 +35,7 @@ class IApiServer {
    * Components of the API server
    */
   struct Components {
-    std::unique_ptr<IApiHandler> handler;
+    std::unique_ptr<IApiHandler> storage;
     std::unique_ptr<auth::ITokenAuthentication> auth;
   };
 
