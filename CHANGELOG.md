@@ -1,4 +1,4 @@
-## Release 0.2.1 (in progress)
+## Release 0.2.1 (2022-03-07)
 
 **Bugs**:
 
