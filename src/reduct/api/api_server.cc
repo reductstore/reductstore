@@ -24,7 +24,7 @@ using core::Error;
 class ApiServer : public IApiServer {
  public:
   explicit ApiServer(Components components, Options options)
-      : handler_(std::move(components.handler)), auth_(std::move(components.auth)), options_(std::move(options)) {}
+      : storage_(std::move(components.storage)), auth_(std::move(components.auth)), options_(std::move(options)) {}
 
   void Run(const bool &running) const override {
     auto [host, port, base_path] = options_;
@@ -105,11 +105,13 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL>
   VoidTask Info(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
-    [[maybe_unused]] auto err =
-        BasicHandle<SSL, IInfoCallback>(res, req)
-            .OnSuccess([](IInfoCallback::Response app_resp) { return PrintToJson(std::move(app_resp.info)); })
-            .Run(co_await handler_->OnInfo({}), auth_.get());
+    auto handler = BasicApiHandler<SSL, IInfoCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
 
+    handler.Run(co_await storage_->OnInfo({}),
+                [](IInfoCallback::Response app_resp) { return PrintToJson(std::move(app_resp.info)); });
     co_return;
   }
 
@@ -118,10 +120,12 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL>
   VoidTask List(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
-    [[maybe_unused]] auto err =
-        BasicHandle<SSL, IListStorageCallback>(res, req)
-            .OnSuccess([](IListStorageCallback::Response app_resp) { return PrintToJson(std::move(app_resp.buckets)); })
-            .Run(co_await handler_->OnStorageList({}), auth_.get());
+    auto handler = BasicApiHandler<SSL, IListStorageCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+    handler.Run(co_await storage_->OnStorageList({}),
+                [](IListStorageCallback::Response app_resp) { return PrintToJson(std::move(app_resp.buckets)); });
     co_return;
   }
 
@@ -132,10 +136,9 @@ class ApiServer : public IApiServer {
   template <bool SSL>
   VoidTask RefreshToken(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
     std::string header(req->getHeader("authorization"));
-    [[maybe_unused]] auto err =
-        BasicHandle<SSL, IRefreshToken>(res, req)
-            .OnSuccess([](IRefreshToken::Response resp) { return PrintToJson(std::move(resp)); })
-            .Run(co_await auth_->OnRefreshToken(header));
+    auto handler = BasicApiHandler<SSL, IRefreshToken>(res, req);
+    handler.Run(co_await auth_->OnRefreshToken(header),
+                [](IRefreshToken::Response resp) { return PrintToJson(std::move(resp)); });
     co_return;
   }
 
@@ -145,14 +148,17 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL>
   VoidTask CreateBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
-    auto basic = BasicHandle<SSL, ICreateBucketCallback>(res, req);
+    auto handler = BasicApiHandler<SSL, ICreateBucketCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
 
     auto data = co_await AsyncHttpReceiver<SSL>(res);
     BucketSettings settings;
     if (!data.empty()) {
       auto status = JsonStringToMessage(data, &settings);
       if (!status.ok()) {
-        basic.SendError(
+        handler.SendError(
             Error{.code = 422, .message = fmt::format("Failed parse JSON data: {}", status.message().ToString())});
         co_return;
       }
@@ -163,7 +169,7 @@ class ApiServer : public IApiServer {
         .bucket_settings = std::move(settings),
     };
 
-    [[maybe_unused]] auto err = basic.Run(co_await handler_->OnCreateBucket(app_request), auth_.get());
+    handler.Run(co_await storage_->OnCreateBucket(app_request));
     co_return;
   }
 
@@ -172,11 +178,14 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL>
   VoidTask GetBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
+    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+
     IGetBucketCallback::Request app_request{.bucket_name = name};
-    [[maybe_unused]] auto err =
-        BasicHandle<SSL, IGetBucketCallback>(res, req)
-            .OnSuccess([](IGetBucketCallback::Response resp) { return PrintToJson(resp.bucket_settings); })
-            .Run(co_await handler_->OnGetBucket(app_request), auth_.get());
+    handler.Run(co_await storage_->OnGetBucket(app_request),
+                [](IGetBucketCallback::Response resp) { return PrintToJson(resp.bucket_settings); });
     co_return;
   }
 
@@ -185,9 +194,13 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL>
   VoidTask HeadBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
+    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+
     IGetBucketCallback::Request app_request{.bucket_name = name};
-    [[maybe_unused]] auto err =
-        BasicHandle<SSL, IGetBucketCallback>(res, req).Run(co_await handler_->OnGetBucket(app_request), auth_.get());
+    handler.Run(co_await storage_->OnGetBucket(app_request));
     co_return;
   }
 
@@ -196,13 +209,16 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL>
   VoidTask UpdateBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
-    auto basic = BasicHandle<SSL, IUpdateBucketCallback>(res, req);
+    auto handler = BasicApiHandler<SSL, IUpdateBucketCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
 
     auto data = co_await AsyncHttpReceiver<SSL>(res);
     BucketSettings settings;
     auto status = JsonStringToMessage(data, &settings);
     if (!status.ok()) {
-      basic.SendError(Error{.code = 422, .message = "Failed parse JSON data"});
+      handler.SendError(Error{.code = 422, .message = "Failed parse JSON data"});
       co_return;
     }
 
@@ -210,7 +226,7 @@ class ApiServer : public IApiServer {
         .bucket_name = name,
         .new_settings = std::move(settings),
     };
-    [[maybe_unused]] auto err = basic.Run(co_await handler_->OnUpdateCallback(app_request), auth_.get());
+    handler.Run(co_await storage_->OnUpdateCallback(app_request));
     co_return;
   }
 
@@ -219,9 +235,13 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL>
   VoidTask RemoveBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
+    auto handler = BasicApiHandler<SSL, IRemoveBucketCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+
     IRemoveBucketCallback::Request app_request{.bucket_name = name};
-    [[maybe_unused]] auto err = BasicHandle<SSL, IRemoveBucketCallback>(res, req).Run(
-        co_await handler_->OnRemoveBucket(app_request), auth_.get());
+    handler.Run(co_await storage_->OnRemoveBucket(app_request));
     co_return;
   }
 
@@ -232,7 +252,10 @@ class ApiServer : public IApiServer {
   template <bool SSL>
   async::VoidTask WriteEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
                              std::string ts) const {
-    auto basic = BasicHandle<SSL, IWriteEntryCallback>(res, req);
+    auto handler = BasicApiHandler<SSL, IWriteEntryCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
 
     auto full_blob = co_await AsyncHttpReceiver<SSL>(res);
     IWriteEntryCallback::Request data{
@@ -241,8 +264,7 @@ class ApiServer : public IApiServer {
         .timestamp = ts,
         .blob = full_blob,
     };
-    [[maybe_unused]] auto err =
-        basic.Run(co_await handler_->OnWriteEntry(data), auth_.get());  // TODO(Alexey Timin): std::move crushes
+    handler.Run(co_await storage_->OnWriteEntry(data));  // TODO(Alexey Timin): std::move crushes
     co_return;
   }
 
@@ -252,15 +274,18 @@ class ApiServer : public IApiServer {
   template <bool SSL = false>
   async::VoidTask ReadEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
                             std::string ts) const {
+    auto handler = BasicApiHandler<SSL, IReadEntryCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+
     IReadEntryCallback::Request data{
         .bucket_name = bucket,
         .entry_name = entry,
         .timestamp = ts,
     };
-
-    [[maybe_unused]] auto err = BasicHandle<SSL, IReadEntryCallback>(res, req)
-                                    .OnSuccess([](IReadEntryCallback::Response app_resp) { return app_resp.blob; })
-                                    .Run(co_await handler_->OnReadEntry(data), auth_.get());
+    handler.Run(co_await storage_->OnReadEntry(data),
+                [](IReadEntryCallback::Response app_resp) { return app_resp.blob; });
     co_return;
   }
 
@@ -270,6 +295,11 @@ class ApiServer : public IApiServer {
   template <bool SSL = false>
   async::VoidTask ListEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
                             std::string start_ts, std::string stop_ts) const {
+    auto handler = BasicApiHandler<SSL, IListEntryCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+
     IListEntryCallback::Request data{
         .bucket_name = bucket,
         .entry_name = entry,
@@ -277,23 +307,23 @@ class ApiServer : public IApiServer {
         .stop_timestamp = stop_ts,
     };
 
-    [[maybe_unused]] auto err = BasicHandle<SSL, IListEntryCallback>(res, req)
-                                    .OnSuccess([](IListEntryCallback::Response app_resp) {
-                                      nlohmann::json data;
-                                      for (const auto &rec : app_resp.records) {
-                                        nlohmann::json record;
-                                        record["ts"] = rec.timestamp;
-                                        record["size"] = rec.size;
-                                        data["records"].push_back(record);
-                                      }
-                                      return data.dump();
-                                    })
-                                    .Run(co_await handler_->OnListEntry(data), auth_.get());
+    auto on_success = [](IListEntryCallback::Response app_resp) {
+      nlohmann::json data;
+      for (const auto &rec : app_resp.records) {
+        nlohmann::json record;
+        record["ts"] = rec.timestamp;
+        record["size"] = rec.size;
+        data["records"].push_back(record);
+      }
+      return data.dump();
+    };
+
+    handler.Run(co_await storage_->OnListEntry(data), on_success);
     co_return;
   }
 
   Options options_;
-  std::unique_ptr<IApiHandler> handler_;
+  std::unique_ptr<IApiHandler> storage_;
   std::unique_ptr<ITokenAuthentication> auth_;
 };
 
