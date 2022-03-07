@@ -82,10 +82,10 @@ class JwtAuthentication : public ITokenAuthentication {
 
       try {
         if (key_ != Botan::hex_decode(api_token.substr(7, api_token.size() - 7))) {
-          throw;
+          return Result{{}, Error{.code = 401, .message = "Invalid API token"}};
         }
       } catch (...) {
-        return Result{{}, Error{.code = 401, .message = "Invalid API token"}};
+        return Result{{}, Error{.code = 401, .message = "Failed to decode API token"}};
       }
 
       Token token;
