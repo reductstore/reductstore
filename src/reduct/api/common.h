@@ -68,10 +68,16 @@ class BasicApiHandler {
   }
 
   core::Error CheckAuth(auth::ITokenAuthentication *auth) const noexcept {
+    auto err = core::Error::kOk;
     if (auth) {
-      return auth->Check(authorization_);
+      err = auth->Check(authorization_);
     }
-    return core::Error::kOk;
+
+    if (err) {
+      SendError(err);
+    }
+
+    return err;
   }
 
   void Run(
