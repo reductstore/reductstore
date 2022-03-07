@@ -10,7 +10,7 @@
 
 ## SDKs
 
-* [C++ Client SDK](https://cpp.reduct-storage.dev)
+* [C++ Client SDK](https://reduct-cpp.readthedocs.io/en/latest/)
 
 ## VERSIONS
 
