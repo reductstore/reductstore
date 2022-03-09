@@ -307,17 +307,7 @@ class ApiServer : public IApiServer {
         .stop_timestamp = stop_ts,
     };
 
-    auto on_success = [](IListEntryCallback::Response app_resp) {
-      nlohmann::json data;
-      for (const auto &rec : app_resp.records) {
-        nlohmann::json record;
-        record["ts"] = rec.timestamp;
-        record["size"] = rec.size;
-        data["records"].push_back(record);
-      }
-      return data.dump();
-    };
-
+    auto on_success = [](IListEntryCallback::Response app_resp) { return PrintToJson(app_resp); };
     handler.Run(co_await storage_->OnListEntry(data), on_success);
     co_return;
   }

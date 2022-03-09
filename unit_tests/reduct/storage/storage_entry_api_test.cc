@@ -115,11 +115,11 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
                            .Get();
 
   REQUIRE(err == Error::kOk);
-  REQUIRE(result.records.size() == 2);
-  REQUIRE(result.records[0].timestamp == 1610387457862000);
-  REQUIRE(result.records[0].size == 11);
-  REQUIRE(result.records[1].timestamp == 1610387457862001);
-  REQUIRE(result.records[1].size == 11);
+  REQUIRE(result.records_size() == 2);
+  REQUIRE(result.records(0).ts() == 1610387457862000);
+  REQUIRE(result.records(0).size() == 11);
+  REQUIRE(result.records(1).ts() == 1610387457862001);
+  REQUIRE(result.records(1).size() == 11);
 
   SECTION("error if bad timestamps") {
     Error bad_ts_err =

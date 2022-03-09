@@ -90,8 +90,8 @@ def test_list_entry_ok(base_url, headers, bucket):
 
     data = json.loads(resp.content)
     assert "records" in data
-    assert data["records"][0] == {'ts': 1000, 'size': 11}
-    assert data["records"][1] == {'ts': 1100, 'size': 11}
+    assert data["records"][0] == {'ts': '1000', 'size': '11'}
+    assert data["records"][1] == {'ts': '1100', 'size': '11'}
 
 
 def test_list_entry_no_data(base_url, headers, bucket):

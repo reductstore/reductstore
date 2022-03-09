@@ -4,7 +4,6 @@
 #define REDUCT_STORAGE_HANDLERS_COMMON_H
 
 #include <google/protobuf/util/json_util.h>
-#include <nlohmann/json.hpp>
 #include <uWebSockets/App.h>
 
 #include "reduct/async/loop.h"
@@ -94,11 +93,8 @@ class BasicApiHandler {
 
   void SendError(core::Error err) const noexcept {
     LOG_ERROR("{} {}: {}", method_, url_, err.ToString());
-    nlohmann::json data;
     http_resp_->writeStatus(std::to_string(err.code));
-
-    data["detail"] = err.message;
-    http_resp_->end(data.dump());
+    http_resp_->end(fmt::format(R"({{"detail":"{}"}})", err.message));
   }
 
  private:
