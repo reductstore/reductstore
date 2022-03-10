@@ -27,7 +27,21 @@ class ApiServer : public IApiServer {
       : storage_(std::move(components.storage)), auth_(std::move(components.auth)), options_(std::move(options)) {}
 
   void Run(const bool &running) const override {
-    auto [host, port, base_path] = options_;
+    if (options_.cert_path.empty()) {
+      RegisterEndpointsAndRun(uWS::App(), running);
+    } else {
+      RegisterEndpointsAndRun(uWS::SSLApp(uWS::SocketContextOptions{
+                                  .key_file_name = options_.cert_key_path.data(),
+                                  .cert_file_name = options_.cert_path.data(),
+                              }),
+                              running);
+    }
+  }
+
+ private:
+  template <bool SSL>
+  void RegisterEndpointsAndRun(uWS::TemplatedApp<SSL> &&app, const bool &running) const {
+    auto [host, port, base_path, cert_path, cert_key_path] = options_;
 
     if (!base_path.starts_with('/')) {
       base_path = "/" + base_path;
@@ -35,10 +49,8 @@ class ApiServer : public IApiServer {
     if (!base_path.ends_with('/')) {
       base_path.push_back('/');
     }
-
-    uWS::App()
-        // Server API
-        .get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
+    // Server API
+    app.get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
         .get(base_path + "list", [this](auto *res, auto *req) { List(res, req); })
         // Auth API
         .post(base_path + "auth/refresh", [this](auto *res, auto *req) { RefreshToken(res, req); })
@@ -77,7 +89,7 @@ class ApiServer : public IApiServer {
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {
                   if (sock) {
-                    LOG_INFO("Run HTTP server on {}:{}", host, port);
+                    LOG_INFO("Run HTTP server on http{}://{}:{}", SSL ? "s" : "", host, port);
 
                     std::thread stopper([sock, &running] {
                       // Checks running flag and closes the socket to stop the app gracefully
@@ -97,8 +109,6 @@ class ApiServer : public IApiServer {
                 })
         .run();
   }
-
- private:
   // Server API
   /**
    * GET /info
