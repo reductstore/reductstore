@@ -307,8 +307,8 @@ class ApiServer : public IApiServer {
         .stop_timestamp = stop_ts,
     };
 
-    auto on_success = [](IListEntryCallback::Response app_resp) { return PrintToJson(app_resp); };
-    handler.Run(co_await storage_->OnListEntry(data), on_success);
+    handler.Run(co_await storage_->OnListEntry(data),
+                [](IListEntryCallback::Response app_resp) { return PrintToJson(app_resp); });
     co_return;
   }
 

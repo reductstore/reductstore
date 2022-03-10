@@ -80,11 +80,12 @@ class BasicApiHandler {
   }
 
   void Run(
-      typename Callback::Result result,
+      typename Callback::Result&& result,
       std::function<std::string(typename Callback::Response)> on_success = [](auto) { return ""; }) const noexcept {
     auto [resp, err] = std::move(result);
     if (err) {
       SendError(err);
+      return;
     }
 
     LOG_DEBUG("{} {}: OK", method_, url_);
