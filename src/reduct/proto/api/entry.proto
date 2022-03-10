@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package reduct.proto.api;
+
+// Record
+message RecordInfo {
+  uint64 ts = 1;      // timestamp of record in microseconds
+  uint64 size = 2;    // size in bytes
+}
+
+// List of records
+message RecordInfoList {
+  repeated RecordInfo records = 1;
+}

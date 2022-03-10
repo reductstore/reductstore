@@ -256,11 +256,11 @@ class Storage : public IStorage {
       }
 
       Callback::Response resp;
-      std::ranges::transform(list, std::back_inserter(resp.records), [](const IEntry::RecordInfo& info) {
-        return Callback::RecordInfo{
-            .timestamp = std::chrono::duration_cast<std::chrono::microseconds>(info.time.time_since_epoch()).count(),
-            .size = info.size};
-      });
+      for (const auto& info : list) {
+        auto rec = resp.add_records();
+        rec->set_ts(std::chrono::duration_cast<std::chrono::microseconds>(info.time.time_since_epoch()).count());
+        rec->set_size(info.size);
+      }
 
       return Callback::Result{std::move(resp), {}};
     });

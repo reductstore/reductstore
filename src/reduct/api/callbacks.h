@@ -10,6 +10,7 @@
 #include "reduct/core/result.h"
 #include "reduct/proto/api/auth.pb.h"
 #include "reduct/proto/api/bucket.pb.h"
+#include "reduct/proto/api/entry.pb.h"
 #include "reduct/proto/api/server.pb.h"
 
 namespace reduct::api {
@@ -163,9 +164,7 @@ class IListEntryCallback {
     size_t size;
   };
 
-  struct Response {
-    std::vector<RecordInfo> records;
-  };
+  using Response = proto::api::RecordInfoList;
 
   struct Request {
     std::string_view bucket_name;

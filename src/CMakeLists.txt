@@ -5,6 +5,7 @@ set(PROTOBUF_SPEC_FILES
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/auth.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/bucket.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/server.proto
+        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/entry.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/storage/entry.proto
         )
 
@@ -12,8 +13,8 @@ set(PROTOBUF_FILES
         ${CMAKE_BINARY_DIR}/reduct/proto/api/auth.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/bucket.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/server.pb.cc
+        ${CMAKE_BINARY_DIR}/reduct/proto/api/entry.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/storage/entry.pb.cc
-
         )
 
 
