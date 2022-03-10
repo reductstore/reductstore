@@ -1,3 +1,9 @@
+## Release 0.3.0 (in progress)
+
+**Other**:
+
+* Replace nholmann/json with Protobuf, [PR-47](https://github.com/reduct-storage/reduct-storage/pull/47)
+
 ## Release 0.2.1 (2022-03-07)
 
 **Bugs**:
