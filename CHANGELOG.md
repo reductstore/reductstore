@@ -1,5 +1,9 @@
 ## Release 0.3.0 (in progress)
 
+**Bugs**:
+
+* Fix sending two responses for HTTP error, [PR-48](https://github.com/reduct-storage/reduct-storage/pull/48)
+
 **Other**:
 
 * Replace nholmann/json with Protobuf, [PR-47](https://github.com/reduct-storage/reduct-storage/pull/47)
