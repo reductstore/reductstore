@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <filesystem>
 
 #include "reduct/api/callbacks.h"
 #include "reduct/auth/token_auth.h"
@@ -43,6 +44,8 @@ class IApiServer {
     std::string host;
     int port;
     std::string base_path;
+    std::string cert_path;
+    std::string cert_key_path;
   };
 
   /**
@@ -56,7 +59,7 @@ class IApiServer {
   /**
    * Runs HTTP server
    */
-  virtual void Run(const bool &running) const = 0;
+  virtual int Run(const bool &running) const = 0;
 };
 
 }  // namespace reduct::api

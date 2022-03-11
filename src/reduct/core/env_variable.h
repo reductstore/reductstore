@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 #ifndef REDUCT_CORE_ENV_VARIABLE_H_
 #define REDUCT_CORE_ENV_VARIABLE_H_
 
@@ -42,11 +42,13 @@ class EnvVariable {
       ss >> value;
     }
 
-    stream_ << "\t" << name << " = ";
-    if (masked) {
-      stream_ << "********** (masked)\n";
-    } else {
-      stream_ << value << " " << additional_part << "\n";
+    if (value != T{}) {
+      stream_ << "\t" << name << " = ";
+      if (masked) {
+        stream_ << "********** (masked)\n";
+      } else {
+        stream_ << value << " " << additional_part << "\n";
+      }
     }
 
     return value;

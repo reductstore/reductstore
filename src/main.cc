@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 #include <uWebSockets/Loop.h>
 
 #include <csignal>
@@ -40,6 +40,8 @@ int main() {
   auto api_base_path = env.Get<std::string>("RS_API_BASE_PATH", "/");
   auto data_path = env.Get<std::string>("RS_DATA_PATH", "/data");
   auto api_token = env.Get<std::string>("RS_API_TOKEN", "", true);
+  auto cert_path = env.Get<std::string>("RS_CERT_PATH", "");
+  auto cert_key_path = env.Get<std::string>("RS_CERT_KEY_PATH", "");
 
   Logger::set_level(log_level);
 
@@ -53,8 +55,12 @@ int main() {
       .auth = ITokenAuthentication::Build(api_token),
   };
 
-  auto server = IApiServer::Build(std::move(components), {.host = host, .port = port, .base_path = api_base_path});
-  server->Run(running);
-
-  return 0;
+  auto server = IApiServer::Build(std::move(components), {
+                                                             .host = host,
+                                                             .port = port,
+                                                             .base_path = api_base_path,
+                                                             .cert_path = cert_path,
+                                                             .cert_key_path = cert_key_path,
+                                                         });
+  return server->Run(running);
 }

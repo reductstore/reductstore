@@ -1,5 +1,9 @@
 ## Release 0.3.0 (in progress)
 
+**Features**:
+
+* Add secure HTTP, [PR-49](https://github.com/reduct-storage/reduct-storage/pull/49)
+
 **Bugs**:
 
 * Fix sending two responses for HTTP error, [PR-48](https://github.com/reduct-storage/reduct-storage/pull/48)

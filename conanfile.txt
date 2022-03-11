@@ -8,3 +8,6 @@ botan/2.19.1
 
 [generators]
 cmake
+
+[options]
+usockets:with_ssl=openssl
