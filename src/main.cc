@@ -1,4 +1,4 @@
-// Copyright 2021 Alexey Timin
+// Copyright 2021-2022 Alexey Timin
 #include <uWebSockets/Loop.h>
 
 #include <csignal>
@@ -62,7 +62,5 @@ int main() {
                                                              .cert_path = cert_path,
                                                              .cert_key_path = cert_key_path,
                                                          });
-  server->Run(running);
-
-  return 0;
+  return server->Run(running);
 }
