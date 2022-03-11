@@ -115,7 +115,7 @@ jobs:
       - name: Build API tests
         run: docker build -t api_tests ./api_tests
       - name: Run Storage
-        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_CERT_PATH=/misc/certificate.crt RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
+        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_CERT_PATH=/misc/certificate.crt --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
       - name: Run API tests
         run: docker run --network=host --env STORAGE_URL=https://127.0.0.1:8383 api_tests
 
@@ -124,6 +124,7 @@ jobs:
     needs:
       - api_tests_with_auth
       - api_tests_without_auth
+      - api_tests_with_ssl
       - unit_tests
     if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
     steps:
