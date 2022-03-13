@@ -14,7 +14,7 @@ For more information, you can read more about buckets in [How does it work?](../
 
 {% swagger method="get" path=" " baseUrl="/b/:bucket_name " summary="Get information about a bucket" %}
 {% swagger-description %}
-The method returns the current settings of the bucket in JSON format. 
+The method returns the current settings, stats, and entry list of the bucket in JSON format.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name="bucket_name" required="true" %}
@@ -24,9 +24,19 @@ Name of bucket
 {% swagger-response status="200: OK" description="Information about the bucket in JSON format" %}
 ```javascript
 {
-    "max_block_size": "integer",
-    "quota_type": Union["NONE", "FIFO"],
-    "quota_size": "integer"
+    "settings": {
+        "max_block_size": "integer",            // max block size in bytes
+        "quota_type": Union["NONE", "FIFO"],    // quota type
+        "quota_size": "integer"                 // quota size in bytes
+    }
+    "info": {
+        "name": "string",         // name of the bucket
+        "entry_count": "integer", // number of entries in the bucket
+        "size": "integer",        // size of stored data in the bucket in bytes
+        "oldest_record": "integer", // unix timestamp of oldest record in seconds
+        "latest_record": "integer"  // unix timestamp of latest record in seconds
+    },
+    "entries": List[String]        // list of entry names
 }
 ```
 {% endswagger-response %}
@@ -160,7 +170,7 @@ Size of quota in bytes
 
 {% swagger method="delete" path=" " baseUrl="/b/:bucket_name " summary="Remove a bucket" %}
 {% swagger-description %}
-Remove a bucket with 
+Remove a bucket with
 
 **all its entries and stored data**
 {% endswagger-description %}
