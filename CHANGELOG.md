@@ -3,6 +3,7 @@
 **Features**:
 
 * Add secure HTTP, [PR-49](https://github.com/reduct-storage/reduct-storage/pull/49)
+* Extend GET /b/:bucket method with stats and list entries, [PR-51](https://github.com/reduct-storage/reduct-storage/pull/51)
 
 **Bugs**:
 

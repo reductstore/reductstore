@@ -4,15 +4,26 @@
 #define REDUCT_STORAGE_HELPERS_H
 
 #include <fmt/core.h>
+#include <google/protobuf/util/json_util.h>
 
 #include <filesystem>
 #include <random>
 
+#include "reduct/proto/api/bucket.pb.h"
 #include "reduct/storage/storage.h"
 
 inline bool operator==(const google::protobuf::MessageLite& msg_a, const google::protobuf::MessageLite& msg_b) {
   return (msg_a.GetTypeName() == msg_b.GetTypeName()) && (msg_a.SerializeAsString() == msg_b.SerializeAsString());
 }
+
+namespace reduct::proto::api {
+inline std::ostream& operator<<(std::ostream& os, const BucketInfo& msg) {
+  std::string str;
+  google::protobuf::util::MessageToJsonString(msg, &str);
+  os << str;
+  return os;
+}
+}  // namespace reduct::proto::api
 
 /**
  * Build a directory in /tmp with random name

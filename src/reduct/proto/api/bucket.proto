@@ -11,6 +11,13 @@ message BucketInfo {
   uint64 latest_record = 6; // unix timestamp of latest record in seconds
 }
 
+// Full information about bucket
+message FullBucketInfo {
+  BucketInfo info = 1;          // stats about the bucket
+  BucketSettings settings = 2;  // settings of the bucket
+  repeated string entries = 3;  // list of entries names
+}
+
 // List of buckets
 message BucketInfoList {
   repeated BucketInfo buckets = 1;

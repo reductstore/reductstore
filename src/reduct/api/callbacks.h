@@ -80,10 +80,7 @@ class ICreateBucketCallback {
  */
 class IGetBucketCallback {
  public:
-  struct Response {
-    proto::api::BucketSettings bucket_settings;
-  };
-
+  using Response = proto::api::FullBucketInfo;
   struct Request {
     std::string_view bucket_name;
   };
