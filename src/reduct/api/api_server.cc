@@ -213,7 +213,7 @@ class ApiServer : public IApiServer {
 
     IGetBucketCallback::Request app_request{.bucket_name = name};
     handler.Run(co_await storage_->OnGetBucket(app_request),
-                [](IGetBucketCallback::Response resp) { return PrintToJson(resp.bucket_settings); });
+                [](IGetBucketCallback::Response resp) { return PrintToJson(resp); });
     co_return;
   }
 

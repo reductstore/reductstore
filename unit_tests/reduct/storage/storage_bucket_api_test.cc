@@ -53,9 +53,9 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
 
   auto [resp, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error::kOk);
-  REQUIRE(resp.bucket_settings.max_block_size() == settings.max_block_size());
-  REQUIRE(resp.bucket_settings.quota_type() == settings.quota_type());
-  REQUIRE(resp.bucket_settings.quota_size() == settings.quota_size());
+  REQUIRE(resp.settings().max_block_size() == settings.max_block_size());
+  REQUIRE(resp.settings().quota_type() == settings.quota_type());
+  REQUIRE(resp.settings().quota_size() == settings.quota_size());
 
   SECTION("error if not exist") {
     err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();
@@ -84,7 +84,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
 
   auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error::kOk);
-  REQUIRE(info.bucket_settings == change_req.new_settings);
+  REQUIRE(info.settings() == change_req.new_settings);
 }
 
 TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {

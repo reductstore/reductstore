@@ -8,6 +8,7 @@
 
 #include "reduct/config.h"
 #include "reduct/core/logger.h"
+#include "reduct/proto/api/bucket.pb.h"
 #include "reduct/storage/bucket.h"
 
 namespace reduct::storage {
@@ -49,14 +50,14 @@ class Storage : public IStorage {
       using Clk = IEntry::Time::clock;
 
       size_t usage = 0;
-      IEntry::Time oldest_ts = IEntry::Time::clock::now();
-      IEntry::Time latest_ts{};
+      uint64_t oldest_ts = Clk::to_time_t(IEntry::Time::clock::now());
+      uint64_t latest_ts{};
 
       for (const auto& [_, bucket] : buckets_) {
         auto info = bucket->GetInfo();
-        usage += info.size;
-        oldest_ts = std::min(oldest_ts, info.oldest_record_time);
-        latest_ts = std::max(latest_ts, info.latest_record_time);
+        usage += info.size();
+        oldest_ts = std::min(oldest_ts, info.oldest_record());
+        latest_ts = std::max(latest_ts, info.latest_record());
       }
 
       ServerInfo info;
@@ -65,8 +66,8 @@ class Storage : public IStorage {
       info.set_uptime(
           std::chrono::duration_cast<std::chrono::seconds>(decltype(start_time_)::clock::now() - start_time_).count());
       info.set_usage(usage);
-      info.set_oldest_record(Clk::to_time_t(oldest_ts));
-      info.set_latest_record(Clk::to_time_t(latest_ts));
+      info.set_oldest_record(oldest_ts);
+      info.set_latest_record(latest_ts);
 
       Callback::Response resp{.info = std::move(info)};
       return Callback::Result{std::move(resp), Error{}};
@@ -83,14 +84,7 @@ class Storage : public IStorage {
 
       BucketInfoList list;
       for (const auto& [name, bucket] : buckets_) {
-        auto bucket_info = bucket->GetInfo();
-
-        auto proto_info = list.add_buckets();
-        proto_info->set_name(name);
-        proto_info->set_size(bucket_info.size);
-        proto_info->set_entry_count(bucket_info.entry_count);
-        proto_info->set_oldest_record(Clk::to_time_t(bucket_info.oldest_record_time));
-        proto_info->set_latest_record(Clk::to_time_t(bucket_info.latest_record_time));
+        *list.add_buckets() = bucket->GetInfo();
       }
       return Callback::Result{.result = {.buckets = std::move(list)}, .error = Error::kOk};
     });
@@ -127,8 +121,10 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      const auto& settings = bucket_it->second->GetSettings();
-      return Callback::Result{{.bucket_settings = settings}, Error::kOk};
+      proto::api::FullBucketInfo info;
+      info.mutable_info()->CopyFrom(bucket_it->second->GetInfo());
+      info.mutable_settings()->CopyFrom(bucket_it->second->GetSettings());
+      return Callback::Result{std::move(info), Error::kOk};
     });
   }
 

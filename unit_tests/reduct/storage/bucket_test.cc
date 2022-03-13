@@ -77,10 +77,10 @@ TEST_CASE("storage::Bucket should remove all entries", "[bucket]") {
 
   REQUIRE(bucket->GetOrCreateEntry("entry_1").error == Error::kOk);
   REQUIRE(bucket->GetOrCreateEntry("entry_2").error == Error::kOk);
-  REQUIRE(bucket->GetInfo().entry_count == 2);
+  REQUIRE(bucket->GetInfo().entry_count() == 2);
 
   REQUIRE(bucket->Clean() == Error::kOk);
-  REQUIRE(bucket->GetInfo().entry_count == 0);
+  REQUIRE(bucket->GetInfo().entry_count() == 0);
   REQUIRE_FALSE(fs::exists(dir_path / "bucket" / "entry_1"));
   REQUIRE_FALSE(fs::exists(dir_path / "bucket" / "entry_2"));
 }
@@ -104,9 +104,7 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
     REQUIRE(entry1->Write(blob, ts + seconds(3)) == Error::kOk);
 
-    REQUIRE(bucket->GetInfo().record_count == 3);
     REQUIRE(bucket->KeepQuota() == Error::kOk);
-    REQUIRE(bucket->GetInfo().record_count == 2);
 
     REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
     REQUIRE(entry1->Read(ts + seconds(3)).error == Error::kOk);
