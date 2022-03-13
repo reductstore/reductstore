@@ -142,6 +142,11 @@ class Bucket : public IBucket {
     return SaveDescriptor();
   }
 
+  std::vector<std::string> GetEntryList() const override {
+    auto keys =  std::views::keys(entry_map_);
+    return {keys.begin(), keys.end()};
+  }
+
   [[nodiscard]] BucketInfo GetInfo() const override {
     using Clk = IEntry::Time::clock;
 

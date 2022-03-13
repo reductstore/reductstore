@@ -21,6 +21,7 @@ using reduct::OnChangeBucketSettings;
 using reduct::OnCreateBucket;
 using reduct::OnGetBucket;
 using reduct::OnRemoveBucket;
+using reduct::OnWriteEntry;
 
 using reduct::MakeDefaultBucketSettings;
 using reduct::storage::IStorage;
@@ -51,11 +52,26 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = settings};
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {
+                           .bucket_name = "bucket",
+                           .entry_name = "entry_1",
+                           .timestamp = "100000000",
+                           .blob = "somedata",
+                       })
+              .Get() == Error::kOk);
   auto [resp, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error::kOk);
-  REQUIRE(resp.settings().max_block_size() == settings.max_block_size());
-  REQUIRE(resp.settings().quota_type() == settings.quota_type());
-  REQUIRE(resp.settings().quota_size() == settings.quota_size());
+  REQUIRE(resp.settings() == settings);
+
+  REQUIRE(resp.info().name() == "bucket");
+  REQUIRE(resp.info().size() == 10);
+  REQUIRE(resp.info().entry_count() == 1);
+  REQUIRE(resp.info().oldest_record() == 100);
+  REQUIRE(resp.info().latest_record() == 100);
+
+  REQUIRE(resp.entries_size() == 1);
+  REQUIRE(resp.entries(0) == "entry_1");
 
   SECTION("error if not exist") {
     err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();

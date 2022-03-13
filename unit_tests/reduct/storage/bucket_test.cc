@@ -43,6 +43,7 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   auto restored_bucket = IBucket::Restore(dir_path / "bucket");
   REQUIRE(restored_bucket->GetInfo() == bucket->GetInfo());
   REQUIRE(restored_bucket->GetSettings() == bucket->GetSettings());
+  REQUIRE(restored_bucket->GetEntryList() == bucket->GetEntryList());
 
   SECTION("empty folder") {
     fs::create_directory(dir_path / "empty_folder");

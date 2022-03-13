@@ -65,6 +65,11 @@ class IBucket {
   [[nodiscard]] virtual const proto::api::BucketSettings& GetSettings() const = 0;
 
   /**
+   * Return list of entry names
+   * @return
+   */
+  virtual std::vector<std::string> GetEntryList() const = 0;
+  /**
    * @brief Builds a new bucket
    * @param options
    * @return

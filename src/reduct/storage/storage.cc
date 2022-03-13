@@ -121,9 +121,13 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
+      const auto& bucket = *bucket_it->second;
       proto::api::FullBucketInfo info;
-      info.mutable_info()->CopyFrom(bucket_it->second->GetInfo());
-      info.mutable_settings()->CopyFrom(bucket_it->second->GetSettings());
+      info.mutable_info()->CopyFrom(bucket.GetInfo());
+      info.mutable_settings()->CopyFrom(bucket.GetSettings());
+      for (auto& entry : bucket.GetEntryList()) {
+        info.add_entries(entry);
+      }
       return Callback::Result{std::move(info), Error::kOk};
     });
   }
