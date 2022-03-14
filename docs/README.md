@@ -53,12 +53,14 @@ RS_DATA_PATH=./data bin/reduct-storage
 
 The storage can be customized by the following environment variables:
 
-| Name                | Default   | Description                                                                              |
-| ------------------- | --------- | ---------------------------------------------------------------------------------------- |
-| RS\_LOG\_LEVEL      | INFO      | Logging level, can be: TRACE, DEBUG, INFO, WARNING, ERROR                                |
-| RS\_HOST            | 0.0.0.0.0 | Listening IP address                                                                     |
-| RS\_PORT            | 8383      | Listening port                                                                           |
-| RS\_API\_BASE\_PATH | /         | Prefix for all URLs of requests                                                          |
-| RS\_DATA\_PATH      | /data     | Path to a folder where the storage must store all the data                               |
-| RS\_API\_TOKEN      |           | If it is set, the storage uses [token authorization](http-api/token-authentication.md).  |
+| Name                | Default   | Description                                                                            |
+| ------------------- | --------- | -------------------------------------------------------------------------------------- |
+| RS\_LOG\_LEVEL      | INFO      | Logging level, can be: TRACE, DEBUG, INFO, WARNING, ERROR                              |
+| RS\_HOST            | 0.0.0.0.0 | Listening IP address                                                                   |
+| RS\_PORT            | 8383      | Listening port                                                                         |
+| RS\_API\_BASE\_PATH | /         | Prefix for all URLs of requests                                                        |
+| RS\_DATA\_PATH      | /data     | Path to a folder where the storage must store all the data                             |
+| RS\_API\_TOKEN      |           | If it is set, the storage uses [token authorization](http-api/token-authentication.md) |
+| RS\_CERT\_PATH      |           | Path to an SSL certificate. If it isn't set, the storage uses HTTP instead of HTTPS    |
+| RS\_CERT\_KEY\_PATH |           | Path to the private key of SSL certificate. Should be set with RS\_CERT\_PATH          |
 

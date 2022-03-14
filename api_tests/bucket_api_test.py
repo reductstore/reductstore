@@ -14,7 +14,9 @@ def test_create_bucket_ok(base_url, headers, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data == {"max_block_size": str(1024 * 1024), "quota_type": "NONE", "quota_size": '0'}
+    assert data['settings'] == {"max_block_size": str(1024 * 1024), "quota_type": "NONE", "quota_size": '0'}
+    assert data['info']['name'] == bucket_name
+    assert len(data['entries']) == 0
 
 
 def test_create_bucket_bad_format(base_url, headers, bucket_name):
@@ -35,7 +37,7 @@ def test_create_bucket_custom(base_url, headers, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data == {"max_block_size": '500', "quota_type": "NONE", "quota_size": '0'}
+    assert data['settings'] == {"max_block_size": '500', "quota_type": "NONE", "quota_size": '0'}
 
 
 def test_create_twice_bucket(base_url, headers, bucket_name):
@@ -54,6 +56,25 @@ def test_get_bucket_not_exist(base_url, headers, bucket_name):
     assert "is not found" in get_detail(resp)
 
 
+def test_get_bucket_stats(base_url, headers, bucket_name):
+    """Should get stats from bucket"""
+    resp = requests.post(f'{base_url}/b/{bucket_name}', headers=headers)
+    assert resp.status_code == 200
+
+    resp = requests.post(f'{base_url}/b/{bucket_name}/entry_1?ts=1000000', headers=headers, data="somedata")
+    assert resp.status_code == 200
+
+    resp = requests.post(f'{base_url}/b/{bucket_name}/entry_2?ts=2000000', headers=headers, data="anotherdata")
+    assert resp.status_code == 200
+
+    resp = requests.get(f'{base_url}/b/{bucket_name}', headers=headers)
+    assert resp.status_code == 200
+
+    data = json.loads(resp.content)
+    assert data['entries'] == ['entry_1', 'entry_2']
+    assert data['info'] == dict(name=bucket_name, entry_count='2', size='23', latest_record='2', oldest_record='1')
+
+
 def test_update_bucket_ok(base_url, headers, bucket_name):
     """Should update setting of the bucket"""
     requests.post(f'{base_url}/b/{bucket_name}', headers=headers)
@@ -66,7 +87,7 @@ def test_update_bucket_ok(base_url, headers, bucket_name):
     resp = requests.get(f'{base_url}/b/{bucket_name}', headers=headers)
     assert resp.status_code == 200
     data = json.loads(resp.content)
-    assert data == new_settings
+    assert data['settings'] == new_settings
 
 
 def test_update_bucket_bad_format(base_url, headers, bucket_name):

@@ -10,6 +10,7 @@
 #include "reduct/core/result.h"
 #include "reduct/proto/api/auth.pb.h"
 #include "reduct/proto/api/bucket.pb.h"
+#include "reduct/proto/api/entry.pb.h"
 #include "reduct/proto/api/server.pb.h"
 
 namespace reduct::api {
@@ -79,10 +80,7 @@ class ICreateBucketCallback {
  */
 class IGetBucketCallback {
  public:
-  struct Response {
-    proto::api::BucketSettings bucket_settings;
-  };
-
+  using Response = proto::api::FullBucketInfo;
   struct Request {
     std::string_view bucket_name;
   };
@@ -146,10 +144,12 @@ class IReadEntryCallback {
     std::string blob;
     std::string timestamp;
   };
+
   struct Request {
     std::string_view bucket_name;
     std::string_view entry_name;
     std::string_view timestamp;
+    bool latest;
   };
 
   using Result = core::Result<Response>;
@@ -163,9 +163,7 @@ class IListEntryCallback {
     size_t size;
   };
 
-  struct Response {
-    std::vector<RecordInfo> records;
-  };
+  using Response = proto::api::RecordInfoList;
 
   struct Request {
     std::string_view bucket_name;

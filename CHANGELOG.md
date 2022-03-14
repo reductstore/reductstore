@@ -1,3 +1,19 @@
+## Release 0.3.0 (2022-03-14)
+
+**Features**:
+
+* Add secure HTTP, [PR-49](https://github.com/reduct-storage/reduct-storage/pull/49)
+* Extend GET /b/:bucket method with stats and list entries, [PR-51](https://github.com/reduct-storage/reduct-storage/pull/51)
+* Add access to the latest record, [PR-53](https://github.com/reduct-storage/reduct-storage/pull/53)
+
+**Bugs**:
+
+* Fix sending two responses for HTTP error, [PR-48](https://github.com/reduct-storage/reduct-storage/pull/48)
+
+**Other**:
+
+* Replace nholmann/json with Protobuf, [PR-47](https://github.com/reduct-storage/reduct-storage/pull/47)
+
 ## Release 0.2.1 (2022-03-07)
 
 **Bugs**:

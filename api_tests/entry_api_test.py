@@ -54,7 +54,7 @@ def test_read_no_data(base_url, headers, bucket):
 
 def test_read_bad_ts(base_url, headers, bucket):
     """Should return 400 if ts is bad"""
-    resp = requests.get(f'{base_url}/b/{bucket}/entry?ts=XXXX',  headers=headers)
+    resp = requests.get(f'{base_url}/b/{bucket}/entry?ts=XXXX', headers=headers)
     assert resp.status_code == 422
     assert 'XXX' in get_detail(resp)
 
@@ -90,11 +90,25 @@ def test_list_entry_ok(base_url, headers, bucket):
 
     data = json.loads(resp.content)
     assert "records" in data
-    assert data["records"][0] == {'ts': 1000, 'size': 11}
-    assert data["records"][1] == {'ts': 1100, 'size': 11}
+    assert data["records"][0] == {'ts': '1000', 'size': '11'}
+    assert data["records"][1] == {'ts': '1100', 'size': '11'}
 
 
 def test_list_entry_no_data(base_url, headers, bucket):
     """Should return 404 if no data for request"""
     resp = requests.get(f'{base_url}/b/{bucket}/entry/list?start=100&stop=200', headers=headers)
     assert resp.status_code == 404
+
+
+def test_latest_record(base_url, headers, bucket):
+    """Should return the latest record"""
+    ts = 1000
+    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    assert resp.status_code == 404
+
+    requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data="some_data1")
+    requests.post(f'{base_url}/b/{bucket}/entry?ts={ts+10}', headers=headers, data="some_data2")
+
+    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    assert resp.status_code == 200
+    assert resp.content == b"some_data2"

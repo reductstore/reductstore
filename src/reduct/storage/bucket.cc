@@ -13,12 +13,16 @@ namespace reduct::storage {
 
 namespace fs = std::filesystem;
 using core::Error;
+using proto::api::BucketInfo;
 using proto::api::BucketSettings;
 
 class Bucket : public IBucket {
  public:
   explicit Bucket(fs::path full_path, BucketSettings settings)
-      : full_path_(std::move(full_path)), settings_(std::move(settings)), entry_map_() {
+      : full_path_(std::move(full_path)),
+        name_(full_path_.filename().string()),
+        settings_(std::move(settings)),
+        entry_map_() {
     if (fs::exists(full_path_)) {
       throw std::runtime_error(fmt::format("Path '{}' already exists", full_path_.string()));
     }
@@ -42,7 +46,8 @@ class Bucket : public IBucket {
     }
   }
 
-  explicit Bucket(fs::path full_path) : settings_{}, full_path_(std::move(full_path)), entry_map_() {
+  explicit Bucket(fs::path full_path)
+      : settings_{}, full_path_(std::move(full_path)), name_(full_path_.filename().string()),  entry_map_() {
     if (!fs::exists(full_path_)) {
       throw std::runtime_error(fmt::format("Path '{}' doesn't exist", full_path_.string()));
     }
@@ -101,7 +106,7 @@ class Bucket : public IBucket {
       case BucketSettings::NONE:
         break;
       case BucketSettings::FIFO:
-        size_t bucket_size = GetInfo().size;
+        size_t bucket_size = GetInfo().size();
         while (bucket_size > settings_.quota_size()) {
           LOG_DEBUG("Size of bucket '{}' is {} bigger than quota {}. Remove the oldest record",
                     full_path_.filename().string(), bucket_size, settings_.quota_size());
@@ -126,7 +131,7 @@ class Bucket : public IBucket {
             return err;
           }
 
-          bucket_size = GetInfo().size;
+          bucket_size = GetInfo().size();
         }
     }
     return Error::kOk;
@@ -137,10 +142,17 @@ class Bucket : public IBucket {
     return SaveDescriptor();
   }
 
-  [[nodiscard]] Info GetInfo() const override {
+  std::vector<std::string> GetEntryList() const override {
+    auto keys =  std::views::keys(entry_map_);
+    return {keys.begin(), keys.end()};
+  }
+
+  [[nodiscard]] BucketInfo GetInfo() const override {
+    using Clk = IEntry::Time::clock;
+
     size_t record_count = 0;
     size_t size = 0;
-    IEntry::Time oldest_ts = IEntry::Time::clock::now();
+    IEntry::Time oldest_ts = Clk::now();
     IEntry::Time latest_ts{};
 
     for (const auto& [_, entry] : entry_map_) {
@@ -152,13 +164,13 @@ class Bucket : public IBucket {
       latest_ts = std::max(latest_ts, info.latest_record_time);
     }
 
-    return {
-        .entry_count = entry_map_.size(),
-        .record_count = record_count,
-        .size = size,
-        .oldest_record_time = oldest_ts,
-        .latest_record_time = latest_ts,
-    };
+    BucketInfo info;
+    info.set_name(name_);
+    info.set_size(size);
+    info.set_entry_count(entry_map_.size());
+    info.set_oldest_record(Clk::to_time_t(oldest_ts));
+    info.set_latest_record(Clk::to_time_t(latest_ts));
+    return info;
   }
 
   [[nodiscard]] const BucketSettings& GetSettings() const override { return settings_; }
@@ -185,8 +197,10 @@ class Bucket : public IBucket {
   }
 
   constexpr static std::string_view kSettingsName = "bucket.settings";
-  BucketSettings settings_;
+
   fs::path full_path_;
+  std::string name_;
+  BucketSettings settings_;
   std::map<std::string, std::shared_ptr<IEntry>> entry_map_;
 };
 
@@ -211,9 +225,4 @@ std::unique_ptr<IBucket> IBucket::Restore(std::filesystem::path full_path) {
   return nullptr;
 }
 
-std::ostream& operator<<(std::ostream& os, const IBucket::Info& info) {
-  os << fmt::format("<IBucket::Info entry_count={} record_count={} quota_size={}>", info.entry_count, info.record_count,
-                    info.size);
-  return os;
-}
 }  // namespace reduct::storage
