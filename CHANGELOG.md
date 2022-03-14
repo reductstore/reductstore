@@ -1,4 +1,4 @@
-## Release 0.3.0 (in progress)
+## Release 0.3.0 (2022-03-14)
 
 **Features**:
 
