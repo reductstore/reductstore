@@ -209,9 +209,15 @@ class Storage : public IStorage {
         return Callback::Result{{}, ref_error};
       }
 
-      auto [ts, parse_err] = ParseTimestamp(req.timestamp);
-      if (parse_err) {
-        return Callback::Result{{}, parse_err};
+      IEntry::Time ts;
+      if (!req.latest) {
+        auto [parsed_ts, parse_err] = ParseTimestamp(req.timestamp);
+        if (parse_err) {
+          return Callback::Result{{}, parse_err};
+        }
+        ts = parsed_ts;
+      } else {
+        ts = entry.lock()->GetInfo().latest_record_time;
       }
 
       auto read_result = entry.lock()->Read(ts);

@@ -311,6 +311,7 @@ class ApiServer : public IApiServer {
         .bucket_name = bucket,
         .entry_name = entry,
         .timestamp = ts,
+        .latest = ts.empty()
     };
     handler.Run(co_await storage_->OnReadEntry(data),
                 [](IReadEntryCallback::Response app_resp) { return app_resp.blob; });

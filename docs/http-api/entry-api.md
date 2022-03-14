@@ -59,8 +59,8 @@ Name of bucket
 Name of entry
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="ts" type="Integer" required="true" %}
-A UNIX timestamp in microseconds
+{% swagger-parameter in="query" name="ts" type="Integer" required="false" %}
+A UNIX timestamp in microseconds. If it is empty, returns the latest record.
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="The record is found and returned in body of the response" %}
@@ -69,7 +69,7 @@ A UNIX timestamp in microseconds
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucker or record with the timestamp doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket or record with the timestamp doesn't exist" %}
 ```javascript
 {
    "detail": "string"

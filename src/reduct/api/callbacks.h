@@ -144,10 +144,12 @@ class IReadEntryCallback {
     std::string blob;
     std::string timestamp;
   };
+
   struct Request {
     std::string_view bucket_name;
     std::string_view entry_name;
     std::string_view timestamp;
+    bool latest;
   };
 
   using Result = core::Result<Response>;
