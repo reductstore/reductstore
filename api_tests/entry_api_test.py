@@ -103,12 +103,12 @@ def test_list_entry_no_data(base_url, headers, bucket):
 def test_latest_record(base_url, headers, bucket):
     """Should return the latest record"""
     ts = 1000
-    resp = requests.get(f'{base_url}/b/{bucket}/entry')
+    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
     assert resp.status_code == 404
 
     requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data="some_data1")
     requests.post(f'{base_url}/b/{bucket}/entry?ts={ts+10}', headers=headers, data="some_data2")
 
-    resp = requests.get(f'{base_url}/b/{bucket}/entry')
+    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
