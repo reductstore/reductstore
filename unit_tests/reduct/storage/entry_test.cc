@@ -18,7 +18,7 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time();
+static const auto kTimestamp = IEntry::Time() + seconds(10);
 
 TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
@@ -189,12 +189,20 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
     REQUIRE(entry->Write(blob, kTimestamp + seconds(1)) == Error::kOk);
     REQUIRE(entry->Write(blob, kTimestamp + seconds(2)) == Error::kOk);
 
-    auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
+    SECTION("without overlap") {
+      auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
 
-    REQUIRE(err == Error::kOk);
-    REQUIRE(records.size() == 2);
-    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 102});
-    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 102});
+      REQUIRE(err == Error::kOk);
+      REQUIRE(records.size() == 2);
+      REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 102});
+      REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 102});
+    }
+
+    SECTION("with overlap") {
+      auto [records, err] = entry->List(kTimestamp - seconds(1), kTimestamp + seconds(4));
+      REQUIRE(err == Error::kOk);
+      REQUIRE(records.size() == 3);
+    }
   }
 
   SECTION("some records in one block") {

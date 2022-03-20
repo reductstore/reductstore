@@ -212,6 +212,7 @@ class Entry : public IEntry {
       return {{}, {.code = 422, .message = "Start timestamp cannot be older stop timestamp"}};
     }
 
+    // Check boarders (is it okay if at least one record inside the interval
     if (block_set_.empty()) {
       return {{}, {.code = 404, .message = "No records in the entry"}};
     }
@@ -229,10 +230,11 @@ class Entry : public IEntry {
       return {{}, {.code = 404, .message = "No records for time interval"}};
     }
 
+    // Find block range
     auto start_block = block_set_.upper_bound(start_ts);
     if (start_block == block_set_.end()) {
       start_block = block_set_.begin();
-    } else {
+    } else if (start_block != block_set_.begin()) {
       start_block = std::prev(start_block);
     }
 
@@ -285,7 +287,9 @@ class Entry : public IEntry {
     Time oldest_record, latest_record;
     if (!block_set_.empty()) {
       proto::Block latest_block;
-      LoadBlockByTimestamp(*block_set_.rbegin(), &latest_block);
+      if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &latest_block)) {
+        LOG_ERROR("{}", err.ToString());
+      }
 
       oldest_record = ToTimePoint(*block_set_.begin());
       latest_record = ToTimePoint(latest_block.latest_record_time());
