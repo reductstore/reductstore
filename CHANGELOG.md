@@ -1,5 +1,9 @@
 ## Release 0.4.0 (in progress)
 
+**Bugs**:
+
+* Fix searching start block in Entry List request, [PR-61](https://github.com/reduct-storage/reduct-storage/pull/61)
+
 **Other**:
 
 * Refactor block structure in entry, [PR-58](https://github.com/reduct-storage/reduct-storage/pull/58)
