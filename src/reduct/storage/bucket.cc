@@ -47,7 +47,7 @@ class Bucket : public IBucket {
   }
 
   explicit Bucket(fs::path full_path)
-      : settings_{}, full_path_(std::move(full_path)), name_(full_path_.filename().string()),  entry_map_() {
+      : settings_{}, full_path_(std::move(full_path)), name_(full_path_.filename().string()), entry_map_() {
     if (!fs::exists(full_path_)) {
       throw std::runtime_error(fmt::format("Path '{}' doesn't exist", full_path_.string()));
     }
@@ -63,7 +63,11 @@ class Bucket : public IBucket {
     for (const auto& folder : fs::directory_iterator(full_path_)) {
       if (fs::is_directory(folder)) {
         auto entry_name = folder.path().filename().string();
-        auto entry = IEntry::Restore(folder);
+        auto entry = IEntry::Build(IEntry::Options{
+            .name = folder.path().filename().string(),
+            .path = folder.path().parent_path().string(),
+            .max_block_size = settings_.max_block_size(),
+        });
         if (entry) {
           entry_map_[entry_name] = std::move(entry);
         } else {
@@ -114,8 +118,9 @@ class Bucket : public IBucket {
           std::shared_ptr<IEntry> current_entry = nullptr;
           for (const auto& [_, entry] : entry_map_) {
             auto entry_info = entry->GetInfo();
-            if (entry_info.block_count > 1 ||  // first not empty
-                (current_entry && entry_info.oldest_record_time < current_entry->GetInfo().oldest_record_time)) {
+            if (entry_info.block_count > 0 ||  // first no empty
+                (current_entry && entry_info.block_count > 0 &&
+                 entry_info.oldest_record_time < current_entry->GetInfo().oldest_record_time)) {
               current_entry = entry;
             }
           }
@@ -143,7 +148,7 @@ class Bucket : public IBucket {
   }
 
   std::vector<std::string> GetEntryList() const override {
-    auto keys =  std::views::keys(entry_map_);
+    auto keys = std::views::keys(entry_map_);
     return {keys.begin(), keys.end()};
   }
 

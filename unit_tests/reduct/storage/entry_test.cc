@@ -37,7 +37,11 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
     REQUIRE(entry->Write("other_data2", kTimestamp + seconds(10)) == Error::kOk);
     REQUIRE(entry->Write("other_data3", kTimestamp + seconds(15)) == Error::kOk);
 
-    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 4, .bytes = 50});
+    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1,
+                                             .record_count = 4,
+                                             .bytes = 50,
+                                             .oldest_record_time = kTimestamp,
+                                             .latest_record_time = kTimestamp + seconds(15)});
 
     auto ret = entry->Read(kTimestamp);
     REQUIRE(ret.blob == "some_data");
@@ -56,15 +60,16 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
 
-  REQUIRE(entry->Write(std::string(100, 'c'), kTimestamp) == Error::kOk);
+  auto big_data = std::string(MakeDefaultOptions().max_block_size + 1, 'c');
+  REQUIRE(entry->Write(big_data, kTimestamp) == Error::kOk);
 
   SECTION("one record") {
     auto ret = entry->Read(kTimestamp);
-    REQUIRE(ret == IEntry::ReadResult{std::string(100, 'c'), Error{}, kTimestamp});
+    REQUIRE(ret == IEntry::ReadResult{big_data, Error{}, kTimestamp});
     REQUIRE(entry->GetInfo() == IEntry::Info{
                                     .block_count = 1,
                                     .record_count = 1,
-                                    .bytes = 102,
+                                    .bytes = 103,
                                     .oldest_record_time = kTimestamp,
                                     .latest_record_time = kTimestamp,
                                 });
@@ -72,7 +77,11 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
 
   SECTION("two records in different blocks") {
     REQUIRE(entry->Write("other_data1", kTimestamp + seconds(5)) == Error::kOk);
-    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2, .record_count = 2, .bytes = 115});
+    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2,
+                                             .record_count = 2,
+                                             .bytes = 116,
+                                             .oldest_record_time = kTimestamp,
+                                             .latest_record_time = kTimestamp + seconds(5)});
 
     auto ret = entry->Read(kTimestamp + seconds(5));
     REQUIRE(ret.blob == "other_data1");
@@ -102,14 +111,14 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
   }
 }
 
-TEST_CASE("storage::Entry should restore itself from descriptors", "[entry]") {
+TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
   const auto options = MakeDefaultOptions();
   auto entry = IEntry::Build(options);
   REQUIRE(entry);
 
   REQUIRE(entry->Write("some_data", kTimestamp) == Error::kOk);
 
-  entry = IEntry::Restore(options.path / options.name);
+  entry = IEntry::Build(options);
   REQUIRE(entry->GetOptions() == options);
 
   REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 1, .bytes = 11});
@@ -156,7 +165,7 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
 
     SECTION("recovery") {
       auto info = entry->GetInfo();
-      entry = IEntry::Restore(entry->GetOptions().path / "entry_1");
+      entry = IEntry::Build(entry->GetOptions());
 
       REQUIRE(entry);
       REQUIRE(entry->GetInfo() == info);

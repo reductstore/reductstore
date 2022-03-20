@@ -4,36 +4,22 @@ package reduct.proto;
 
 import "google/protobuf/timestamp.proto";
 
-// Settings for entry in a bucket
-message EntrySettings {
-  uint64 max_block_size = 1;    // block size to create a new one
+// Represents a stored blob in a block
+message Record {
+  google.protobuf.Timestamp timestamp = 1;  // timestamp (works as ID)
+  uint64 begin = 2;                         // begin position of a blob in a block
+  uint64 end = 3;                           // end position of a blob in a block
 }
 
-// Entry descriptor contains all stored information
-message EntryDescriptor {
-  // Represents a stored blob in a block
-  message Record {
-    google.protobuf.Timestamp timestamp = 1;  // timestamp (works as ID)
-    uint64 begin = 2;                         // begin position of a blob in a block
-    uint64 end = 3;                           // end position of a blob in a block
-  }
-
-  // Represents a block of records.
-  // The storage engine create a new block if the current one bigger than EntrySettings::max_block_size
-  message Block {
-    uint64 id = 1;  // ID of block (auto-incremented)
-    google.protobuf.Timestamp begin_time = 2;           // when the block started being recorded
-    google.protobuf.Timestamp latest_record_time = 3;    // the timestamp of the latest record
-    uint64 size = 4;                                // size of block in bytes (with protobuf overhead)
-    repeated Record records = 5;                    // stored records
-  }
-
-  google.protobuf.Timestamp created_at = 1;         // when entry was created
-  google.protobuf.Timestamp oldest_record_time = 2; // the oldest stored record
-  google.protobuf.Timestamp latest_record_time = 3; // the latest stored record
-  uint64 size = 4;                                  // size of stored data - all blocks together with protobuf overhead
-  repeated Block blocks = 5;                        // stored blocks
+// Represents a block of records.
+// The storage engine create a new block if the current one bigger than EntrySettings::max_block_size
+message Block {
+  google.protobuf.Timestamp begin_time = 1;           // when the block started being recorded
+  google.protobuf.Timestamp latest_record_time = 2;    // the timestamp of the latest record
+  uint64 size = 3;                                // size of block in bytes (with protobuf overhead)
+  repeated Record records = 4;                    // stored records
 }
+
 
 // Stored in blocks record
 message EntryRecord {
