@@ -40,14 +40,14 @@ class Entry : public IEntry {
             proto::Block block;
             auto err = LoadBlockByTimestamp(ts, &block);
             if (err) {
-              LOG_WARNING("Wrong block descriptor {}", path.string());
+              LOG_ERROR("{}", err.ToString());
               continue;
             }
             block_set_.insert(ts);
             size_counter_ += block.size();
             record_counter_ += block.records_size();
           } catch (std::exception& err) {
-            LOG_WARNING("Wrong filename format {}: {}", path.string(), err.what());
+            LOG_ERROR("Wrong filename format {}: {}", path.string(), err.what());
           }
         }
       }
@@ -310,12 +310,14 @@ class Entry : public IEntry {
   Error LoadBlockByTimestamp(const Timestamp& proto_ts, proto::Block* block) const {
     auto file_name = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
     std::ifstream file(file_name);
-    if (file) {
-      block->ParseFromIstream(&file);
-      return {};
-    } else {
-      return {.code = 500, .message = "Failed to load a block descriptor"};
+    if (!file) {
+      return {.code = 500, .message = fmt::format("Failed to load a block descriptor: {}", file_name.string())};
     }
+
+    if (!block->ParseFromIstream(&file)) {
+      return {.code = 500, .message = fmt::format("Failed to parse meta: {}", file_name.string())};
+    }
+    return {};
   }
 
   Error SaveBlock(const proto::Block& block) {
