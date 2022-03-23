@@ -19,9 +19,11 @@ using proto::api::BucketSettings;
 using uWS::HttpRequest;
 using uWS::HttpResponse;
 
+using async::Task;
 using async::VoidTask;
 using auth::ITokenAuthentication;
 using core::Error;
+using core::Result;
 
 namespace fs = std::filesystem;
 
@@ -181,7 +183,11 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    auto data = co_await AsyncHttpReceiver<SSL>(res);
+    auto [data, err] = ReceiveData(res).Get();
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
     BucketSettings settings;
     if (!data.empty()) {
       auto status = JsonStringToMessage(data, &settings);
@@ -242,7 +248,12 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    auto data = co_await AsyncHttpReceiver<SSL>(res);
+    auto [data, err] = ReceiveData(res).Get();
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
     BucketSettings settings;
     auto status = JsonStringToMessage(data, &settings);
     if (!status.ok()) {
@@ -284,15 +295,19 @@ class ApiServer : public IApiServer {
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
-
-    auto full_blob = co_await AsyncHttpReceiver<SSL>(res);
-    IWriteEntryCallback::Request data{
-        .bucket_name = bucket,
-        .entry_name = entry,
-        .timestamp = ts,
-        .blob = full_blob,
-    };
-    handler.Run(co_await storage_->OnWriteEntry(data));  // TODO(Alexey Timin): std::move crushes
+//    IWriteEntryCallback::Request req{
+//        .bucket_name = bucket,
+//        .entry_name = entry,
+//        .timestamp = ts,
+//    };
+//
+//    auto [writer, err] = co_await storage_->OnWriteEntry(res);
+//    if (err) {
+//      handler.SendError(err);
+//      co_return;
+//    }
+//
+//    handler.Run(co_await AsyncHttpReceiver<SSL>(res, [&writer](auto chunk) { return writer(chunk); }));
     co_return;
   }
 
@@ -307,12 +322,7 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    IReadEntryCallback::Request data{
-        .bucket_name = bucket,
-        .entry_name = entry,
-        .timestamp = ts,
-        .latest = ts.empty()
-    };
+    IReadEntryCallback::Request data{.bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
     handler.Run(co_await storage_->OnReadEntry(data),
                 [](IReadEntryCallback::Response app_resp) { return app_resp.blob; });
     co_return;
@@ -339,6 +349,17 @@ class ApiServer : public IApiServer {
     handler.Run(co_await storage_->OnListEntry(data),
                 [](IListEntryCallback::Response app_resp) { return PrintToJson(app_resp); });
     co_return;
+  }
+
+  template <bool SSL = false>
+  static Task<Result<std::string>> ReceiveData(uWS::HttpResponse<SSL> *res) {
+    std::string data;
+    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck) {
+      data += chuck;
+      return Error::kOk;
+    });
+
+    co_return {std::move(data), std::move(err)};
   }
 
   Options options_;

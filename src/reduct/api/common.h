@@ -28,29 +28,30 @@ std::string PrintToJson(T &&msg) {
 
 template <bool SSL>
 struct AsyncHttpReceiver {
-  explicit AsyncHttpReceiver(uWS::HttpResponse<SSL> *res) : data_(), finish_(false), res_(res) {
-    res->onData([this](std::string_view data, bool last) mutable {
+  using Callback = uWS::MoveOnlyFunction<core::Error(std::string_view)>;
+  explicit AsyncHttpReceiver(uWS::HttpResponse<SSL> *res, Callback callback) : finish_{}, error_{}, res_(res) {
+    res->onData([this, callback = std::move(callback)](std::string_view data, bool last) mutable {
       LOG_TRACE("Received chuck {} kB", data.size() / 1024);
-      data_ += data;
+      error_ = callback(data);
       finish_ = last;
     });
   }
 
-  bool await_ready() const noexcept { return finish_; }
+  [[nodiscard]] bool await_ready() const noexcept { return false; }
 
   void await_suspend(std::coroutine_handle<> h) const noexcept {
-    if (finish_) {
+    if (finish_ || error_) {
       h.resume();
     } else {
       async::ILoop::loop().Defer([this, h] { await_suspend(h); });
     }
   }
 
-  [[nodiscard]] std::string await_resume() noexcept { return std::move(data_); }
+  [[nodiscard]] core::Error await_resume() noexcept { return error_; }
 
  private:
-  std::string data_;
   bool finish_;
+  core::Error error_;
   uWS::HttpResponse<SSL> *res_;
 };
 
