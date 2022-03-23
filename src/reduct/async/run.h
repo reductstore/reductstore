@@ -56,15 +56,16 @@ struct RunUntil {
   using Us = std::chrono::microseconds;
 
   RunUntil(std::function<std::optional<T>()>&& task, Executor* executor) : executor_(executor), func_(std::move(task)) {
-    task_ = executor_.Commit(func_);
+    task_ = executor_->Commit(func_);
   }
+
   explicit RunUntil(std::function<std::optional<T>()>&& task) : executor_{}, func_(std::move(task)) {
     task_ = LoopExecutor<std::optional<T>>().Commit(func_);
   }
 
-  bool await_ready() const noexcept { return CheckTask(); }
+  constexpr bool await_ready() const noexcept { return false; }
 
-  void await_suspend(std::coroutine_handle<> h) const noexcept {
+  void await_suspend(std::coroutine_handle<> h) noexcept {
     if (CheckTask()) {
       LOG_TRACE("Resume {}", *(int*)h.address());
       result_ = task_.get();
@@ -72,11 +73,13 @@ struct RunUntil {
         h.resume();
       } else {
         // if result is nullopt, repeat task
-        if (executor_) {
-          task_ = executor_.Commit(func_);
+        if (executor_ != nullptr) {
+          task_ = executor_->Commit(func_);
         } else {
           task_ = LoopExecutor<std::optional<T>>().Commit(func_);
         }
+
+        ILoop::loop().Defer([this, h] { await_suspend(h); });
       }
 
     } else {
@@ -93,7 +96,7 @@ struct RunUntil {
 
   std::future<std::optional<T>> task_;
   std::optional<T> result_;
-  LoopExecutor<std::optional<T>> executor_;
+  Executor* executor_;
   std::function<std::optional<T>()> func_;
 };
 
