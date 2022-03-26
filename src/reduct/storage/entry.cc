@@ -33,6 +33,19 @@ std::filesystem::path BlockPath(const fs::path& parent, const proto::Block& bloc
   return block_path;
 }
 
+Error LoadBlockByTimestamp(fs::path folder, const Timestamp& proto_ts, proto::Block* block) {
+  auto file_name = folder / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
+  std::ifstream file(file_name);
+  if (!file) {
+    return {.code = 499, .message = fmt::format("Failed to load a block descriptor: {}", file_name.string())};
+  }
+
+  if (!block->ParseFromIstream(&file)) {
+    return {.code = 499, .message = fmt::format("Failed to parse meta: {}", file_name.string())};
+  }
+  return Error::kOk;
+}
+
 Error SaveBlock(const fs::path& parent, const proto::Block& block) {
   auto file_name = BlockPath(parent, block, kMetaExt);
   std::ofstream file(file_name);
@@ -50,31 +63,61 @@ Error SaveBlock(const fs::path& parent, const proto::Block& block) {
  */
 class AsyncWriter : public async::IAsyncWriter {
  public:
-  AsyncWriter(const fs::path& path, const proto::Block& block, int record_index)
-      : ts_(block.begin_time()), record_index_(record_index) {
-    file_ = std::ofstream(path, std::ios::out | std::ios::in | std::ios::binary);
-    file_.seekp(block.records(record_index).begin());
+  struct Parameters {
+    fs::path path;
+    int record_index;
+    size_t size;
+  };
+
+  AsyncWriter(const proto::Block& block, Parameters parameters)
+      : ts_(block.begin_time()), parameters_(parameters), writen_size_{} {
+    file_ = std::ofstream(parameters_.path, std::ios::out | std::ios::in | std::ios::binary);
+    file_.seekp(block.records(parameters_.record_index).begin());
   }
 
   Error Write(std::string_view chunk, bool last) noexcept override {
     if (!file_) {
+      UpdateRecord(proto::Record::kErrored);
       return {.code = 500, .message = "Bad file"};
     }
 
+    writen_size_ += chunk.size();
+    if (writen_size_ > parameters_.size) {
+      UpdateRecord(proto::Record::kErrored);
+      return {.code = 413, .message = "Content is bigger than in content-length"};
+    }
+
     if (!file_.write(chunk.data(), chunk.size())) {
+      UpdateRecord(proto::Record::kErrored);
       return {.code = 500, .message = "Failed to write a chunk into a block"};
     }
 
     if (last) {
+      UpdateRecord(proto::Record::kFinished);
       file_ << std::flush;
     }
+
     return Error::kOk;
   }
 
  private:
+  void UpdateRecord(proto::Record::State state) {
+    proto::Block block;
+    if (auto err = LoadBlockByTimestamp(parameters_.path.parent_path(), ts_, &block)) {
+      LOG_ERROR("{}", err);
+      return;
+    }
+
+    block.mutable_records(parameters_.record_index)->set_state(state);
+    if (auto err = SaveBlock(parameters_.path.parent_path(), block)) {
+      LOG_ERROR("{}", err);
+    }
+  }
+
   std::ofstream file_;
   Timestamp ts_;
-  int record_index_;
+  Parameters parameters_;
+  size_t writen_size_;
 };
 
 Error SaveBlock(proto::Block block);
@@ -93,7 +136,7 @@ class Entry : public IEntry {
           try {
             auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoul(path.stem().c_str()));
             proto::Block block;
-            auto err = LoadBlockByTimestamp(ts, &block);
+            auto err = LoadBlockByTimestamp(full_path_, ts, &block);
             if (err) {
               LOG_ERROR("{}", err.ToString());
               continue;
@@ -118,7 +161,7 @@ class Entry : public IEntry {
     proto::Block block;
     if (!block_set_.empty()) {
       // Load last block if it is exists
-      if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &block)) {
+      if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
         return {{}, err};
       }
     }
@@ -196,7 +239,12 @@ class Entry : public IEntry {
     }
 
     return {
-        std::make_unique<AsyncWriter>(BlockPath(full_path_, block), block, block.records_size() - 1),
+        std::make_unique<AsyncWriter>(block,
+                                      AsyncWriter::Parameters{
+                                          .path = BlockPath(full_path_, block),
+                                          .record_index = block.records_size() - 1,
+                                          .size = size,
+                                      }),
         SaveBlock(block),
     };
   }
@@ -211,7 +259,7 @@ class Entry : public IEntry {
     }
 
     proto::Block block;
-    if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &block)) {
+    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
       return {{}, err};
     }
 
@@ -241,12 +289,20 @@ class Entry : public IEntry {
     auto block_path = BlockPath(full_path_, block);
     LOG_DEBUG("Found block {} with needed record", block_path.string());
 
+    auto record = block.records(record_index);
+    if (record.state() == proto::Record::kStarted) {
+      return {{}, {.code = 425, .message = "Record is still being written"}, time};
+    }
+
+    if (record.state() == proto::Record::kErrored) {
+      return {{}, {.code = 500, .message = "Record is broken"}, time};
+    }
+
     std::ifstream block_file(block_path, std::ios::binary);
     if (!block_file) {
       return {{}, {.code = 500, .message = "Failed to open a block for reading"}, time};
     }
 
-    auto record = block.records(record_index);
     auto data_size = record.end() - record.begin();
     std::string data(data_size, '\0');
     block_file.seekg(record.begin());
@@ -275,7 +331,7 @@ class Entry : public IEntry {
     }
 
     proto::Block block;
-    if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &block)) {
+    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
       return {{}, err};
     }
 
@@ -296,7 +352,7 @@ class Entry : public IEntry {
     std::vector<RecordInfo> records;
     for (auto block_it = start_block; block_it != stop_block; ++block_it) {
       proto::Block block;
-      auto err = LoadBlockByTimestamp(*block_it, &block);
+      auto err = LoadBlockByTimestamp(full_path_, *block_it, &block);
       if (err) {
         return {{}, err};
       }
@@ -323,7 +379,7 @@ class Entry : public IEntry {
     }
 
     proto::Block first_block;
-    if (auto err = LoadBlockByTimestamp(*block_set_.begin(), &first_block)) {
+    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.begin(), &first_block)) {
       return err;
     }
 
@@ -340,7 +396,7 @@ class Entry : public IEntry {
     Time oldest_record, latest_record;
     if (!block_set_.empty()) {
       proto::Block latest_block;
-      if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &latest_block)) {
+      if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &latest_block)) {
         LOG_ERROR("{}", err.ToString());
       }
 
@@ -359,19 +415,6 @@ class Entry : public IEntry {
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
  private:
-  Error LoadBlockByTimestamp(const Timestamp& proto_ts, proto::Block* block) const {
-    auto file_name = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
-    std::ifstream file(file_name);
-    if (!file) {
-      return {.code = 500, .message = fmt::format("Failed to load a block descriptor: {}", file_name.string())};
-    }
-
-    if (!block->ParseFromIstream(&file)) {
-      return {.code = 500, .message = fmt::format("Failed to parse meta: {}", file_name.string())};
-    }
-    return {};
-  }
-
   Error SaveBlock(proto::Block block) {
     block_set_.insert(block.begin_time());
     return storage::SaveBlock(full_path_, std::move(block));
@@ -390,7 +433,8 @@ class Entry : public IEntry {
     } else {
       proto_ts = *std::prev(ts);
     }
-    return LoadBlockByTimestamp(proto_ts, block);
+
+    return LoadBlockByTimestamp(full_path_, proto_ts, block);
   }
 
   static google::protobuf::Timestamp FromTimePoint(const Time& time) {

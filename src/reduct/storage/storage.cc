@@ -186,10 +186,10 @@ class Storage : public IStorage {
     try {
       size = std::stol(req.content_length.data());
       if (size < 0) {
-        return {{}, {.code = 422, .message = "negative content-length"}};
+        return {{}, {.code = 411, .message = "negative content-length"}};
       }
     } catch (...) {
-      return {{}, {.code = 422, .message = "bad or empty content-length"}};
+      return {{}, {.code = 411, .message = "bad or empty content-length"}};
     }
 
     auto [writer, writer_err] = entry.lock()->BeginWrite(ts, size);

@@ -75,17 +75,17 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
                                    .content_length = "",
                                })
                       .Get();
-    REQUIRE(error == Error{.code = 422, .message = "bad or empty content-length"});
+    REQUIRE(error == Error{.code = 411, .message = "bad or empty content-length"});
 
     error = OnWriteEntry(storage.get(),
                          {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "100", .content_length = "xxx"})
                 .Get();
-    REQUIRE(error == Error{.code = 422, .message = "bad or empty content-length"});
+    REQUIRE(error == Error{.code = 411, .message = "bad or empty content-length"});
 
     error = OnWriteEntry(storage.get(),
                          {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "100", .content_length = "-100"})
                 .Get();
-    REQUIRE(error == Error{.code = 422, .message = "negative content-length"});
+    REQUIRE(error == Error{.code = 411, .message = "negative content-length"});
   }
 
   SECTION("error if bucket is not found during reading") {
