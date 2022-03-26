@@ -2,12 +2,14 @@
 
 #include "reduct/storage/entry.h"
 
+#include <fcntl.h>
 #include <fmt/core.h>
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
 #include <fstream>
 
+#include "reduct/async/io.h"
 #include "reduct/core/logger.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/storage/entry.pb.h"
@@ -22,6 +24,12 @@ using google::protobuf::util::TimeUtil;
 auto to_time_t = IEntry::Time::clock::to_time_t;
 
 namespace fs = std::filesystem;
+
+class AsyncWriter : public async::IAsyncWriter {
+ public:
+  AsyncWriter(Timestamp ts, size_t record_index) {}
+  Error Write(std::string_view chunk, bool last) noexcept override { return core::Error(); }
+};
 
 class Entry : public IEntry {
  public:
@@ -54,7 +62,7 @@ class Entry : public IEntry {
     }
   }
 
-  [[nodiscard]] Error Write(std::string_view blob, const Time& time) override {
+  [[nodiscard]] Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
 
     const auto proto_ts = FromTimePoint(time);
@@ -64,7 +72,7 @@ class Entry : public IEntry {
     if (!block_set_.empty()) {
       // Load last block if it is exists
       if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &block)) {
-        return err;
+        return {{}, err};
       }
     }
 
@@ -79,7 +87,7 @@ class Entry : public IEntry {
         type = RecordType::kBelated;
         auto err = FindBlock(proto_ts, &block);
         if (err) {
-          return err;
+          return {{}, err};
         }
       }
     }
@@ -93,43 +101,39 @@ class Entry : public IEntry {
       auto ret = StartNextBlock(proto_ts);
       if (ret.error) {
         LOG_ERROR("Failed create a next block");
-        return ret.error;
+        return {{}, ret.error};
       }
 
       block = std::move(ret.result);
     }
 
     auto block_path = BlockPath(block);
-    LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
+    LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), size / 1024,
               block_path.string());
-    std::ofstream block_file(block_path, std::ios::app | std::ios::binary);
-    if (!block_file) {
-      return {.code = 500, .message = "Failed open a block_file for writing"};
+
+    if (block.records_size() == 0) {
+      // allocate the whole block
+      int fd = open(block_path.c_str(), O_WRONLY | O_APPEND | O_CREAT);
+      if (fd < 0) {
+        return {{}, {.code = 500, .message = "Failed create a new block for writing"}};
+      }
+      if (posix_fallocate(fd, 0, options_.max_block_size) != 0) {
+        return {{}, {.code = 500, .message = "Failed allocate a new block"}};
+      }
     }
 
-    proto::EntryRecord record_entry;
-    record_entry.set_blob(std::string{blob});
-    record_entry.mutable_meta_data()->Clear();
-
-    std::string data;
-    if (!record_entry.SerializeToString(&data)) {
-      return {.code = 500, .message = "Failed write a record_entry to a block_file"};
-    }
-
-    LOG_TRACE("Record {} bytes to {}", data.size(), block_path.string());
-    block_file << data;
-
-    // Update written block
+    // Update writing block
     auto record = block.add_records();
+    record->set_state(proto::Record::kEmpty);
     record->mutable_timestamp()->CopyFrom(proto_ts);
     record->set_begin(block.size());
-    record->set_end(block.size() + data.size());
+    record->set_end(block.size() + size);
 
-    block.set_size(block.size() + data.size());
+    block.set_size(block.size() + size);
 
     // Update counters
     record_counter_++;
-    size_counter_ += data.size();
+    size_counter_ += size;
 
     switch (type) {
       case RecordType::kLatest:
@@ -142,7 +146,7 @@ class Entry : public IEntry {
         break;
     }
 
-    return SaveBlock(block);
+    return {std::make_unique<AsyncWriter>(block.begin_time(), block.records_size() - 1), SaveBlock(block)};
   }
 
   [[nodiscard]] ReadResult Read(const Time& time) const override {
@@ -196,12 +200,7 @@ class Entry : public IEntry {
     block_file.seekg(record.begin());
     block_file.read(data.data(), data_size);
 
-    proto::EntryRecord entry_record;
-    if (!entry_record.ParseFromString(data)) {
-      return {{}, {.code = 500, .message = "Failed parse a block"}, time};
-    }
-
-    return {entry_record.blob(), {}, time};
+    return {std::move(data), {}, time};
   }
 
   [[nodiscard]] ListResult List(const Time& start, const Time& stop) const override {

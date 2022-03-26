@@ -20,12 +20,19 @@ static auto MakeDefaultOptions() {
 
 static const auto kTimestamp = IEntry::Time() + seconds(10);
 
+auto WriteOne(IEntry& entry, std::string_view blob, IEntry::Time ts) {
+  auto [res, err] = entry.BeginWrite(ts, blob.size());
+  if (err) {
+    return err;
+  }
+  return res->Write(blob);
+};
+
 TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
 
-  REQUIRE(entry->Write("some_data", kTimestamp) == Error::kOk);
-
+  REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
   SECTION("one record") {
     auto ret = entry->Read(kTimestamp);
     REQUIRE(ret == IEntry::ReadResult{"some_data", Error{}, kTimestamp});
@@ -33,9 +40,9 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   }
 
   SECTION("few records") {
-    REQUIRE(entry->Write("other_data1", kTimestamp + seconds(5)) == Error::kOk);
-    REQUIRE(entry->Write("other_data2", kTimestamp + seconds(10)) == Error::kOk);
-    REQUIRE(entry->Write("other_data3", kTimestamp + seconds(15)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "other_data1", kTimestamp + seconds(5)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "other_data2", kTimestamp + seconds(10)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "other_data3", kTimestamp + seconds(15)) == Error::kOk);
 
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1,
                                              .record_count = 4,
@@ -61,7 +68,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
   REQUIRE(entry);
 
   auto big_data = std::string(MakeDefaultOptions().max_block_size + 1, 'c');
-  REQUIRE(entry->Write(big_data, kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
 
   SECTION("one record") {
     auto ret = entry->Read(kTimestamp);
@@ -76,7 +83,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
   }
 
   SECTION("two records in different blocks") {
-    REQUIRE(entry->Write("other_data1", kTimestamp + seconds(5)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "other_data1", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2,
                                              .record_count = 2,
                                              .bytes = 116,
@@ -92,19 +99,20 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
 
-  REQUIRE(entry->Write(std::string(100, 'c'), kTimestamp) == Error::kOk);
+  auto big_blob = std::string(100, 'c');
+  REQUIRE(entry->BeginWrite(kTimestamp, big_blob.size()).result->Write(big_blob) == Error::kOk);
 
   SECTION("a record older than first in entry") {
-    REQUIRE(entry->Write("belated_data", kTimestamp - seconds(5)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "belated_data", kTimestamp - seconds(5)) == Error::kOk);
     REQUIRE(entry->Read(kTimestamp - seconds(5)) ==
             IEntry::ReadResult{"belated_data", Error::kOk, kTimestamp - seconds(5)});
   }
 
   SECTION("a belated record") {
     REQUIRE(entry->GetInfo().block_count == 1);
-    REQUIRE(entry->Write("latest_data", kTimestamp + seconds(5)) == Error::kOk);
-    REQUIRE(entry->Write("latest_data", kTimestamp + seconds(15)) == Error::kOk);
-    REQUIRE(entry->Write("belated_data", kTimestamp + seconds(10)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "latest_data", kTimestamp + seconds(5)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "latest_data", kTimestamp + seconds(15)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "belated_data", kTimestamp + seconds(10)) == Error::kOk);
 
     REQUIRE(entry->Read(kTimestamp + seconds(10)) ==
             IEntry::ReadResult{"belated_data", Error::kOk, kTimestamp + seconds(10)});
@@ -115,16 +123,14 @@ TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
   const auto options = MakeDefaultOptions();
   auto entry = IEntry::Build(options);
   REQUIRE(entry);
-
-  REQUIRE(entry->Write("some_data", kTimestamp) == Error::kOk);
-
+  REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
   entry = IEntry::Build(options);
   REQUIRE(entry->GetOptions() == options);
 
   REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 1, .bytes = 11});
 
   SECTION("should work ok after restoring") {
-    REQUIRE(entry->Write("next_data", kTimestamp + seconds(5)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "next_data", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(entry->Read(kTimestamp + seconds(5)) ==
             IEntry::ReadResult{.blob = "next_data", .error = Error::kOk, .time = kTimestamp + seconds(5)});
   }
@@ -142,9 +148,9 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
   REQUIRE(entry);
 
   const std::string blob(entry->GetOptions().max_block_size, 'x');
-  REQUIRE(entry->Write(blob, kTimestamp) == Error::kOk);
-  REQUIRE(entry->Write(blob, kTimestamp + seconds(1)) == Error::kOk);
-  REQUIRE(entry->Write(blob, kTimestamp + seconds(2)) == Error::kOk);
+  REQUIRE(WriteOne(*entry, blob, kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(1)) == Error::kOk);
+  REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(2)) == Error::kOk);
   REQUIRE(entry->GetInfo().block_count == 3);
 
   SECTION("remove one block") {
@@ -153,7 +159,7 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
     REQUIRE(entry->Read(kTimestamp).error.code == 404);
 
     SECTION("write should be ok") {
-      REQUIRE(entry->Write("some_data", kTimestamp) == Error::kOk);
+      REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
       REQUIRE(entry->Read(kTimestamp).error == Error::kOk);
     }
 
@@ -185,9 +191,9 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
 
   SECTION("some records in few blocks") {
     const std::string blob(entry->GetOptions().max_block_size, 'x');
-    REQUIRE(entry->Write(blob, kTimestamp) == Error::kOk);
-    REQUIRE(entry->Write(blob, kTimestamp + seconds(1)) == Error::kOk);
-    REQUIRE(entry->Write(blob, kTimestamp + seconds(2)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, blob, kTimestamp) == Error::kOk);
+    REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(2)) == Error::kOk);
 
     SECTION("without overlap") {
       auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
@@ -206,9 +212,9 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
   }
 
   SECTION("some records in one block") {
-    REQUIRE(entry->Write("blob", kTimestamp) == Error::kOk);
-    REQUIRE(entry->Write("blob", kTimestamp + seconds(1)) == Error::kOk);
-    REQUIRE(entry->Write("blob", kTimestamp + seconds(2)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2)) == Error::kOk);
 
     auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
 
@@ -219,9 +225,9 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
   }
 
   SECTION("list should be sorted") {
-    REQUIRE(entry->Write("blob", kTimestamp + seconds(1)) == Error::kOk);
-    REQUIRE(entry->Write("blob", kTimestamp) == Error::kOk);
-    REQUIRE(entry->Write("blob", kTimestamp + seconds(2)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2)) == Error::kOk);
 
     auto [records, err] = entry->List(kTimestamp, kTimestamp + seconds(2));
 
@@ -232,9 +238,9 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
   }
 
   SECTION("extreme cases") {
-    REQUIRE(entry->Write("blob", kTimestamp) == Error::kOk);
-    REQUIRE(entry->Write("blob", kTimestamp + seconds(1)) == Error::kOk);
-    REQUIRE(entry->Write("blob", kTimestamp + seconds(2)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(1)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2)) == Error::kOk);
 
     SECTION("request data before first record") {
       auto [records, err] = entry->List(kTimestamp - seconds(2), kTimestamp - seconds(1));
@@ -263,11 +269,11 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
     SECTION("if timestamp between two blocks") {
       const std::string blob(entry->GetOptions().max_block_size / 2 + 10, 'x');
 
-      REQUIRE(entry->Write(blob, kTimestamp + seconds(3)) == Error::kOk);
-      REQUIRE(entry->Write(blob, kTimestamp + seconds(4)) == Error::kOk);
+      REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(3)) == Error::kOk);
+      REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(4)) == Error::kOk);
 
-      REQUIRE(entry->Write(blob, kTimestamp + seconds(10)) == Error::kOk);
-      REQUIRE(entry->Write(blob, kTimestamp + seconds(11)) == Error::kOk);
+      REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(10)) == Error::kOk);
+      REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(11)) == Error::kOk);
 
       REQUIRE(entry->List(kTimestamp + seconds(5), kTimestamp + seconds(12)).error == Error::kOk);
     }

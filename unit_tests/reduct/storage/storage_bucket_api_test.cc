@@ -52,14 +52,11 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = settings};
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {
-                           .bucket_name = "bucket",
-                           .entry_name = "entry_1",
-                           .timestamp = "100000000",
-                           .blob = "somedata",
-                       })
-              .Get() == Error::kOk);
+  auto [writer, w_err] =
+      OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry_1", .timestamp = "100000000"}).Get();
+  REQUIRE(w_err == Error::kOk);
+  REQUIRE(writer->Write("someblob"));
+
   auto [resp, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
   REQUIRE(err == Error::kOk);
   REQUIRE(resp.settings() == settings);

@@ -7,7 +7,9 @@
 #include <ostream>
 #include <vector>
 
+#include "reduct/async/io.h"
 #include "reduct/core/error.h"
+#include "reduct/core/result.h"
 
 namespace reduct::storage {
 
@@ -95,11 +97,10 @@ class IEntry {
    * @brief Write a data with timestamp to corresponding block
    * The method provides the best performance if a new timestamp is always new the stored ones.
    * Then the engine doesn't need to find a proper block and just records data into the current one.
-   * @param blob data to store
    * @param time timestamp of the data
-   * @return error 500 if failed to write data
+   * @return async writer or error
    */
-  [[nodiscard]] virtual core::Error Write(std::string_view blob, const Time& time) = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) = 0;
 
   /**
    * @brief Finds the record for the timestamp and read the blob

@@ -6,9 +6,23 @@ import "google/protobuf/timestamp.proto";
 
 // Represents a stored blob in a block
 message Record {
+  enum State {
+    kEmpty = 0;       // empty record (created but no writings)
+    kStarted = 1;     // has at least one chunk written
+    kFinished = 2;    // finished without errors
+    kErrored = 3;     // finished with error
+  }
+
+  message MetaEntry {
+    string key = 1;
+    string value = 2;
+  }
+
   google.protobuf.Timestamp timestamp = 1;  // timestamp (works as ID)
   uint64 begin = 2;                         // begin position of a blob in a block
   uint64 end = 3;                           // end position of a blob in a block
+  State state = 4;                          // state of record
+  repeated MetaEntry meta_data = 5;         // meta information as list of key-values
 }
 
 // Represents a block of records.
@@ -18,17 +32,4 @@ message Block {
   google.protobuf.Timestamp latest_record_time = 2;    // the timestamp of the latest record
   uint64 size = 3;                                // size of block in bytes (with protobuf overhead)
   repeated Record records = 4;                    // stored records
-}
-
-
-// Stored in blocks record
-message EntryRecord {
-  message MetaEntry {
-    string key = 1;
-    string value = 2;
-  }
-
-  bytes blob = 1;                       // blob of data
-  repeated MetaEntry meta_data = 2;     // meta information as list of key-values
-
 }

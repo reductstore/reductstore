@@ -295,19 +295,26 @@ class ApiServer : public IApiServer {
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
-//    IWriteEntryCallback::Request req{
-//        .bucket_name = bucket,
-//        .entry_name = entry,
-//        .timestamp = ts,
-//    };
-//
-//    auto [writer, err] = co_await storage_->OnWriteEntry(res);
-//    if (err) {
-//      handler.SendError(err);
-//      co_return;
-//    }
-//
-//    handler.Run(co_await AsyncHttpReceiver<SSL>(res, [&writer](auto chunk) { return writer(chunk); }));
+    IWriteEntryCallback::Request app_req{
+        .bucket_name = bucket,
+        .entry_name = entry,
+        .timestamp = ts,
+    };
+
+    auto [async_writer, err] = co_await storage_->OnWriteEntry(app_req);
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
+    std::string s;
+    err = co_await AsyncHttpReceiver<SSL>(res, [s](auto chunk) { return Error(); });
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
+    res->end({});
     co_return;
   }
 

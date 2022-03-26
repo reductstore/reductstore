@@ -64,7 +64,7 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
     auto ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
     REQUIRE(ref.entry.lock()->GetInfo().record_count == 0);
-    REQUIRE(ref.entry.lock()->Write("some_blob", IEntry::Time::clock::now()) == Error::kOk);
+    REQUIRE(ref.entry.lock()->BeginWrite(IEntry::Time::clock::now(), 9).result->Write("some_blob") == Error::kOk);
 
     ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
@@ -101,9 +101,10 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   std::string blob(700, 'x');
 
   SECTION("3 big blobs 3*700 should be shrunk to 2") {
-    REQUIRE(entry1->Write(blob, ts + seconds(1)) == Error::kOk);
-    REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
-    REQUIRE(entry1->Write(blob, ts + seconds(3)) == Error::kOk);
+    //TODO(Alexey Timin): Clean code
+    REQUIRE(entry1->BeginWrite(ts + seconds(1), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry1->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
     REQUIRE(entry1->GetInfo().record_count == 1);
@@ -123,10 +124,12 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   }
 
   SECTION("should keep current block") {
-    REQUIRE(entry1->Write("little_fist_chunk", ts + seconds(1)) == Error::kOk);
-    REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
-    REQUIRE(entry2->Write(blob, ts + seconds(3)) == Error::kOk);
-    REQUIRE(entry2->Write("just_start_new_block", ts + seconds(4)) == Error::kOk);
+    //TODO(Alexey Timin): Clean code
+    std::string little_chunk("little_chunk");
+    REQUIRE(entry1->BeginWrite(ts + seconds(1), little_chunk.size()).result->Write(little_chunk) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(4), little_chunk.size()).result->Write(little_chunk) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
 

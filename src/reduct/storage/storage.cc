@@ -164,7 +164,8 @@ class Storage : public IStorage {
   /**
    * Entry API
    */
-  [[nodiscard]] Run<IWriteEntryCallback::Result> OnWriteEntry(const IWriteEntryCallback::Request& req) override {
+  [[nodiscard]] Run<IWriteEntryCallback::Result> OnWriteEntry(
+      const IWriteEntryCallback::Request& req) noexcept override {
     using Callback = IWriteEntryCallback;
 
     return Run<Callback::Result>([this, &req]() mutable {
@@ -183,15 +184,15 @@ class Storage : public IStorage {
         return Callback::Result{{}, ref_error};
       }
 
-      err = entry.lock()->Write(req.blob, ts);
-      if (!err) {
+      auto [writer, writer_err] = entry.lock()->BeginWrite(ts, req.size);
+      if (!writer_err) {
         auto quota_error = bucket_it->second->KeepQuota();
         if (quota_error) {
           LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
         }
       }
 
-      return Callback::Result{{}, err};
+      return Callback::Result{std::move(writer), writer_err};
     });
   }
 

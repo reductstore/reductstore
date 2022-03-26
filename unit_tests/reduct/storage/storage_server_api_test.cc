@@ -38,13 +38,14 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][serv
   auto storage = IStorage::Build({.data_path = dir});
 
   REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = {}}).Get() == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000000", .blob = "some_data"})
-              .Get() == Error::kOk);
+  auto ret =
+      OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000000"}).Get();
+  REQUIRE(ret == Error::kOk);
+  REQUIRE(ret.result->Write("some_blob") == Error::kOk);
 
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "2000000", .blob = "some_data"})
-              .Get() == Error::kOk);
+  ret = OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "2000000"}).Get();
+  REQUIRE(ret == Error::kOk);
+  REQUIRE(ret.result->Write("some_blob") == Error::kOk);
 
   storage = IStorage::Build({.data_path = dir});
 
@@ -61,16 +62,15 @@ TEST_CASE("storage::Storage should provide list of buckets", "[storage][server_a
 
   REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket_1", .bucket_settings = {}}).Get() == Error::kOk);
   REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket_2", .bucket_settings = {}}).Get() == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket_1", .entry_name = "entry1", .timestamp = "1000000", .blob = "some_data"})
-              .Get() == Error::kOk);
-
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket_1", .entry_name = "entry2", .timestamp = "2000000", .blob = "some_data"})
-              .Get() == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket_2", .entry_name = "entry2", .timestamp = "3000000", .blob = "some_data"})
-              .Get() == Error::kOk);
+  REQUIRE(OnWriteEntry(storage.get(), {.bucket_name = "bucket_1", .entry_name = "entry1", .timestamp = "1000000"})
+              .Get()
+              .result->Write("some_data") == Error::kOk);
+  REQUIRE(OnWriteEntry(storage.get(), {.bucket_name = "bucket_1", .entry_name = "entry2", .timestamp = "2000000"})
+              .Get()
+              .result->Write("some_data") == Error::kOk);
+  REQUIRE(OnWriteEntry(storage.get(), {.bucket_name = "bucket_2", .entry_name = "entry2", .timestamp = "3000000"})
+              .Get()
+              .result->Write("some_data") == Error::kOk);
 
   auto [resp, err] = OnStorageList(storage.get()).Get();
   REQUIRE(resp.buckets.buckets_size() == 2);
