@@ -135,7 +135,9 @@ class IWriteEntryCallback {
   };
 
   using Result = core::Result<Response>;
-  virtual async::Run<Result> OnWriteEntry(const Request& req) noexcept = 0;
+
+  // NOTICE: Can't be an executor because we can't postpone receiving tasks in the loop
+  virtual Result OnWriteEntry(const Request& req) noexcept = 0;
 };
 
 /**

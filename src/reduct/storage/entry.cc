@@ -50,8 +50,9 @@ Error SaveBlock(const fs::path& parent, const proto::Block& block) {
  */
 class AsyncWriter : public async::IAsyncWriter {
  public:
-  AsyncWriter(const fs::path& path, const proto::Block& block, int record_index) : ts_(block.begin_time()) {
-    file_ = std::ofstream(path, std::ios::out | std::ios::in | std::ios::binary); //TODO: WHy it drop to zero???
+  AsyncWriter(const fs::path& path, const proto::Block& block, int record_index)
+      : ts_(block.begin_time()), record_index_(record_index) {
+    file_ = std::ofstream(path, std::ios::out | std::ios::in | std::ios::binary);
     file_.seekp(block.records(record_index).begin());
   }
 
@@ -61,7 +62,7 @@ class AsyncWriter : public async::IAsyncWriter {
     }
 
     if (!file_.write(chunk.data(), chunk.size())) {
-      return {.code=500, .message="Failed to write a chunk into a block"};
+      return {.code = 500, .message = "Failed to write a chunk into a block"};
     }
 
     if (last) {
@@ -73,6 +74,7 @@ class AsyncWriter : public async::IAsyncWriter {
  private:
   std::ofstream file_;
   Timestamp ts_;
+  int record_index_;
 };
 
 Error SaveBlock(proto::Block block);
@@ -250,7 +252,6 @@ class Entry : public IEntry {
     block_file.seekg(record.begin());
     if (!block_file.read(data.data(), data_size)) {
       return {{}, {.code = 500, .message = "Failed to read a block"}, time};
-
     }
 
     return {std::move(data), {}, time};

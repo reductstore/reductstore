@@ -164,36 +164,33 @@ class Storage : public IStorage {
   /**
    * Entry API
    */
-  [[nodiscard]] Run<IWriteEntryCallback::Result> OnWriteEntry(
-      const IWriteEntryCallback::Request& req) noexcept override {
+  [[nodiscard]] IWriteEntryCallback::Result OnWriteEntry(const IWriteEntryCallback::Request& req) noexcept override {
     using Callback = IWriteEntryCallback;
 
-    return Run<Callback::Result>([this, &req]() mutable {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
+    auto [bucket_it, err] = FindBucket(req.bucket_name);
+    if (err) {
+      return Callback::Result{{}, err};
+    }
 
-      auto [ts, parse_err] = ParseTimestamp(req.timestamp);
-      if (parse_err) {
-        return Callback::Result{{}, parse_err};
-      }
+    auto [ts, parse_err] = ParseTimestamp(req.timestamp);
+    if (parse_err) {
+      return Callback::Result{{}, parse_err};
+    }
 
-      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
-      if (ref_error) {
-        return Callback::Result{{}, ref_error};
-      }
+    auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+    if (ref_error) {
+      return Callback::Result{{}, ref_error};
+    }
 
-      auto [writer, writer_err] = entry.lock()->BeginWrite(ts, req.size);
-      if (!writer_err) {
-        auto quota_error = bucket_it->second->KeepQuota();
-        if (quota_error) {
-          LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
-        }
+    auto [writer, writer_err] = entry.lock()->BeginWrite(ts, req.size);
+    if (!writer_err) {
+      auto quota_error = bucket_it->second->KeepQuota();
+      if (quota_error) {
+        LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
       }
+    }
 
-      return Callback::Result{std::move(writer), writer_err};
-    });
+    return Callback::Result{std::move(writer), writer_err};
   }
 
   Run<IReadEntryCallback::Result> OnReadEntry(const IReadEntryCallback::Request& req) override {

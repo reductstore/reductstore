@@ -99,7 +99,7 @@ inline async::Task<api::IRemoveBucketCallback::Result> OnRemoveBucket(storage::I
 
 inline async::Task<api::IWriteEntryCallback::Result> OnWriteEntry(storage::IStorage* storage,
                                                                   api::IWriteEntryCallback::Request req) {
-  auto result = co_await storage->OnWriteEntry(std::move(req));
+  auto result = storage->OnWriteEntry(std::move(req));
   co_return result;
 }
 

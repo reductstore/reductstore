@@ -5,7 +5,6 @@
 #include <filesystem>
 
 #include "reduct/async/task.h"
-#include "reduct/config.h"
 #include "reduct/helpers.h"
 #include "reduct/storage/storage.h"
 

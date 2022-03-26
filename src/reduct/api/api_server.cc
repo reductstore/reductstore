@@ -183,11 +183,16 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    auto [data, err] = ReceiveData(res).Get();
+    std::string data;
+    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck, bool _) {
+      data += chuck;
+      return Error::kOk;
+    });
     if (err) {
       handler.SendError(err);
       co_return;
     }
+
     BucketSettings settings;
     if (!data.empty()) {
       auto status = JsonStringToMessage(data, &settings);
@@ -248,7 +253,12 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    auto [data, err] = ReceiveData(res).Get();
+    std::string data;
+    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck, bool _) {
+      data += chuck;
+      return Error::kOk;
+    });
+
     if (err) {
       handler.SendError(err);
       co_return;
@@ -299,16 +309,16 @@ class ApiServer : public IApiServer {
         .bucket_name = bucket,
         .entry_name = entry,
         .timestamp = ts,
+        .size = std::stoul(req->getHeader("content-length").data()),
     };
 
-    auto [async_writer, err] = co_await storage_->OnWriteEntry(app_req);
+    auto [async_writer, err] = storage_->OnWriteEntry(app_req);
     if (err) {
       handler.SendError(err);
       co_return;
     }
 
-    std::string s;
-    err = co_await AsyncHttpReceiver<SSL>(res, [s](auto chunk) { return Error(); });
+    err = co_await AsyncHttpReceiver<SSL>(res, [&](auto chunk, bool last) { return async_writer->Write(chunk, last); });
     if (err) {
       handler.SendError(err);
       co_return;
@@ -356,17 +366,6 @@ class ApiServer : public IApiServer {
     handler.Run(co_await storage_->OnListEntry(data),
                 [](IListEntryCallback::Response app_resp) { return PrintToJson(app_resp); });
     co_return;
-  }
-
-  template <bool SSL = false>
-  static Task<Result<std::string>> ReceiveData(uWS::HttpResponse<SSL> *res) {
-    std::string data;
-    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck) {
-      data += chuck;
-      return Error::kOk;
-    });
-
-    co_return {std::move(data), std::move(err)};
   }
 
   Options options_;
