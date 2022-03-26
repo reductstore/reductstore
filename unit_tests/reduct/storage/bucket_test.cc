@@ -101,7 +101,6 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   std::string blob(700, 'x');
 
   SECTION("3 big blobs 3*700 should be shrunk to 2") {
-    //TODO(Alexey Timin): Clean code
     REQUIRE(entry1->BeginWrite(ts + seconds(1), blob.size()).result->Write(blob) == Error::kOk);
     REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
     REQUIRE(entry1->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
@@ -124,7 +123,7 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   }
 
   SECTION("should keep current block") {
-    //TODO(Alexey Timin): Clean code
+    // TODO(Alexey Timin): Clean code
     std::string little_chunk("little_chunk");
     REQUIRE(entry1->BeginWrite(ts + seconds(1), little_chunk.size()).result->Write(little_chunk) == Error::kOk);
     REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
