@@ -6,6 +6,7 @@
 
 #include "reduct/helpers.h"
 
+using reduct::WriteOne;
 using reduct::core::Error;
 using reduct::storage::IEntry;
 using std::chrono::seconds;
@@ -20,14 +21,6 @@ static auto MakeDefaultOptions() {
 
 static const auto kTimestamp = IEntry::Time() + seconds(10);
 
-auto WriteOne(IEntry& entry, std::string_view blob, IEntry::Time ts) {
-  auto [res, err] = entry.BeginWrite(ts, blob.size());
-  if (err) {
-    return err;
-  }
-  return res->Write(blob);
-};
-
 TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
@@ -36,7 +29,13 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
   SECTION("one record") {
     auto ret = entry->Read(kTimestamp);
     REQUIRE(ret == IEntry::ReadResult{"some_data", Error{}, kTimestamp});
-    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 1, .bytes = 11});
+    REQUIRE(entry->GetInfo() == IEntry::Info{
+                                    .block_count = 1,
+                                    .record_count = 1,
+                                    .bytes = 9,
+                                    .oldest_record_time = kTimestamp,
+                                    .latest_record_time = kTimestamp,
+                                });
   }
 
   SECTION("few records") {
@@ -46,7 +45,7 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
 
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1,
                                              .record_count = 4,
-                                             .bytes = 50,
+                                             .bytes = 42,
                                              .oldest_record_time = kTimestamp,
                                              .latest_record_time = kTimestamp + seconds(15)});
 
@@ -76,7 +75,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
     REQUIRE(entry->GetInfo() == IEntry::Info{
                                     .block_count = 1,
                                     .record_count = 1,
-                                    .bytes = 103,
+                                    .bytes = 101,
                                     .oldest_record_time = kTimestamp,
                                     .latest_record_time = kTimestamp,
                                 });
@@ -86,7 +85,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
     REQUIRE(WriteOne(*entry, "other_data1", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2,
                                              .record_count = 2,
-                                             .bytes = 116,
+                                             .bytes = 112,
                                              .oldest_record_time = kTimestamp,
                                              .latest_record_time = kTimestamp + seconds(5)});
 
@@ -127,7 +126,13 @@ TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
   entry = IEntry::Build(options);
   REQUIRE(entry->GetOptions() == options);
 
-  REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1, .record_count = 1, .bytes = 11});
+  REQUIRE(entry->GetInfo() == IEntry::Info{
+                                  .block_count = 1,
+                                  .record_count = 1,
+                                  .bytes = 9,
+                                  .oldest_record_time = kTimestamp,
+                                  .latest_record_time = kTimestamp,
+                              });
 
   SECTION("should work ok after restoring") {
     REQUIRE(WriteOne(*entry, "next_data", kTimestamp + seconds(5)) == Error::kOk);
@@ -147,7 +152,7 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
 
-  const std::string blob(entry->GetOptions().max_block_size, 'x');
+  const std::string blob(entry->GetOptions().max_block_size + 1, 'x');
   REQUIRE(WriteOne(*entry, blob, kTimestamp) == Error::kOk);
   REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(1)) == Error::kOk);
   REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(2)) == Error::kOk);
@@ -200,8 +205,8 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
 
       REQUIRE(err == Error::kOk);
       REQUIRE(records.size() == 2);
-      REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 102});
-      REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 102});
+      REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 100});
+      REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 100});
     }
 
     SECTION("with overlap") {
@@ -220,8 +225,8 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
 
     REQUIRE(err == Error::kOk);
     REQUIRE(records.size() == 2);
-    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 6});
-    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 6});
+    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 4});
+    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 4});
   }
 
   SECTION("list should be sorted") {
@@ -233,8 +238,8 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
 
     REQUIRE(err == Error::kOk);
     REQUIRE(records.size() == 2);
-    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 6});
-    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 6});
+    REQUIRE(records[0] == IEntry::RecordInfo{.time = kTimestamp, .size = 4});
+    REQUIRE(records[1] == IEntry::RecordInfo{.time = kTimestamp + seconds(1), .size = 4});
   }
 
   SECTION("extreme cases") {

@@ -26,11 +26,7 @@ class IEntry {
     std::filesystem::path path;  // path to entry (path to bucket)
     size_t max_block_size;       // max block quota_size after that we create a new one
 
-    bool operator==(const Options& rhs) const {
-      return std::tie(name, path, max_block_size) == std::tie(rhs.name, rhs.path, rhs.max_block_size);
-    }
-
-    bool operator!=(const Options& rhs) const { return !(rhs == *this); }
+    bool operator<=>(const Options& rhs) const = default;
   };
 
   using Time = std::chrono::system_clock::time_point;
@@ -43,11 +39,7 @@ class IEntry {
     core::Error error;  // error (Error::kOk if no errors)
     Time time;          // timestamp of blob
 
-    bool operator==(const ReadResult& rhs) const {
-      return std::tie(blob, error, time) == std::tie(rhs.blob, rhs.error, rhs.time);
-    }
-
-    bool operator!=(const ReadResult& rhs) const { return !(rhs == *this); }
+    bool operator<=>(const ReadResult& rhs) const = default;
 
     friend std::ostream& operator<<(std::ostream& os, const ReadResult& result);
   };
@@ -59,8 +51,7 @@ class IEntry {
     Time time;    // time when it was created
     size_t size;  // size in bytes
 
-    bool operator==(const RecordInfo& rhs) const { return std::tie(time, size) == std::tie(rhs.time, rhs.size); }
-    bool operator!=(const RecordInfo& rhs) const { return !(rhs == *this); }
+    bool operator<=>(const RecordInfo& rhs) const = default;
 
     friend std::ostream& operator<<(std::ostream& os, const RecordInfo& info);
   };
@@ -83,12 +74,7 @@ class IEntry {
     Time oldest_record_time;  // time of the oldest record
     Time latest_record_time;  // time of the latest record
 
-    bool operator==(const Info& rhs) const {
-      return std::tie(block_count, record_count, bytes, oldest_record_time, latest_record_time) ==
-             std::tie(rhs.block_count, rhs.record_count, rhs.bytes, oldest_record_time, latest_record_time);
-    }
-
-    bool operator!=(const Info& rhs) const { return !(rhs == *this); }
+    bool operator<=>(const Info& rhs) const = default;
 
     friend std::ostream& operator<<(std::ostream& os, const Info& info);
   };

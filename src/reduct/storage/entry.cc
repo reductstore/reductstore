@@ -25,12 +25,57 @@ auto to_time_t = IEntry::Time::clock::to_time_t;
 
 namespace fs = std::filesystem;
 
+static constexpr std::string_view kBlockExt = ".blk";
+static constexpr std::string_view kMetaExt = ".meta";
+
+std::filesystem::path BlockPath(const fs::path& parent, const proto::Block& block, std::string_view ext = kBlockExt) {
+  auto block_path = parent / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(block.begin_time()), ext);
+  return block_path;
+}
+
+Error SaveBlock(const fs::path& parent, const proto::Block& block) {
+  auto file_name = BlockPath(parent, block, kMetaExt);
+  std::ofstream file(file_name);
+  if (file) {
+    block.SerializeToOstream(&file);
+    return {};
+  } else {
+    return {.code = 500, .message = "Failed to save a block descriptor"};
+  }
+}
+
+/**
+ * @class Asynchronous writer
+ * @brief Writes chunks of data into pre-allocated block
+ */
 class AsyncWriter : public async::IAsyncWriter {
  public:
-  AsyncWriter(Timestamp ts, size_t record_index) {}
-  Error Write(std::string_view chunk, bool last) noexcept override { return core::Error(); }
+  AsyncWriter(const fs::path& path, const proto::Block& block, int record_index) : ts_(block.begin_time()) {
+    file_ = std::ofstream(path, std::ios::out | std::ios::in | std::ios::binary); //TODO: WHy it drop to zero???
+    file_.seekp(block.records(record_index).begin());
+  }
+
+  Error Write(std::string_view chunk, bool last) noexcept override {
+    if (!file_) {
+      return {.code = 500, .message = "Bad file"};
+    }
+
+    if (!file_.write(chunk.data(), chunk.size())) {
+      return {.code=500, .message="Failed to write a chunk into a block"};
+    }
+
+    if (last) {
+      file_ << std::flush;
+    }
+    return Error::kOk;
+  }
+
+ private:
+  std::ofstream file_;
+  Timestamp ts_;
 };
 
+Error SaveBlock(proto::Block block);
 class Entry : public IEntry {
  public:
   /**
@@ -107,19 +152,21 @@ class Entry : public IEntry {
       block = std::move(ret.result);
     }
 
-    auto block_path = BlockPath(block);
+    auto block_path = BlockPath(full_path_, block);
     LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), size / 1024,
               block_path.string());
 
     if (block.records_size() == 0) {
       // allocate the whole block
-      int fd = open(block_path.c_str(), O_WRONLY | O_APPEND | O_CREAT);
+      int fd = open(block_path.c_str(), O_WRONLY | O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
       if (fd < 0) {
         return {{}, {.code = 500, .message = "Failed create a new block for writing"}};
       }
       if (posix_fallocate(fd, 0, options_.max_block_size) != 0) {
-        return {{}, {.code = 500, .message = "Failed allocate a new block"}};
+        return {{}, {.code = 500, .message = fmt::format("Failed allocate a new block: {}", std::strerror(errno))}};
       }
+
+      close(fd);
     }
 
     // Update writing block
@@ -146,7 +193,10 @@ class Entry : public IEntry {
         break;
     }
 
-    return {std::make_unique<AsyncWriter>(block.begin_time(), block.records_size() - 1), SaveBlock(block)};
+    return {
+        std::make_unique<AsyncWriter>(BlockPath(full_path_, block), block, block.records_size() - 1),
+        SaveBlock(block),
+    };
   }
 
   [[nodiscard]] ReadResult Read(const Time& time) const override {
@@ -186,19 +236,22 @@ class Entry : public IEntry {
       return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
     }
 
-    auto block_path = BlockPath(block);
+    auto block_path = BlockPath(full_path_, block);
     LOG_DEBUG("Found block {} with needed record", block_path.string());
 
     std::ifstream block_file(block_path, std::ios::binary);
     if (!block_file) {
-      return {{}, {.code = 500, .message = "Failed open a block for reading"}, time};
+      return {{}, {.code = 500, .message = "Failed to open a block for reading"}, time};
     }
 
     auto record = block.records(record_index);
     auto data_size = record.end() - record.begin();
     std::string data(data_size, '\0');
     block_file.seekg(record.begin());
-    block_file.read(data.data(), data_size);
+    if (!block_file.read(data.data(), data_size)) {
+      return {{}, {.code = 500, .message = "Failed to read a block"}, time};
+
+    }
 
     return {std::move(data), {}, time};
   }
@@ -273,8 +326,8 @@ class Entry : public IEntry {
       return err;
     }
 
-    fs::remove(BlockPath(first_block));
-    fs::remove(BlockPath(first_block, kMetaExt));
+    fs::remove(BlockPath(full_path_, first_block));
+    fs::remove(BlockPath(full_path_, first_block, kMetaExt));
 
     size_counter_ -= first_block.size();
     record_counter_ -= first_block.records_size();
@@ -305,11 +358,6 @@ class Entry : public IEntry {
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
  private:
-  [[nodiscard]] std::filesystem::path BlockPath(const proto::Block& block, std::string_view ext = kBlockExt) const {
-    auto block_path = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(block.begin_time()), ext);
-    return block_path;
-  }
-
   Error LoadBlockByTimestamp(const Timestamp& proto_ts, proto::Block* block) const {
     auto file_name = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
     std::ifstream file(file_name);
@@ -323,22 +371,15 @@ class Entry : public IEntry {
     return {};
   }
 
-  Error SaveBlock(const proto::Block& block) {
-    auto file_name = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(block.begin_time()), kMetaExt);
-    std::ofstream file(file_name);
-    if (file) {
-      block.SerializeToOstream(&file);
-      block_set_.insert(block.begin_time());
-      return {};
-    } else {
-      return {.code = 500, .message = "Failed to save a block descriptor"};
-    }
+  Error SaveBlock(proto::Block block) {
+    block_set_.insert(block.begin_time());
+    return storage::SaveBlock(full_path_, std::move(block));
   }
 
   Result<proto::Block> StartNextBlock(const Timestamp& ts) {
     proto::Block block;
     block.mutable_begin_time()->CopyFrom(ts);
-    return {block, SaveBlock(block)};
+    return {block, SaveBlock(std::move(block))};
   }
 
   Error FindBlock(Timestamp proto_ts, proto::Block* block) const {
@@ -359,9 +400,6 @@ class Entry : public IEntry {
   static Time ToTimePoint(const google::protobuf::Timestamp& time) {
     return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
   }
-
-  static constexpr std::string_view kBlockExt = ".blk";
-  static constexpr std::string_view kMetaExt = ".meta";
 
   Options options_;
   fs::path full_path_;

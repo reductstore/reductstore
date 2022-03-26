@@ -11,6 +11,7 @@
 
 #include "reduct/proto/api/bucket.pb.h"
 #include "reduct/storage/storage.h"
+#include "reduct/storage/entry.h"
 
 inline bool operator==(const google::protobuf::MessageLite& msg_a, const google::protobuf::MessageLite& msg_b) {
   return (msg_a.GetTypeName() == msg_b.GetTypeName()) && (msg_a.SerializeAsString() == msg_b.SerializeAsString());
@@ -52,6 +53,15 @@ static const proto::api::BucketSettings MakeDefaultBucketSettings() {
 
   return settings;
 }
+
+inline auto WriteOne(storage::IEntry& entry, std::string_view blob, storage::IEntry::Time ts) {
+  auto [res, err] = entry.BeginWrite(ts, blob.size());
+  if (err) {
+    return err;
+  }
+  return res->Write(blob);
+};
+
 
 inline async::Task<api::IInfoCallback::Result> OnInfo(storage::IStorage* storage) {
   auto result = co_await storage->OnInfo({});

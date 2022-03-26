@@ -38,11 +38,12 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
       Error::kOk);
 
   auto write_ret =
-      OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000"})
+      OnWriteEntry(storage.get(),
+                   {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .size = 9})
           .Get();
 
   REQUIRE(write_ret == Error::kOk);
-  REQUIRE(write_ret.result->Write("some_data"));
+  REQUIRE(write_ret.result->Write("some_data") == Error::kOk);
 
   auto [resp, err] =
       OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000"})
@@ -91,13 +92,16 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
   REQUIRE(
       OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
       Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000"})
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .size = 9})
               .Get()
               .result->Write("some_data") == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862001"})
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862001", .size = 9})
               .Get()
               .result->Write("some_data") == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862002"})
+  REQUIRE(OnWriteEntry(storage.get(),
+                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862002", .size = 9})
               .Get()
               .result->Write("some_data") == Error::kOk);
 
@@ -110,9 +114,9 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
   REQUIRE(err == Error::kOk);
   REQUIRE(result.records_size() == 2);
   REQUIRE(result.records(0).ts() == 1610387457862000);
-  REQUIRE(result.records(0).size() == 11);
+  REQUIRE(result.records(0).size() == 9);
   REQUIRE(result.records(1).ts() == 1610387457862001);
-  REQUIRE(result.records(1).size() == 11);
+  REQUIRE(result.records(1).size() == 9);
 
   SECTION("error if bad timestamps") {
     Error bad_ts_err =
