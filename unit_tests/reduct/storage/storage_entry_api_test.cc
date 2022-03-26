@@ -37,8 +37,9 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
       Error::kOk);
 
   auto write_ret =
-      OnWriteEntry(storage.get(),
-                   {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .size = 9})
+      OnWriteEntry(
+          storage.get(),
+          {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .content_length = "9"})
           .Get();
 
   REQUIRE(write_ret == Error::kOk);
@@ -63,6 +64,28 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
     error = OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "XXXX"}).Get();
     REQUIRE(error ==
             Error{.code = 422, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
+  }
+
+  SECTION("error if size is empty or bad  during writing") {
+    Error error = OnWriteEntry(storage.get(),
+                               {
+                                   .bucket_name = "bucket",
+                                   .entry_name = "entry",
+                                   .timestamp = "100",
+                                   .content_length = "",
+                               })
+                      .Get();
+    REQUIRE(error == Error{.code = 422, .message = "bad or empty content-length"});
+
+    error = OnWriteEntry(storage.get(),
+                         {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "100", .content_length = "xxx"})
+                .Get();
+    REQUIRE(error == Error{.code = 422, .message = "bad or empty content-length"});
+
+    error = OnWriteEntry(storage.get(),
+                         {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "100", .content_length = "-100"})
+                .Get();
+    REQUIRE(error == Error{.code = 422, .message = "negative content-length"});
   }
 
   SECTION("error if bucket is not found during reading") {
@@ -91,16 +114,19 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
   REQUIRE(
       OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
       Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .size = 9})
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .content_length = "9"})
               .Get()
               .result->Write("some_data") == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862001", .size = 9})
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862001", .content_length = "9"})
               .Get()
               .result->Write("some_data") == Error::kOk);
-  REQUIRE(OnWriteEntry(storage.get(),
-                       {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862002", .size = 9})
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862002", .content_length = "9"})
               .Get()
               .result->Write("some_data") == Error::kOk);
 

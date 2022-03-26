@@ -7,10 +7,9 @@ import "google/protobuf/timestamp.proto";
 // Represents a stored blob in a block
 message Record {
   enum State {
-    kEmpty = 0;       // empty record (created but no writings)
-    kStarted = 1;     // has at least one chunk written
-    kFinished = 2;    // finished without errors
-    kErrored = 3;     // finished with error
+    kStarted = 0;     // has at least one chunk written
+    kFinished = 1;    // finished without errors
+    kErrored = 2;     // finished with error
   }
 
   message MetaEntry {

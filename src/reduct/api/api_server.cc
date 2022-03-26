@@ -309,7 +309,7 @@ class ApiServer : public IApiServer {
         .bucket_name = bucket,
         .entry_name = entry,
         .timestamp = ts,
-        .size = std::stoul(req->getHeader("content-length").data()),
+        .content_length = req->getHeader("content-length"),
     };
 
     auto [async_writer, err] = storage_->OnWriteEntry(app_req);

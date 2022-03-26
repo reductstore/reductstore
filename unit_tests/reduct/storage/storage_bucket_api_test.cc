@@ -53,7 +53,9 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
   auto [writer, w_err] =
-      OnWriteEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry_1", .timestamp = "100000000", .size=8}).Get();
+      OnWriteEntry(storage.get(),
+                   {.bucket_name = "bucket", .entry_name = "entry_1", .timestamp = "100000000", .content_length = "8"})
+          .Get();
   REQUIRE(w_err == Error::kOk);
   REQUIRE(writer->Write("someblob") == Error::kOk);
 

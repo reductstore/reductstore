@@ -182,7 +182,17 @@ class Storage : public IStorage {
       return Callback::Result{{}, ref_error};
     }
 
-    auto [writer, writer_err] = entry.lock()->BeginWrite(ts, req.size);
+    int64_t size;
+    try {
+      size = std::stol(req.content_length.data());
+      if (size < 0) {
+        return {{}, {.code = 422, .message = "negative content-length"}};
+      }
+    } catch (...) {
+      return {{}, {.code = 422, .message = "bad or empty content-length"}};
+    }
+
+    auto [writer, writer_err] = entry.lock()->BeginWrite(ts, size);
     if (!writer_err) {
       auto quota_error = bucket_it->second->KeepQuota();
       if (quota_error) {

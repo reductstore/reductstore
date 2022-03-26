@@ -173,7 +173,7 @@ class Entry : public IEntry {
 
     // Update writing block
     auto record = block.add_records();
-    record->set_state(proto::Record::kEmpty);
+    record->set_state(proto::Record::kStarted);
     record->mutable_timestamp()->CopyFrom(proto_ts);
     record->set_begin(block.size());
     record->set_end(block.size() + size);

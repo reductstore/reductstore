@@ -6,9 +6,9 @@ description: Bucket API provides HTTP methods to create, modify or delete a buck
 
 Before starting recording, a user has to create a bucket with the following settings:
 
-* Maximal block size
+* Maximal block content_length
 * Quota type
-* Quota size
+* Quota content_length
 
 For more information, you can read more about buckets in [How does it work?](../how-does-it-work.md)
 
@@ -25,14 +25,14 @@ Name of bucket
 ```javascript
 {
     "settings": {
-        "max_block_size": "integer",            // max block size in bytes
+        "max_block_size": "integer",            // max block content_length in bytes
         "quota_type": Union["NONE", "FIFO"],    // quota type
-        "quota_size": "integer"                 // quota size in bytes
+        "quota_size": "integer"                 // quota content_length in bytes
     }
     "info": {
         "name": "string",         // name of the bucket
         "entry_count": "integer", // number of entries in the bucket
-        "size": "integer",        // size of stored data in the bucket in bytes
+        "content_length": "integer",        // content_length of stored data in the bucket in bytes
         "oldest_record": "integer", // unix timestamp of oldest record in seconds
         "latest_record": "integer"  // unix timestamp of latest record in seconds
     },
@@ -86,7 +86,7 @@ Name of new bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal size of a data block in bytes (default: 1Mb)
+Maximal content_length of a data block in bytes (default: 1Mb)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
@@ -132,7 +132,7 @@ Name of bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal size of a data block in bytes
+Maximal content_length of a data block in bytes
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}

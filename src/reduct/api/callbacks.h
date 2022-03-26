@@ -131,7 +131,7 @@ class IWriteEntryCallback {
     std::string_view bucket_name;
     std::string_view entry_name;
     std::string_view timestamp;
-    size_t size;
+    std::string_view content_length;
   };
 
   using Result = core::Result<Response>;
