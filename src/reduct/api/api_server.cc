@@ -7,8 +7,8 @@
 #include <filesystem>
 
 #include "common.h"
-#include "reduct/core/logger.h"
 #include "reduct/async/sleep.h"
+#include "reduct/core/logger.h"
 
 namespace reduct::api {
 
@@ -20,9 +20,9 @@ using proto::api::BucketSettings;
 using uWS::HttpRequest;
 using uWS::HttpResponse;
 
+using async::Sleep;
 using async::Task;
 using async::VoidTask;
-using async::Sleep;
 using auth::ITokenAuthentication;
 using core::Error;
 using core::Result;
@@ -349,7 +349,6 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-
     for (;;) {
       auto [chuck, read_err] = reader->Read();
       if (read_err) {
@@ -364,7 +363,7 @@ class ApiServer : public IApiServer {
 
       if (responded) break;
 
-      co_await Sleep(async::kTick); // to suspend between chunks
+      co_await Sleep(async::kTick);  // to suspend between chunks
     }
 
     co_return;
