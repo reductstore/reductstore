@@ -10,7 +10,7 @@ set(SRC_FILES
         reduct/core/env_test.cc
         reduct/auth/token_auth_test.cc
 
-        reduct/storage/aync_writer_test.cc
+        reduct/storage/aync_io_test.cc
         reduct/storage/bucket_test.cc
         reduct/storage/entry_test.cc
         reduct/storage/storage_bucket_api_test.cc

@@ -1,6 +1,7 @@
 // Copyright 2022 Alexey Timin
 #include <catch2/catch.hpp>
 
+#include "reduct/config.h"
 #include "reduct/helpers.h"
 #include "reduct/storage/entry.h"
 
@@ -8,6 +9,8 @@ using reduct::core::Error;
 using reduct::storage::IEntry;
 
 using reduct::ReadOne;
+using reduct::WriteOne;
+using reduct::async::IAsyncReader;
 
 using std::chrono::seconds;
 
@@ -60,4 +63,18 @@ TEST_CASE("AsyncWriter should mark finished records") {
 
   REQUIRE(writer->Write("456789012") != Error::kOk);
   REQUIRE(ReadOne(*entry, kTimestamp) == Error{.code = 500, .message = "Record is broken"});
+}
+
+TEST_CASE("AsyncReader should read a big file in two chunks") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  const auto size = reduct::kDefaultMaxReadChunk * 2 - 1;
+  REQUIRE(WriteOne(*entry, std::string(size, 'x'), kTimestamp) == Error::kOk);
+
+  auto [reader, err] = entry->BeginRead(kTimestamp);
+  REQUIRE(err == Error::kOk);
+  REQUIRE(reader->size() == size);
+  REQUIRE(reader->Read().result == IAsyncReader::DataChunk{std::string(reduct::kDefaultMaxReadChunk, 'x'), false});
+  REQUIRE(reader->Read().result == IAsyncReader::DataChunk{std::string(reduct::kDefaultMaxReadChunk - 1, 'x'), true});
 }
