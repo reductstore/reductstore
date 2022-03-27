@@ -43,7 +43,7 @@ inline std::filesystem::path BuildTmpDirectory() {
 
 namespace reduct {
 
-static const proto::api::BucketSettings MakeDefaultBucketSettings() {
+static proto::api::BucketSettings MakeDefaultBucketSettings() {
   using proto::api::BucketSettings;
 
   BucketSettings settings;

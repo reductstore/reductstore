@@ -8,7 +8,6 @@
 #include <filesystem>
 
 #include "reduct/core/error.h"
-#include "reduct/error.h"
 #include "reduct/proto/storage/entry.pb.h"
 
 namespace reduct::storage {
