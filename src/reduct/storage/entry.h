@@ -32,19 +32,6 @@ class IEntry {
   using Time = std::chrono::system_clock::time_point;
 
   /**
-   * Result of reading
-   */
-  struct ReadResult {
-    std::string blob;   // blob of data
-    core::Error error;  // error (Error::kOk if no errors)
-    Time time;          // timestamp of blob
-
-    bool operator<=>(const ReadResult& rhs) const = default;
-
-    friend std::ostream& operator<<(std::ostream& os, const ReadResult& result);
-  };
-
-  /**
    * Info about a record in a block
    */
   struct RecordInfo {
@@ -92,9 +79,9 @@ class IEntry {
    * @brief Finds the record for the timestamp and read the blob
    * Current implementation provide only exact matching.
    * @param time timestamp of record to read
-   * @return blob and timestamp of data, or error (404 - if no record found, 500 some internal errors)
+   * @return async reader or error (404 - if no record found, 500 some internal errors)
    */
-  [[nodiscard]] virtual ReadResult Read(const Time& time) const = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const = 0;
 
   /**
    * @brief List records for the time interval [start, stop)

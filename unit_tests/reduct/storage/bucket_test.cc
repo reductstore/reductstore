@@ -109,9 +109,9 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     REQUIRE(entry1->GetInfo().record_count == 1);
     REQUIRE(entry2->GetInfo().record_count == 0);
 
-    REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
-    REQUIRE(entry1->Read(ts + seconds(3)).error == Error::kOk);
-    REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+    REQUIRE(entry1->BeginRead(ts + seconds(1)).error.code == 404);
+    REQUIRE(entry1->BeginRead(ts + seconds(3)).error == Error::kOk);
+    REQUIRE(entry2->BeginRead(ts + seconds(2)).error.code == 404);
 
     SECTION("the same state after restoring") {
       auto info = bucket->GetInfo();
@@ -132,8 +132,8 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
 
-    REQUIRE(entry1->Read(ts + seconds(1)).error == Error::kOk);
-    REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+    REQUIRE(entry1->BeginRead(ts + seconds(1)).error == Error::kOk);
+    REQUIRE(entry2->BeginRead(ts + seconds(2)).error.code == 404);
   }
 }
 

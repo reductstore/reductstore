@@ -54,12 +54,39 @@ static const proto::api::BucketSettings MakeDefaultBucketSettings() {
   return settings;
 }
 
-inline auto WriteOne(storage::IEntry& entry, std::string_view blob, storage::IEntry::Time ts) { // NOLINT
-  auto [res, err] = entry.BeginWrite(ts, blob.size());
+/**
+ * Simple writing a record in one step
+ * @param entry
+ * @param blob
+ * @param ts
+ * @return
+ */
+inline auto WriteOne(storage::IEntry& entry, std::string_view blob, storage::IEntry::Time ts) {  // NOLINT
+  auto [ret, err] = entry.BeginWrite(ts, blob.size());
   if (err) {
     return err;
   }
-  return res->Write(blob);
+  return ret->Write(blob);
+}
+
+/**
+ * Simple reading a record in one step
+ * @param entry
+ * @param ts
+ * @return
+ */
+inline core::Result<std::string> ReadOne(const storage::IEntry& entry, storage::IEntry::Time ts) {
+  auto [ret, err] = entry.BeginRead(ts);
+  if (err) {
+    return {{}, err};
+  }
+
+  auto read_res = ret->Read();
+  if (read_res.error) {
+    return {{}, read_res.error};
+  }
+
+  return {read_res.result.data, core::Error::kOk};
 }
 
 inline async::Task<api::IInfoCallback::Result> OnInfo(storage::IStorage* storage) {

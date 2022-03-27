@@ -8,6 +8,7 @@
 
 #include "common.h"
 #include "reduct/core/logger.h"
+#include "reduct/async/sleep.h"
 
 namespace reduct::api {
 
@@ -21,6 +22,7 @@ using uWS::HttpResponse;
 
 using async::Task;
 using async::VoidTask;
+using async::Sleep;
 using auth::ITokenAuthentication;
 using core::Error;
 using core::Result;
@@ -340,8 +342,28 @@ class ApiServer : public IApiServer {
     }
 
     IReadEntryCallback::Request data{.bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
-    handler.Run(co_await storage_->OnReadEntry(data),
-                [](IReadEntryCallback::Response app_resp) { return app_resp.blob; });
+    auto [reader, err] = co_await storage_->OnReadEntry(data);
+
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
+    res->writeHeader("content-length", std::to_string(reader->size()));
+    for (;;) {
+      auto [chuck, read_err] = reader->Read();
+      if (read_err) {
+        handler.SendError(err);
+        co_return;
+      }
+
+      res->write(chuck.data);
+      if (chuck.last) break;
+
+      co_await Sleep(async::kTick); // to suspend between chunks
+    }
+
+    res->end({});
     co_return;
   }
 

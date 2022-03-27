@@ -145,11 +145,7 @@ class IWriteEntryCallback {
  */
 class IReadEntryCallback {
  public:
-  struct Response {
-    std::string blob;
-    std::string timestamp;
-  };
-
+  using Response = async::IAsyncReader::UPtr;
   struct Request {
     std::string_view bucket_name;
     std::string_view entry_name;

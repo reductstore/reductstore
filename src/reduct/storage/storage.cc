@@ -228,15 +228,7 @@ class Storage : public IStorage {
         ts = entry.lock()->GetInfo().latest_record_time;
       }
 
-      auto read_result = entry.lock()->Read(ts);
-      return Callback::Result{
-          {
-              .blob = read_result.blob,
-              .timestamp = std::to_string(
-                  std::chrono::duration_cast<std::chrono::microseconds>(read_result.time.time_since_epoch()).count()),
-          },
-          read_result.error,
-      };
+      return entry.lock()->BeginRead(ts);
     });
   }
 

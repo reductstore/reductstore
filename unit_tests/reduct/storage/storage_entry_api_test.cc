@@ -27,6 +27,8 @@ using reduct::OnListEntry;
 using reduct::OnReadEntry;
 using reduct::OnWriteEntry;
 
+using reduct::async::IAsyncReader;
+
 namespace fs = std::filesystem;
 
 TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
@@ -49,8 +51,7 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
       OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000"})
           .Get();
   REQUIRE(err == Error::kOk);
-  REQUIRE(resp.blob == "some_data");
-  REQUIRE(resp.timestamp == "1610387457862000");
+  REQUIRE(resp->Read().result == IAsyncReader::DataChunk{.data = "some_data", .last = true});
 
   SECTION("error if bucket is not found during writing") {
     Error error = OnWriteEntry(storage.get(), {.bucket_name = "X", .entry_name = "entry", .timestamp = "1000"}).Get();

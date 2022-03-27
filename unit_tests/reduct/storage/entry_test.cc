@@ -6,9 +6,11 @@
 
 #include "reduct/helpers.h"
 
+using reduct::ReadOne;
 using reduct::WriteOne;
 using reduct::core::Error;
 using reduct::storage::IEntry;
+
 using std::chrono::seconds;
 
 static auto MakeDefaultOptions() {
@@ -21,14 +23,13 @@ static auto MakeDefaultOptions() {
 
 static const auto kTimestamp = IEntry::Time() + seconds(10);
 
-TEST_CASE("storage::Entry should record file to a block", "[entry]") {
+TEST_CASE("storage::Entry should record data to a block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
 
   REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
   SECTION("one record") {
-    auto ret = entry->Read(kTimestamp);
-    REQUIRE(ret == IEntry::ReadResult{"some_data", Error{}, kTimestamp});
+    REQUIRE(ReadOne(*entry, kTimestamp).result == "some_data");
     REQUIRE(entry->GetInfo() == IEntry::Info{
                                     .block_count = 1,
                                     .record_count = 1,
@@ -49,16 +50,13 @@ TEST_CASE("storage::Entry should record file to a block", "[entry]") {
                                              .oldest_record_time = kTimestamp,
                                              .latest_record_time = kTimestamp + seconds(15)});
 
-    auto ret = entry->Read(kTimestamp);
-    REQUIRE(ret.blob == "some_data");
-
-    ret = entry->Read(kTimestamp + seconds(15));
-    REQUIRE(ret.blob == "other_data3");
+    REQUIRE(ReadOne(*entry, kTimestamp).result == "some_data");
+    REQUIRE(ReadOne(*entry, kTimestamp + seconds(15)).result == "other_data3");
   }
 
   SECTION("error 404 if request out of  interval") {
-    auto bad_result = entry->Read(kTimestamp - seconds(10));
-    REQUIRE(bad_result.error == Error{.code = 404, .message = "No records for this timestamp"});
+    REQUIRE(ReadOne(*entry, kTimestamp - seconds(10)) ==
+            Error{.code = 404, .message = "No records for this timestamp"});
   }
 }
 
@@ -70,8 +68,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
   REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
 
   SECTION("one record") {
-    auto ret = entry->Read(kTimestamp);
-    REQUIRE(ret == IEntry::ReadResult{big_data, Error{}, kTimestamp});
+    REQUIRE(ReadOne(*entry, kTimestamp).result == big_data);
     REQUIRE(entry->GetInfo() == IEntry::Info{
                                     .block_count = 1,
                                     .record_count = 1,
@@ -89,8 +86,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
                                              .oldest_record_time = kTimestamp,
                                              .latest_record_time = kTimestamp + seconds(5)});
 
-    auto ret = entry->Read(kTimestamp + seconds(5));
-    REQUIRE(ret.blob == "other_data1");
+    REQUIRE(ReadOne(*entry, kTimestamp + seconds(5)).result == "other_data1");
   }
 }
 
@@ -103,8 +99,7 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
 
   SECTION("a record older than first in entry") {
     REQUIRE(WriteOne(*entry, "belated_data", kTimestamp - seconds(5)) == Error::kOk);
-    REQUIRE(entry->Read(kTimestamp - seconds(5)) ==
-            IEntry::ReadResult{"belated_data", Error::kOk, kTimestamp - seconds(5)});
+    REQUIRE(ReadOne(*entry, kTimestamp - seconds(5)).result == "belated_data");
   }
 
   SECTION("a belated record") {
@@ -113,8 +108,7 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
     REQUIRE(WriteOne(*entry, "latest_data", kTimestamp + seconds(15)) == Error::kOk);
     REQUIRE(WriteOne(*entry, "belated_data", kTimestamp + seconds(10)) == Error::kOk);
 
-    REQUIRE(entry->Read(kTimestamp + seconds(10)) ==
-            IEntry::ReadResult{"belated_data", Error::kOk, kTimestamp + seconds(10)});
+    REQUIRE(ReadOne(*entry, kTimestamp + seconds(10)).result == "belated_data");
   }
 }
 
@@ -136,8 +130,7 @@ TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
 
   SECTION("should work ok after restoring") {
     REQUIRE(WriteOne(*entry, "next_data", kTimestamp + seconds(5)) == Error::kOk);
-    REQUIRE(entry->Read(kTimestamp + seconds(5)) ==
-            IEntry::ReadResult{.blob = "next_data", .error = Error::kOk, .time = kTimestamp + seconds(5)});
+    REQUIRE(ReadOne(*entry, kTimestamp + seconds(5)).result == "next_data");
   }
 }
 
@@ -145,7 +138,7 @@ TEST_CASE("storage::Entry should read from empty entry with 404", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
 
   REQUIRE(entry);
-  REQUIRE(entry->Read(IEntry::Time()).error.code == 404);
+  REQUIRE(ReadOne(*entry, IEntry::Time()).error.code == 404);
 }
 
 TEST_CASE("storage::Entry should remove last block", "[entry]") {
@@ -161,17 +154,17 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
   SECTION("remove one block") {
     REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
     REQUIRE(entry->GetInfo().block_count == 2);
-    REQUIRE(entry->Read(kTimestamp).error.code == 404);
+    REQUIRE(ReadOne(*entry, kTimestamp).error.code == 404);
 
     SECTION("write should be ok") {
       REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
-      REQUIRE(entry->Read(kTimestamp).error == Error::kOk);
+      REQUIRE(ReadOne(*entry, kTimestamp).error == Error::kOk);
     }
 
     SECTION("remove two blocks") {
       REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
       REQUIRE(entry->GetInfo().block_count == 1);
-      REQUIRE(entry->Read(kTimestamp + seconds(1)).error.code == 404);
+      REQUIRE(ReadOne(*entry, kTimestamp + seconds(1)).error.code == 404);
     }
 
     SECTION("recovery") {

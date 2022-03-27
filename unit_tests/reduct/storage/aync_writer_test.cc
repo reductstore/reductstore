@@ -7,6 +7,8 @@
 using reduct::core::Error;
 using reduct::storage::IEntry;
 
+using reduct::ReadOne;
+
 using std::chrono::seconds;
 
 static auto MakeDefaultOptions() {
@@ -34,8 +36,8 @@ TEST_CASE("AsyncWriter should provide async writing in the same block") {
   REQUIRE(writer_1->Write("ccccc") == Error::kOk);
   REQUIRE(writer_2->Write("ddddd") == Error::kOk);
 
-  REQUIRE(entry->Read(kTimestamp).blob == "aaaaaccccc");
-  REQUIRE(entry->Read(kTimestamp + seconds(1)).blob == "bbbbbddddd");
+  REQUIRE(ReadOne(*entry, kTimestamp).result == "aaaaaccccc");
+  REQUIRE(ReadOne(*entry, kTimestamp + seconds(1)).result == "bbbbbddddd");
 }
 
 TEST_CASE("AsyncWriter should check size") {
@@ -54,8 +56,8 @@ TEST_CASE("AsyncWriter should mark finished records") {
   auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
   REQUIRE(writer->Write("123", false) == Error::kOk);
 
-  REQUIRE(entry->Read(kTimestamp).error == Error{.code = 425, .message = "Record is still being written"});
+  REQUIRE(ReadOne(*entry, kTimestamp) == Error{.code = 425, .message = "Record is still being written"});
 
   REQUIRE(writer->Write("456789012") != Error::kOk);
-  REQUIRE(entry->Read(kTimestamp).error == Error{.code = 500, .message = "Record is broken"});
+  REQUIRE(ReadOne(*entry, kTimestamp) == Error{.code = 500, .message = "Record is broken"});
 }

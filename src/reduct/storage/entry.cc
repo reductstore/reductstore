@@ -249,13 +249,13 @@ class Entry : public IEntry {
     };
   }
 
-  [[nodiscard]] ReadResult Read(const Time& time) const override {
+  [[nodiscard]] Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const override {
     const auto proto_ts = FromTimePoint(time);
 
     LOG_DEBUG("Read a record for ts={}", TimeUtil::ToString(proto_ts));
 
     if (block_set_.empty() || proto_ts < *block_set_.begin()) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
+      return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
     proto::Block block;
@@ -264,13 +264,13 @@ class Entry : public IEntry {
     }
 
     if (block.latest_record_time() < proto_ts) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
+      return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
     auto err = FindBlock(proto_ts, &block);
     if (err) {
       LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(proto_ts));
-      return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}, time};
+      return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
     }
 
     int record_index = -1;
@@ -283,7 +283,7 @@ class Entry : public IEntry {
     }
 
     if (record_index == -1) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
+      return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
     auto block_path = BlockPath(full_path_, block);
@@ -291,26 +291,26 @@ class Entry : public IEntry {
 
     auto record = block.records(record_index);
     if (record.state() == proto::Record::kStarted) {
-      return {{}, {.code = 425, .message = "Record is still being written"}, time};
+      return {{}, {.code = 425, .message = "Record is still being written"}};
     }
 
     if (record.state() == proto::Record::kErrored) {
-      return {{}, {.code = 500, .message = "Record is broken"}, time};
+      return {{}, {.code = 500, .message = "Record is broken"}};
     }
 
     std::ifstream block_file(block_path, std::ios::binary);
     if (!block_file) {
-      return {{}, {.code = 500, .message = "Failed to open a block for reading"}, time};
+      return {{}, {.code = 500, .message = "Failed to open a block for reading"}};
     }
 
     auto data_size = record.end() - record.begin();
     std::string data(data_size, '\0');
     block_file.seekg(record.begin());
     if (!block_file.read(data.data(), data_size)) {
-      return {{}, {.code = 500, .message = "Failed to read a block"}, time};
+      return {{}, {.code = 500, .message = "Failed to read a block"}};
     }
 
-    return {std::move(data), {}, time};
+    return {{}, Error::kOk};
   }
 
   [[nodiscard]] ListResult List(const Time& start, const Time& stop) const override {
@@ -459,12 +459,6 @@ std::unique_ptr<IEntry> IEntry::Build(IEntry::Options options) { return std::mak
 /**
  * Streams
  */
-
-std::ostream& operator<<(std::ostream& os, const IEntry::ReadResult& result) {
-  os << fmt::format("<IEntry::ReadResult data={}  error={} time={}>", result.blob, result.error.ToString(),
-                    IEntry::Time::clock::to_time_t(result.time));
-  return os;
-}
 
 std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
   os << fmt::format(

@@ -60,20 +60,14 @@ TEST_CASE("async::RunUntil should run task in executor") {
 }
 
 TEST_CASE("async::RunUntil should run task in loop by default") {
-  auto task1 = RunUntilCoro([]() -> std::optional<int> {
+  auto func = []() -> std::optional<int> {
     static int count = 0;
     if (++count < 20) {
       return {};
     }
     return count;
-  });
-  auto task2 = RunUntilCoro([]() -> std::optional<int> {
-    static int count = 0;
-    if (++count < 20) {
-      return {};
-    }
-    return count;
-  });
-  REQUIRE(task1.Get() == 20);
-  REQUIRE(task2.Get() == 20);
+  };
+
+  auto task = RunUntilCoro(func);
+  REQUIRE(task.Get() == 20);
 }
