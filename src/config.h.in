@@ -7,6 +7,6 @@ namespace reduct {
 
 static constexpr const char* kVersion = "@FULL_VERSION@";
 static constexpr size_t kDefaultMaxBlockSize = @DEFAULT_MAX_BLOCK_SIZE@;
-
+static constexpr size_t kDefaultMaxReadChunk = @DEFAULT_MAX_READ_CHUNK@;
 }
 #endif  // REDUCT_STORAGE_CONFIG_H

@@ -10,9 +10,11 @@
 #include <fstream>
 
 #include "reduct/async/io.h"
+#include "reduct/config.h"
 #include "reduct/core/logger.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/storage/entry.pb.h"
+#include "reduct/storage/async_reader.h"
 #include "reduct/storage/async_writer.h"
 #include "reduct/storage/block_helpers.h"
 
@@ -200,19 +202,10 @@ class Entry : public IEntry {
       return {{}, {.code = 500, .message = "Record is broken"}};
     }
 
-    std::ifstream block_file(block_path, std::ios::binary);
-    if (!block_file) {
-      return {{}, {.code = 500, .message = "Failed to open a block for reading"}};
-    }
-
-    auto data_size = record.end() - record.begin();
-    std::string data(data_size, '\0');
-    block_file.seekg(record.begin());
-    if (!block_file.read(data.data(), data_size)) {
-      return {{}, {.code = 500, .message = "Failed to read a block"}};
-    }
-
-    return {{}, Error::kOk};
+    return {BuildAsyncReader(block, AsyncReaderParameters{.path = BlockPath(full_path_, block),
+                                                          .record_index = record_index,
+                                                          .chunk_size = kDefaultMaxReadChunk}),
+            Error::kOk};
   }
 
   [[nodiscard]] ListResult List(const Time& start, const Time& stop) const override {

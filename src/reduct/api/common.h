@@ -55,6 +55,34 @@ struct AsyncHttpReceiver {
   uWS::HttpResponse<SSL> *res_;
 };
 
+template <bool SSL>
+class WhenWritable {
+ public:
+  explicit WhenWritable(uWS::HttpResponse<SSL> *res) : ready_{}, max_size_{} {
+    res->onWritable([this](auto max) -> bool {
+      ready_ = true;
+      max_size_ = max;
+      return true;
+    });
+  }
+
+  [[nodiscard]] bool await_ready() const noexcept { return false; }
+
+  void await_suspend(std::coroutine_handle<> h) const noexcept {
+    if (ready_) {
+      h.resume();
+    } else {
+      async::ILoop::loop().Defer([this, h] { await_suspend(h); });
+    }
+  }
+
+  [[nodiscard]] size_t await_resume() noexcept { return max_size_; }
+
+ private:
+  bool ready_;
+  size_t max_size_;
+};
+
 template <bool SSL, typename Callback>
 class BasicApiHandler {
  public:
@@ -81,7 +109,7 @@ class BasicApiHandler {
   }
 
   void Run(
-      typename Callback::Result&& result,
+      typename Callback::Result &&result,
       std::function<std::string(typename Callback::Response)> on_success = [](auto) { return ""; }) const noexcept {
     auto [resp, err] = std::move(result);
     if (err) {

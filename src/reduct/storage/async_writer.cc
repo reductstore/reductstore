@@ -31,7 +31,7 @@ class AsyncWriter : public async::IAsyncWriter {
   Error Write(std::string_view chunk, bool last) noexcept override {
     if (!file_) {
       UpdateRecord(proto::Record::kErrored);
-      return {.code = 500, .message = "Bad file"};
+      return {.code = 500, .message = "Bad block"};
     }
 
     writen_size_ += chunk.size();

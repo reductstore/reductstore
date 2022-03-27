@@ -349,7 +349,7 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    res->writeHeader("content-length", std::to_string(reader->size()));
+
     for (;;) {
       auto [chuck, read_err] = reader->Read();
       if (read_err) {
@@ -357,13 +357,16 @@ class ApiServer : public IApiServer {
         co_return;
       }
 
-      res->write(chuck.data);
-      if (chuck.last) break;
+      auto [ok, responded] = res->tryEnd(chuck.data, reader->size());
+      if (!ok) {
+        LOG_ERROR("Failed to send data");
+      }
+
+      if (responded) break;
 
       co_await Sleep(async::kTick); // to suspend between chunks
     }
 
-    res->end({});
     co_return;
   }
 
