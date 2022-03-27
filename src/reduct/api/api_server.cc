@@ -7,6 +7,7 @@
 #include <filesystem>
 
 #include "common.h"
+#include "reduct/async/sleep.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api {
@@ -19,9 +20,12 @@ using proto::api::BucketSettings;
 using uWS::HttpRequest;
 using uWS::HttpResponse;
 
+using async::Sleep;
+using async::Task;
 using async::VoidTask;
 using auth::ITokenAuthentication;
 using core::Error;
+using core::Result;
 
 namespace fs = std::filesystem;
 
@@ -181,7 +185,16 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    auto data = co_await AsyncHttpReceiver<SSL>(res);
+    std::string data;
+    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck, bool _) {
+      data += chuck;
+      return Error::kOk;
+    });
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
     BucketSettings settings;
     if (!data.empty()) {
       auto status = JsonStringToMessage(data, &settings);
@@ -242,7 +255,17 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    auto data = co_await AsyncHttpReceiver<SSL>(res);
+    std::string data;
+    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck, bool _) {
+      data += chuck;
+      return Error::kOk;
+    });
+
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
     BucketSettings settings;
     auto status = JsonStringToMessage(data, &settings);
     if (!status.ok()) {
@@ -284,15 +307,26 @@ class ApiServer : public IApiServer {
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
-
-    auto full_blob = co_await AsyncHttpReceiver<SSL>(res);
-    IWriteEntryCallback::Request data{
+    IWriteEntryCallback::Request app_req{
         .bucket_name = bucket,
         .entry_name = entry,
         .timestamp = ts,
-        .blob = full_blob,
+        .content_length = req->getHeader("content-length"),
     };
-    handler.Run(co_await storage_->OnWriteEntry(data));  // TODO(Alexey Timin): std::move crushes
+
+    auto [async_writer, err] = storage_->OnWriteEntry(app_req);
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
+    err = co_await AsyncHttpReceiver<SSL>(res, [&](auto chunk, bool last) { return async_writer->Write(chunk, last); });
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
+    res->end({});
     co_return;
   }
 
@@ -307,14 +341,31 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    IReadEntryCallback::Request data{
-        .bucket_name = bucket,
-        .entry_name = entry,
-        .timestamp = ts,
-        .latest = ts.empty()
-    };
-    handler.Run(co_await storage_->OnReadEntry(data),
-                [](IReadEntryCallback::Response app_resp) { return app_resp.blob; });
+    IReadEntryCallback::Request data{.bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
+    auto [reader, err] = co_await storage_->OnReadEntry(data);
+
+    if (err) {
+      handler.SendError(err);
+      co_return;
+    }
+
+    for (;;) {
+      auto [chuck, read_err] = reader->Read();
+      if (read_err) {
+        handler.SendError(err);
+        co_return;
+      }
+
+      auto [ok, responded] = res->tryEnd(chuck.data, reader->size());
+      if (!ok) {
+        LOG_ERROR("Failed to send data");
+      }
+
+      if (responded) break;
+
+      co_await Sleep(async::kTick);  // to suspend between chunks
+    }
+
     co_return;
   }
 

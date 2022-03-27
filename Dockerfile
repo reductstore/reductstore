@@ -1,5 +1,8 @@
-FROM gcc:11.2 AS builder
-RUN apt-get update && apt-get install -y cmake python3-pip
+FROM ubuntu:21.10 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y gcc cmake python3-pip
 
 RUN pip3 install conan
 

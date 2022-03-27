@@ -113,7 +113,7 @@ A UNIX timestamp in microseconds
     "records": [
         {
             "ts": "integer",
-            "size": "integer"
+            "content_length": "integer"
         }
     ]
 }

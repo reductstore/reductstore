@@ -2,15 +2,21 @@
 
 #include "reduct/storage/entry.h"
 
+#include <fcntl.h>
 #include <fmt/core.h>
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
 #include <fstream>
 
+#include "reduct/async/io.h"
+#include "reduct/config.h"
 #include "reduct/core/logger.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/storage/entry.pb.h"
+#include "reduct/storage/async_reader.h"
+#include "reduct/storage/async_writer.h"
+#include "reduct/storage/block_helpers.h"
 
 namespace reduct::storage {
 
@@ -38,7 +44,7 @@ class Entry : public IEntry {
           try {
             auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoul(path.stem().c_str()));
             proto::Block block;
-            auto err = LoadBlockByTimestamp(ts, &block);
+            auto err = LoadBlockByTimestamp(full_path_, ts, &block);
             if (err) {
               LOG_ERROR("{}", err.ToString());
               continue;
@@ -54,7 +60,7 @@ class Entry : public IEntry {
     }
   }
 
-  [[nodiscard]] Error Write(std::string_view blob, const Time& time) override {
+  [[nodiscard]] Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
 
     const auto proto_ts = FromTimePoint(time);
@@ -63,8 +69,8 @@ class Entry : public IEntry {
     proto::Block block;
     if (!block_set_.empty()) {
       // Load last block if it is exists
-      if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &block)) {
-        return err;
+      if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
+        return {{}, err};
       }
     }
 
@@ -79,7 +85,7 @@ class Entry : public IEntry {
         type = RecordType::kBelated;
         auto err = FindBlock(proto_ts, &block);
         if (err) {
-          return err;
+          return {{}, err};
         }
       }
     }
@@ -93,43 +99,41 @@ class Entry : public IEntry {
       auto ret = StartNextBlock(proto_ts);
       if (ret.error) {
         LOG_ERROR("Failed create a next block");
-        return ret.error;
+        return {{}, ret.error};
       }
 
       block = std::move(ret.result);
     }
 
-    auto block_path = BlockPath(block);
-    LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), blob.size() / 1024,
+    auto block_path = BlockPath(full_path_, block);
+    LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), size / 1024,
               block_path.string());
-    std::ofstream block_file(block_path, std::ios::app | std::ios::binary);
-    if (!block_file) {
-      return {.code = 500, .message = "Failed open a block_file for writing"};
+
+    if (block.records_size() == 0) {
+      // allocate the whole block
+      int fd = open(block_path.c_str(), O_WRONLY | O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+      if (fd < 0) {
+        return {{}, {.code = 500, .message = "Failed create a new block for writing"}};
+      }
+      if (posix_fallocate(fd, 0, options_.max_block_size) != 0) {
+        return {{}, {.code = 500, .message = fmt::format("Failed allocate a new block: {}", std::strerror(errno))}};
+      }
+
+      close(fd);
     }
 
-    proto::EntryRecord record_entry;
-    record_entry.set_blob(std::string{blob});
-    record_entry.mutable_meta_data()->Clear();
-
-    std::string data;
-    if (!record_entry.SerializeToString(&data)) {
-      return {.code = 500, .message = "Failed write a record_entry to a block_file"};
-    }
-
-    LOG_TRACE("Record {} bytes to {}", data.size(), block_path.string());
-    block_file << data;
-
-    // Update written block
+    // Update writing block
     auto record = block.add_records();
+    record->set_state(proto::Record::kStarted);
     record->mutable_timestamp()->CopyFrom(proto_ts);
     record->set_begin(block.size());
-    record->set_end(block.size() + data.size());
+    record->set_end(block.size() + size);
 
-    block.set_size(block.size() + data.size());
+    block.set_size(block.size() + size);
 
     // Update counters
     record_counter_++;
-    size_counter_ += data.size();
+    size_counter_ += size;
 
     switch (type) {
       case RecordType::kLatest:
@@ -142,31 +146,35 @@ class Entry : public IEntry {
         break;
     }
 
-    return SaveBlock(block);
+    return {
+        BuildAsyncWriter(
+            block, {.path = BlockPath(full_path_, block), .record_index = block.records_size() - 1, .size = size}),
+        SaveBlock(block),
+    };
   }
 
-  [[nodiscard]] ReadResult Read(const Time& time) const override {
+  [[nodiscard]] Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const override {
     const auto proto_ts = FromTimePoint(time);
 
     LOG_DEBUG("Read a record for ts={}", TimeUtil::ToString(proto_ts));
 
     if (block_set_.empty() || proto_ts < *block_set_.begin()) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
+      return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
     proto::Block block;
-    if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &block)) {
+    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
       return {{}, err};
     }
 
     if (block.latest_record_time() < proto_ts) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
+      return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
     auto err = FindBlock(proto_ts, &block);
     if (err) {
       LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(proto_ts));
-      return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}, time};
+      return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
     }
 
     int record_index = -1;
@@ -179,29 +187,25 @@ class Entry : public IEntry {
     }
 
     if (record_index == -1) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}, time};
+      return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
-    auto block_path = BlockPath(block);
+    auto block_path = BlockPath(full_path_, block);
     LOG_DEBUG("Found block {} with needed record", block_path.string());
 
-    std::ifstream block_file(block_path, std::ios::binary);
-    if (!block_file) {
-      return {{}, {.code = 500, .message = "Failed open a block for reading"}, time};
-    }
-
     auto record = block.records(record_index);
-    auto data_size = record.end() - record.begin();
-    std::string data(data_size, '\0');
-    block_file.seekg(record.begin());
-    block_file.read(data.data(), data_size);
-
-    proto::EntryRecord entry_record;
-    if (!entry_record.ParseFromString(data)) {
-      return {{}, {.code = 500, .message = "Failed parse a block"}, time};
+    if (record.state() == proto::Record::kStarted) {
+      return {{}, {.code = 425, .message = "Record is still being written"}};
     }
 
-    return {entry_record.blob(), {}, time};
+    if (record.state() == proto::Record::kErrored) {
+      return {{}, {.code = 500, .message = "Record is broken"}};
+    }
+
+    return {BuildAsyncReader(block, AsyncReaderParameters{.path = BlockPath(full_path_, block),
+                                                          .record_index = record_index,
+                                                          .chunk_size = kDefaultMaxReadChunk}),
+            Error::kOk};
   }
 
   [[nodiscard]] ListResult List(const Time& start, const Time& stop) const override {
@@ -222,7 +226,7 @@ class Entry : public IEntry {
     }
 
     proto::Block block;
-    if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &block)) {
+    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
       return {{}, err};
     }
 
@@ -243,7 +247,7 @@ class Entry : public IEntry {
     std::vector<RecordInfo> records;
     for (auto block_it = start_block; block_it != stop_block; ++block_it) {
       proto::Block block;
-      auto err = LoadBlockByTimestamp(*block_it, &block);
+      auto err = LoadBlockByTimestamp(full_path_, *block_it, &block);
       if (err) {
         return {{}, err};
       }
@@ -270,12 +274,12 @@ class Entry : public IEntry {
     }
 
     proto::Block first_block;
-    if (auto err = LoadBlockByTimestamp(*block_set_.begin(), &first_block)) {
+    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.begin(), &first_block)) {
       return err;
     }
 
-    fs::remove(BlockPath(first_block));
-    fs::remove(BlockPath(first_block, kMetaExt));
+    fs::remove(BlockPath(full_path_, first_block));
+    fs::remove(BlockPath(full_path_, first_block, kMetaExt));
 
     size_counter_ -= first_block.size();
     record_counter_ -= first_block.records_size();
@@ -287,7 +291,7 @@ class Entry : public IEntry {
     Time oldest_record, latest_record;
     if (!block_set_.empty()) {
       proto::Block latest_block;
-      if (auto err = LoadBlockByTimestamp(*block_set_.rbegin(), &latest_block)) {
+      if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &latest_block)) {
         LOG_ERROR("{}", err.ToString());
       }
 
@@ -306,40 +310,15 @@ class Entry : public IEntry {
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
  private:
-  [[nodiscard]] std::filesystem::path BlockPath(const proto::Block& block, std::string_view ext = kBlockExt) const {
-    auto block_path = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(block.begin_time()), ext);
-    return block_path;
-  }
-
-  Error LoadBlockByTimestamp(const Timestamp& proto_ts, proto::Block* block) const {
-    auto file_name = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
-    std::ifstream file(file_name);
-    if (!file) {
-      return {.code = 500, .message = fmt::format("Failed to load a block descriptor: {}", file_name.string())};
-    }
-
-    if (!block->ParseFromIstream(&file)) {
-      return {.code = 500, .message = fmt::format("Failed to parse meta: {}", file_name.string())};
-    }
-    return {};
-  }
-
-  Error SaveBlock(const proto::Block& block) {
-    auto file_name = full_path_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(block.begin_time()), kMetaExt);
-    std::ofstream file(file_name);
-    if (file) {
-      block.SerializeToOstream(&file);
-      block_set_.insert(block.begin_time());
-      return {};
-    } else {
-      return {.code = 500, .message = "Failed to save a block descriptor"};
-    }
+  Error SaveBlock(proto::Block block) {
+    block_set_.insert(block.begin_time());
+    return storage::SaveBlock(full_path_, std::move(block));
   }
 
   Result<proto::Block> StartNextBlock(const Timestamp& ts) {
     proto::Block block;
     block.mutable_begin_time()->CopyFrom(ts);
-    return {block, SaveBlock(block)};
+    return {block, SaveBlock(std::move(block))};
   }
 
   Error FindBlock(Timestamp proto_ts, proto::Block* block) const {
@@ -349,7 +328,8 @@ class Entry : public IEntry {
     } else {
       proto_ts = *std::prev(ts);
     }
-    return LoadBlockByTimestamp(proto_ts, block);
+
+    return LoadBlockByTimestamp(full_path_, proto_ts, block);
   }
 
   static google::protobuf::Timestamp FromTimePoint(const Time& time) {
@@ -360,9 +340,6 @@ class Entry : public IEntry {
   static Time ToTimePoint(const google::protobuf::Timestamp& time) {
     return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
   }
-
-  static constexpr std::string_view kBlockExt = ".blk";
-  static constexpr std::string_view kMetaExt = ".meta";
 
   Options options_;
   fs::path full_path_;
@@ -377,12 +354,6 @@ std::unique_ptr<IEntry> IEntry::Build(IEntry::Options options) { return std::mak
 /**
  * Streams
  */
-
-std::ostream& operator<<(std::ostream& os, const IEntry::ReadResult& result) {
-  os << fmt::format("<IEntry::ReadResult data={}  error={} time={}>", result.blob, result.error.ToString(),
-                    IEntry::Time::clock::to_time_t(result.time));
-  return os;
-}
 
 std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
   os << fmt::format(

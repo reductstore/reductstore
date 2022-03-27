@@ -28,30 +28,59 @@ std::string PrintToJson(T &&msg) {
 
 template <bool SSL>
 struct AsyncHttpReceiver {
-  explicit AsyncHttpReceiver(uWS::HttpResponse<SSL> *res) : data_(), finish_(false), res_(res) {
-    res->onData([this](std::string_view data, bool last) mutable {
+  using Callback = uWS::MoveOnlyFunction<core::Error(std::string_view, bool)>;
+  explicit AsyncHttpReceiver(uWS::HttpResponse<SSL> *res, Callback callback) : finish_{}, error_{}, res_(res) {
+    res->onData([this, callback = std::move(callback)](std::string_view data, bool last) mutable {
       LOG_TRACE("Received chuck {} kB", data.size() / 1024);
-      data_ += data;
+      error_ = callback(data, last);
       finish_ = last;
     });
   }
 
-  bool await_ready() const noexcept { return finish_; }
+  [[nodiscard]] bool await_ready() const noexcept { return false; }
 
   void await_suspend(std::coroutine_handle<> h) const noexcept {
-    if (finish_) {
+    if (finish_ || error_) {
       h.resume();
     } else {
       async::ILoop::loop().Defer([this, h] { await_suspend(h); });
     }
   }
 
-  [[nodiscard]] std::string await_resume() noexcept { return std::move(data_); }
+  [[nodiscard]] core::Error await_resume() noexcept { return error_; }
 
  private:
-  std::string data_;
   bool finish_;
+  core::Error error_;
   uWS::HttpResponse<SSL> *res_;
+};
+
+template <bool SSL>
+class WhenWritable {
+ public:
+  explicit WhenWritable(uWS::HttpResponse<SSL> *res) : ready_{}, max_size_{} {
+    res->onWritable([this](auto max) -> bool {
+      ready_ = true;
+      max_size_ = max;
+      return true;
+    });
+  }
+
+  [[nodiscard]] bool await_ready() const noexcept { return false; }
+
+  void await_suspend(std::coroutine_handle<> h) const noexcept {
+    if (ready_) {
+      h.resume();
+    } else {
+      async::ILoop::loop().Defer([this, h] { await_suspend(h); });
+    }
+  }
+
+  [[nodiscard]] size_t await_resume() noexcept { return max_size_; }
+
+ private:
+  bool ready_;
+  size_t max_size_;
 };
 
 template <bool SSL, typename Callback>
@@ -80,7 +109,7 @@ class BasicApiHandler {
   }
 
   void Run(
-      typename Callback::Result&& result,
+      typename Callback::Result &&result,
       std::function<std::string(typename Callback::Response)> on_success = [](auto) { return ""; }) const noexcept {
     auto [resp, err] = std::move(result);
     if (err) {
