@@ -1,5 +1,9 @@
 ## Release 0.4.0 (in progress)
 
+**Features**:
+
+* Asynchronous write/read operations with data blocks, [PR-62](https://github.com/reduct-storage/reduct-storage/pull/62)
+
 **Bugs**:
 
 * Fix searching start block in Entry List request, [PR-61](https://github.com/reduct-storage/reduct-storage/pull/61)
