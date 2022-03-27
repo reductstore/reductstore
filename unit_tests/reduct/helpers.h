@@ -76,12 +76,12 @@ inline auto WriteOne(storage::IEntry& entry, std::string_view blob, storage::IEn
  * @return
  */
 inline core::Result<std::string> ReadOne(const storage::IEntry& entry, storage::IEntry::Time ts) {
-  auto [ret, err] = entry.BeginRead(ts);
+  auto [reader, err] = entry.BeginRead(ts);
   if (err) {
     return {{}, err};
   }
 
-  auto read_res = ret->Read();
+  auto read_res = reader->Read();
   if (read_res.error) {
     return {{}, read_res.error};
   }

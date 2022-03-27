@@ -13,6 +13,7 @@
 #include "reduct/core/logger.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/storage/entry.pb.h"
+#include "reduct/storage/block_helpers.h"
 
 namespace reduct::storage {
 
@@ -24,38 +25,6 @@ using google::protobuf::util::TimeUtil;
 auto to_time_t = IEntry::Time::clock::to_time_t;
 
 namespace fs = std::filesystem;
-
-static constexpr std::string_view kBlockExt = ".blk";
-static constexpr std::string_view kMetaExt = ".meta";
-
-std::filesystem::path BlockPath(const fs::path& parent, const proto::Block& block, std::string_view ext = kBlockExt) {
-  auto block_path = parent / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(block.begin_time()), ext);
-  return block_path;
-}
-
-Error LoadBlockByTimestamp(fs::path folder, const Timestamp& proto_ts, proto::Block* block) {
-  auto file_name = folder / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
-  std::ifstream file(file_name);
-  if (!file) {
-    return {.code = 499, .message = fmt::format("Failed to load a block descriptor: {}", file_name.string())};
-  }
-
-  if (!block->ParseFromIstream(&file)) {
-    return {.code = 499, .message = fmt::format("Failed to parse meta: {}", file_name.string())};
-  }
-  return Error::kOk;
-}
-
-Error SaveBlock(const fs::path& parent, const proto::Block& block) {
-  auto file_name = BlockPath(parent, block, kMetaExt);
-  std::ofstream file(file_name);
-  if (file) {
-    block.SerializeToOstream(&file);
-    return {};
-  } else {
-    return {.code = 500, .message = "Failed to save a block descriptor"};
-  }
-}
 
 /**
  * @class Asynchronous writer

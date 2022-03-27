@@ -40,7 +40,8 @@ set(SRC_FILES
 
         reduct/storage/bucket.cc
         reduct/storage/entry.cc
-        reduct/storage/storage.cc)
+        reduct/storage/storage.cc
+        reduct/storage/block_helpers.cc)
 
 
 add_library(reduct STATIC ${SRC_FILES} ${PROTOBUF_FILES})
