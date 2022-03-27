@@ -38,6 +38,7 @@ set(SRC_FILES
         reduct/core/logger.cc
         reduct/core/error.cc
 
+        reduct/storage/async_writer.cc
         reduct/storage/bucket.cc
         reduct/storage/entry.cc
         reduct/storage/storage.cc
