@@ -14,7 +14,7 @@ def test_create_bucket_ok(base_url, headers, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['settings'] == {"max_block_size": str(1024 * 1024), "quota_type": "NONE", "quota_size": '0'}
+    assert data['settings'] == {"max_block_size": str(64 * 1024 * 1024), "quota_type": "NONE", "quota_size": '0'}
     assert data['info']['name'] == bucket_name
     assert len(data['entries']) == 0
 
