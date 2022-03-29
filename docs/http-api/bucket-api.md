@@ -41,7 +41,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn't exist" %}
 ```javascript
 {
     "detail": "string"
@@ -67,7 +67,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn't exist" %}
 ```javascript
 {
     // Response
@@ -86,7 +86,7 @@ Name of new bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal content_length of a data block in bytes (default: 1Mb)
+Maximal content_length of a data block in bytes (default: 64Mb)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
