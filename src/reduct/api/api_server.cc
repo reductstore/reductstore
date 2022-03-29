@@ -327,6 +327,7 @@ class ApiServer : public IApiServer {
     }
 
     res->end({});
+    async_writer.reset(); // the pointer stuck looks like a bug
     co_return;
   }
 
@@ -392,6 +393,7 @@ class ApiServer : public IApiServer {
     }
 
     LOG_DEBUG("Sent {} {}/{} kB", ts, sent / 1024, reader->size() / 1024);
+    reader.reset();
     co_return;
   }
 

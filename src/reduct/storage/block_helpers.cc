@@ -24,11 +24,13 @@ Error LoadBlockByTimestamp(fs::path folder, const Timestamp& proto_ts, proto::Bl
   auto file_name = folder / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
   std::ifstream file(file_name);
   if (!file) {
-    return {.code = 499, .message = fmt::format("Failed to load a block descriptor: {}", file_name.string())};
+    return {.code = 500,
+            .message = fmt::format("Failed to load a block descriptor {}: {}", file_name.string(),
+            std::strerror(errno))};
   }
 
   if (!block->ParseFromIstream(&file)) {
-    return {.code = 499, .message = fmt::format("Failed to parse meta: {}", file_name.string())};
+    return {.code = 500, .message = fmt::format("Failed to parse meta: {}", file_name.string())};
   }
   return Error::kOk;
 }
