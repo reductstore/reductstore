@@ -7,6 +7,7 @@
 **Bugs**:
 
 * Fix searching start block in Entry List request, [PR-61](https://github.com/reduct-storage/reduct-storage/pull/61)
+* Fix aborting GET requests, [PR-64](https://github.com/reduct-storage/reduct-storage/pull/64)
 
 **Other**:
 
