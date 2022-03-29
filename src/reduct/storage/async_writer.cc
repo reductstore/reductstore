@@ -28,6 +28,8 @@ class AsyncWriter : public async::IAsyncWriter {
     file_.seekp(block.records(parameters_.record_index).begin());
   }
 
+  ~AsyncWriter() override = default;
+
   Error Write(std::string_view chunk, bool last) noexcept override {
     if (!file_) {
       UpdateRecord(proto::Record::kErrored);

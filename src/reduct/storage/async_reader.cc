@@ -4,6 +4,8 @@
 
 #include <fstream>
 
+#include "reduct/core/logger.h"
+
 namespace reduct::storage {
 
 using core::Error;
@@ -18,6 +20,8 @@ class AsyncReader : public async::IAsyncReader {
     file_.seekg(record.begin());
     size_ = record.end() - record.begin();
   }
+
+  ~AsyncReader() override = default;
 
   core::Result<DataChunk> Read() noexcept override {
     DataChunk chunk;

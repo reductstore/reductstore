@@ -17,6 +17,7 @@ class IAsyncWriter {
  public:
   using UPtr = std::unique_ptr<IAsyncWriter>;
 
+  virtual ~IAsyncWriter() = default;
   virtual core::Error Write(std::string_view chunk, bool last = true) noexcept = 0;
 };
 
@@ -25,6 +26,8 @@ class IAsyncWriter {
  */
 class IAsyncReader {
  public:
+  virtual ~IAsyncReader() = default;
+
   using UPtr = std::unique_ptr<IAsyncReader>;
   struct DataChunk {
     std::string data;
