@@ -327,7 +327,7 @@ class ApiServer : public IApiServer {
     }
 
     res->end({});
-    async_writer.reset(); // the pointer stuck looks like a bug
+    async_writer.reset();  // the pointer stuck looks like a bug
     co_return;
   }
 
