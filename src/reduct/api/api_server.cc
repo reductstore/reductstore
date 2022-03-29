@@ -349,22 +349,31 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    for (;;) {
+    bool complete = false;
+    while (!complete) {
       auto [chuck, read_err] = reader->Read();
       if (read_err) {
         handler.SendError(err);
         co_return;
       }
 
-      auto [ok, responded] = res->tryEnd(chuck.data, reader->size());
-      if (!ok) {
-        LOG_ERROR("Failed to send data");
+      int repeat = 10;
+      while (--repeat) {
+        auto [ok, responded] = res->tryEnd(chuck.data, reader->size());
+        co_await Sleep(async::kTick);  // to suspend between attempts
+        if (ok) {
+          complete = responded;
+          break;
+        }
       }
 
-      if (responded) break;
-
-      co_await Sleep(async::kTick);  // to suspend between chunks
+      if (repeat == 0) {
+        LOG_ERROR("Failed to send data. Abort.");
+        res->end({}, true);
+        break;
+      }
     }
+
 
     co_return;
   }
