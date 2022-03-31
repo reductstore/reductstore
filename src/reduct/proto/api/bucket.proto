@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package reduct.proto.api;
+import "reduct/proto/api/entry.proto";
 
 // Stats of bucket
 message BucketInfo {
@@ -15,7 +16,7 @@ message BucketInfo {
 message FullBucketInfo {
   BucketInfo info = 1;          // stats about the bucket
   BucketSettings settings = 2;  // settings of the bucket
-  repeated string entries = 3;  // list of entries names
+  repeated EntryInfo entries = 3;  // list of entries names
 }
 
 // List of buckets
