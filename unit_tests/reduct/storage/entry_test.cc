@@ -24,7 +24,7 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time{} + std::chrono::microseconds(10'100'200); // to check um precision
+static const auto kTimestamp = IEntry::Time() + std::chrono::microseconds(10'100'200);  // to check um precision
 
 auto ToMicroseconds(IEntry::Time tp) {
   return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();

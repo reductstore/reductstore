@@ -225,7 +225,7 @@ class Storage : public IStorage {
         }
         ts = parsed_ts;
       } else {
-        ts = IEntry::Time{} + std::chrono::microseconds(entry.lock()->GetInfo().latest_record());
+        ts = IEntry::Time() + std::chrono::microseconds(entry.lock()->GetInfo().latest_record());
       }
 
       return entry.lock()->BeginRead(ts);
