@@ -7,8 +7,9 @@ message EntryInfo {
   string name = 1;          // name of bucket
   uint64 size = 2;          // size of bucket in bytes
   uint64 record_count = 3;  // number of records
-  uint64 oldest_record = 5; // unix timestamp of oldest record in seconds
-  uint64 latest_record = 6; // unix timestamp of latest record in seconds
+  uint64 block_count = 4;   // number of blocks
+  uint64 oldest_record = 5; // unix timestamp of oldest record in microseconds
+  uint64 latest_record = 6; // unix timestamp of latest record in microseconds
 }
 
 // Record

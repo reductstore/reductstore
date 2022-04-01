@@ -125,8 +125,8 @@ class Storage : public IStorage {
       proto::api::FullBucketInfo info;
       info.mutable_info()->CopyFrom(bucket.GetInfo());
       info.mutable_settings()->CopyFrom(bucket.GetSettings());
-      for (auto& entry : bucket.GetEntryList()) {
-        info.add_entries(entry);
+      for (auto&& entry : bucket.GetEntryList()) {
+        *info.add_entries() = std::move(entry);
       }
       return Callback::Result{std::move(info), Error::kOk};
     });
@@ -225,7 +225,7 @@ class Storage : public IStorage {
         }
         ts = parsed_ts;
       } else {
-        ts = entry.lock()->GetInfo().latest_record_time;
+        ts = IEntry::Time{} + std::chrono::microseconds(entry.lock()->GetInfo().latest_record());
       }
 
       return entry.lock()->BeginRead(ts);

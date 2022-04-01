@@ -66,11 +66,11 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   REQUIRE(resp.info().name() == "bucket");
   REQUIRE(resp.info().size() == 8);
   REQUIRE(resp.info().entry_count() == 1);
-  REQUIRE(resp.info().oldest_record() == 100);
-  REQUIRE(resp.info().latest_record() == 100);
+  REQUIRE(resp.info().oldest_record() == 100'000'000);
+  REQUIRE(resp.info().latest_record() == 100'000'000);
 
   REQUIRE(resp.entries_size() == 1);
-  REQUIRE(resp.entries(0) == "entry_1");
+  REQUIRE(resp.entries(0).name() == "entry_1");
 
   SECTION("error if not exist") {
     err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();
