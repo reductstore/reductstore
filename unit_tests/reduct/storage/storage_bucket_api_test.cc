@@ -54,7 +54,7 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
 
   auto [writer, w_err] =
       OnWriteEntry(storage.get(),
-                   {.bucket_name = "bucket", .entry_name = "entry_1", .timestamp = "100000000", .content_length = "8"})
+                   {.bucket_name = "bucket", .entry_name = "entry_1", .timestamp = "100000123", .content_length = "8"})
           .Get();
   REQUIRE(w_err == Error::kOk);
   REQUIRE(writer->Write("someblob") == Error::kOk);
@@ -66,11 +66,16 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   REQUIRE(resp.info().name() == "bucket");
   REQUIRE(resp.info().size() == 8);
   REQUIRE(resp.info().entry_count() == 1);
-  REQUIRE(resp.info().oldest_record() == 100);
-  REQUIRE(resp.info().latest_record() == 100);
+  REQUIRE(resp.info().oldest_record() == 100'000'123);
+  REQUIRE(resp.info().latest_record() == 100'000'123);
 
   REQUIRE(resp.entries_size() == 1);
-  REQUIRE(resp.entries(0) == "entry_1");
+  REQUIRE(resp.entries(0).name() == "entry_1");
+  REQUIRE(resp.entries(0).size() == 8);
+  REQUIRE(resp.entries(0).block_count() == 1);
+  REQUIRE(resp.entries(0).record_count() == 1);
+  REQUIRE(resp.entries(0).latest_record() == 100'000'123);
+  REQUIRE(resp.entries(0).oldest_record() == 100'000'123);
 
   SECTION("error if not exist") {
     err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();

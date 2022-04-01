@@ -1,21 +1,22 @@
 syntax = "proto3";
 
 package reduct.proto.api;
+import "reduct/proto/api/entry.proto";
 
 // Stats of bucket
 message BucketInfo {
   string name = 1;          // name of bucket
   uint64 size = 2;          // size of bucket in bytes
   uint64 entry_count = 3;   // number of entries
-  uint64 oldest_record = 5; // unix timestamp of oldest record in seconds
-  uint64 latest_record = 6; // unix timestamp of latest record in seconds
+  uint64 oldest_record = 5; // unix timestamp of oldest record in microseconds
+  uint64 latest_record = 6; // unix timestamp of latest record in microseconds
 }
 
 // Full information about bucket
 message FullBucketInfo {
   BucketInfo info = 1;          // stats about the bucket
   BucketSettings settings = 2;  // settings of the bucket
-  repeated string entries = 3;  // list of entries names
+  repeated EntryInfo entries = 3;  // list of entries names
 }
 
 // List of buckets

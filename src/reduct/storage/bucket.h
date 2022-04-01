@@ -68,7 +68,7 @@ class IBucket {
    * Return list of entry names
    * @return
    */
-  virtual std::vector<std::string> GetEntryList() const = 0;
+  virtual std::vector<proto::api::EntryInfo> GetEntryList() const = 0;
   /**
    * @brief Builds a new bucket
    * @param options

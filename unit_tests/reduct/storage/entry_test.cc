@@ -3,6 +3,7 @@
 #include "reduct/storage/entry.h"
 
 #include <catch2/catch.hpp>
+#include <google/protobuf/util/time_util.h>
 
 #include "reduct/helpers.h"
 
@@ -10,6 +11,8 @@ using reduct::ReadOne;
 using reduct::WriteOne;
 using reduct::core::Error;
 using reduct::storage::IEntry;
+
+using google::protobuf::util::TimeUtil;
 
 using std::chrono::seconds;
 
@@ -21,22 +24,27 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time() + seconds(10);
+static const auto kTimestamp = IEntry::Time() + std::chrono::microseconds(10'100'200);  // to check um precision
+
+auto ToMicroseconds(IEntry::Time tp) {
+  return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
+}
 
 TEST_CASE("storage::Entry should record data to a block", "[entry]") {
   auto entry = IEntry::Build(MakeDefaultOptions());
   REQUIRE(entry);
 
   REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
+
   SECTION("one record") {
     REQUIRE(ReadOne(*entry, kTimestamp).result == "some_data");
-    REQUIRE(entry->GetInfo() == IEntry::Info{
-                                    .block_count = 1,
-                                    .record_count = 1,
-                                    .bytes = 9,
-                                    .oldest_record_time = kTimestamp,
-                                    .latest_record_time = kTimestamp,
-                                });
+    const auto info = entry->GetInfo();
+    REQUIRE(info.name() == "entry_1");
+    REQUIRE(info.size() == 9);
+    REQUIRE(info.record_count() == 1);
+    REQUIRE(info.block_count() == 1);
+    REQUIRE(info.latest_record() == ToMicroseconds(kTimestamp));
+    REQUIRE(info.oldest_record() == ToMicroseconds(kTimestamp));
   }
 
   SECTION("few records") {
@@ -44,11 +52,13 @@ TEST_CASE("storage::Entry should record data to a block", "[entry]") {
     REQUIRE(WriteOne(*entry, "other_data2", kTimestamp + seconds(10)) == Error::kOk);
     REQUIRE(WriteOne(*entry, "other_data3", kTimestamp + seconds(15)) == Error::kOk);
 
-    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 1,
-                                             .record_count = 4,
-                                             .bytes = 42,
-                                             .oldest_record_time = kTimestamp,
-                                             .latest_record_time = kTimestamp + seconds(15)});
+    const auto info = entry->GetInfo();
+    REQUIRE(info.name() == "entry_1");
+    REQUIRE(info.size() == 42);
+    REQUIRE(info.record_count() == 4);
+    REQUIRE(info.block_count() == 1);
+    REQUIRE(info.oldest_record() == ToMicroseconds(kTimestamp));
+    REQUIRE(info.latest_record() == ToMicroseconds(kTimestamp + seconds(15)));
 
     REQUIRE(ReadOne(*entry, kTimestamp).result == "some_data");
     REQUIRE(ReadOne(*entry, kTimestamp + seconds(15)).result == "other_data3");
@@ -69,22 +79,25 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
 
   SECTION("one record") {
     REQUIRE(ReadOne(*entry, kTimestamp).result == big_data);
-    REQUIRE(entry->GetInfo() == IEntry::Info{
-                                    .block_count = 1,
-                                    .record_count = 1,
-                                    .bytes = 101,
-                                    .oldest_record_time = kTimestamp,
-                                    .latest_record_time = kTimestamp,
-                                });
+
+    const auto info = entry->GetInfo();
+    REQUIRE(info.name() == "entry_1");
+    REQUIRE(info.size() == 101);
+    REQUIRE(info.record_count() == 1);
+    REQUIRE(info.block_count() == 1);
+    REQUIRE(info.latest_record() == ToMicroseconds(kTimestamp));
+    REQUIRE(info.oldest_record() == ToMicroseconds(kTimestamp));
   }
 
   SECTION("two records in different blocks") {
     REQUIRE(WriteOne(*entry, "other_data1", kTimestamp + seconds(5)) == Error::kOk);
-    REQUIRE(entry->GetInfo() == IEntry::Info{.block_count = 2,
-                                             .record_count = 2,
-                                             .bytes = 112,
-                                             .oldest_record_time = kTimestamp,
-                                             .latest_record_time = kTimestamp + seconds(5)});
+
+    const auto info = entry->GetInfo();
+    REQUIRE(info.size() == 112);
+    REQUIRE(info.record_count() == 2);
+    REQUIRE(info.block_count() == 2);
+    REQUIRE(info.oldest_record() == ToMicroseconds(kTimestamp));
+    REQUIRE(info.latest_record() == ToMicroseconds(kTimestamp + seconds(5)));
 
     REQUIRE(ReadOne(*entry, kTimestamp + seconds(5)).result == "other_data1");
   }
@@ -103,7 +116,7 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
   }
 
   SECTION("a belated record") {
-    REQUIRE(entry->GetInfo().block_count == 1);
+    REQUIRE(entry->GetInfo().block_count() == 1);
     REQUIRE(WriteOne(*entry, "latest_data", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(WriteOne(*entry, "latest_data", kTimestamp + seconds(15)) == Error::kOk);
     REQUIRE(WriteOne(*entry, "belated_data", kTimestamp + seconds(10)) == Error::kOk);
@@ -120,13 +133,12 @@ TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
   entry = IEntry::Build(options);
   REQUIRE(entry->GetOptions() == options);
 
-  REQUIRE(entry->GetInfo() == IEntry::Info{
-                                  .block_count = 1,
-                                  .record_count = 1,
-                                  .bytes = 9,
-                                  .oldest_record_time = kTimestamp,
-                                  .latest_record_time = kTimestamp,
-                              });
+  const auto info = entry->GetInfo();
+  REQUIRE(info.size() == 9);
+  REQUIRE(info.record_count() == 1);
+  REQUIRE(info.block_count() == 1);
+  REQUIRE(info.latest_record() == ToMicroseconds(kTimestamp));
+  REQUIRE(info.oldest_record() == ToMicroseconds(kTimestamp));
 
   SECTION("should work ok after restoring") {
     REQUIRE(WriteOne(*entry, "next_data", kTimestamp + seconds(5)) == Error::kOk);
@@ -149,11 +161,11 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
   REQUIRE(WriteOne(*entry, blob, kTimestamp) == Error::kOk);
   REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(1)) == Error::kOk);
   REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(2)) == Error::kOk);
-  REQUIRE(entry->GetInfo().block_count == 3);
+  REQUIRE(entry->GetInfo().block_count() == 3);
 
   SECTION("remove one block") {
     REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
-    REQUIRE(entry->GetInfo().block_count == 2);
+    REQUIRE(entry->GetInfo().block_count() == 2);
     REQUIRE(ReadOne(*entry, kTimestamp).error.code == 404);
 
     SECTION("write should be ok") {
@@ -163,7 +175,7 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
 
     SECTION("remove two blocks") {
       REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
-      REQUIRE(entry->GetInfo().block_count == 1);
+      REQUIRE(entry->GetInfo().block_count() == 1);
       REQUIRE(ReadOne(*entry, kTimestamp + seconds(1)).error.code == 404);
     }
 

@@ -43,7 +43,8 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   auto restored_bucket = IBucket::Restore(dir_path / "bucket");
   REQUIRE(restored_bucket->GetInfo() == bucket->GetInfo());
   REQUIRE(restored_bucket->GetSettings() == bucket->GetSettings());
-  REQUIRE(restored_bucket->GetEntryList() == bucket->GetEntryList());
+  REQUIRE(restored_bucket->GetEntryList().size() == bucket->GetEntryList().size());
+  REQUIRE(restored_bucket->GetEntryList()[0] == bucket->GetEntryList()[0]);
 
   SECTION("empty folder") {
     fs::create_directory(dir_path / "empty_folder");
@@ -63,12 +64,12 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
   SECTION("get an existing entry") {
     auto ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
-    REQUIRE(ref.entry.lock()->GetInfo().record_count == 0);
+    REQUIRE(ref.entry.lock()->GetInfo().record_count() == 0);
     REQUIRE(ref.entry.lock()->BeginWrite(IEntry::Time::clock::now(), 9).result->Write("some_blob") == Error::kOk);
 
     ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
-    REQUIRE(ref.entry.lock()->GetInfo().record_count == 1);
+    REQUIRE(ref.entry.lock()->GetInfo().record_count() == 1);
   }
 }
 
@@ -106,8 +107,8 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     REQUIRE(entry1->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
-    REQUIRE(entry1->GetInfo().record_count == 1);
-    REQUIRE(entry2->GetInfo().record_count == 0);
+    REQUIRE(entry1->GetInfo().record_count() == 1);
+    REQUIRE(entry2->GetInfo().record_count() == 0);
 
     REQUIRE(entry1->BeginRead(ts + seconds(1)).error.code == 404);
     REQUIRE(entry1->BeginRead(ts + seconds(3)).error == Error::kOk);

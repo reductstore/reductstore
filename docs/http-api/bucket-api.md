@@ -6,9 +6,9 @@ description: Bucket API provides HTTP methods to create, modify or delete a buck
 
 Before starting recording, a user has to create a bucket with the following settings:
 
-* Maximal block content_length
+* Maximal block size
 * Quota type
-* Quota content_length
+* Quota size
 
 For more information, you can read more about buckets in [How does it work?](../how-does-it-work.md)
 
@@ -24,7 +24,7 @@ Name of bucket
 {% swagger-response status="200: OK" description="Information about the bucket in JSON format" %}
 ```javascript
 {
-    "settings": {
+  "settings": {
         "max_block_size": "integer",            // max block content_length in bytes
         "quota_type": Union["NONE", "FIFO"],    // quota type
         "quota_size": "integer"                 // quota content_length in bytes
@@ -32,16 +32,26 @@ Name of bucket
     "info": {
         "name": "string",         // name of the bucket
         "entry_count": "integer", // number of entries in the bucket
-        "content_length": "integer",        // content_length of stored data in the bucket in bytes
-        "oldest_record": "integer", // unix timestamp of oldest record in seconds
-        "latest_record": "integer"  // unix timestamp of latest record in seconds
+        "size": "integer",        // size of stored data in the bucket in bytes
+        "oldest_record": "integer", // unix timestamp of oldest record in microseconds
+        "latest_record": "integer"  // unix timestamp of latest record in microseconds
     },
-    "entries": List[String]        // list of entry names
+    "entries": [        // list of entry stats
+        {
+            "name": "string",    // name of the entry
+            "size": "integer",          // size of stored data in bytes
+            "block_count": "integer",   // number of blocks with data
+            "record_count": "integer",  // number of recods in the entry
+            "oldest_record": "integer", // unix timestamp of oldest record in microseconds
+            "latest_record": "integer"  // unix timestamp of latest record in microseconds
+
+        }
+    ]
 }
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn't exist" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn" %}
 ```javascript
 {
     "detail": "string"
@@ -67,7 +77,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn't exist" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn" %}
 ```javascript
 {
     // Response

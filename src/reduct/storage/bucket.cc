@@ -1,6 +1,8 @@
 // Copyright 2021-2022 Alexey Timin
 #include "reduct/storage/bucket.h"
 
+#include <google/protobuf/util/time_util.h>
+
 #include <fstream>
 #include <numeric>
 #include <ranges>
@@ -15,6 +17,9 @@ namespace fs = std::filesystem;
 using core::Error;
 using proto::api::BucketInfo;
 using proto::api::BucketSettings;
+using proto::api::EntryInfo;
+
+using google::protobuf::util::TimeUtil;
 
 class Bucket : public IBucket {
  public:
@@ -118,9 +123,9 @@ class Bucket : public IBucket {
           std::shared_ptr<IEntry> current_entry = nullptr;
           for (const auto& [_, entry] : entry_map_) {
             auto entry_info = entry->GetInfo();
-            if (entry_info.block_count > 0 ||  // first no empty
-                (current_entry && entry_info.block_count > 0 &&
-                 entry_info.oldest_record_time < current_entry->GetInfo().oldest_record_time)) {
+            if (entry_info.block_count() > 0 ||  // first no empty
+                (current_entry && entry_info.block_count() > 0 &&
+                 entry_info.oldest_record() < current_entry->GetInfo().oldest_record())) {
               current_entry = entry;
             }
           }
@@ -147,9 +152,13 @@ class Bucket : public IBucket {
     return SaveDescriptor();
   }
 
-  std::vector<std::string> GetEntryList() const override {
-    auto keys = std::views::keys(entry_map_);
-    return {keys.begin(), keys.end()};
+  std::vector<EntryInfo> GetEntryList() const override {
+    std::vector<EntryInfo> entries;
+    for (auto&& entry_info : std::views::values(entry_map_)) {
+      entries.push_back(entry_info->GetInfo());
+    }
+
+    return entries;
   }
 
   [[nodiscard]] BucketInfo GetInfo() const override {
@@ -157,24 +166,24 @@ class Bucket : public IBucket {
 
     size_t record_count = 0;
     size_t size = 0;
-    IEntry::Time oldest_ts = Clk::now();
-    IEntry::Time latest_ts{};
+    uint64_t oldest_ts = TimeUtil::TimestampToMicroseconds(TimeUtil::GetCurrentTime());
+    uint64_t latest_ts{};
 
     for (const auto& [_, entry] : entry_map_) {
       auto info = entry->GetInfo();
-      record_count += info.record_count;
-      size += info.bytes;
+      record_count += info.record_count();
+      size += info.size();
 
-      oldest_ts = std::min(oldest_ts, info.oldest_record_time);
-      latest_ts = std::max(latest_ts, info.latest_record_time);
+      oldest_ts = std::min(oldest_ts, info.oldest_record());
+      latest_ts = std::max(latest_ts, info.latest_record());
     }
 
     BucketInfo info;
     info.set_name(name_);
     info.set_size(size);
     info.set_entry_count(entry_map_.size());
-    info.set_oldest_record(Clk::to_time_t(oldest_ts));
-    info.set_latest_record(Clk::to_time_t(latest_ts));
+    info.set_oldest_record(oldest_ts);
+    info.set_latest_record(latest_ts);
     return info;
   }
 

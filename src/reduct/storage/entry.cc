@@ -22,9 +22,10 @@ namespace reduct::storage {
 
 using core::Error;
 using core::Result;
+using proto::api::EntryInfo;
+
 using google::protobuf::Timestamp;
 using google::protobuf::util::TimeUtil;
-
 auto to_time_t = IEntry::Time::clock::to_time_t;
 
 namespace fs = std::filesystem;
@@ -287,24 +288,27 @@ class Entry : public IEntry {
     return {};
   }
 
-  [[nodiscard]] Info GetInfo() const override {
-    Time oldest_record, latest_record;
+  [[nodiscard]] EntryInfo GetInfo() const override {
+    Timestamp oldest_record, latest_record;
     if (!block_set_.empty()) {
       proto::Block latest_block;
       if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &latest_block)) {
         LOG_ERROR("{}", err.ToString());
       }
 
-      oldest_record = ToTimePoint(*block_set_.begin());
-      latest_record = ToTimePoint(latest_block.latest_record_time());
+      oldest_record = *block_set_.begin();
+      latest_record = latest_block.latest_record_time();
     }
-    return {
-        .block_count = block_set_.size(),
-        .record_count = record_counter_,
-        .bytes = size_counter_,
-        .oldest_record_time = oldest_record,
-        .latest_record_time = latest_record,
-    };
+
+    EntryInfo info;
+    info.set_name(options_.name);
+    info.set_size(size_counter_);
+    info.set_record_count(record_counter_);
+    info.set_block_count(block_set_.size());
+    info.set_oldest_record(TimeUtil::TimestampToMicroseconds(oldest_record));
+    info.set_latest_record(TimeUtil::TimestampToMicroseconds(latest_record));
+
+    return info;
   }
 
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
@@ -355,16 +359,8 @@ std::unique_ptr<IEntry> IEntry::Build(IEntry::Options options) { return std::mak
  * Streams
  */
 
-std::ostream& operator<<(std::ostream& os, const IEntry::Info& info) {
-  os << fmt::format(
-      "<IEntry::Info block_count={}  record_count={} bytes={} oldest_record_time={} latest_record_time={}>",
-      info.block_count, info.record_count, info.bytes, to_time_t(info.oldest_record_time),
-      to_time_t(info.latest_record_time));
-  return os;
-}
-
 std::ostream& operator<<(std::ostream& os, const IEntry::RecordInfo& info) {
-  os << fmt::format("<IEntry::RecordInfo time={}, size={}>", to_time_t(info.time), info.size);
+  os << fmt::format("<IEntry::RecordInfo time={}, size={}>", info.time.time_since_epoch().count() / 1000, info.size);
   return os;
 }
 };  // namespace reduct::storage

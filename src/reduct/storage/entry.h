@@ -10,6 +10,7 @@
 #include "reduct/async/io.h"
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
+#include "reduct/proto/api/entry.pb.h"
 
 namespace reduct::storage {
 
@@ -52,21 +53,6 @@ class IEntry {
   };
 
   /**
-   * Statistic information about the entry
-   */
-  struct Info {
-    size_t block_count;       // stored blocks
-    size_t record_count;      // stored records
-    size_t bytes;             // stored data quota_size with overhead
-    Time oldest_record_time;  // time of the oldest record
-    Time latest_record_time;  // time of the latest record
-
-    bool operator<=>(const Info& rhs) const = default;
-
-    friend std::ostream& operator<<(std::ostream& os, const Info& info);
-  };
-
-  /**
    * @brief Write a data with timestamp to corresponding block
    * The method provides the best performance if a new timestamp is always new the stored ones.
    * Then the engine doesn't need to find a proper block and just records data into the current one.
@@ -100,7 +86,7 @@ class IEntry {
    * @brief Provides statistical information about the entry
    * @return
    */
-  [[nodiscard]] virtual Info GetInfo() const = 0;
+  [[nodiscard]] virtual proto::api::EntryInfo GetInfo() const = 0;
 
   /**
    * @brief Provides current options of the entry
