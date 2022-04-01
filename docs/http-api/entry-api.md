@@ -6,7 +6,7 @@ description: Entry API provides methods to write, read and browse the data
 
 {% swagger method="post" path=" " baseUrl="/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
 {% swagger-description %}
-The storage creates an entry at the first write operation. The record should be placed to the body of the request.
+The storage creates an entry at the first write operation. The record should be placed to the body of the request. The body can be empty.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -19,6 +19,10 @@ Name of entry
 
 {% swagger-parameter in="query" name="ts" type="Integer" required="true" %}
 A UNIX timestamp in microseconds
+{% endswagger-parameter %}
+
+{% swagger-parameter in="header" required="true" name="content-length" %}
+Content-length is required to start asynchronous write operation
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="The record is written" %}
@@ -69,7 +73,7 @@ A UNIX timestamp in microseconds. If it is empty, returns the latest record.
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket or record with the timestamp doesn't exist" %}
+{% swagger-response status="404: Not Found" description="The bucket or record with the timestamp doesn" %}
 ```javascript
 {
    "detail": "string"
@@ -113,7 +117,7 @@ A UNIX timestamp in microseconds
     "records": [
         {
             "ts": "integer",
-            "size": "integer"
+            "content_length": "integer"
         }
     ]
 }

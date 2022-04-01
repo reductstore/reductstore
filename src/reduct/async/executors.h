@@ -16,7 +16,7 @@ namespace reduct::async {
  */
 template <typename T>
 struct LoopExecutor {
-  std::future<T> Commit(std::function<T()>&& task) {
+  std::future<T> Commit(std::function<T()> task) {
     std::packaged_task<T()> wrapper([t = std::move(task)] { return t(); });
     std::future<T> future = wrapper.get_future();
     ILoop::loop().Defer([wrapper = std::move(wrapper)]() mutable { wrapper(); });

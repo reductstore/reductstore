@@ -1,9 +1,25 @@
+## Release 0.4.0 (in progress)
+
+**Features**:
+
+* Asynchronous write/read operations with data blocks, [PR-62](https://github.com/reduct-storage/reduct-storage/pull/62)
+
+**Bugs**:
+
+* Fix searching start block in Entry List request, [PR-61](https://github.com/reduct-storage/reduct-storage/pull/61)
+* Fix aborting GET requests, [PR-64](https://github.com/reduct-storage/reduct-storage/pull/64)
+
+**Other**:
+
+* Refactor block structure in entry, [PR-58](https://github.com/reduct-storage/reduct-storage/pull/58)
+
 ## Release 0.3.0 (2022-03-14)
 
 **Features**:
 
 * Add secure HTTP, [PR-49](https://github.com/reduct-storage/reduct-storage/pull/49)
-* Extend GET /b/:bucket method with stats and list entries, [PR-51](https://github.com/reduct-storage/reduct-storage/pull/51)
+* Extend GET /b/:bucket method with stats and list
+  entries, [PR-51](https://github.com/reduct-storage/reduct-storage/pull/51)
 * Add access to the latest record, [PR-53](https://github.com/reduct-storage/reduct-storage/pull/53)
 
 **Bugs**:
@@ -34,7 +50,8 @@
 **Bugs**:
 
 * Fix docker build on ARM32, [PR-29](https://github.com/reduct-storage/reduct-storage/pull/29)
-* Fix IBucket::List error 500 for timestamps between blocks, [PR-31](https://github.com/reduct-storage/reduct-storage/pull/31)
+* Fix IBucket::List error 500 for timestamps between
+  blocks, [PR-31](https://github.com/reduct-storage/reduct-storage/pull/31)
 
 **Documentation**:
 

@@ -7,7 +7,10 @@
 #include <ostream>
 #include <vector>
 
+#include "reduct/async/io.h"
 #include "reduct/core/error.h"
+#include "reduct/core/result.h"
+#include "reduct/proto/api/entry.pb.h"
 
 namespace reduct::storage {
 
@@ -24,31 +27,10 @@ class IEntry {
     std::filesystem::path path;  // path to entry (path to bucket)
     size_t max_block_size;       // max block quota_size after that we create a new one
 
-    bool operator==(const Options& rhs) const {
-      return std::tie(name, path, max_block_size) == std::tie(rhs.name, rhs.path, rhs.max_block_size);
-    }
-
-    bool operator!=(const Options& rhs) const { return !(rhs == *this); }
+    bool operator<=>(const Options& rhs) const = default;
   };
 
   using Time = std::chrono::system_clock::time_point;
-
-  /**
-   * Result of reading
-   */
-  struct ReadResult {
-    std::string blob;   // blob of data
-    core::Error error;  // error (Error::kOk if no errors)
-    Time time;          // timestamp of blob
-
-    bool operator==(const ReadResult& rhs) const {
-      return std::tie(blob, error, time) == std::tie(rhs.blob, rhs.error, rhs.time);
-    }
-
-    bool operator!=(const ReadResult& rhs) const { return !(rhs == *this); }
-
-    friend std::ostream& operator<<(std::ostream& os, const ReadResult& result);
-  };
 
   /**
    * Info about a record in a block
@@ -57,8 +39,7 @@ class IEntry {
     Time time;    // time when it was created
     size_t size;  // size in bytes
 
-    bool operator==(const RecordInfo& rhs) const { return std::tie(time, size) == std::tie(rhs.time, rhs.size); }
-    bool operator!=(const RecordInfo& rhs) const { return !(rhs == *this); }
+    bool operator<=>(const RecordInfo& rhs) const = default;
 
     friend std::ostream& operator<<(std::ostream& os, const RecordInfo& info);
   };
@@ -72,42 +53,21 @@ class IEntry {
   };
 
   /**
-   * Statistic information about the entry
-   */
-  struct Info {
-    size_t block_count;       // stored blocks
-    size_t record_count;      // stored records
-    size_t bytes;             // stored data quota_size with overhead
-    Time oldest_record_time;  // time of the oldest record
-    Time latest_record_time;  // time of the latest record
-
-    bool operator==(const Info& rhs) const {
-      return std::tie(block_count, record_count, bytes, oldest_record_time, latest_record_time) ==
-             std::tie(rhs.block_count, rhs.record_count, rhs.bytes, oldest_record_time, latest_record_time);
-    }
-
-    bool operator!=(const Info& rhs) const { return !(rhs == *this); }
-
-    friend std::ostream& operator<<(std::ostream& os, const Info& info);
-  };
-
-  /**
    * @brief Write a data with timestamp to corresponding block
    * The method provides the best performance if a new timestamp is always new the stored ones.
    * Then the engine doesn't need to find a proper block and just records data into the current one.
-   * @param blob data to store
    * @param time timestamp of the data
-   * @return error 500 if failed to write data
+   * @return async writer or error
    */
-  [[nodiscard]] virtual core::Error Write(std::string_view blob, const Time& time) = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) = 0;
 
   /**
    * @brief Finds the record for the timestamp and read the blob
    * Current implementation provide only exact matching.
    * @param time timestamp of record to read
-   * @return blob and timestamp of data, or error (404 - if no record found, 500 some internal errors)
+   * @return async reader or error (404 - if no record found, 500 some internal errors)
    */
-  [[nodiscard]] virtual ReadResult Read(const Time& time) const = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const = 0;
 
   /**
    * @brief List records for the time interval [start, stop)
@@ -126,7 +86,7 @@ class IEntry {
    * @brief Provides statistical information about the entry
    * @return
    */
-  [[nodiscard]] virtual Info GetInfo() const = 0;
+  [[nodiscard]] virtual proto::api::EntryInfo GetInfo() const = 0;
 
   /**
    * @brief Provides current options of the entry

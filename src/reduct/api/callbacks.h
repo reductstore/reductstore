@@ -6,6 +6,7 @@
 #include <string>
 
 #include "reduct/async/run.h"
+#include "reduct/async/io.h"
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/api/auth.pb.h"
@@ -118,21 +119,25 @@ class IUpdateBucketCallback {
 //---------------------
 // Entry API
 //---------------------
+
+
 /**
  * Write a new record to the entry
  */
 class IWriteEntryCallback {
  public:
-  struct Response {};
+  using Response = async::IAsyncWriter::UPtr;
   struct Request {
     std::string_view bucket_name;
     std::string_view entry_name;
     std::string_view timestamp;
-    std::string_view blob;
+    std::string_view content_length;
   };
 
   using Result = core::Result<Response>;
-  virtual async::Run<Result> OnWriteEntry(const Request& req) = 0;
+
+  // NOTICE: Can't be an executor because we can't postpone receiving tasks in the loop
+  virtual Result OnWriteEntry(const Request& req) noexcept = 0;
 };
 
 /**
@@ -140,11 +145,7 @@ class IWriteEntryCallback {
  */
 class IReadEntryCallback {
  public:
-  struct Response {
-    std::string blob;
-    std::string timestamp;
-  };
-
+  using Response = async::IAsyncReader::UPtr;
   struct Request {
     std::string_view bucket_name;
     std::string_view entry_name;

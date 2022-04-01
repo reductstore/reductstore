@@ -24,19 +24,29 @@ Name of bucket
 {% swagger-response status="200: OK" description="Information about the bucket in JSON format" %}
 ```javascript
 {
-    "settings": {
-        "max_block_size": "integer",            // max block size in bytes
+  "settings": {
+        "max_block_size": "integer",            // max block content_length in bytes
         "quota_type": Union["NONE", "FIFO"],    // quota type
-        "quota_size": "integer"                 // quota size in bytes
+        "quota_size": "integer"                 // quota content_length in bytes
     }
     "info": {
         "name": "string",         // name of the bucket
         "entry_count": "integer", // number of entries in the bucket
         "size": "integer",        // size of stored data in the bucket in bytes
-        "oldest_record": "integer", // unix timestamp of oldest record in seconds
-        "latest_record": "integer"  // unix timestamp of latest record in seconds
+        "oldest_record": "integer", // unix timestamp of oldest record in microseconds
+        "latest_record": "integer"  // unix timestamp of latest record in microseconds
     },
-    "entries": List[String]        // list of entry names
+    "entries": [        // list of entry stats
+        {
+            "name": "string",    // name of the entry
+            "size": "integer",          // size of stored data in bytes
+            "block_count": "integer",   // number of blocks with data
+            "record_count": "integer",  // number of recods in the entry
+            "oldest_record": "integer", // unix timestamp of oldest record in microseconds
+            "latest_record": "integer"  // unix timestamp of latest record in microseconds
+
+        }
+    ]
 }
 ```
 {% endswagger-response %}
@@ -86,7 +96,7 @@ Name of new bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal size of a data block in bytes (default: 1Mb)
+Maximal content_length of a data block in bytes (default: 64Mb)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
@@ -132,7 +142,7 @@ Name of bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal size of a data block in bytes
+Maximal content_length of a data block in bytes
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}

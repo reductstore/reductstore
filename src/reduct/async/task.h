@@ -61,7 +61,7 @@ struct Task {
    */
   T Get() const {
     if (!coro_.done()) coro_.resume();
-    return coro_.promise().value_;
+    return std::move(coro_.promise().value_);
   }
 
  private:

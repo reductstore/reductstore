@@ -10,6 +10,7 @@
 #include <random>
 
 #include "reduct/proto/api/bucket.pb.h"
+#include "reduct/storage/entry.h"
 #include "reduct/storage/storage.h"
 
 inline bool operator==(const google::protobuf::MessageLite& msg_a, const google::protobuf::MessageLite& msg_b) {
@@ -42,7 +43,7 @@ inline std::filesystem::path BuildTmpDirectory() {
 
 namespace reduct {
 
-static const proto::api::BucketSettings MakeDefaultBucketSettings() {
+static proto::api::BucketSettings MakeDefaultBucketSettings() {
   using proto::api::BucketSettings;
 
   BucketSettings settings;
@@ -51,6 +52,41 @@ static const proto::api::BucketSettings MakeDefaultBucketSettings() {
   settings.set_quota_size(10);
 
   return settings;
+}
+
+/**
+ * Simple writing a record in one step
+ * @param entry
+ * @param blob
+ * @param ts
+ * @return
+ */
+inline auto WriteOne(storage::IEntry& entry, std::string_view blob, storage::IEntry::Time ts) {  // NOLINT
+  auto [ret, err] = entry.BeginWrite(ts, blob.size());
+  if (err) {
+    return err;
+  }
+  return ret->Write(blob);
+}
+
+/**
+ * Simple reading a record in one step
+ * @param entry
+ * @param ts
+ * @return
+ */
+inline core::Result<std::string> ReadOne(const storage::IEntry& entry, storage::IEntry::Time ts) {
+  auto [reader, err] = entry.BeginRead(ts);
+  if (err) {
+    return {{}, err};
+  }
+
+  auto read_res = reader->Read();
+  if (read_res.error) {
+    return {{}, read_res.error};
+  }
+
+  return {read_res.result.data, core::Error::kOk};
 }
 
 inline async::Task<api::IInfoCallback::Result> OnInfo(storage::IStorage* storage) {
@@ -89,7 +125,7 @@ inline async::Task<api::IRemoveBucketCallback::Result> OnRemoveBucket(storage::I
 
 inline async::Task<api::IWriteEntryCallback::Result> OnWriteEntry(storage::IStorage* storage,
                                                                   api::IWriteEntryCallback::Request req) {
-  auto result = co_await storage->OnWriteEntry(std::move(req));
+  auto result = storage->OnWriteEntry(std::move(req));
   co_return result;
 }
 

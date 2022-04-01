@@ -43,7 +43,8 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   auto restored_bucket = IBucket::Restore(dir_path / "bucket");
   REQUIRE(restored_bucket->GetInfo() == bucket->GetInfo());
   REQUIRE(restored_bucket->GetSettings() == bucket->GetSettings());
-  REQUIRE(restored_bucket->GetEntryList() == bucket->GetEntryList());
+  REQUIRE(restored_bucket->GetEntryList().size() == bucket->GetEntryList().size());
+  REQUIRE(restored_bucket->GetEntryList()[0] == bucket->GetEntryList()[0]);
 
   SECTION("empty folder") {
     fs::create_directory(dir_path / "empty_folder");
@@ -63,12 +64,12 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
   SECTION("get an existing entry") {
     auto ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
-    REQUIRE(ref.entry.lock()->GetInfo().record_count == 0);
-    REQUIRE(ref.entry.lock()->Write("some_blob", IEntry::Time::clock::now()) == Error::kOk);
+    REQUIRE(ref.entry.lock()->GetInfo().record_count() == 0);
+    REQUIRE(ref.entry.lock()->BeginWrite(IEntry::Time::clock::now(), 9).result->Write("some_blob") == Error::kOk);
 
     ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
-    REQUIRE(ref.entry.lock()->GetInfo().record_count == 1);
+    REQUIRE(ref.entry.lock()->GetInfo().record_count() == 1);
   }
 }
 
@@ -100,16 +101,18 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   const auto ts = IEntry::Time();
   std::string blob(700, 'x');
 
-  SECTION("3 big blobs 3*700 should be shrunk to 1") {
-    REQUIRE(entry1->Write(blob, ts + seconds(1)) == Error::kOk);
-    REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
-    REQUIRE(entry1->Write(blob, ts + seconds(3)) == Error::kOk);
+  SECTION("3 big blobs 3*700 should be shrunk to 2") {
+    REQUIRE(entry1->BeginWrite(ts + seconds(1), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry1->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
+    REQUIRE(entry1->GetInfo().record_count() == 1);
+    REQUIRE(entry2->GetInfo().record_count() == 0);
 
-    REQUIRE(entry1->Read(ts + seconds(1)).error.code == 404);
-    REQUIRE(entry1->Read(ts + seconds(3)).error == Error::kOk);
-    REQUIRE(entry2->Read(ts + seconds(2)).error == Error::kOk);
+    REQUIRE(entry1->BeginRead(ts + seconds(1)).error.code == 404);
+    REQUIRE(entry1->BeginRead(ts + seconds(3)).error == Error::kOk);
+    REQUIRE(entry2->BeginRead(ts + seconds(2)).error.code == 404);
 
     SECTION("the same state after restoring") {
       auto info = bucket->GetInfo();
@@ -121,14 +124,17 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   }
 
   SECTION("should keep current block") {
-    REQUIRE(entry1->Write("little_fist_chunk", ts + seconds(1)) == Error::kOk);
-    REQUIRE(entry2->Write(blob, ts + seconds(2)) == Error::kOk);
-    REQUIRE(entry2->Write(blob, ts + seconds(3)) == Error::kOk);
+    // TODO(Alexey Timin): Clean code
+    std::string little_chunk("little_chunk");
+    REQUIRE(entry1->BeginWrite(ts + seconds(1), little_chunk.size()).result->Write(little_chunk) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(4), little_chunk.size()).result->Write(little_chunk) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
 
-    REQUIRE(entry1->Read(ts + seconds(1)).error == Error::kOk);
-    REQUIRE(entry2->Read(ts + seconds(2)).error.code == 404);
+    REQUIRE(entry1->BeginRead(ts + seconds(1)).error == Error::kOk);
+    REQUIRE(entry2->BeginRead(ts + seconds(2)).error.code == 404);
   }
 }
 

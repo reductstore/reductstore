@@ -14,7 +14,7 @@ def test_create_bucket_ok(base_url, headers, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['settings'] == {"max_block_size": str(1024 * 1024), "quota_type": "NONE", "quota_size": '0'}
+    assert data['settings'] == {"max_block_size": str(64 * 1024 * 1024), "quota_type": "NONE", "quota_size": '0'}
     assert data['info']['name'] == bucket_name
     assert len(data['entries']) == 0
 
@@ -71,8 +71,20 @@ def test_get_bucket_stats(base_url, headers, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['entries'] == ['entry_1', 'entry_2']
-    assert data['info'] == dict(name=bucket_name, entry_count='2', size='23', latest_record='2', oldest_record='1')
+    assert data['entries'] == [{'block_count': '1',
+                                'latest_record': '1000000',
+                                'name': 'entry_1',
+                                'oldest_record': '1000000',
+                                'record_count': '1',
+                                'size': '8'},
+                               {'block_count': '1',
+                                'latest_record': '2000000',
+                                'name': 'entry_2',
+                                'oldest_record': '2000000',
+                                'record_count': '1',
+                                'size': '11'}]
+    assert data['info'] == dict(name=bucket_name, entry_count='2', size='19', latest_record='2000000',
+                                oldest_record='1000000')
 
 
 def test_update_bucket_ok(base_url, headers, bucket_name):
