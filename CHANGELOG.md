@@ -1,3 +1,9 @@
+## Release 0.4.1 (2022-04-04)
+
+**Bugs**:
+
+* Fix timestamp for oldest record, [PR-68](https://github.com/reduct-storage/reduct-storage/pull/68)
+
 ## Release 0.4.0 (2022-04-01)
 
 **Features**:
