@@ -6,7 +6,7 @@
 A time series storage to keep history of blob data.
 
 Reduct Storage aims to solve the problem of storing data in a case where you need to write some data intensively and read it accidentally by some time interval. 
-The storage uses HTTP API and stores the data as blobs. Read more [here](https://docs.reduct-storage.dev/http-api).
+The storage uses HTTP API and stores the data as blobs. Read more [here](https://docs.reduct-storage.dev/).
 
 ## Features:
 
@@ -24,30 +24,8 @@ The easiest way to start is to use Docker image:
 docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-storage:main
 ```
 
-## API Example
+## Try one of SDKs;
 
-Get information about the server:
-
-```shell
-curl http://127.0.0.1:8383/info #-> {"bucket_count":183,"version":"0.1.0"}
-```
-
-Create a bucket with FIFO quota:
-
-```shell
- curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" -X POST -a http://127.0.0.1:8383/b/my_data
-```
-
-Write some data with timestamp 100000:
-
-```shell
-curl -d "some_data" -X POST -a http://127.0.0.1:8383/b/my_data/entry_1?ts=10000
-```
-
-Read data by timestamp:
-
-```shell
-curl  http://127.0.0.1:8383/b/my_data/entry_1?ts=10000 #-> "some_data"
-```
-
-See [HTTP API](https://docs.reduct-storage.dev/http-api)
+* [Python Client SDK](https://github.com/reduct-storage/reduct-py)
+* [C++ Client SDK](https://github.com/reduct-storage/reduct-cpp)
+* or use [HTTP API](https://docs.reduct-storage.dev/http-api)
