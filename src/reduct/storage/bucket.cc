@@ -162,12 +162,10 @@ class Bucket : public IBucket {
   }
 
   [[nodiscard]] BucketInfo GetInfo() const override {
-    using Clk = IEntry::Time::clock;
-
     size_t record_count = 0;
     size_t size = 0;
-    uint64_t oldest_ts = TimeUtil::TimestampToMicroseconds(TimeUtil::GetCurrentTime());
-    uint64_t latest_ts{};
+    uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
+    uint64_t latest_ts = 0;
 
     for (const auto& [_, entry] : entry_map_) {
       auto info = entry->GetInfo();
