@@ -47,11 +47,10 @@ class Storage : public IStorage {
 
     return Run<Callback::Result>([this] {
       using proto::api::ServerInfo;
-      using Clk = IEntry::Time::clock;
 
       size_t usage = 0;
-      uint64_t oldest_ts = Clk::to_time_t(IEntry::Time::clock::now());
-      uint64_t latest_ts{};
+      uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
+      uint64_t latest_ts = 0;
 
       for (const auto& [_, bucket] : buckets_) {
         auto info = bucket->GetInfo();
@@ -80,7 +79,6 @@ class Storage : public IStorage {
     return Run<Callback::Result>([this] {
       using proto::api::BucketInfoList;
       using proto::api::BucketInfo;
-      using Clk = IEntry::Time::clock;
 
       BucketInfoList list;
       for (const auto& [name, bucket] : buckets_) {

@@ -9,7 +9,11 @@ def test_get_info(base_url, headers):
 
     assert resp.status_code == 200
     data = json.loads(resp.content)
+<<<<<<< HEAD
     assert data['version'] == '0.5.0'
+=======
+    assert data['version'] == '0.4.1'
+>>>>>>> 448653c... [#67] Fix timestamp for oldest_record (#68)
     assert int(data['bucket_count']) > 0
     assert int(data['uptime']) >= 0
     assert int(data['latest_record']) >= 0
