@@ -24,8 +24,7 @@ The easiest way to start is to use Docker image:
 docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-storage:main
 ```
 
-## Try one of SDKs;
+##  Client SDKs
 
 * [Python Client SDK](https://github.com/reduct-storage/reduct-py)
 * [C++ Client SDK](https://github.com/reduct-storage/reduct-cpp)
-* or use [HTTP API](https://docs.reduct-storage.dev/http-api)
