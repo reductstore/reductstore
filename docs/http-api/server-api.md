@@ -35,7 +35,7 @@ You can use this method to browse the buckets of the storage.
       {
         "name": "string",         // name of the bucket
         "entry_count": "integer", // number of entries in the bucket
-        "content_length": "integer",        // content_length of stored data in the bucket in bytes
+        "size": "integer",        // size of stored data in the bucket in bytes
         "oldest_record": "integer", // unix timestamp of oldest record in microseconds
         "latest_record": "integer"  // unix timestamp of latest record in microseconds
 
