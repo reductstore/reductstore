@@ -27,4 +27,5 @@ docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-stora
 ##  Client SDKs
 
 * [Python Client SDK](https://github.com/reduct-storage/reduct-py)
+* [JavaScript Client SDK](https://github.com/reduct-storage/reduct-js)
 * [C++ Client SDK](https://github.com/reduct-storage/reduct-cpp)
