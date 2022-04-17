@@ -1,3 +1,9 @@
+## Release 0.5.0 (in progress)
+
+**Bugs**:
+
+* Fix CORS functionality, [PR-72](https://github.com/reduct-storage/reduct-storage/pull/72)
+
 ## Release 0.4.1 (2022-04-04)
 
 **Bugs**:

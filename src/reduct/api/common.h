@@ -92,6 +92,13 @@ class BasicApiHandler {
         url_(req->getUrl()),
         method_(req->getMethod()) {
     std::transform(method_.begin(), method_.end(), method_.begin(), [](auto &ch) { return std::toupper(ch); });
+
+    // Allow CORS
+    auto origin = req->getHeader("origin");
+    if (!origin.empty()) {
+      res->writeHeader("access-control-allow-origin", origin);
+    }
+
     http_resp_->onAborted([*this] { LOG_ERROR("{} {}: aborted", method_, url_); });
   }
 
