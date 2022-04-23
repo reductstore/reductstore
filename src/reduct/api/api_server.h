@@ -3,12 +3,13 @@
 #ifndef REDUCT_STORAGE_API_SERVER_H
 #define REDUCT_STORAGE_API_SERVER_H
 
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
-#include <filesystem>
 
 #include "reduct/api/callbacks.h"
+#include "reduct/asset/asset_manager.h"
 #include "reduct/auth/token_auth.h"
 #include "reduct/core/error.h"
 
@@ -38,6 +39,7 @@ class IApiServer {
   struct Components {
     std::unique_ptr<IApiHandler> storage;
     std::unique_ptr<auth::ITokenAuthentication> auth;
+    std::unique_ptr<asset::IAssetManager> console;
   };
 
   struct Options {
