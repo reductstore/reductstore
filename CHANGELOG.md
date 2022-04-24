@@ -1,5 +1,9 @@
 ## Release 0.5.0 (in progress)
 
+**Features**:
+
+* Integrate Web Console, [PR-77](https://github.com/reduct-storage/reduct-storage/pull/77)
+
 **Bugs**:
 
 * Fix CORS functionality, [PR-72](https://github.com/reduct-storage/reduct-storage/pull/72)

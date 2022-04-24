@@ -177,5 +177,6 @@ class IListEntryCallback {
   [[nodiscard]] virtual async::Run<Result> OnListEntry(const Request& req) const = 0;
 };
 
+
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

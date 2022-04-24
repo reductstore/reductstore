@@ -20,6 +20,7 @@ using proto::api::BucketSettings;
 using uWS::HttpRequest;
 using uWS::HttpResponse;
 
+using asset::IAssetManager;
 using async::Sleep;
 using async::Task;
 using async::VoidTask;
@@ -31,8 +32,11 @@ namespace fs = std::filesystem;
 
 class ApiServer : public IApiServer {
  public:
-  explicit ApiServer(Components components, Options options)
-      : storage_(std::move(components.storage)), auth_(std::move(components.auth)), options_(std::move(options)) {}
+  ApiServer(Components components, Options options)
+      : storage_(std::move(components.storage)),
+        auth_(std::move(components.auth)),
+        console_(std::move(components.console)),
+        options_(std::move(options)) {}
 
   [[nodiscard]] int Run(const bool &running) const override {
     if (options_.cert_path.empty()) {
@@ -102,6 +106,23 @@ class ApiServer : public IApiServer {
              [this](auto *res, auto *req) {
                ListEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
                          std::string(req->getQuery("start")), std::string(req->getQuery("stop")));
+             })
+        .get(base_path,
+             [base_path](auto *res, auto *req) {
+               res->writeStatus("301");
+               res->writeHeader("location", base_path + "ui/");
+               res->end({});
+             })
+        .get(base_path + "ui/*",
+             [this](auto *res, auto *req) {
+               std::string path(req->getUrl());
+               path = path.substr(4, path.size());
+
+               if (path.empty()) {
+                 path = "index.html";
+               }
+
+               UiRequest(res, req, path);
              })
         .any("/*",
              [](auto *res, auto *req) {
@@ -418,9 +439,25 @@ class ApiServer : public IApiServer {
     co_return;
   }
 
+  template <bool SSL = false>
+  async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string path) const {
+    struct Callback {
+      struct Request {};
+      using Response = std::string;
+      using Result = core::Result<Response>;
+    };
+
+    auto handler = BasicApiHandler<SSL, Callback>(res, req);
+    auto ret = console_->Read(path);
+    handler.Run(std::move(ret), [](typename Callback::Response resp) { return resp; });
+
+    co_return;
+  }
+
   Options options_;
   std::unique_ptr<IApiHandler> storage_;
   std::unique_ptr<ITokenAuthentication> auth_;
+  std::unique_ptr<IAssetManager> console_;
 };
 
 std::unique_ptr<IApiServer> IApiServer::Build(Components components, Options options) {
