@@ -1,6 +1,4 @@
-//
-// Created by atimin on 22.04.22.
-//
+// Copyright 2022 Reduct Storage Team
 
 #include "reduct/asset/asset_manager.h"
 

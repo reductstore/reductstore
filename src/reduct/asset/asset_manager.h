@@ -1,6 +1,4 @@
-//
-// Created by atimin on 22.04.22.
-//
+// Copyright 2022 Reduct Storage Team
 
 #ifndef REDUCT_STORAGE_ASSET_MANAGER_H
 #define REDUCT_STORAGE_ASSET_MANAGER_H
