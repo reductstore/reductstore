@@ -3,6 +3,8 @@ enable_testing()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 set(SRC_FILES
+        reduct/asset/asset_manager_test.cc
+
         reduct/async/run_test.cc
         reduct/async/sleep_test.cc
         reduct/async/task_test.cc
