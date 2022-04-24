@@ -9,7 +9,7 @@ RUN pip3 install conan
 WORKDIR /src
 
 COPY conanfile.txt .
-#RUN conan install . --build=missing  TODO: cmake rebuiild the dependcies anyway
+RUN conan install . --build=missing
 
 COPY src src
 COPY unit_tests unit_tests

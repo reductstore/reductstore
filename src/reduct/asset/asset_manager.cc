@@ -23,12 +23,12 @@ class AssetManager : public IAssetManager {
   Result<std::string> Read(std::string_view relative_path) const override {
     auto full_path = asset_path_ / relative_path;
     if (!fs::exists(full_path)) {
-      return {{}, {.code = 404, .message = fmt::format("File {} not found", relative_path)}};
+      return {{}, {.code = 404, .message = fmt::format("File '{}' not found", relative_path)}};
     }
 
     std::ifstream file(full_path);
     if (!file) {
-      return {{}, {.code = 500, .message = fmt::format("Failed to open {}", relative_path)}};
+      return {{}, {.code = 500, .message = fmt::format("Failed to open '{}'", relative_path)}};
     }
 
     std::stringstream ss;

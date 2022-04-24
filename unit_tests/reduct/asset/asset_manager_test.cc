@@ -32,4 +32,5 @@ TEST_CASE("asset::IAssetManager should extract files form zip") {
 
   REQUIRE(zip_asset);
   REQUIRE(zip_asset->Read("helloworld.txt").result == "Hello,World!");
+  REQUIRE(zip_asset->Read("noexist").error == Error{.code = 404, .message = "File 'noexist' not found"});
 }
