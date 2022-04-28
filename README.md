@@ -23,6 +23,27 @@ The easiest way to start is to use Docker image:
 docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-storage:main
 ```
 
+or you can use the demo storage: https://play.reduct-storage.dev
+
+## Usage Example
+
+Reudct Storage porvides a simple HTTP API, so you can use it with `curl`:
+
+```
+# Create a bucket
+curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
+  -X POST \
+  -a https://play.reduct-storage.dev/b/my_data
+
+# Write some data
+curl -d "some_data" \
+  -X POST \
+  -a https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
+
+# Read the data by timestamp
+curl https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
+```
+
 ##  Client SDKs
 
 * [Python Client SDK](https://github.com/reduct-storage/reduct-py)
