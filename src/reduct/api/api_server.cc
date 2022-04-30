@@ -372,6 +372,7 @@ class ApiServer : public IApiServer {
       }
 
       while (!aborted) {
+        ready_to_continue = false;
         auto [ok, responded] = res->tryEnd(chuck.data, reader->size());
         co_await Sleep(async::kTick);
         if (ok) {
@@ -381,7 +382,6 @@ class ApiServer : public IApiServer {
         } else {
           // Have to wait until onWritable sets flag
           LOG_DEBUG("Failed to send data. Abort. {} {}/{} kB", ts, sent / 1024, reader->size() / 1024);
-          ready_to_continue = false;
           while (!ready_to_continue && !aborted) {
             co_await Sleep(async::kTick);
           }
