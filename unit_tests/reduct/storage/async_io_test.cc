@@ -78,3 +78,20 @@ TEST_CASE("AsyncReader should read a big file in two chunks") {
   REQUIRE(reader->Read().result == IAsyncReader::DataChunk{std::string(reduct::kDefaultMaxReadChunk, 'x'), false});
   REQUIRE(reader->Read().result == IAsyncReader::DataChunk{std::string(reduct::kDefaultMaxReadChunk - 1, 'x'), true});
 }
+
+TEST_CASE("AsyncReader should not spoil data") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  const auto size = reduct::kDefaultMaxReadChunk - 1;
+  std::string blob(size, 'a');
+  for (int i = 0; i < size; ++i) {
+    blob[i] = static_cast<char>(rand() % 127); // NOLINT
+  }
+
+  REQUIRE(WriteOne(*entry, blob, kTimestamp) == Error::kOk);
+
+  auto [reader, err] = entry->BeginRead(kTimestamp);
+  REQUIRE(err == Error::kOk);
+  REQUIRE(reader->Read().result == IAsyncReader::DataChunk{blob, true});
+}
