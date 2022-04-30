@@ -86,7 +86,7 @@ TEST_CASE("AsyncReader should not spoil data") {
   const auto size = reduct::kDefaultMaxReadChunk - 1;
   std::string blob(size, 'a');
   for (int i = 0; i < size; ++i) {
-    blob[i] = static_cast<char>(rand() % 127);
+    blob[i] = static_cast<char>(rand() % 127); // NOLINT
   }
 
   REQUIRE(WriteOne(*entry, blob, kTimestamp) == Error::kOk);

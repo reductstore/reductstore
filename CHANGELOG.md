@@ -1,3 +1,9 @@
+## Release 0.4.3 (2022-05-01)
+
+**Bugs**:
+
+* Fix sending big blobs [PR-80](https://github.com/reduct-storage/reduct-storage/pull/80)
+
 ## Release 0.4.2 (2022-04-30)
 
 **Bugs**:
