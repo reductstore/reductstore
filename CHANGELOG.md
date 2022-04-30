@@ -1,3 +1,9 @@
+## Release 0.4.2 (2022-04-30)
+
+**Bugs**:
+
+* Fix deadlock during sending data, [PR-78](https://github.com/reduct-storage/reduct-storage/pull/78)
+
 ## Release 0.4.1 (2022-04-04)
 
 **Bugs**:
