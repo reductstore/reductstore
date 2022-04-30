@@ -7,14 +7,20 @@
 **Bugs**:
 
 * Fix CORS functionality, [PR-72](https://github.com/reduct-storage/reduct-storage/pull/72)
-* 
-## Release 0.4.2 (2022-04-30)
+
+### Release 0.4.3 (2022-05-01)
+
+**Bugs**:
+
+* Fix sending big blobs [PR-80](https://github.com/reduct-storage/reduct-storage/pull/80)
+
+### Release 0.4.2 (2022-04-30)
 
 **Bugs**:
 
 * Fix deadlock during sending data, [PR-78](https://github.com/reduct-storage/reduct-storage/pull/78)
 
-## Release 0.4.1 (2022-04-04)
+### Release 0.4.1 (2022-04-04)
 
 **Bugs**:
 
@@ -52,7 +58,7 @@
 
 * Replace nholmann/json with Protobuf, [PR-47](https://github.com/reduct-storage/reduct-storage/pull/47)
 
-## Release 0.2.1 (2022-03-07)
+### Release 0.2.1 (2022-03-07)
 
 **Bugs**:
 
@@ -79,7 +85,7 @@
 
 * Fix wrong parameters in Entry API documentation, [PR-38](https://github.com/reduct-storage/reduct-storage/pull/38)
 
-## Release 0.1.1 (2022-02-13)
+### Release 0.1.1 (2022-02-13)
 
 **Bugs**:
 

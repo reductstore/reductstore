@@ -379,26 +379,28 @@ class ApiServer : public IApiServer {
 
     bool aborted = false;
     res->onAborted([&aborted] {
-      LOG_DEBUG("aborted");
+      LOG_WARNING("aborted");
       aborted = true;
     });
 
-    bool complete = false;
     size_t sent = 0;
-    while (!complete && !aborted) {
+    while (!aborted) {
       auto [chuck, read_err] = reader->Read();
       if (read_err) {
         handler.SendError(err);
         co_return;
       }
 
+      if (chuck.data.empty()) {
+        break;
+      }
+
       while (!aborted) {
         ready_to_continue = false;
-        auto [ok, responded] = res->tryEnd(chuck.data, reader->size());
+        auto [ok, _] = res->tryEnd(chuck.data, reader->size());
         co_await Sleep(async::kTick);
         if (ok) {
           sent += chuck.data.size();
-          complete = responded;
           break;
         } else {
           // Have to wait until onWritable sets flag

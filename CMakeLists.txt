@@ -7,9 +7,8 @@ set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
 
 option(REDUCT_BUILD_TEST "Build unit tests" ON)
 
-
 set(DEFAULT_MAX_BLOCK_SIZE 67108864 CACHE STRING "Default max size for block with data")
-set(DEFAULT_MAX_READ_CHUNK 524288 CACHE STRING "Default max chunk for reading")
+set(DEFAULT_MAX_READ_CHUNK 65536 CACHE STRING "Default max chunk for reading")
 set(WEB_CONSOLE_PATH "" CACHE STRING "Path to the built web console")
 
 project(reduct_storage VERSION ${FULL_VERSION})
