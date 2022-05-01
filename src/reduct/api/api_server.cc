@@ -364,7 +364,7 @@ class ApiServer : public IApiServer {
 
     bool complete = false;
     while (!aborted && !complete) {
-      co_await Sleep(async::kTick); // switch context before start to read
+      co_await Sleep(async::kTick);  // switch context before start to read
       auto [chuck, read_err] = reader->Read();
       if (read_err) {
         handler.SendError(err);

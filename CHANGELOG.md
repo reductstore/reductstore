@@ -3,6 +3,7 @@
 **Bugs**:
 
 * Fix sending big blobs [PR-80](https://github.com/reduct-storage/reduct-storage/pull/80)
+* Fix handling offset in tryEnd [PR-81](https://github.com/reduct-storage/reduct-storage/pull/81)
 
 ### Release 0.4.2 (2022-04-30)
 
