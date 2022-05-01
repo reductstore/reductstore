@@ -1,5 +1,8 @@
+import hashlib
 import json
+import random
 
+import numpy as np
 import pytest
 import requests
 
@@ -107,8 +110,22 @@ def test_latest_record(base_url, headers, bucket):
     assert resp.status_code == 404
 
     requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data="some_data1")
-    requests.post(f'{base_url}/b/{bucket}/entry?ts={ts+10}', headers=headers, data="some_data2")
+    requests.post(f'{base_url}/b/{bucket}/entry?ts={ts + 10}', headers=headers, data="some_data2")
 
     resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
+
+
+def test_read_write_big_blob(base_url, headers, bucket):
+    """Should read and write a big blob"""
+    blob = np.random.bytes(2 ** 20).hex()
+    ts = 1000
+
+    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data=blob)
+    assert resp.status_code == 200
+
+    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    assert resp.status_code == 200
+    assert len(resp.text) == len(blob)
+    assert resp.text == blob

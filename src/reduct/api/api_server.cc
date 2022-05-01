@@ -383,28 +383,25 @@ class ApiServer : public IApiServer {
       aborted = true;
     });
 
-    size_t sent = 0;
-    while (!aborted) {
+    bool complete = false;
+    while (!aborted && !complete) {
+      co_await Sleep(async::kTick);  // switch context before start to read
       auto [chuck, read_err] = reader->Read();
       if (read_err) {
         handler.SendError(err);
         co_return;
       }
 
-      if (chuck.data.empty()) {
-        break;
-      }
-
+      const auto offset = res->getWriteOffset();
       while (!aborted) {
         ready_to_continue = false;
-        auto [ok, _] = res->tryEnd(chuck.data, reader->size());
-        co_await Sleep(async::kTick);
+        auto [ok, responded] = res->tryEnd(chuck.data.substr(res->getWriteOffset() - offset), reader->size());
         if (ok) {
-          sent += chuck.data.size();
+          complete = responded;
           break;
         } else {
           // Have to wait until onWritable sets flag
-          LOG_DEBUG("Failed to send data. Abort. {} {}/{} kB", ts, sent / 1024, reader->size() / 1024);
+          LOG_DEBUG("Failed to send data: {} {}/{} kB", ts, res->getWriteOffset() / 1024, reader->size() / 1024);
           while (!ready_to_continue && !aborted) {
             co_await Sleep(async::kTick);
           }
@@ -414,7 +411,7 @@ class ApiServer : public IApiServer {
       }
     }
 
-    LOG_DEBUG("Sent {} {}/{} kB", ts, sent / 1024, reader->size() / 1024);
+    LOG_DEBUG("Sent {} {}/{} kB", ts, res->getWriteOffset() / 1024, reader->size() / 1024);
     co_return;
   }
 
