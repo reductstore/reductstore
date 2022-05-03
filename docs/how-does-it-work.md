@@ -11,7 +11,7 @@ In comparison with other S3-like object storages, Reduct Storage does its job di
 
 * **Access By Time.** Each record is written with a timestamp and to read it, you need to know the entry name and time.
 * **Flat Storage Structure.** It has no tree-like structure for data. Only buckets and entries in them.
-* **Batching Data.** It doesn't store each blob as one of few files in the file system. It batches them into blocks of the fixed content_length so that it can store small objects more efficiently. You don't waste the disk space because of the filesystem blocks.&#x20;
+* **Batching Data.** It doesn't store each blob as one of few files in the file system. It batches them into blocks of the fixed size so that it can store small objects more efficiently. You don't waste the disk space because of the filesystem blocks.&#x20;
 * **Forward Writing.** The storage records data fastest if it needs only to append records to the current block. It means for better performance, you write data always with the latest timestamps.&#x20;
 * **Strong FIFO Quota.** When you have intensive write operations, you may run out of the disk space quickly. The storage removes the oldest block in a bucket at once when the amount of data reaches the quota limit.
 
@@ -25,11 +25,11 @@ As was mentioned above, Reduct Storage has flat structure:
 
 A container for entries which provides the storage settings:
 
-* **Maximal block content_length.** The content_length of the block, when the storage creates a new one after it finishes the current write operation. A block might be bigger than this content_length because the storage can write a belated record. &#x20;
+* **Maximal block size.** The size of the block, when the storage creates a new one after it finishes the current write operation. A block might be bigger than this size because the storage can write a belated record. &#x20;
 * **Quota type.** The storage supports two types:
   * No quota. A bucket will consume the whole free disk space.
   * FIFO. A bucket removes the oldest block of some entry, when it reaches the quota limit.
-* **Quota content_length.**
+* **Quota size.**
 
 A user can manage bucket with[ Bucket API](http-api/bucket-api.md).
 
