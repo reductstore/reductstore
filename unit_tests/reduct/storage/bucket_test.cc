@@ -133,7 +133,7 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
 
-    REQUIRE(entry1->BeginRead(ts + seconds(1)).error == Error::kOk);
+    REQUIRE(entry1->BeginRead(ts + seconds(1)).error.code == 404);
     REQUIRE(entry2->BeginRead(ts + seconds(2)).error.code == 404);
 
     REQUIRE(bucket->GetEntryList().size() == 1);
