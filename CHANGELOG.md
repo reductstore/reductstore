@@ -7,6 +7,7 @@
 **Bugs**:
 
 * Fix CORS functionality, [PR-72](https://github.com/reduct-storage/reduct-storage/pull/72)
+* Fix quota policy, [PR-83](https://github.com/reduct-storage/reduct-storage/pull/83)
 
 ### Release 0.4.3 (2022-05-01)
 
