@@ -99,20 +99,20 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   auto entry2 = bucket->GetOrCreateEntry("entry_2").entry.lock();
 
   const auto ts = IEntry::Time();
-  std::string blob(700, 'x');
+  std::string blob(400, 'x');
 
-  SECTION("3 big blobs 3*700 should be shrunk to 2") {
+  SECTION("3 big blobs 3*400 should be shrunk to 2") {
     REQUIRE(entry1->BeginWrite(ts + seconds(1), blob.size()).result->Write(blob) == Error::kOk);
     REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
     REQUIRE(entry1->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
     REQUIRE(entry1->GetInfo().record_count() == 1);
-    REQUIRE(entry2->GetInfo().record_count() == 0);
+    REQUIRE(entry2->GetInfo().record_count() == 1);
 
     REQUIRE(entry1->BeginRead(ts + seconds(1)).error.code == 404);
     REQUIRE(entry1->BeginRead(ts + seconds(3)).error == Error::kOk);
-    REQUIRE(entry2->BeginRead(ts + seconds(2)).error.code == 404);
+    REQUIRE(entry2->BeginRead(ts + seconds(2)).error == Error::kOk);
 
     SECTION("the same state after restoring") {
       auto info = bucket->GetInfo();
@@ -123,18 +123,20 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     }
   }
 
-  SECTION("should keep current block") {
+  SECTION("should remove entry if no blocks") {
     // TODO(Alexey Timin): Clean code
     std::string little_chunk("little_chunk");
     REQUIRE(entry1->BeginWrite(ts + seconds(1), little_chunk.size()).result->Write(little_chunk) == Error::kOk);
     REQUIRE(entry2->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
     REQUIRE(entry2->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
-    REQUIRE(entry2->BeginWrite(ts + seconds(4), little_chunk.size()).result->Write(little_chunk) == Error::kOk);
+    REQUIRE(entry2->BeginWrite(ts + seconds(4), blob.size()).result->Write(blob) == Error::kOk);
 
     REQUIRE(bucket->KeepQuota() == Error::kOk);
 
-    REQUIRE(entry1->BeginRead(ts + seconds(1)).error == Error::kOk);
+    REQUIRE(entry1->BeginRead(ts + seconds(1)).error.code == 404);
     REQUIRE(entry2->BeginRead(ts + seconds(2)).error.code == 404);
+
+    REQUIRE(bucket->GetEntryList().size() == 1);
   }
 }
 
