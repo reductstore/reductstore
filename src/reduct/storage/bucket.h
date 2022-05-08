@@ -82,6 +82,12 @@ class IBucket {
    * @return
    */
   static std::unique_ptr<IBucket> Restore(std::filesystem::path full_path);
+
+  /**
+   * Gets default settings for a new bucket
+   * @return
+   */
+  static const proto::api::BucketSettings& GetDefaults();
 };
 
 }  // namespace reduct::storage

@@ -31,6 +31,9 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage][server
   REQUIRE(info.bucket_count() == 0);
   REQUIRE(info.usage() == 0);
   REQUIRE(info.uptime() >= 1);
+  REQUIRE(info.defaults().bucket().max_block_size() == reduct::kDefaultMaxBlockSize);
+  REQUIRE(info.defaults().bucket().quota_type() == reduct::proto::api::BucketSettings::NONE);
+  REQUIRE(info.defaults().bucket().quota_size() == 0);
 }
 
 TEST_CASE("storage::Storage should be restored from filesystem", "[storage][server_api]") {

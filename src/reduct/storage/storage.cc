@@ -47,6 +47,8 @@ class Storage : public IStorage {
 
     return Run<Callback::Result>([this] {
       using proto::api::ServerInfo;
+      using proto::api::Defaults;
+      using proto::api::BucketSettings;
 
       size_t usage = 0;
       uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
@@ -68,6 +70,7 @@ class Storage : public IStorage {
       info.set_oldest_record(oldest_ts);
       info.set_latest_record(latest_ts);
 
+      *info.mutable_defaults()->mutable_bucket() = IBucket::GetDefaults();
       return Callback::Result{std::move(info), Error{}};
     });
   }
