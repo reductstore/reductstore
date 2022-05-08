@@ -164,7 +164,7 @@ class ApiServer : public IApiServer {
     }
 
     handler.Run(co_await storage_->OnInfo({}),
-                [](IInfoCallback::Response app_resp) { return PrintToJson(std::move(app_resp.info)); });
+                [](IInfoCallback::Response app_resp) { return PrintToJson(std::move(app_resp)); });
     co_return;
   }
 

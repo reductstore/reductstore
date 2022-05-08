@@ -68,8 +68,7 @@ class Storage : public IStorage {
       info.set_oldest_record(oldest_ts);
       info.set_latest_record(latest_ts);
 
-      Callback::Response resp{.info = std::move(info)};
-      return Callback::Result{std::move(resp), Error{}};
+      return Callback::Result{std::move(info), Error{}};
     });
   }
 
