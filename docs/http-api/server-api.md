@@ -13,11 +13,17 @@ You can use this method to get stats of the storage and check its version.
 ```javascript
 {
     "version": "string",
-    "bucket_count": "integer", // number of buckets in storage
-    "usage": "integer",  // disk usage in bytes
-    "uptime": "integer", // server uptime in seconds
+    "bucket_count": "integer",  // number of buckets in storage
+    "usage": "integer",         // disk usage in bytes
+    "uptime": "integer",        // server uptime in seconds
     "oldest_record": "integer", // unix timestamp of oldest record in microseconds
     "latest_record": "integer"  // unix timestamp of latest record in microseconds
+    "defaults":{
+    "bucket":{                  // default settings for a new bucket
+        "max_block_size": "integer",            // max block content_length in bytes
+        "quota_type": Union["NONE", "FIFO"],    // quota type
+        "quota_size": "integer"                 // quota content_length in bytes
+    }
 }
 ```
 {% endswagger-response %}
