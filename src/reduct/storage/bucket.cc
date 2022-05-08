@@ -32,16 +32,17 @@ class Bucket : public IBucket {
       throw std::runtime_error(fmt::format("Path '{}' already exists", full_path_.string()));
     }
 
+    const auto& default_settings = Bucket::GetDefaults();
     if (!settings_.has_max_block_size()) {
-      settings_.set_max_block_size(kDefaultMaxBlockSize);
+      settings_.set_max_block_size(default_settings.max_block_size());
     }
 
     if (!settings_.has_quota_type()) {
-      settings_.set_quota_type(BucketSettings::NONE);
+      settings_.set_quota_type(default_settings.quota_type());
     }
 
     if (!settings_.has_quota_size()) {
-      settings_.set_quota_size(0);
+      settings_.set_quota_size(default_settings.quota_size());
     }
 
     fs::create_directories(full_path_);
@@ -228,6 +229,17 @@ std::unique_ptr<IBucket> IBucket::Restore(std::filesystem::path full_path) {
   }
 
   return nullptr;
+}
+const BucketSettings& IBucket::GetDefaults() {
+  static BucketSettings default_settings;
+
+  if (!default_settings.has_max_block_size()) {
+    default_settings.set_max_block_size(kDefaultMaxBlockSize);
+    default_settings.set_quota_type(BucketSettings::NONE);
+    default_settings.set_quota_size(0);
+  }
+
+  return default_settings;
 }
 
 }  // namespace reduct::storage

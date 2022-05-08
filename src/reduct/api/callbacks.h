@@ -25,9 +25,7 @@ namespace reduct::api {
  */
 class IInfoCallback {
  public:
-  struct Response {
-    proto::api::ServerInfo info;
-  };
+  using Response = proto::api::ServerInfo;
   struct Request {};
   using Result = core::Result<Response>;
   virtual async::Run<Result> OnInfo(const Request& req) const = 0;

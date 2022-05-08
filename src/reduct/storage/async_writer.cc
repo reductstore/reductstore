@@ -59,13 +59,13 @@ class AsyncWriter : public async::IAsyncWriter {
   void UpdateRecord(proto::Record::State state) {
     proto::Block block;
     if (auto err = LoadBlockByTimestamp(parameters_.path.parent_path(), ts_, &block)) {
-      LOG_ERROR("{}", err);
+      LOG_ERROR("{}", err.ToString());
       return;
     }
 
     block.mutable_records(parameters_.record_index)->set_state(state);
     if (auto err = SaveBlock(parameters_.path.parent_path(), block)) {
-      LOG_ERROR("{}", err);
+      LOG_ERROR("{}", err.ToString());
     }
   }
 

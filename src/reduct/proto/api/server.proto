@@ -1,6 +1,11 @@
 syntax = "proto3";
+import "reduct/proto/api/bucket.proto";
 
 package reduct.proto.api;
+
+message Defaults {
+  BucketSettings bucket = 1;  // default values for a new bucket
+}
 
 // Stats of server
 message ServerInfo {
@@ -10,4 +15,6 @@ message ServerInfo {
   uint64 uptime = 4;        // uptime in seconds
   uint64 oldest_record = 5; // unix timestamp of oldest record in microseconds
   uint64 latest_record = 6; // unix timestamp of latest record in microseconds
+
+  Defaults defaults = 7;    // default settings for everything
 }

@@ -4,6 +4,7 @@
 
 * Integrate Web Console, [PR-77](https://github.com/reduct-storage/reduct-storage/pull/77)
 * Print only HTTP errors 50x to the logs, [PR-84](https://github.com/reduct-storage/reduct-storage/issues/84)
+* Add default settings for a new bucket in GET /info, [PR-87](https://github.com/reduct-storage/reduct-storage/pull/87)
 
 **Bugs**:
 
