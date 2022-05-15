@@ -4,6 +4,7 @@
 #include <csignal>
 
 #include "reduct/api/api_server.h"
+#include "reduct/asset/asset_manager.h"
 #include "reduct/async/loop.h"
 #include "reduct/auth/token_auth.h"
 #include "reduct/config.h"
@@ -12,12 +13,18 @@
 #include "reduct/storage/storage.h"
 
 using reduct::api::IApiServer;
+using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
 using reduct::auth::ITokenAuthentication;
 using reduct::core::EnvVariable;
 using reduct::core::Error;
 using reduct::core::Logger;
 using reduct::storage::IStorage;
+
+#ifdef WITH_CONSOLE
+extern const char _binary_console_zip_start[];
+extern const char _binary_console_zip_end[];
+#endif
 
 class Loop : public ILoop {
  public:
@@ -50,9 +57,16 @@ int main() {
   Loop loop;
   ILoop::set_loop(&loop);
 
+#if WITH_CONSOLE
+  auto console = IAssetManager::BuildFromZip(std::string(_binary_console_zip_start, _binary_console_zip_end));
+#else
+  auto console = IAssetManager::BuildEmpty();
+#endif
+
   IApiServer::Components components{
       .storage = IStorage::Build({.data_path = data_path}),
       .auth = ITokenAuthentication::Build(api_token),
+      .console = std::move(console),
   };
 
   auto server = IApiServer::Build(std::move(components), {

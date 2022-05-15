@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.18)
 
 set(MAJOR_VERSION 0)
-set(MINOR_VERSION 4)
-set(PATCH_VERSION 3)
+set(MINOR_VERSION 5)
+set(PATCH_VERSION 0)
 set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
 
 option(REDUCT_BUILD_TEST "Build unit tests" ON)
 
-
 set(DEFAULT_MAX_BLOCK_SIZE 67108864 CACHE STRING "Default max size for block with data")
 set(DEFAULT_MAX_READ_CHUNK 524288 CACHE STRING "Default max chunk for reading")
+set(WEB_CONSOLE_PATH "" CACHE STRING "Path to the built web console")
 
 project(reduct_storage VERSION ${FULL_VERSION})
 
@@ -40,6 +40,7 @@ conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup()
+
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 include_directories(${CMAKE_BINARY_DIR})

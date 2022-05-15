@@ -25,9 +25,7 @@ namespace reduct::api {
  */
 class IInfoCallback {
  public:
-  struct Response {
-    proto::api::ServerInfo info;
-  };
+  using Response = proto::api::ServerInfo;
   struct Request {};
   using Result = core::Result<Response>;
   virtual async::Run<Result> OnInfo(const Request& req) const = 0;
@@ -176,6 +174,7 @@ class IListEntryCallback {
   using Result = core::Result<Response>;
   [[nodiscard]] virtual async::Run<Result> OnListEntry(const Request& req) const = 0;
 };
+
 
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

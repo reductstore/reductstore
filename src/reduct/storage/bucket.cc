@@ -32,16 +32,17 @@ class Bucket : public IBucket {
       throw std::runtime_error(fmt::format("Path '{}' already exists", full_path_.string()));
     }
 
+    const auto& default_settings = Bucket::GetDefaults();
     if (!settings_.has_max_block_size()) {
-      settings_.set_max_block_size(kDefaultMaxBlockSize);
+      settings_.set_max_block_size(default_settings.max_block_size());
     }
 
     if (!settings_.has_quota_type()) {
-      settings_.set_quota_type(BucketSettings::NONE);
+      settings_.set_quota_type(default_settings.quota_type());
     }
 
     if (!settings_.has_quota_size()) {
-      settings_.set_quota_size(0);
+      settings_.set_quota_size(default_settings.quota_size());
     }
 
     fs::create_directories(full_path_);
@@ -120,25 +121,22 @@ class Bucket : public IBucket {
           LOG_DEBUG("Size of bucket '{}' is {} bigger than quota {}. Remove the oldest record",
                     full_path_.filename().string(), bucket_size, settings_.quota_size());
 
-          std::shared_ptr<IEntry> current_entry = nullptr;
-          for (const auto& [_, entry] : entry_map_) {
-            auto entry_info = entry->GetInfo();
-            if (entry_info.block_count() > 0 ||  // first no empty
-                (current_entry && entry_info.block_count() > 0 &&
-                 entry_info.oldest_record() < current_entry->GetInfo().oldest_record())) {
-              current_entry = entry;
-            }
-          }
+          auto rr =
+              entry_map_ | std::views::values | std::views::transform([](auto entry) { return entry->GetInfo(); });
 
-          if (!current_entry) {
-            LOG_DEBUG("Looks like all the entries have only one block");
-            return Error::kOk;
-          }
+          std::vector<EntryInfo> candidates(std::ranges::begin(rr), std::ranges::end(rr));
+          std::ranges::sort(candidates, [](auto& a, auto& b) { return a.oldest_record() < b.oldest_record(); });
 
-          LOG_DEBUG("Remove the oldest block in entry '{}'", current_entry->GetOptions().name);
-          auto err = current_entry->RemoveOldestBlock();
+          const auto& entry = candidates[0];
+          LOG_DEBUG("Remove the oldest block in entry '{}'", entry.name());
+          auto err = entry_map_.at(entry.name())->RemoveOldestBlock();
           if (err) {
             return err;
+          }
+
+          if (entry_map_.at(entry.name())->GetInfo().block_count() == 0) {
+            entry_map_.erase(entry.name());
+            fs::remove(full_path_ / entry.name());
           }
 
           bucket_size = GetInfo().size();
@@ -153,12 +151,8 @@ class Bucket : public IBucket {
   }
 
   std::vector<EntryInfo> GetEntryList() const override {
-    std::vector<EntryInfo> entries;
-    for (auto&& entry_info : std::views::values(entry_map_)) {
-      entries.push_back(entry_info->GetInfo());
-    }
-
-    return entries;
+    auto rr = entry_map_ | std::views::values | std::views::transform([](auto entry) { return entry->GetInfo(); });
+    return std::vector(std::ranges::begin(rr), std::ranges::end(rr));
   }
 
   [[nodiscard]] BucketInfo GetInfo() const override {
@@ -235,6 +229,17 @@ std::unique_ptr<IBucket> IBucket::Restore(std::filesystem::path full_path) {
   }
 
   return nullptr;
+}
+const BucketSettings& IBucket::GetDefaults() {
+  static BucketSettings default_settings;
+
+  if (!default_settings.has_max_block_size()) {
+    default_settings.set_max_block_size(kDefaultMaxBlockSize);
+    default_settings.set_quota_type(BucketSettings::NONE);
+    default_settings.set_quota_size(0);
+  }
+
+  return default_settings;
 }
 
 }  // namespace reduct::storage

@@ -1,10 +1,13 @@
 [requires]
-fmt/8.0.1
-uwebsockets/20.8.0
-protobuf/3.19.1
+fmt/8.1.1
+uwebsockets/20.9.0
+protobuf/3.19.2
 gtest/1.11.0
-catch2/2.13.7
+catch2/2.13.8
 botan/2.19.1
+zlib/1.2.12
+libzippp/5.0-1.8.0
+openssl/1.1.1l
 
 [generators]
 cmake

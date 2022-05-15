@@ -24,13 +24,16 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage][server
   std::this_thread::sleep_for(std::chrono::seconds(1));  // uptime 1 second
 
   auto task = OnInfo(storage.get());
-  auto [resp, err] = task.Get();
+  auto [info, err] = task.Get();
 
   REQUIRE_FALSE(err);
-  REQUIRE(resp.info.version() == reduct::kVersion);
-  REQUIRE(resp.info.bucket_count() == 0);
-  REQUIRE(resp.info.usage() == 0);
-  REQUIRE(resp.info.uptime() >= 1);
+  REQUIRE(info.version() == reduct::kVersion);
+  REQUIRE(info.bucket_count() == 0);
+  REQUIRE(info.usage() == 0);
+  REQUIRE(info.uptime() >= 1);
+  REQUIRE(info.defaults().bucket().max_block_size() == reduct::kDefaultMaxBlockSize);
+  REQUIRE(info.defaults().bucket().quota_type() == reduct::proto::api::BucketSettings::NONE);
+  REQUIRE(info.defaults().bucket().quota_size() == 0);
 }
 
 TEST_CASE("storage::Storage should be restored from filesystem", "[storage][server_api]") {
@@ -53,11 +56,19 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][serv
 
   storage = IStorage::Build({.data_path = dir});
 
+<<<<<<< HEAD
   auto [resp, err] = OnInfo(storage.get()).Get();
   REQUIRE(resp.info.bucket_count() == 1);
   REQUIRE(resp.info.usage() == 18);
   REQUIRE(resp.info.oldest_record() == 1000001);
   REQUIRE(resp.info.latest_record() == 2000002);
+=======
+  auto [info, err] = OnInfo(storage.get()).Get();
+  REQUIRE(info.bucket_count() == 1);
+  REQUIRE(info.usage() == 18);
+  REQUIRE(info.oldest_record() == 1000001);
+  REQUIRE(info.latest_record() == 2000002);
+>>>>>>> main
 }
 
 TEST_CASE("storage::Storage should provide list of buckets", "[storage][server_api]") {

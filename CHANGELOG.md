@@ -1,3 +1,20 @@
+## Release 0.5.0 (2022-05-15)
+
+**Features**:
+
+* Integrate Web Console, [PR-77](https://github.com/reduct-storage/reduct-storage/pull/77)
+* Print only HTTP errors 50x to the logs, [PR-84](https://github.com/reduct-storage/reduct-storage/issues/84)
+* Add default settings for a new bucket in GET /info, [PR-87](https://github.com/reduct-storage/reduct-storage/pull/87)
+
+**Bugs**:
+
+* Fix CORS functionality, [PR-72](https://github.com/reduct-storage/reduct-storage/pull/72)
+* Fix quota policy, [PR-83](https://github.com/reduct-storage/reduct-storage/pull/83)
+
+**Documentation**:
+
+* Add link to JS SDK, [PR-88](https://github.com/reduct-storage/reduct-storage/pull/88)
+
 ### Release 0.4.3 (2022-05-01)
 
 **Bugs**:
