@@ -56,19 +56,12 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][serv
 
   storage = IStorage::Build({.data_path = dir});
 
-<<<<<<< HEAD
-  auto [resp, err] = OnInfo(storage.get()).Get();
-  REQUIRE(resp.info.bucket_count() == 1);
-  REQUIRE(resp.info.usage() == 18);
-  REQUIRE(resp.info.oldest_record() == 1000001);
-  REQUIRE(resp.info.latest_record() == 2000002);
-=======
+
   auto [info, err] = OnInfo(storage.get()).Get();
   REQUIRE(info.bucket_count() == 1);
   REQUIRE(info.usage() == 18);
   REQUIRE(info.oldest_record() == 1000001);
   REQUIRE(info.latest_record() == 2000002);
->>>>>>> main
 }
 
 TEST_CASE("storage::Storage should provide list of buckets", "[storage][server_api]") {

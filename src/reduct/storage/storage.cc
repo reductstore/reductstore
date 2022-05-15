@@ -47,11 +47,8 @@ class Storage : public IStorage {
 
     return Run<Callback::Result>([this] {
       using proto::api::ServerInfo;
-<<<<<<< HEAD
-=======
       using proto::api::Defaults;
       using proto::api::BucketSettings;
->>>>>>> main
 
       size_t usage = 0;
       uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
