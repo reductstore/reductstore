@@ -5,6 +5,7 @@
 #include <App.h>
 
 #include <filesystem>
+#include <regex>
 
 #include "common.h"
 #include "reduct/async/sleep.h"
@@ -114,15 +115,15 @@ class ApiServer : public IApiServer {
                res->end({});
              })
         .get(base_path + "ui/*",
-             [this](auto *res, auto *req) {
+             [this, base_path](auto *res, auto *req) {
                std::string path(req->getUrl());
-               path = path.substr(4, path.size());
+               path = path.substr(base_path.size() + 3, path.size());
 
                if (path.empty()) {
                  path = "index.html";
                }
 
-               UiRequest(res, req, path);
+               UiRequest(res, req, base_path, path);
              })
         .any("/*",
              [](auto *res, auto *req) {
@@ -439,7 +440,8 @@ class ApiServer : public IApiServer {
   }
 
   template <bool SSL = false>
-  async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string path) const {
+  async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string_view base_path,
+                            std::string path) const {
     struct Callback {
       struct Request {};
       using Response = std::string;
@@ -448,7 +450,11 @@ class ApiServer : public IApiServer {
 
     auto handler = BasicApiHandler<SSL, Callback>(res, req);
     auto ret = console_->Read(path);
-    handler.Run(std::move(ret), [](typename Callback::Response resp) { return resp; });
+    handler.Run(std::move(ret), [&base_path](typename Callback::Response resp) {
+      // subtitue RS_API_BASE_PATH to make web console work
+      resp = std::regex_replace(resp, std::regex("/ui/"), fmt::format("{}ui/", base_path));
+      return resp;
+    });
 
     co_return;
   }
