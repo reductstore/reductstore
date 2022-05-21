@@ -1,3 +1,9 @@
+## Release 0.6.0 (in progress)
+
+**Bugs**:
+
+* Fix Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
+
 ## Release 0.5.0 (2022-05-15)
 
 **Features**:
