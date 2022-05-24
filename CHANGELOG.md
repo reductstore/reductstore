@@ -4,6 +4,12 @@
 
 * Fix Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
 
+## Release 0.5.1 (2022-05-24)
+
+**Bugs**:
+
+* GET /b/:bucket/:entry doesn't create an empty entry, [PR-95](https://github.com/reduct-storage/reduct-storage/pull/95)
+
 ## Release 0.5.0 (2022-05-15)
 
 **Features**:

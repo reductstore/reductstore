@@ -23,6 +23,7 @@ using reduct::storage::IStorage;
 
 using reduct::MakeDefaultBucketSettings;
 using reduct::OnCreateBucket;
+using reduct::OnGetBucket;
 using reduct::OnListEntry;
 using reduct::OnReadEntry;
 using reduct::OnWriteEntry;
@@ -103,6 +104,16 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
             Error{.code = 422, .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds"});
   }
 
+  SECTION("error if no entry to read") {
+    Error error =
+        OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "NOTEXIT", .timestamp = "1000"}).Get();
+    REQUIRE(error == Error{.code = 404, .message = "Entry 'NOTEXIT' could not be found"});
+
+    auto bucket_info = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+    REQUIRE(bucket_info == Error::kOk);
+    REQUIRE(bucket_info.result.entries_size() == 1);  // we don't create a new one
+  }
+
   SECTION("error if the record not found") {
     Error error = OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "10"}).Get();
     REQUIRE(error == Error{.code = 404, .message = "No records for this timestamp"});
@@ -165,7 +176,7 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
   }
 
   SECTION("error, if bucket not found") {
-    REQUIRE(OnListEntry(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
+     REQUIRE(OnListEntry(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
                                         .entry_name = "entry",
                                         .start_timestamp = "1000",
                                         .stop_timestamp = "1200"})

@@ -21,7 +21,7 @@ Name of entry
 A UNIX timestamp in microseconds
 {% endswagger-parameter %}
 
-{% swagger-parameter in="header" required="true" name="size" %}
+{% swagger-parameter in="header" required="true" name="Content-Length" %}
 Content-length is required to start asynchronous write operation
 {% endswagger-parameter %}
 
