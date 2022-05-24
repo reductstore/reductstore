@@ -109,7 +109,7 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
         OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "NOTEXIT", .timestamp = "1000"}).Get();
     REQUIRE(error == Error{.code = 404, .message = "Entry 'NOTEXIT' could not be found"});
 
-    auto bucket_info = OnGetBucket(storage.get(), {.bucket_name="bucket"}).Get();
+    auto bucket_info = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
     REQUIRE(bucket_info == Error::kOk);
     REQUIRE(bucket_info.result.entries_size() == 1);  // we don't create a new one
   }
@@ -176,7 +176,7 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
   }
 
   SECTION("error, if bucket not found") {
-    REQUIRE(OnListEntry(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
+     REQUIRE(OnListEntry(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
                                         .entry_name = "entry",
                                         .start_timestamp = "1000",
                                         .stop_timestamp = "1200"})
