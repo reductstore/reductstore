@@ -138,6 +138,15 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
 
     REQUIRE(bucket->GetEntryList().size() == 1);
   }
+
+  SECTION("should work with empty entry-2") {
+    REQUIRE(entry1->BeginWrite(ts + seconds(1), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry1->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
+    REQUIRE(entry1->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
+
+    REQUIRE(bucket->KeepQuota() == Error::kOk);
+    REQUIRE(entry1->GetInfo().record_count() == 2);
+  }
 }
 
 TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]") {

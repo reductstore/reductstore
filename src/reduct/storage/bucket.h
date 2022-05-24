@@ -69,11 +69,15 @@ class IBucket {
    * @return
    */
   virtual std::vector<proto::api::EntryInfo> GetEntryList() const = 0;
+
+
+  virtual bool HasEntry(const std::string& name) const = 0;
   /**
    * @brief Builds a new bucket
    * @param options
    * @return
    */
+
   static std::unique_ptr<IBucket> Build(std::filesystem::path full_path, proto::api::BucketSettings options = {});
 
   /**

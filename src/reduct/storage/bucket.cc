@@ -112,6 +112,7 @@ class Bucket : public IBucket {
   }
 
   [[nodiscard]] Error KeepQuota() override {
+    auto err = Error::kOk;
     switch (settings_.quota_type()) {
       case BucketSettings::NONE:
         break;
@@ -127,22 +128,24 @@ class Bucket : public IBucket {
           std::vector<EntryInfo> candidates(std::ranges::begin(rr), std::ranges::end(rr));
           std::ranges::sort(candidates, [](auto& a, auto& b) { return a.oldest_record() < b.oldest_record(); });
 
-          const auto& entry = candidates[0];
-          LOG_DEBUG("Remove the oldest block in entry '{}'", entry.name());
-          auto err = entry_map_.at(entry.name())->RemoveOldestBlock();
-          if (err) {
-            return err;
-          }
+          for (int i = 0; i < candidates.size(); ++i) {
+            const auto& entry = candidates[i];
+            LOG_DEBUG("Remove the oldest block in entry '{}'", entry.name());
+            auto entry_ptr = entry_map_.at(entry.name());
+            err = entry_ptr->RemoveOldestBlock();
+            if (!err) {
+              if (entry_ptr->GetInfo().block_count() == 0) {
+                entry_map_.erase(entry.name());
+                fs::remove(full_path_ / entry.name());
+              }
 
-          if (entry_map_.at(entry.name())->GetInfo().block_count() == 0) {
-            entry_map_.erase(entry.name());
-            fs::remove(full_path_ / entry.name());
+              bucket_size = GetInfo().size();
+              break;
+            }
           }
-
-          bucket_size = GetInfo().size();
         }
     }
-    return Error::kOk;
+    return err;
   }
 
   Error SetSettings(BucketSettings settings) override {
@@ -154,6 +157,8 @@ class Bucket : public IBucket {
     auto rr = entry_map_ | std::views::values | std::views::transform([](auto entry) { return entry->GetInfo(); });
     return std::vector(std::ranges::begin(rr), std::ranges::end(rr));
   }
+
+  bool HasEntry(const std::string& name) const override { return entry_map_.contains(name); }
 
   [[nodiscard]] BucketInfo GetInfo() const override {
     size_t record_count = 0;

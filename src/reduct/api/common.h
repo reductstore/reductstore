@@ -131,6 +131,8 @@ class BasicApiHandler {
   void SendError(core::Error err) const noexcept {
     if (err.code >= 500) {
       LOG_ERROR("{} {}: {}", method_, url_, err.ToString());
+    } else {
+      LOG_DEBUG("{} {}: {}", method_, url_, err.ToString());
     }
     http_resp_->writeStatus(std::to_string(err.code));
     http_resp_->end(fmt::format(R"({{"detail":"{}"}})", err.message));
