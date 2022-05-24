@@ -155,6 +155,10 @@ class Bucket : public IBucket {
     return std::vector(std::ranges::begin(rr), std::ranges::end(rr));
   }
 
+  bool HasEntry(const std::string& name) const override {
+    return entry_map_.contains(name);
+  }
+
   [[nodiscard]] BucketInfo GetInfo() const override {
     size_t record_count = 0;
     size_t size = 0;

@@ -212,7 +212,13 @@ class Storage : public IStorage {
         return Callback::Result{{}, err};
       }
 
-      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+      auto& bucket = bucket_it->second;
+      if (!bucket->HasEntry(req.entry_name.data())) {
+        return Callback::Result{{},
+                                {.code = 404, .message = fmt::format("Entry '{}' could not be found", req.entry_name)}};
+      }
+
+      auto [entry, ref_error] = bucket->GetOrCreateEntry(req.entry_name.data());
       if (ref_error) {
         return Callback::Result{{}, ref_error};
       }
