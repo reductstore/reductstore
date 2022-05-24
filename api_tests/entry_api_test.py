@@ -57,9 +57,17 @@ def test_read_no_data(base_url, headers, bucket):
 
 def test_read_bad_ts(base_url, headers, bucket):
     """Should return 400 if ts is bad"""
+    requests.post(f"{base_url}/b/{bucket}/entry?ts=100", data=b"somedata")
     resp = requests.get(f'{base_url}/b/{bucket}/entry?ts=XXXX', headers=headers)
     assert resp.status_code == 422
     assert 'XXX' in get_detail(resp)
+
+
+def test_read_bad_no_entry(base_url, headers, bucket):
+    """Should return 400 if ts is bad"""
+    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    assert resp.status_code == 404
+    assert 'entry' in get_detail(resp)
 
 
 def test_write_no_bucket(base_url, headers):
