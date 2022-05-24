@@ -57,7 +57,7 @@ def test_read_no_data(base_url, headers, bucket):
 
 def test_read_bad_ts(base_url, headers, bucket):
     """Should return 400 if ts is bad"""
-    requests.post(f"{base_url}/b/{bucket}/entry?ts=100", data=b"somedata")
+    requests.post(f"{base_url}/b/{bucket}/entry?ts=100", data=b"somedata", headers=headers)
     resp = requests.get(f'{base_url}/b/{bucket}/entry?ts=XXXX', headers=headers)
     assert resp.status_code == 422
     assert 'XXX' in get_detail(resp)
