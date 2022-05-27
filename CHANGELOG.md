@@ -4,6 +4,10 @@
 
 * Fix Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
 
+**Other**:
+
+* Optimise write operation, [PR-96](https://github.com/reduct-storage/reduct-storage/pull/96)
+
 ## Release 0.5.1 (2022-05-24)
 
 **Bugs**:

@@ -69,10 +69,17 @@ class Entry : public IEntry {
     RecordType type = RecordType::kLatest;
     proto::Block block;
     if (!block_set_.empty()) {
-      // Load last block if it is exists
+      // Load last block if it exists
       if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
         return {{}, err};
       }
+    } else {
+      auto ret = StartNextBlock(proto_ts);
+      if (ret.error) {
+        return {{}, ret.error};
+      }
+
+      block = std::move(ret.result);
     }
 
     if (block.has_latest_record_time() && block.latest_record_time() >= proto_ts) {
@@ -81,7 +88,12 @@ class Entry : public IEntry {
       if (*block_set_.begin() > proto_ts) {
         LOG_DEBUG("Timestamp earlier than first record");
         type = RecordType::kBelatedFirst;
-        block = proto::Block();  // add a new block
+        auto ret = StartNextBlock(proto_ts);
+        if (ret.error) {
+          return {{}, ret.error};
+        }
+
+        block = std::move(ret.result);
       } else {
         type = RecordType::kBelated;
         auto err = FindBlock(proto_ts, &block);
@@ -314,15 +326,19 @@ class Entry : public IEntry {
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
  private:
-  Error SaveBlock(proto::Block block) {
-    block_set_.insert(block.begin_time());
-    return storage::SaveBlock(full_path_, std::move(block));
-  }
+  Error SaveBlock(const proto::Block& block) { return storage::SaveBlock(full_path_, block); }
 
   Result<proto::Block> StartNextBlock(const Timestamp& ts) {
     proto::Block block;
     block.mutable_begin_time()->CopyFrom(ts);
-    return {block, SaveBlock(std::move(block))};
+
+    auto err = SaveBlock(block);
+    if (err) {
+      return {{}, err};
+    }
+
+    block_set_.insert(block.begin_time());
+    return {block, Error::kOk};
   }
 
   Error FindBlock(Timestamp proto_ts, proto::Block* block) const {
