@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "reduct/core/logger.h"
-#include "reduct/storage/block_helpers.h"
+#include "reduct/storage/block_manager.h"
 
 namespace reduct::storage {
 

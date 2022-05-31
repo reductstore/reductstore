@@ -1,6 +1,6 @@
 // Copyright 2022 Alexey Timin
 
-#include "reduct/storage/block_helpers.h"
+#include "reduct/storage/block_manager.h"
 
 #include <fmt/core.h>
 #include <google/protobuf/util/time_util.h>

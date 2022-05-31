@@ -1,7 +1,7 @@
 // Copyright 2022 Alexey Timin
 
-#ifndef REDUCT_STORAGE_BLOCK_HELPERS_H
-#define REDUCT_STORAGE_BLOCK_HELPERS_H
+#ifndef REDUCT_STORAGE_BLOCK_MANAGER_H
+#define REDUCT_STORAGE_BLOCK_MANAGER_H
 
 #include <google/protobuf/timestamp.pb.h>
 
@@ -15,6 +15,9 @@ namespace reduct::storage {
 static constexpr std::string_view kBlockExt = ".blk";
 static constexpr std::string_view kMetaExt = ".meta";
 
+class IBlockManager {
+ public:
+};
 /**
  * Builds a full path for a data block or meta block
  * @note it uses Block::begin_time for file name
