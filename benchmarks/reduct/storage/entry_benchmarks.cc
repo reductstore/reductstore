@@ -21,7 +21,6 @@ TEST_CASE("storage::IEntry write operation") {
   fs::remove_all(dir_path);
 
   BucketSettings settings;
-  settings.set_max_block_size(1024);
   auto bucket = IBucket::Build(dir_path, settings);
   auto entry = bucket->GetOrCreateEntry("entry-1").entry.lock();
 
