@@ -222,7 +222,7 @@ class Entry : public IEntry {
     }
 
     if (auto err = CheckLatestRecord(start_ts)) {
-      return {{}, std::move(err)};
+      return {{}, {.code = 404, .message = "No records for time interval"}};
     }
 
     // Find block range
