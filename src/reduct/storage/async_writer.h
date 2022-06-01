@@ -16,7 +16,10 @@ struct AsyncWriterParameters {
   size_t size;
 };
 
-async::IAsyncWriter::UPtr BuildAsyncWriter(const proto::Block& block, AsyncWriterParameters parameters);
+using OnStateUpdated = std::function<void(int, proto::Record::State)>;
+
+async::IAsyncWriter::UPtr BuildAsyncWriter(const proto::Block& block, AsyncWriterParameters parameters,
+                                           OnStateUpdated callback);
 
 }  // namespace reduct::storage
 

@@ -11,6 +11,7 @@ WORKDIR /src
 COPY conanfile.txt .
 COPY src src
 COPY unit_tests unit_tests
+COPY benchmarks benchmarks
 COPY CMakeLists.txt .
 
 WORKDIR /build

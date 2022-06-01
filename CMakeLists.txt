@@ -6,6 +6,8 @@ set(PATCH_VERSION 0)
 set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
 
 option(REDUCT_BUILD_TEST "Build unit tests" ON)
+option(REDUCT_BUILD_BENCHMARKS "Build unit tests" ON)
+
 
 set(DEFAULT_MAX_BLOCK_SIZE 67108864 CACHE STRING "Default max size for block with data")
 set(DEFAULT_MAX_READ_CHUNK 524288 CACHE STRING "Default max chunk for reading")
@@ -52,4 +54,9 @@ add_subdirectory(src)
 message(STATUS "REDUCT_BUILD_TEST=${REDUCT_BUILD_TEST}")
 if (REDUCT_BUILD_TEST)
     add_subdirectory(unit_tests)
+endif ()
+
+message(STATUS "REDUCT_BUILD_BENCHMARKS=${REDUCT_BUILD_BENCHMARKS}")
+if (REDUCT_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif ()
