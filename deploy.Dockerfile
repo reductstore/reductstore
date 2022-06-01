@@ -15,7 +15,7 @@ WORKDIR /build
 
 COPY --from=web-console /app /web-console
 
-RUN cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=OFF -DWEB_CONSOLE_PATH=/web-console /src
+RUN cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=OFF -DREDUCT_BUILD_BENCHMARKS=OFF -DWEB_CONSOLE_PATH=/web-console /src
 RUN make -j4
 
 FROM ubuntu:21.10
