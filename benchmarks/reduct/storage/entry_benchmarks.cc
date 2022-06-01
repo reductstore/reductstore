@@ -1,3 +1,5 @@
+// Copyright 2022 Alexey Timin
+
 #define CATCH_CONFIG_ENABLE_BENCHMARKING
 #include <catch2/catch.hpp>
 #include <google/protobuf/util/time_util.h>
@@ -24,7 +26,7 @@ TEST_CASE("storage::IEntry write operation") {
   auto bucket = IBucket::Build(dir_path, settings);
   auto entry = bucket->GetOrCreateEntry("entry-1").entry.lock();
 
-  for (int i = 0; i< 10000; ++i) {
+  for (int i = 0; i < 10000; ++i) {
     auto [writer, err] = entry->BeginWrite(IEntry::Time::clock::now(), 10);
     [[maybe_unused]] auto ret = writer->Write("1234567890");
   }

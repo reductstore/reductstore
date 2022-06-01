@@ -61,48 +61,41 @@ class Entry : public IEntry {
 
   [[nodiscard]] Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
+    RecordType type = RecordType::kLatest;
 
     const auto proto_ts = FromTimePoint(time);
 
-    IBlockManager::BlockSPtr block;
-    RecordType type = RecordType::kLatest;
-    if (!block_set_.empty()) {
-      // Load last block if it exists
-      auto ret = block_manager_->LoadBlock(*block_set_.rbegin());
-      if (ret.error) {
-        return {{}, ret.error};
+    auto get_block = [this](auto ts) {
+      if (!block_set_.empty()) {
+        // Load last block if it exists
+        return block_manager_->LoadBlock(*block_set_.rbegin());
+      } else {
+        return StartNextBlock(ts);
       }
+    };
 
-      block = ret.result;
-    } else {
-      auto ret = StartNextBlock(proto_ts);
-      if (ret.error) {
-        return {{}, ret.error};
-      }
-
-      block = ret.result;
+    auto [block, get_err] = get_block(proto_ts);
+    if (get_err) {
+      return {{}, std::move(get_err)};
     }
 
     if (block->has_latest_record_time() && block->latest_record_time() >= proto_ts) {
       LOG_DEBUG("Timestamp {} is belated. Finding proper block", TimeUtil::ToString(proto_ts));
 
+      Result<IBlockManager::BlockSPtr> ret;
       if (*block_set_.begin() > proto_ts) {
         LOG_DEBUG("Timestamp earlier than first record");
         type = RecordType::kBelatedFirst;
-        auto ret = StartNextBlock(proto_ts);
-        if (ret.error) {
-          return {{}, ret.error};
-        }
-
-        block = std::move(ret.result);
+        ret = StartNextBlock(proto_ts);
       } else {
         type = RecordType::kBelated;
-        auto ret = FindBlock(proto_ts);
-        if (ret.error) {
-          return {{}, ret.error};
-        }
-        block = ret.result;
+        ret = FindBlock(proto_ts);
       }
+
+      if (ret.error) {
+        return {{}, ret.error};
+      }
+      block = ret.result;
     }
 
     if (!block->has_begin_time()) {
