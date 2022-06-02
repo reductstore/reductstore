@@ -23,7 +23,9 @@ class IBlockManager {
 
   virtual core::Result<BlockSPtr> LoadBlock(const google::protobuf::Timestamp& proto_ts) = 0;
   virtual core::Result<BlockSPtr> StartBlock(const google::protobuf::Timestamp& proto_ts, size_t max_block_size) = 0;
+
   virtual core::Error SaveBlock(const BlockSPtr& block) const = 0;
+  virtual core::Error FinishBlock(const BlockSPtr& block) const = 0;
 
   static std::unique_ptr<IBlockManager> Build(const std::filesystem::path& parent);
 };

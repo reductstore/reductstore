@@ -59,18 +59,28 @@ class Entry : public IEntry {
     }
   }
 
-  [[nodiscard]] Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) override {
+  [[nodiscard]] Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t content_size) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
     RecordType type = RecordType::kLatest;
 
     const auto proto_ts = FromTimePoint(time);
 
-    auto get_block = [this](auto ts) {
+    auto start_new_block = [this](const Timestamp& ts, size_t content_size) -> Result<IBlockManager::BlockSPtr> {
+      auto [block, err] = block_manager_->StartBlock(ts, std::max(options_.max_block_size, content_size));
+      if (err) {
+        return {{}, err};
+      }
+
+      block_set_.insert(block->begin_time());
+      return {block, Error::kOk};
+    };
+
+    auto get_block = [this, content_size, &start_new_block](auto ts) {
       if (!block_set_.empty()) {
         // Load last block if it exists
         return block_manager_->LoadBlock(*block_set_.rbegin());
       } else {
-        return StartNextBlock(ts);
+        return start_new_block(ts, content_size);
       }
     };
 
@@ -86,7 +96,7 @@ class Entry : public IEntry {
       if (*block_set_.begin() > proto_ts) {
         LOG_DEBUG("Timestamp earlier than first record");
         type = RecordType::kBelatedFirst;
-        ret = StartNextBlock(proto_ts);
+        ret = start_new_block(proto_ts, content_size);
       } else {
         type = RecordType::kBelated;
         ret = FindBlock(proto_ts);
@@ -103,11 +113,17 @@ class Entry : public IEntry {
       block->mutable_begin_time()->CopyFrom(proto_ts);
     }
 
-    if (type == RecordType::kLatest && block->size() > options_.max_block_size) {
-      LOG_DEBUG("Block {} is full. Create a new one", TimeUtil::TimestampToMicroseconds(block->begin_time()));
-      auto ret = StartNextBlock(proto_ts);
+    if (type == RecordType::kLatest && block->size() + content_size > options_.max_block_size) {
+      LOG_DEBUG("Block {} has no space for the record. Create a new one",
+                TimeUtil::TimestampToMicroseconds(block->begin_time()));
+      if (auto err = block_manager_->FinishBlock(block)) {
+        LOG_ERROR("Failed to finish the current block");
+        return {{}, err};
+      }
+
+      auto ret = start_new_block(proto_ts, content_size);
       if (ret.error) {
-        LOG_ERROR("Failed create a next block");
+        LOG_ERROR("Failed to create a next block");
         return {{}, ret.error};
       }
 
@@ -119,13 +135,13 @@ class Entry : public IEntry {
     record->set_state(proto::Record::kStarted);
     record->mutable_timestamp()->CopyFrom(proto_ts);
     record->set_begin(block->size());
-    record->set_end(block->size() + size);
+    record->set_end(block->size() + content_size);
 
-    block->set_size(block->size() + size);
+    block->set_size(block->size() + content_size);
 
     // Update counters
     record_counter_++;
-    size_counter_ += size;
+    size_counter_ += content_size;
 
     switch (type) {
       case RecordType::kLatest:
@@ -143,7 +159,8 @@ class Entry : public IEntry {
     }
 
     auto writer = BuildAsyncWriter(
-        *block, {.path = BlockPath(full_path_, *block), .record_index = block->records_size() - 1, .size = size},
+        *block,
+        {.path = BlockPath(full_path_, *block), .record_index = block->records_size() - 1, .size = content_size},
         [this, block](int index, auto state) {
           block->mutable_records(index)->set_state(state);
           if (auto err = block_manager_->SaveBlock(block)) {
@@ -303,16 +320,6 @@ class Entry : public IEntry {
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
  private:
-  Result<IBlockManager::BlockSPtr> StartNextBlock(const Timestamp& ts) {
-    auto [block, err] = block_manager_->StartBlock(ts, options_.max_block_size);
-    if (err) {
-      return {{}, err};
-    }
-
-    block_set_.insert(block->begin_time());
-    return {block, Error::kOk};
-  }
-
   Result<IBlockManager::BlockSPtr> FindBlock(Timestamp proto_ts) const {
     auto ts = block_set_.upper_bound(proto_ts);
     if (ts == block_set_.end()) {

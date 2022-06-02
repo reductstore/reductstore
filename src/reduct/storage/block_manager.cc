@@ -59,18 +59,16 @@ class BlockManager : public IBlockManager {
     latest_loaded_->mutable_begin_time()->CopyFrom(proto_ts);
 
     auto block_path = BlockPath(parent_, *latest_loaded_, kBlockExt);
-    int fd = open(block_path.c_str(), O_WRONLY | O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-    if (fd < 0) {
-      return {{}, {.code = 500, .message = "Failed create a new block for writing"}};
+
+    if (auto file = std::ofstream(block_path, std::ios::binary)) {
+      std::error_code ec;
+      fs::resize_file(block_path, max_block_size, ec);
+      if (ec) {
+        return {{}, {.code = 500, .message = ec.message()}};
+      }
+    } else {
+      return {{}, {.code = 500, .message = strerror(errno)}};
     }
-    if (posix_fallocate(fd, 0, max_block_size) != 0) {
-      close(fd);
-      return {{}, {.code = 500, .message = fmt::format("Failed allocate a new block: {}", std::strerror(errno))}};
-    }
-
-    close(fd);
-
-
 
     auto err = SaveBlock(latest_loaded_);
     if (err) {
@@ -81,14 +79,25 @@ class BlockManager : public IBlockManager {
   }
 
   core::Error SaveBlock(const BlockSPtr& block) const override {
-    auto file_name = BlockPath(parent_, *block, kMetaExt);
-    std::ofstream file(file_name);
+    auto block_path = BlockPath(parent_, *block, kMetaExt);
+    std::ofstream file(block_path);
     if (file) {
       block->SerializeToOstream(&file);
       return {};
     } else {
       return {.code = 500, .message = "Failed to save a block descriptor"};
     }
+  }
+
+  Error FinishBlock(const BlockSPtr& block) const override {
+    auto block_path = BlockPath(parent_, *block, kBlockExt);
+    std::error_code ec;
+    fs::resize_file(block_path, block->size(), ec);
+    if (ec) {
+      return {.code = 500, .message = ec.message()};
+    }
+
+    return Error::kOk;
   }
 
  private:

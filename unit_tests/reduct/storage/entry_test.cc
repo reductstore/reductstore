@@ -5,6 +5,8 @@
 #include <catch2/catch.hpp>
 #include <google/protobuf/util/time_util.h>
 
+#include <filesystem>
+
 #include "reduct/helpers.h"
 
 using reduct::ReadOne;
@@ -15,6 +17,7 @@ using reduct::storage::IEntry;
 using google::protobuf::util::TimeUtil;
 
 using std::chrono::seconds;
+namespace fs = std::filesystem;
 
 static auto MakeDefaultOptions() {
   return IEntry::Options{
@@ -28,6 +31,13 @@ static const auto kTimestamp = IEntry::Time() + std::chrono::microseconds(10'100
 
 auto ToMicroseconds(IEntry::Time tp) {
   return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
+}
+
+auto GetBlockPath(IEntry::Options options, IEntry::Time begin_ts) {
+  return fs::file_size(
+      options.path / options.name /
+      fmt::format("{}.blk",
+                  std::chrono::duration_cast<std::chrono::microseconds>(begin_ts.time_since_epoch()).count()));
 }
 
 TEST_CASE("storage::Entry should record data to a block", "[entry]") {
@@ -101,6 +111,30 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
 
     REQUIRE(ReadOne(*entry, kTimestamp + seconds(5)).result == "other_data1");
   }
+}
+
+TEST_CASE("storage::Entry should resize finished block") {
+  const auto options = MakeDefaultOptions();
+  auto entry = IEntry::Build(options);
+  REQUIRE(entry);
+
+  auto big_data = std::string(options.max_block_size - 10, 'c');
+  REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, big_data, kTimestamp + seconds(1)) == Error::kOk);
+
+  REQUIRE(GetBlockPath(options, kTimestamp) == big_data.size());
+  REQUIRE(GetBlockPath(options, kTimestamp + seconds(1)) == options.max_block_size);
+}
+
+TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size") {
+  const auto options = MakeDefaultOptions();
+  auto entry = IEntry::Build(options);
+  REQUIRE(entry);
+
+  auto big_data = std::string(options.max_block_size + 10, 'c');
+  REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
+
+  REQUIRE(GetBlockPath(options, kTimestamp) == big_data.size());
 }
 
 TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
