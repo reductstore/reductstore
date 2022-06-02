@@ -15,6 +15,7 @@ The storage engine has HTTP API and stores data as a history of blobs. Read more
 * Real-time quota for buckets
 * Token authentication
 * Embedded Web Console
+* Support EXT4, FSX filesystems
 
 ## Get started
 

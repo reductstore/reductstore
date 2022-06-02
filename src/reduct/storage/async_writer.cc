@@ -23,7 +23,7 @@ namespace fs = std::filesystem;
 class AsyncWriter : public async::IAsyncWriter {
  public:
   AsyncWriter(const proto::Block& block, AsyncWriterParameters parameters, OnStateUpdated callback)
-      : ts_(block.begin_time()), parameters_(std::move(parameters)), writen_size_{}, update_record_(callback) {
+      :  parameters_(std::move(parameters)), writen_size_{}, update_record_(callback) {
     file_ = std::ofstream(parameters_.path, std::ios::out | std::ios::in | std::ios::binary);
     file_.seekp(block.records(parameters_.record_index).begin());
   }
@@ -58,7 +58,6 @@ class AsyncWriter : public async::IAsyncWriter {
 
  private:
   std::ofstream file_;
-  Timestamp ts_;
   AsyncWriterParameters parameters_;
   size_t writen_size_;
   OnStateUpdated update_record_;
