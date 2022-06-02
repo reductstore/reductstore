@@ -3,6 +3,7 @@
 **Bugs**:
 
 * Fix Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
+* Fix wasting disk space in FSX filesystem, [PR-100](https://github.com/reduct-storage/reduct-storage/pull/100)
 
 **Other**:
 
