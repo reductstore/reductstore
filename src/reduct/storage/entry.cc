@@ -285,8 +285,9 @@ class Entry : public IEntry {
       return err;
     }
 
-    fs::remove(BlockPath(full_path_, *first_block));
-    fs::remove(BlockPath(full_path_, *first_block, kMetaExt));
+    if (auto remove_err = block_manager_->RemoveBlock(first_block)) {
+      return remove_err;
+    }
 
     size_counter_ -= first_block->size();
     record_counter_ -= first_block->records_size();

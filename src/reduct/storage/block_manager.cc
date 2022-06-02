@@ -100,6 +100,22 @@ class BlockManager : public IBlockManager {
     return Error::kOk;
   }
 
+  Error RemoveBlock(const BlockSPtr& block) const override {
+    std::error_code ec;
+
+    fs::remove(BlockPath(parent_, *block), ec);
+    if (ec) {
+      return {.code = 500, .message = ec.message()};
+    }
+
+    fs::remove(BlockPath(parent_, *block, kMetaExt), ec);
+    if (ec) {
+      return {.code = 500, .message = ec.message()};
+    }
+
+    return Error::kOk;
+  }
+
  private:
   fs::path parent_;
   BlockSPtr latest_loaded_;

@@ -16,17 +16,51 @@ namespace reduct::storage {
 static constexpr std::string_view kBlockExt = ".blk";
 static constexpr std::string_view kMetaExt = ".meta";
 
+/**
+ * Creates, loads removes blocks of data
+ * @note It has to be only one in the app, because caches the last loaded block
+ */
 class IBlockManager {
  public:
-  virtual ~IBlockManager() = default;
   using BlockSPtr = std::shared_ptr<proto::Block>;
 
+  virtual ~IBlockManager() = default;
+
+  /**
+   * Load a block and save in a cache
+   * @param proto_ts
+   * @return
+   */
   virtual core::Result<BlockSPtr> LoadBlock(const google::protobuf::Timestamp& proto_ts) = 0;
+
+  /**
+   * Starts a new block and save it a cache
+   * @param proto_ts
+   * @param max_block_size
+   * @return
+   */
   virtual core::Result<BlockSPtr> StartBlock(const google::protobuf::Timestamp& proto_ts, size_t max_block_size) = 0;
 
+  /**
+   * Save a block to filesystem
+   * @param block
+   * @return
+   */
   virtual core::Error SaveBlock(const BlockSPtr& block) const = 0;
+
+  /**
+   * Finish a block
+   * @param block
+   * @return
+   */
   virtual core::Error FinishBlock(const BlockSPtr& block) const = 0;
 
+  virtual core::Error RemoveBlock(const BlockSPtr& block) const = 0;
+  /**
+   * Factory method
+   * @param parent
+   * @return
+   */
   static std::unique_ptr<IBlockManager> Build(const std::filesystem::path& parent);
 };
 
