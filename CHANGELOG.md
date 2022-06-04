@@ -4,6 +4,7 @@
 
 * Filter unfinished records in GET /b/:bucket/:entry/list endpoint, [PR-106](https://github.com/reduct-storage/reduct-storage/pull/106)
 * Add content-type header to responses, [PR-107](https://github.com/reduct-storage/reduct-storage/pull/107)
+* Add `max_block_records` to bucket settings, [PR-108](https://github.com/reduct-storage/reduct-storage/pull/108)
 
 **Bugs**:
 
