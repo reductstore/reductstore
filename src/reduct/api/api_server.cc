@@ -451,7 +451,7 @@ class ApiServer : public IApiServer {
       using Result = core::Result<Response>;
     };
 
-    auto handler = BasicApiHandler<SSL, Callback>(res, req);
+    auto handler = BasicApiHandler<SSL, Callback>(res, req, "text/html; charset=UTF-8");
     auto ret = console_->Read(path);
     handler.Run(std::move(ret), [&base_path](typename Callback::Response resp) {
       // subtitue RS_API_BASE_PATH to make web console work
