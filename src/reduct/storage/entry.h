@@ -45,14 +45,6 @@ class IEntry {
   };
 
   /**
-   * Result of the list request
-   */
-  struct ListResult {
-    std::vector<RecordInfo> records;
-    core::Error error;
-  };
-
-  /**
    * @brief Write a data with timestamp to corresponding block
    * The method provides the best performance if a new timestamp is always new the stored ones.
    * Then the engine doesn't need to find a proper block and just records data into the current one.
@@ -75,7 +67,7 @@ class IEntry {
    * @param stop
    * @return return time stamps and size of records,  empty if no data
    */
-  [[nodiscard]] virtual ListResult List(const Time& start, const Time& stop) const = 0;
+  [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const = 0;
 
   /**
    * @brief Remove the oldest block from disk

@@ -299,12 +299,12 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
     }
 
     SECTION("if there is overlap it is ok") {
-      auto records = entry->List(kTimestamp + seconds(1), kTimestamp + seconds(4)).records;
+      auto records = entry->List(kTimestamp + seconds(1), kTimestamp + seconds(4)).result;
       REQUIRE(records.size() == 2);
       REQUIRE(records[0].time == kTimestamp + seconds(1));
       REQUIRE(records[1].time == kTimestamp + seconds(2));
 
-      records = entry->List(kTimestamp - seconds(1), kTimestamp + seconds(2)).records;
+      records = entry->List(kTimestamp - seconds(1), kTimestamp + seconds(2)).result;
       REQUIRE(records.size() == 2);
       REQUIRE(records[0].time == kTimestamp);
       REQUIRE(records[1].time == kTimestamp + seconds(1));
@@ -322,4 +322,15 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
       REQUIRE(entry->List(kTimestamp + seconds(5), kTimestamp + seconds(12)).error == Error::kOk);
     }
   }
+}
+
+TEST_CASE("storage::Entry should not list records which is not finished") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  auto writer = entry->BeginWrite(kTimestamp, 1).result;
+  REQUIRE(entry->List(kTimestamp - seconds(1), kTimestamp + seconds(1)).result.empty());
+
+  REQUIRE(writer->Write("x") == Error::kOk);
+  REQUIRE(entry->List(kTimestamp - seconds(1), kTimestamp + seconds(1)).result.size() == 1);
 }
