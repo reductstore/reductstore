@@ -24,6 +24,7 @@ static auto MakeDefaultOptions() {
       .name = "entry_1",
       .path = BuildTmpDirectory(),
       .max_block_size = 100,
+      .max_block_records = 1024,
   };
 }
 
@@ -33,7 +34,7 @@ auto ToMicroseconds(IEntry::Time tp) {
   return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
 }
 
-auto GetBlockPath(IEntry::Options options, IEntry::Time begin_ts) {
+auto GetBlockSize(IEntry::Options options, IEntry::Time begin_ts) {
   return fs::file_size(
       options.path / options.name /
       fmt::format("{}.blk",
@@ -122,8 +123,23 @@ TEST_CASE("storage::Entry should resize finished block") {
   REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
   REQUIRE(WriteOne(*entry, big_data, kTimestamp + seconds(1)) == Error::kOk);
 
-  REQUIRE(GetBlockPath(options, kTimestamp) == big_data.size());
-  REQUIRE(GetBlockPath(options, kTimestamp + seconds(1)) == options.max_block_size);
+  REQUIRE(GetBlockSize(options, kTimestamp) == big_data.size());
+  REQUIRE(GetBlockSize(options, kTimestamp + seconds(1)) == options.max_block_size);
+}
+
+TEST_CASE("storage::Entry start a new block if it has more records than max_block_records") {
+  auto options = MakeDefaultOptions();
+  options.max_block_records = 2;
+
+  auto entry = IEntry::Build(options);
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "data", kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "data", kTimestamp + seconds(1)) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "data", kTimestamp + seconds(2)) == Error::kOk);
+
+  REQUIRE(GetBlockSize(options, kTimestamp) == 8);
+  REQUIRE(GetBlockSize(options, kTimestamp + seconds(2)) == options.max_block_size);
 }
 
 TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size") {
@@ -134,7 +150,7 @@ TEST_CASE("storage::Entry should create block with size of record it  is bigger 
   auto big_data = std::string(options.max_block_size + 10, 'c');
   REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
 
-  REQUIRE(GetBlockPath(options, kTimestamp) == big_data.size());
+  REQUIRE(GetBlockSize(options, kTimestamp) == big_data.size());
 }
 
 TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {

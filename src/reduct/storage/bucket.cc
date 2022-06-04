@@ -45,6 +45,10 @@ class Bucket : public IBucket {
       settings_.set_quota_size(default_settings.quota_size());
     }
 
+    if (!settings_.has_max_block_records()) {
+      settings_.set_max_block_records(default_settings.max_block_records());
+    }
+
     fs::create_directories(full_path_);
     auto err = SaveDescriptor();
     if (err) {
@@ -93,6 +97,7 @@ class Bucket : public IBucket {
           .name = name,
           .path = full_path_,
           .max_block_size = settings_.max_block_size(),
+          .max_block_records = settings_.max_block_records(),
       });
 
       if (entry) {
@@ -242,6 +247,7 @@ const BucketSettings& IBucket::GetDefaults() {
     default_settings.set_max_block_size(kDefaultMaxBlockSize);
     default_settings.set_quota_type(BucketSettings::NONE);
     default_settings.set_quota_size(0);
+    default_settings.set_max_block_records(kDefaultMaxBlockRecords);
   }
 
   return default_settings;
