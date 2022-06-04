@@ -41,6 +41,8 @@ def test_read_write_entries_big_blob_ok(base_url, headers, bucket):
     assert resp.status_code == 200
     assert resp.content == huge_data
 
+    assert resp.headers['Content-Type'] == "application/octet-stream"
+
 
 def test_read_no_bucket(base_url, headers):
     """Should return 404 if no bucket found"""
