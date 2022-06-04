@@ -133,7 +133,7 @@ class BasicApiHandler {
       http_resp_->writeHeader("access-control-allow-origin", origin_);
     }
 
-    if (has_content) {
+    if (has_content && !content_type_.empty()) {
       http_resp_->writeHeader("content-type", content_type);
     }
 
