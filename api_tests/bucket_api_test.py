@@ -18,6 +18,8 @@ def test_create_bucket_ok(base_url, headers, bucket_name):
     assert data['info']['name'] == bucket_name
     assert len(data['entries']) == 0
 
+    assert resp.headers['Content-Type'] == "application/json"
+
 
 def test_create_bucket_bad_format(base_url, headers, bucket_name):
     """Should not create a bucket if JSON data is invalid """
@@ -26,6 +28,7 @@ def test_create_bucket_bad_format(base_url, headers, bucket_name):
 
     resp = requests.post(f'{base_url}/b/{bucket_name}', headers=headers, json={"quota_type": "UNKNOWN"})
     assert resp.status_code == 422
+    assert resp.headers['Content-Type'] == "application/json"
 
 
 def test_create_bucket_custom(base_url, headers, bucket_name):

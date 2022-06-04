@@ -133,7 +133,7 @@ class ApiServer : public IApiServer {
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {
                   if (sock) {
-                    LOG_INFO("Run HTTP server on http{}://{}:{}{}", SSL ? "s" : "", host, port,  base_path);
+                    LOG_INFO("Run HTTP server on http{}://{}:{}{}", SSL ? "s" : "", host, port, base_path);
 
                     std::thread stopper([sock, &running] {
                       // Checks running flag and closes the socket to stop the app gracefully
@@ -384,6 +384,8 @@ class ApiServer : public IApiServer {
       aborted = true;
     });
 
+    handler.PrepareHeaders(true, "application/octet-stream");
+
     bool complete = false;
     while (!aborted && !complete) {
       co_await Sleep(async::kTick);  // switch context before start to read
@@ -413,6 +415,7 @@ class ApiServer : public IApiServer {
     }
 
     LOG_DEBUG("Sent {} {}/{} kB", ts, res->getWriteOffset() / 1024, reader->size() / 1024);
+
     co_return;
   }
 
