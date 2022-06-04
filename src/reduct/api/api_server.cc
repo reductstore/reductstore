@@ -133,7 +133,7 @@ class ApiServer : public IApiServer {
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {
                   if (sock) {
-                    LOG_INFO("Run HTTP server on http{}://{}:{}", SSL ? "s" : "", host, port);
+                    LOG_INFO("Run HTTP server on http{}://{}:{}{}", SSL ? "s" : "", host, port,  base_path);
 
                     std::thread stopper([sock, &running] {
                       // Checks running flag and closes the socket to stop the app gracefully
