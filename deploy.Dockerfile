@@ -20,6 +20,11 @@ RUN make -j4
 
 FROM ubuntu:21.10
 
+RUN apt-get update && apt-get install -y curl
+
 COPY --from=builder /build/bin/reduct-storage /usr/local/bin/reduct-storage
 RUN mkdir /data
+
+EXPOSE 8383
+
 CMD ["reduct-storage"]
