@@ -50,6 +50,7 @@ static proto::api::BucketSettings MakeDefaultBucketSettings() {
   settings.set_max_block_size(1000);
   settings.set_quota_type(BucketSettings::NONE);
   settings.set_quota_size(10);
+  settings.set_max_block_records(40);
 
   return settings;
 }

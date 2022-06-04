@@ -58,7 +58,13 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
   SECTION("create a new entry") {
     auto [entry, err] = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(err == Error::kOk);
+
     REQUIRE(entry.lock());
+    auto options = entry.lock()->GetOptions();
+
+    REQUIRE(options.name == "entry_1");
+    REQUIRE(options.max_block_size == bucket->GetSettings().max_block_size());
+    REQUIRE(options.max_block_records == bucket->GetSettings().max_block_records());
   }
 
   SECTION("get an existing entry") {

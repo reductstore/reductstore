@@ -113,9 +113,11 @@ class Entry : public IEntry {
       block->mutable_begin_time()->CopyFrom(proto_ts);
     }
 
-    if (type == RecordType::kLatest && block->size() + content_size > options_.max_block_size) {
-      LOG_DEBUG("Block {} has no space for the record. Create a new one",
-                TimeUtil::TimestampToMicroseconds(block->begin_time()));
+    auto has_no_space = block->size() + content_size > options_.max_block_size;
+    auto too_many_records = block->records_size() + 1 > options_.max_block_records;
+
+    if (type == RecordType::kLatest && (has_no_space || too_many_records)) {
+      LOG_DEBUG("Create a new block");
       if (auto err = block_manager_->FinishBlock(block)) {
         LOG_ERROR("Failed to finish the current block");
         return {{}, err};
