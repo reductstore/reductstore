@@ -221,7 +221,7 @@ class Entry : public IEntry {
             Error::kOk};
   }
 
-  [[nodiscard]] ListResult List(const Time& start, const Time& stop) const override {
+  [[nodiscard]] core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const override {
     auto start_ts = FromTimePoint(start);
     auto stop_ts = FromTimePoint(stop);
     LOG_DEBUG("List records for interval: ({}, {})", TimeUtil::ToString(start_ts), TimeUtil::ToString(stop_ts));
@@ -261,7 +261,8 @@ class Entry : public IEntry {
 
       for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
         const auto& record = block->records(record_index);
-        if (record.timestamp() >= start_ts && record.timestamp() < stop_ts) {
+        if (record.timestamp() >= start_ts && record.timestamp() < stop_ts &&
+            record.state() == proto::Record::kFinished) {
           records.push_back(RecordInfo{.time = ToTimePoint(record.timestamp()), .size = record.end() - record.begin()});
         }
       }

@@ -1,5 +1,9 @@
 ## Release 0.6.0 (in progress)
 
+**Features**:
+
+* Filter unfinished records in GET /b/:bucket/:entry/list endpoint, [PR-106](https://github.com/reduct-storage/reduct-storage/pull/106)
+
 **Bugs**:
 
 * Fix Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
