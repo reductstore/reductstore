@@ -12,6 +12,8 @@
 * Fix wasting disk space in FSX filesystem, [PR-100](https://github.com/reduct-storage/reduct-storage/pull/100)
 * Fix base path in server url, [PR-105](https://github.com/reduct-storage/reduct-storage/pull/105)
 * Fix updating record state in asynchronous write operation, [PR-109](https://github.com/reduct-storage/reduct-storage/pull/109)
+* Fix SEGFAULT when entry removed but async writer is alive, [PR-110](https://github.com/reduct-storage/reduct-storage/pull/110)
+
 **Other**:
 
 * Optimise write operation, [PR-96](https://github.com/reduct-storage/reduct-storage/pull/96)
