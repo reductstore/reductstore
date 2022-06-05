@@ -16,9 +16,11 @@ namespace reduct::async {
 class IAsyncWriter {
  public:
   using UPtr = std::unique_ptr<IAsyncWriter>;
+  using SPtr = std::shared_ptr<IAsyncWriter>;
 
   virtual ~IAsyncWriter() = default;
   virtual core::Error Write(std::string_view chunk, bool last = true) noexcept = 0;
+  [[nodiscard]] virtual bool is_done() const noexcept = 0;
 };
 
 /**

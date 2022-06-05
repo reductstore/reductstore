@@ -23,7 +23,7 @@ namespace fs = std::filesystem;
 class AsyncWriter : public async::IAsyncWriter {
  public:
   AsyncWriter(const proto::Block& block, AsyncWriterParameters parameters, OnStateUpdated callback)
-      :  parameters_(std::move(parameters)), writen_size_{}, update_record_(callback) {
+      : parameters_(std::move(parameters)), writen_size_{}, update_record_(callback) {
     file_ = std::ofstream(parameters_.path, std::ios::out | std::ios::in | std::ios::binary);
     file_.seekp(block.records(parameters_.record_index).begin());
   }
@@ -55,6 +55,8 @@ class AsyncWriter : public async::IAsyncWriter {
 
     return Error::kOk;
   }
+
+  bool is_done() const noexcept override { return writen_size_ == parameters_.size; }
 
  private:
   std::ofstream file_;

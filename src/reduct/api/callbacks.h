@@ -124,7 +124,7 @@ class IUpdateBucketCallback {
  */
 class IWriteEntryCallback {
  public:
-  using Response = async::IAsyncWriter::UPtr;
+  using Response = async::IAsyncWriter::SPtr;
   struct Request {
     std::string_view bucket_name;
     std::string_view entry_name;

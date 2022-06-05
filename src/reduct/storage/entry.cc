@@ -59,7 +59,7 @@ class Entry : public IEntry {
     }
   }
 
-  [[nodiscard]] Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t content_size) override {
+  [[nodiscard]] Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t content_size) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
     RecordType type = RecordType::kLatest;
 
@@ -160,21 +160,11 @@ class Entry : public IEntry {
       return {{}, std::move(err)};
     }
 
-    auto writer = BuildAsyncWriter(
-        *block,
-        {.path = BlockPath(full_path_, *block), .record_index = block->records_size() - 1, .size = content_size},
-        [block_manager = block_manager_, ts = block->begin_time()](int index, auto state) {
-          auto [block, load_err] = block_manager->LoadBlock(ts);
-          if (load_err) {
-            LOG_ERROR("{}", load_err.ToString());
-          }
-          block->mutable_records(index)->set_state(state);
-          if (auto err = block_manager->SaveBlock(block)) {
-            LOG_ERROR("{}", err.ToString());
-          }
-        });
-
-    return {std::move(writer), Error::kOk};
+    return block_manager_->BeginWrite(block, {
+                                                 .path = BlockPath(full_path_, *block),
+                                                 .record_index = block->records_size() - 1,
+                                                 .size = content_size,
+                                             });
   }
 
   [[nodiscard]] Result<async::IAsyncReader::SPtr> BeginRead(const Time& time) const override {

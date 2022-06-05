@@ -52,7 +52,7 @@ class IEntry {
    * @param time timestamp of the data
    * @return async writer or error
    */
-  [[nodiscard]] virtual core::Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t size) = 0;
 
   /**
    * @brief Finds the record for the timestamp and read the blob
