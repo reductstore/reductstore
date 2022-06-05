@@ -1,4 +1,4 @@
-FROM ghcr.io/reduct-storage/web-console:v0.1.0 AS web-console
+FROM ghcr.io/reduct-storage/web-console:main AS web-console
 FROM gcc:11.2 AS builder
 
 RUN apt update && apt install -y cmake python3-pip zip
