@@ -52,7 +52,7 @@ class IEntry {
    * @param time timestamp of the data
    * @return async writer or error
    */
-  [[nodiscard]] virtual core::Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t size) = 0;
 
   /**
    * @brief Finds the record for the timestamp and read the blob
@@ -60,7 +60,7 @@ class IEntry {
    * @param time timestamp of record to read
    * @return async reader or error (404 - if no record found, 500 some internal errors)
    */
-  [[nodiscard]] virtual core::Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncReader::SPtr> BeginRead(const Time& time) const = 0;
 
   /**
    * @brief List records for the time interval [start, stop)

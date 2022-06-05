@@ -350,3 +350,32 @@ TEST_CASE("storage::Entry should not list records which is not finished") {
   REQUIRE(writer->Write("x") == Error::kOk);
   REQUIRE(entry->List(kTimestamp - seconds(1), kTimestamp + seconds(1)).result.size() == 1);
 }
+
+TEST_CASE("storage::Entry should wait when read operations finish before removing block") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
+
+  auto [reader, err] = entry->BeginRead(kTimestamp);
+  REQUIRE(err == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active readers"});
+  auto [chunk, read_err] = reader->Read();
+  REQUIRE(read_err == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
+}
+
+TEST_CASE("storage::Entry should wait when write operations finish before removing block") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  auto [writer, err] = entry->BeginWrite(kTimestamp, 5);
+  REQUIRE(err == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active writers"});
+  REQUIRE(writer->Write("12345", true) == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
+}

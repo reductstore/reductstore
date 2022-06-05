@@ -9,6 +9,8 @@
 #include <fstream>
 #include <utility>
 
+#include "reduct/core/logger.h"
+
 namespace reduct::storage {
 
 namespace fs = std::filesystem;
@@ -100,8 +102,18 @@ class BlockManager : public IBlockManager {
     return Error::kOk;
   }
 
-  Error RemoveBlock(const BlockSPtr& block) const override {
+  Error RemoveBlock(const BlockSPtr& block) override {
     std::error_code ec;
+
+    const auto& readers = RemoveDeadReaders(block);
+    if (!readers.empty()) {
+      return {.code = 500, .message = "Block has active readers"};
+    }
+
+    const auto& writers = RemoveDeadWriters(block);
+    if (!writers.empty()) {
+      return {.code = 500, .message = "Block has active writers"};
+    }
 
     fs::remove(BlockPath(parent_, *block), ec);
     if (ec) {
@@ -116,9 +128,52 @@ class BlockManager : public IBlockManager {
     return Error::kOk;
   }
 
+  core::Result<async::IAsyncReader::SPtr> BeginRead(const BlockSPtr& block, AsyncReaderParameters params) override {
+    async::IAsyncReader::SPtr reader = BuildAsyncReader(*block, std::move(params));
+
+    auto& readers = RemoveDeadReaders(block);
+    readers.push_back(reader);
+
+    return {reader, Error::kOk};
+  }
+
+  core::Result<async::IAsyncWriter::SPtr> BeginWrite(const BlockSPtr& block, AsyncWriterParameters params) override {
+    async::IAsyncWriter::SPtr writer =
+        BuildAsyncWriter(*block, std::move(params), [this, ts = block->begin_time()](int index, auto state) {
+          auto [blk, load_err] = LoadBlock(ts);
+          if (load_err) {
+            LOG_ERROR("{}", load_err.ToString());
+            return;
+          }
+          blk->mutable_records(index)->set_state(state);
+          if (auto err = SaveBlock(blk)) {
+            LOG_ERROR("{}", err.ToString());
+          }
+        });
+
+    auto& writers = RemoveDeadWriters(block);
+    writers.push_back(writer);
+
+    return {writer, Error::kOk};
+  }
+
  private:
+  std::vector<std::weak_ptr<async::IAsyncReader>>& RemoveDeadReaders(const BlockSPtr& block) {
+    auto& readers = current_readers_[block->begin_time()];
+    std::erase_if(readers, [](auto reader) { return !reader.lock() || reader.lock()->is_done(); });
+    return readers;
+  }
+
+  std::vector<std::weak_ptr<async::IAsyncWriter>>& RemoveDeadWriters(const BlockSPtr& block) {
+    auto& writers = current_writers_[block->begin_time()];
+    std::erase_if(writers, [](auto reader) { return !reader.lock() || reader.lock()->is_done(); });
+    return writers;
+  }
+
   fs::path parent_;
   BlockSPtr latest_loaded_;
+  std::map<Timestamp, std::vector<std::weak_ptr<async::IAsyncReader>>> current_readers_;
+  std::map<Timestamp, std::vector<std::weak_ptr<async::IAsyncWriter>>> current_writers_;
 };
 
 std::unique_ptr<IBlockManager> IBlockManager::Build(const std::filesystem::path& parent) {

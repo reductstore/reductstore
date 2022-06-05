@@ -39,6 +39,7 @@ class AsyncReader : public async::IAsyncReader {
   }
 
   size_t size() const noexcept override { return size_; }
+  bool is_done() const noexcept override { return size_ == read_bytes_; }
 
  private:
   AsyncReaderParameters parameters_;

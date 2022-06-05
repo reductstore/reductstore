@@ -16,9 +16,11 @@ namespace reduct::async {
 class IAsyncWriter {
  public:
   using UPtr = std::unique_ptr<IAsyncWriter>;
+  using SPtr = std::shared_ptr<IAsyncWriter>;
 
   virtual ~IAsyncWriter() = default;
   virtual core::Error Write(std::string_view chunk, bool last = true) noexcept = 0;
+  [[nodiscard]] virtual bool is_done() const noexcept = 0;
 };
 
 /**
@@ -29,6 +31,8 @@ class IAsyncReader {
   virtual ~IAsyncReader() = default;
 
   using UPtr = std::unique_ptr<IAsyncReader>;
+  using SPtr = std::shared_ptr<IAsyncReader>;
+
   struct DataChunk {
     std::string data;
     bool last;
@@ -37,6 +41,8 @@ class IAsyncReader {
   };
 
   virtual core::Result<DataChunk> Read() noexcept = 0;
+
+  [[nodiscard]] virtual bool is_done() const noexcept = 0;
   [[nodiscard]] virtual size_t size() const noexcept = 0;
 };
 
