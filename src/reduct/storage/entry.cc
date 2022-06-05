@@ -163,13 +163,13 @@ class Entry : public IEntry {
     auto writer = BuildAsyncWriter(
         *block,
         {.path = BlockPath(full_path_, *block), .record_index = block->records_size() - 1, .size = content_size},
-        [this, ts = block->begin_time()](int index, auto state) {
-          auto [block, load_err] = block_manager_->LoadBlock(ts);
+        [block_manager = block_manager_, ts = block->begin_time()](int index, auto state) {
+          auto [block, load_err] = block_manager->LoadBlock(ts);
           if (load_err) {
             LOG_ERROR("{}", load_err.ToString());
           }
           block->mutable_records(index)->set_state(state);
-          if (auto err = block_manager_->SaveBlock(block)) {
+          if (auto err = block_manager->SaveBlock(block)) {
             LOG_ERROR("{}", err.ToString());
           }
         });
@@ -365,7 +365,7 @@ class Entry : public IEntry {
   fs::path full_path_;
 
   std::set<google::protobuf::Timestamp> block_set_;
-  std::unique_ptr<IBlockManager> block_manager_;
+  std::shared_ptr<IBlockManager> block_manager_;
   size_t size_counter_;
   size_t record_counter_;
 };
