@@ -163,7 +163,11 @@ class Entry : public IEntry {
     auto writer = BuildAsyncWriter(
         *block,
         {.path = BlockPath(full_path_, *block), .record_index = block->records_size() - 1, .size = content_size},
-        [this, block](int index, auto state) {
+        [this, ts = block->begin_time()](int index, auto state) {
+          auto [block, load_err] = block_manager_->LoadBlock(ts);
+          if (load_err) {
+            LOG_ERROR("{}", load_err.ToString());
+          }
           block->mutable_records(index)->set_state(state);
           if (auto err = block_manager_->SaveBlock(block)) {
             LOG_ERROR("{}", err.ToString());
