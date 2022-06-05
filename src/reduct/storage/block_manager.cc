@@ -100,8 +100,13 @@ class BlockManager : public IBlockManager {
     return Error::kOk;
   }
 
-  Error RemoveBlock(const BlockSPtr& block) const override {
+  Error RemoveBlock(const BlockSPtr& block) override {
     std::error_code ec;
+
+    const auto& readers = RemoveDeadReaders(block);
+    if (!readers.empty()) {
+      return {.code = 500, .message = "Block has active readers"};
+    }
 
     fs::remove(BlockPath(parent_, *block), ec);
     if (ec) {
@@ -116,9 +121,25 @@ class BlockManager : public IBlockManager {
     return Error::kOk;
   }
 
+  core::Result<async::IAsyncReader::SPtr> BeginRead(const BlockSPtr& block, AsyncReaderParameters params) override {
+    std::shared_ptr<async::IAsyncReader> reader = BuildAsyncReader(*block, std::move(params));
+
+    auto& readers = RemoveDeadReaders(block);
+    readers.push_back(reader);
+
+    return {reader, Error::kOk};
+  }
+
  private:
+  std::vector<std::weak_ptr<async::IAsyncReader>>& RemoveDeadReaders(const BlockSPtr& block) {
+    auto& readers = current_readers_[block->begin_time()];
+    std::erase_if(readers, [](auto reader) { return !reader.lock() || reader.lock()->is_done(); });
+    return readers;
+  }
+
   fs::path parent_;
   BlockSPtr latest_loaded_;
+  std::map<Timestamp, std::vector<std::weak_ptr<async::IAsyncReader>>> current_readers_;
 };
 
 std::unique_ptr<IBlockManager> IBlockManager::Build(const std::filesystem::path& parent) {

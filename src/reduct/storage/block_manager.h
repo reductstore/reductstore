@@ -10,6 +10,7 @@
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/storage/entry.pb.h"
+#include "reduct/storage/async_reader.h"
 
 namespace reduct::storage {
 
@@ -55,7 +56,14 @@ class IBlockManager {
    */
   virtual core::Error FinishBlock(const BlockSPtr& block) const = 0;
 
-  virtual core::Error RemoveBlock(const BlockSPtr& block) const = 0;
+  /**
+   * Remove block from disk
+   * @param block
+   * @return
+   */
+  virtual core::Error RemoveBlock(const BlockSPtr& block) = 0;
+
+  virtual core::Result<async::IAsyncReader::SPtr> BeginRead(const BlockSPtr& block, AsyncReaderParameters params) = 0;
   /**
    * Factory method
    * @param parent

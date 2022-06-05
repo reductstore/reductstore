@@ -177,7 +177,7 @@ class Entry : public IEntry {
     return {std::move(writer), Error::kOk};
   }
 
-  [[nodiscard]] Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const override {
+  [[nodiscard]] Result<async::IAsyncReader::SPtr> BeginRead(const Time& time) const override {
     const auto proto_ts = FromTimePoint(time);
 
     LOG_DEBUG("Read a record for ts={}", TimeUtil::ToString(proto_ts));
@@ -221,10 +221,11 @@ class Entry : public IEntry {
       return {{}, {.code = 500, .message = "Record is broken"}};
     }
 
-    return {BuildAsyncReader(*block,
-                             AsyncReaderParameters{
-                                 .path = block_path, .record_index = record_index, .chunk_size = kDefaultMaxReadChunk}),
-            Error::kOk};
+    return block_manager_->BeginRead(block, AsyncReaderParameters{
+                                                .path = block_path,
+                                                .record_index = record_index,
+                                                .chunk_size = kDefaultMaxReadChunk,
+                                            });
   }
 
   [[nodiscard]] core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const override {

@@ -60,7 +60,7 @@ class IEntry {
    * @param time timestamp of record to read
    * @return async reader or error (404 - if no record found, 500 some internal errors)
    */
-  [[nodiscard]] virtual core::Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncReader::SPtr> BeginRead(const Time& time) const = 0;
 
   /**
    * @brief List records for the time interval [start, stop)

@@ -143,7 +143,7 @@ class IWriteEntryCallback {
  */
 class IReadEntryCallback {
  public:
-  using Response = async::IAsyncReader::UPtr;
+  using Response = async::IAsyncReader::SPtr;
   struct Request {
     std::string_view bucket_name;
     std::string_view entry_name;
