@@ -2,7 +2,8 @@
 
 **Features**:
 
-* Filter unfinished records in GET /b/:bucket/:entry/list endpoint, [PR-106](https://github.com/reduct-storage/reduct-storage/pull/106)
+* Filter unfinished records in GET /b/:bucket/:entry/list
+  endpoint, [PR-106](https://github.com/reduct-storage/reduct-storage/pull/106)
 * Add content-type header to responses, [PR-107](https://github.com/reduct-storage/reduct-storage/pull/107)
 * Add `max_block_records` to bucket settings, [PR-108](https://github.com/reduct-storage/reduct-storage/pull/108)
 
@@ -11,8 +12,11 @@
 * Fix Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
 * Fix wasting disk space in FSX filesystem, [PR-100](https://github.com/reduct-storage/reduct-storage/pull/100)
 * Fix base path in server url, [PR-105](https://github.com/reduct-storage/reduct-storage/pull/105)
-* Fix updating record state in asynchronous write operation, [PR-109](https://github.com/reduct-storage/reduct-storage/pull/109)
-* Fix SEGFAULT when entry removed but async writer is alive, [PR-110](https://github.com/reduct-storage/reduct-storage/pull/110)
+* Fix updating record state in asynchronous write
+  operation, [PR-109](https://github.com/reduct-storage/reduct-storage/pull/109)
+* Fix SEGFAULT when entry removed but async writer is
+  alive, [PR-110](https://github.com/reduct-storage/reduct-storage/pull/110)
+* Fix removing a block with active readers or writers [PR-111](ttps://github.com/reduct-storage/reduct-storage/pull/111)
 
 **Other**:
 
