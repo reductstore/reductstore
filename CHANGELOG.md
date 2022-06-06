@@ -16,7 +16,8 @@
   operation, [PR-109](https://github.com/reduct-storage/reduct-storage/pull/109)
 * Fix SEGFAULT when entry removed but async writer is
   alive, [PR-110](https://github.com/reduct-storage/reduct-storage/pull/110)
-* Fix removing a block with active readers or writers [PR-111](https://github.com/reduct-storage/reduct-storage/pull/111)
+* Fix removing a block with active readers or writers, [PR-111](https://github.com/reduct-storage/reduct-storage/pull/111)
+* Fix load bucket settings from disk, [PR-112](https://github.com/reduct-storage/reduct-storage/pull/112)
 
 **Other**:
 
