@@ -36,6 +36,8 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   settings.set_max_block_size(100);
   settings.set_quota_type(BucketSettings::FIFO);
   settings.set_quota_size(1000);
+  settings.set_max_block_records(2000);
+
   auto bucket = IBucket::Build(dir_path / "bucket", settings);
 
   REQUIRE(bucket->GetOrCreateEntry("entry1").error == Error::kOk);
