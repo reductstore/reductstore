@@ -70,6 +70,7 @@ class Bucket : public IBucket {
 
     settings_.ParseFromIstream(&settings_file);
 
+
     for (const auto& folder : fs::directory_iterator(full_path_)) {
       if (fs::is_directory(folder)) {
         auto entry_name = folder.path().filename().string();
@@ -77,6 +78,7 @@ class Bucket : public IBucket {
             .name = folder.path().filename().string(),
             .path = folder.path().parent_path().string(),
             .max_block_size = settings_.max_block_size(),
+            .max_block_records = settings_.max_block_records(),
         });
         if (entry) {
           entry_map_[entry_name] = std::move(entry);
