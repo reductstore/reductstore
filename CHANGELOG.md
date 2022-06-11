@@ -24,6 +24,7 @@
 * Optimise write operation, [PR-96](https://github.com/reduct-storage/reduct-storage/pull/96)
 * Add benchmarks and refactor block management [PR-99](https://github.com/reduct-storage/reduct-storage/pull/99)
 * Add curl to deploy image [PR-104](https://github.com/reduct-storage/reduct-storage/pull/104)
+* Disable SSL verification in API tests, [PR-113](https://github.com/reduct-storage/reduct-storage/pull/113)
 
 ## Release 0.5.1 (2022-05-24)
 

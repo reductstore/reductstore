@@ -1,11 +1,9 @@
 import json
 
-import requests
 
-
-def test_get_info(base_url, headers):
+def test_get_info(base_url, session):
     """Should provide information about the storage"""
-    resp = requests.get(f'{base_url}/info', headers=headers)
+    resp = session.get(f'{base_url}/info')
 
     assert resp.status_code == 200
     data = json.loads(resp.content)
@@ -21,9 +19,9 @@ def test_get_info(base_url, headers):
     assert resp.headers['Content-Type'] == "application/json"
 
 
-def test_get_list_of_buckets(base_url, headers):
+def test_get_list_of_buckets(base_url, session):
     """Should provide information about the storage"""
-    resp = requests.get(f'{base_url}/list', headers=headers)
+    resp = session.get(f'{base_url}/list')
 
     assert resp.status_code == 200
     data = json.loads(resp.content)
@@ -38,10 +36,10 @@ def test_get_list_of_buckets(base_url, headers):
     assert resp.headers['Content-Type'] == "application/json"
 
 
-def test_get_wrong_path(base_url, headers):
+def test_get_wrong_path(base_url, session):
     """Should return 404"""
-    resp = requests.get(f'{base_url}/NOTEXIST', headers=headers)
+    resp = session.get(f'{base_url}/NOTEXIST')
     assert resp.status_code == 404
 
-    resp = requests.get(f'{base_url}/NOTEXIST/XXXX', headers=headers)
+    resp = session.get(f'{base_url}/NOTEXIST/XXXX')
     assert resp.status_code == 404
