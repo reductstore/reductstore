@@ -5,7 +5,7 @@
 
 
 Reduct Storage aims to solve a problem of storing data in a case where you need to write some data intensively and read it accidentally by some time interval. 
-The storage engine has HTTP API and stores data as a history of blobs. Read more [here](https://docs.reduct-storage.dev/).
+The storage engine has a simple HTTP API and stores data as a history of blobs. Read more [here](https://docs.reduct-storage.dev/).
 
 ## Features:
 
