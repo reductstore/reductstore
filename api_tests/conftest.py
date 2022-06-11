@@ -33,7 +33,7 @@ def _session(base_url):
         resp = session.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {hasher.hexdigest()}'})
         if resp.status_code == 200:
             session.headers['Authorization'] = f'Bearer {resp.json()["access_token"]}'
-
-        raise RuntimeError(f'Failed to get access: {resp.content}')
+        else:
+            raise RuntimeError(f'Failed to get access: {resp.content}')
 
     return session
