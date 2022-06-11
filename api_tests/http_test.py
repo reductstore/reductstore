@@ -1,11 +1,10 @@
 """Test basic HTTP things"""
-import requests
 
 
-def test_allow_origin(base_url, headers):
+def test_allow_origin(base_url, session):
     """Should allow origin in header"""
-    headers['origin'] = 'http://test.com'
-    resp = requests.get(f'{base_url}/info', headers=headers)
+    session.headers['origin'] = 'http://test.com'
+    resp = session.get(f'{base_url}/info')
 
     assert resp.status_code == 200
-    assert resp.headers['access-control-allow-origin'] == headers['origin']
+    assert resp.headers['access-control-allow-origin'] == session.headers['origin']

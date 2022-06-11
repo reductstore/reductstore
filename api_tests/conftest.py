@@ -21,16 +21,19 @@ def get_detail(resp) -> str:
     return json.loads(resp.content)["detail"]
 
 
-@pytest.fixture(name='headers')
-def _headers(base_url) -> dict:
-    resp = requests.get(f'{base_url}/info')
-    if resp.status_code == 200:
-        # No JWT needed
-        return {}
-    elif resp.status_code == 401:
-        hasher = hashlib.sha256(bytes(os.getenv("API_TOKEN"), 'utf-8'))
-        resp = requests.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {hasher.hexdigest()}'})
-        if resp.status_code == 200:
-            return {'Authorization': f'Bearer {resp.json()["access_token"]}'}
+@pytest.fixture(name="session")
+def _session(base_url):
+    session = requests.session()
+    session.verify = False
+    session.trust_env = False
 
-    raise RuntimeError(f'Failed to get access: {resp.content}')
+    resp = session.get(f'{base_url}/info')
+    if resp.status_code == 401:
+        hasher = hashlib.sha256(bytes(os.getenv("API_TOKEN"), 'utf-8'))
+        resp = session.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {hasher.hexdigest()}'})
+        if resp.status_code == 200:
+            session.headers['Authorization'] = f'Bearer {resp.json()["access_token"]}'
+
+        raise RuntimeError(f'Failed to get access: {resp.content}')
+
+    return session
