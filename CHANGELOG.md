@@ -18,6 +18,7 @@
   alive, [PR-110](https://github.com/reduct-storage/reduct-storage/pull/110)
 * Fix removing a block with active readers or writers, [PR-111](https://github.com/reduct-storage/reduct-storage/pull/111)
 * Fix loading bucket settings from disk, [PR-112](https://github.com/reduct-storage/reduct-storage/pull/112)
+* Fix 404 error for react routes, [PR-116](https://github.com/reduct-storage/reduct-storage/pull/116)
 
 **Other**:
 

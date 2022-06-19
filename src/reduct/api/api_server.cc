@@ -452,12 +452,30 @@ class ApiServer : public IApiServer {
     };
 
     auto handler = BasicApiHandler<SSL, Callback>(res, req, "");
-    auto ret = console_->Read(path);
-    handler.Run(std::move(ret), [&base_path](typename Callback::Response resp) {
-      // subtitue RS_API_BASE_PATH to make web console work
+
+    auto replace_base_path  = [&base_path](typename Callback::Response resp) {
+      // substitute RS_API_BASE_PATH to make web console work
       resp = std::regex_replace(resp, std::regex("/ui/"), fmt::format("{}ui/", base_path));
       return resp;
-    });
+    };
+
+    auto ret = console_->Read(path);
+    switch (ret.error.code) {
+      case 0: {
+        auto content = std::regex_replace(ret.result, std::regex("/ui/"), fmt::format("{}ui/", base_path));
+        res->end(std::move(content));
+        handler.Run(std::move(ret), replace_base_path);
+        break;
+      }
+      case 404: {
+        ret = console_->Read("index.html");
+        handler.Run(std::move(ret), replace_base_path);
+        break;
+      }
+      default: {
+        handler.SendError(ret.error);
+      }
+    }
 
     co_return;
   }
