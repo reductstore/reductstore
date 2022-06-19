@@ -21,6 +21,7 @@ You can use this method to get stats of the storage and check its version.
     "defaults":{
     "bucket":{                  // default settings for a new bucket
         "max_block_size": "integer",            // max block content_length in bytes
+        "max_block_records": "integer",         // max number of records in a block
         "quota_type": Union["NONE", "FIFO"],    // quota type
         "quota_size": "integer"                 // quota content_length in bytes
     }
@@ -47,6 +48,20 @@ You can use this method to browse the buckets of the storage.
 
       }
     ]
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger method="head" path=" " baseUrl="/alive " summary="Check if the storage engine is working" %}
+{% swagger-description %}
+You can use this method for health checks in Docker or Kubernetes environment
+{% endswagger-description %}
+
+{% swagger-response status="200: OK" description="" %}
+```javascript
+{
+    // Response
 }
 ```
 {% endswagger-response %}
