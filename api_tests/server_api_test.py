@@ -43,3 +43,9 @@ def test_get_wrong_path(base_url, session):
 
     resp = session.get(f'{base_url}/NOTEXIST/XXXX')
     assert resp.status_code == 404
+
+
+def test_head_alive(base_url, session):
+    """Should provide HEAD /alive method"""
+    resp = session.head(f'{base_url}/alive')
+    assert resp.status_code == 200
