@@ -77,7 +77,8 @@ class ApiServer : public IApiServer {
       base_path.push_back('/');
     }
     // Server API
-    app.get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
+    app.head(base_path + "alive", [this](auto *res, auto *req) { Alive(res, req); })
+        .get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
         .get(base_path + "list", [this](auto *res, auto *req) { List(res, req); })
         // Auth API
         .post(base_path + "auth/refresh", [this](auto *res, auto *req) { RefreshToken(res, req); })
@@ -154,6 +155,17 @@ class ApiServer : public IApiServer {
         .run();
   }
   // Server API
+  /**
+   * HEAD /alive
+   */
+  template <bool SSL>
+  VoidTask Alive(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
+    auto handler = BasicApiHandler<SSL, IInfoCallback>(res, req);
+    handler.PrepareHeaders(false, "");
+    res->end({});
+    co_return;
+  }
+
   /**
    * GET /info
    */
@@ -453,7 +465,7 @@ class ApiServer : public IApiServer {
 
     auto handler = BasicApiHandler<SSL, Callback>(res, req, "");
 
-    auto replace_base_path  = [&base_path](typename Callback::Response resp) {
+    auto replace_base_path = [&base_path](typename Callback::Response resp) {
       // substitute RS_API_BASE_PATH to make web console work
       resp = std::regex_replace(resp, std::regex("/ui/"), fmt::format("{}ui/", base_path));
       return resp;
