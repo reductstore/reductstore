@@ -16,8 +16,8 @@ inline Task<IRefreshToken::Result> OnRefreshToken(ITokenAuthentication* auth, IR
 TEST_CASE("auth::TokenAuthorization should return 401 if head is bad") {
   auto auth = ITokenAuthentication::Build("xxxxxxx");
 
-  REQUIRE(auth->Check("") == Error{.code = 401, .message = "No bearer token in response header"});
-  REQUIRE(auth->Check("xxx") == Error{.code = 401, .message = "No bearer token in response header"});
+  REQUIRE(auth->Check("") == Error{.code = 401, .message = "No bearer token in request header"});
+  REQUIRE(auth->Check("xxx") == Error{.code = 401, .message = "No bearer token in request header"});
   REQUIRE(auth->Check("Bearer AABBCC") == Error{.code = 401, .message = "Invalid token"});
 }
 
