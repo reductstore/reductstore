@@ -45,7 +45,7 @@ class JwtAuthentication : public ITokenAuthentication {
 
   Error Check(std::string_view authorization_header) const override {
     if (!authorization_header.starts_with("Bearer ")) {
-      return {.code = 401, .message = "No bearer token in response header"};
+      return {.code = 401, .message = "No bearer token in request header"};
     }
 
     auto access_token = authorization_header.substr(7, authorization_header.size() - 7);
