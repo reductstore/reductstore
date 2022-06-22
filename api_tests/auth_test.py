@@ -43,4 +43,4 @@ def test__empty_token(base_url, session):
     """should use Bearer token"""
     resp = session.get(f'{base_url}/info', headers={'Authorization': ''})
     assert resp.status_code == 401
-    assert get_detail(resp) == "No bearer token in response header"
+    assert get_detail(resp) == "No bearer token in request header"
