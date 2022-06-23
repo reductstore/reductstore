@@ -92,7 +92,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
   };
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
-  SECTION("Update full settings") {
+  SECTION("should update full settings") {
     BucketSettings settings;
     settings.set_max_block_size(10);
     settings.set_quota_type(BucketSettings::FIFO);
@@ -110,7 +110,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
     REQUIRE(info.settings() == change_req.new_settings);
   }
 
-  SECTION("Update part of settings") {
+  SECTION("should update part of settings") {
     BucketSettings settings;
     settings.set_quota_type(BucketSettings::FIFO);
 
