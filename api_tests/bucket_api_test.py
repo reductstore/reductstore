@@ -94,7 +94,7 @@ def test_update_bucket_ok(base_url, session, bucket_name):
     """Should update setting of the bucket"""
     session.post(f'{base_url}/b/{bucket_name}')
 
-    new_settings = {"max_block_size": '1000', "quota_type": "FIFO", "quota_size": '500'}
+    new_settings: dict = {"max_block_size": '1000', "quota_type": "FIFO"}
     resp = session.put(f'{base_url}/b/{bucket_name}',
                        json=new_settings)
     assert resp.status_code == 200
@@ -102,6 +102,8 @@ def test_update_bucket_ok(base_url, session, bucket_name):
     resp = session.get(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 200
     data = json.loads(resp.content)
+
+    new_settings.update({"quota_size": '0', 'max_block_records': '1024'})
     assert data['settings'] == new_settings
 
 
