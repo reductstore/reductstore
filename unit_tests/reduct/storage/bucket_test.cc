@@ -162,13 +162,14 @@ TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]"
   auto bucket = IBucket::Build(dir_path / "bucket");
 
   BucketSettings settings;
-  settings.set_max_block_size(600);
   settings.set_quota_type(BucketSettings::FIFO);
   settings.set_quota_size(1000);
 
   REQUIRE(bucket->SetSettings(settings) == Error::kOk);
-  REQUIRE(bucket->GetSettings() == settings);
+  REQUIRE(bucket->GetSettings().quota_size() == settings.quota_size());
+  REQUIRE(bucket->GetSettings().quota_type() == settings.quota_type());
 
   bucket = IBucket::Restore(dir_path / "bucket");
-  REQUIRE(bucket->GetSettings() == settings);
+  REQUIRE(bucket->GetSettings().quota_size() == settings.quota_size());
+  REQUIRE(bucket->GetSettings().quota_type() == settings.quota_type());
 }

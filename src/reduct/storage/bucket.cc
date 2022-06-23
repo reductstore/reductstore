@@ -24,30 +24,13 @@ using google::protobuf::util::TimeUtil;
 class Bucket : public IBucket {
  public:
   explicit Bucket(fs::path full_path, BucketSettings settings)
-      : full_path_(std::move(full_path)),
-        name_(full_path_.filename().string()),
-        settings_(std::move(settings)),
-        entry_map_() {
+      : full_path_(std::move(full_path)), name_(full_path_.filename().string()), entry_map_() {
     if (fs::exists(full_path_)) {
       throw std::runtime_error(fmt::format("Path '{}' already exists", full_path_.string()));
     }
 
     const auto& default_settings = Bucket::GetDefaults();
-    if (!settings_.has_max_block_size()) {
-      settings_.set_max_block_size(default_settings.max_block_size());
-    }
-
-    if (!settings_.has_quota_type()) {
-      settings_.set_quota_type(default_settings.quota_type());
-    }
-
-    if (!settings_.has_quota_size()) {
-      settings_.set_quota_size(default_settings.quota_size());
-    }
-
-    if (!settings_.has_max_block_records()) {
-      settings_.set_max_block_records(default_settings.max_block_records());
-    }
+    settings_ = InitSettings(std::move(settings), default_settings);
 
     fs::create_directories(full_path_);
     auto err = SaveDescriptor();
@@ -69,7 +52,6 @@ class Bucket : public IBucket {
     }
 
     settings_.ParseFromIstream(&settings_file);
-
 
     for (const auto& folder : fs::directory_iterator(full_path_)) {
       if (fs::is_directory(folder)) {
@@ -156,7 +138,7 @@ class Bucket : public IBucket {
   }
 
   Error SetSettings(BucketSettings settings) override {
-    settings_ = std::move(settings);
+    settings_ = InitSettings(std::move(settings), settings_);
     return SaveDescriptor();
   }
 
@@ -194,6 +176,26 @@ class Bucket : public IBucket {
   [[nodiscard]] const BucketSettings& GetSettings() const override { return settings_; }
 
  private:
+  static BucketSettings InitSettings(BucketSettings&& settings, const BucketSettings& default_settings) {
+    if (!settings.has_max_block_size()) {
+      settings.set_max_block_size(default_settings.max_block_size());
+    }
+
+    if (!settings.has_quota_type()) {
+      settings.set_quota_type(default_settings.quota_type());
+    }
+
+    if (!settings.has_quota_size()) {
+      settings.set_quota_size(default_settings.quota_size());
+    }
+
+    if (!settings.has_max_block_records()) {
+      settings.set_max_block_records(default_settings.max_block_records());
+    }
+
+    return settings;
+  }
+
   core::Error SaveDescriptor() const {
     const auto settings_path = full_path_ / kSettingsName;
     std::ofstream settings_file(settings_path, std::ios::binary);
