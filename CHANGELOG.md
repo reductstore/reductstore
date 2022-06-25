@@ -1,3 +1,9 @@
+## Release 0.6.1 (2022-06-25)
+
+**Other**:
+
+* Use Web Console v0.2.1
+
 ## Release 0.6.0 (2022-06-25)
 
 **Features**:
