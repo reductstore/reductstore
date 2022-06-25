@@ -5,6 +5,7 @@
 #include <App.h>
 
 #include <filesystem>
+#include <regex>
 
 #include "common.h"
 #include "reduct/async/sleep.h"
@@ -76,7 +77,8 @@ class ApiServer : public IApiServer {
       base_path.push_back('/');
     }
     // Server API
-    app.get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
+    app.head(base_path + "alive", [this](auto *res, auto *req) { Alive(res, req); })
+        .get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
         .get(base_path + "list", [this](auto *res, auto *req) { List(res, req); })
         // Auth API
         .post(base_path + "auth/refresh", [this](auto *res, auto *req) { RefreshToken(res, req); })
@@ -114,15 +116,15 @@ class ApiServer : public IApiServer {
                res->end({});
              })
         .get(base_path + "ui/*",
-             [this](auto *res, auto *req) {
+             [this, base_path](auto *res, auto *req) {
                std::string path(req->getUrl());
-               path = path.substr(4, path.size());
+               path = path.substr(base_path.size() + 3, path.size());
 
                if (path.empty()) {
                  path = "index.html";
                }
 
-               UiRequest(res, req, path);
+               UiRequest(res, req, base_path, path);
              })
         .any("/*",
              [](auto *res, auto *req) {
@@ -132,7 +134,7 @@ class ApiServer : public IApiServer {
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {
                   if (sock) {
-                    LOG_INFO("Run HTTP server on http{}://{}:{}", SSL ? "s" : "", host, port);
+                    LOG_INFO("Run HTTP server on http{}://{}:{}{}", SSL ? "s" : "", host, port, base_path);
 
                     std::thread stopper([sock, &running] {
                       // Checks running flag and closes the socket to stop the app gracefully
@@ -153,6 +155,17 @@ class ApiServer : public IApiServer {
         .run();
   }
   // Server API
+  /**
+   * HEAD /alive
+   */
+  template <bool SSL>
+  VoidTask Alive(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
+    auto handler = BasicApiHandler<SSL, IInfoCallback>(res, req);
+    handler.PrepareHeaders(false, "");
+    res->end({});
+    co_return;
+  }
+
   /**
    * GET /info
    */
@@ -383,6 +396,8 @@ class ApiServer : public IApiServer {
       aborted = true;
     });
 
+    handler.PrepareHeaders(true, "application/octet-stream");
+
     bool complete = false;
     while (!aborted && !complete) {
       co_await Sleep(async::kTick);  // switch context before start to read
@@ -412,6 +427,7 @@ class ApiServer : public IApiServer {
     }
 
     LOG_DEBUG("Sent {} {}/{} kB", ts, res->getWriteOffset() / 1024, reader->size() / 1024);
+
     co_return;
   }
 
@@ -439,16 +455,39 @@ class ApiServer : public IApiServer {
   }
 
   template <bool SSL = false>
-  async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string path) const {
+  async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string_view base_path,
+                            std::string path) const {
     struct Callback {
       struct Request {};
       using Response = std::string;
       using Result = core::Result<Response>;
     };
 
-    auto handler = BasicApiHandler<SSL, Callback>(res, req);
+    auto handler = BasicApiHandler<SSL, Callback>(res, req, "");
+
+    auto replace_base_path = [&base_path](typename Callback::Response resp) {
+      // substitute RS_API_BASE_PATH to make web console work
+      resp = std::regex_replace(resp, std::regex("/ui/"), fmt::format("{}ui/", base_path));
+      return resp;
+    };
+
     auto ret = console_->Read(path);
-    handler.Run(std::move(ret), [](typename Callback::Response resp) { return resp; });
+    switch (ret.error.code) {
+      case 0: {
+        auto content = std::regex_replace(ret.result, std::regex("/ui/"), fmt::format("{}ui/", base_path));
+        res->end(std::move(content));
+        handler.Run(std::move(ret), replace_base_path);
+        break;
+      }
+      case 404: {
+        ret = console_->Read("index.html");
+        handler.Run(std::move(ret), replace_base_path);
+        break;
+      }
+      default: {
+        handler.SendError(ret.error);
+      }
+    }
 
     co_return;
   }

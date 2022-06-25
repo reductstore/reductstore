@@ -92,19 +92,39 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
   };
   REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
 
-  BucketSettings settings;
-  settings.set_max_block_size(10);
-  settings.set_quota_type(BucketSettings::FIFO);
-  settings.set_quota_size(1000);
-  IUpdateBucketCallback::Request change_req{
-      .bucket_name = "bucket",
-      .new_settings = settings,
-  };
-  REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
+  SECTION("should update full settings") {
+    BucketSettings settings;
+    settings.set_max_block_size(10);
+    settings.set_quota_type(BucketSettings::FIFO);
+    settings.set_quota_size(1000);
+    settings.set_max_block_records(500);
 
-  auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
-  REQUIRE(err == Error::kOk);
-  REQUIRE(info.settings() == change_req.new_settings);
+    IUpdateBucketCallback::Request change_req{
+        .bucket_name = "bucket",
+        .new_settings = settings,
+    };
+
+    REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
+    auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+    REQUIRE(err == Error::kOk);
+    REQUIRE(info.settings() == change_req.new_settings);
+  }
+
+  SECTION("should update part of settings") {
+    BucketSettings settings;
+    settings.set_quota_type(BucketSettings::FIFO);
+
+    IUpdateBucketCallback::Request change_req{
+        .bucket_name = "bucket",
+        .new_settings = settings,
+    };
+
+    REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
+    auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+    REQUIRE(err == Error::kOk);
+    REQUIRE(info.settings().max_block_size() == MakeDefaultBucketSettings().max_block_size());
+    REQUIRE(info.settings().quota_type() == change_req.new_settings.quota_type());
+  }
 }
 
 TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {

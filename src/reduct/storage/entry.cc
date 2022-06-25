@@ -2,12 +2,10 @@
 
 #include "reduct/storage/entry.h"
 
-#include <fcntl.h>
 #include <fmt/core.h>
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
-#include <fstream>
 
 #include "reduct/async/io.h"
 #include "reduct/config.h"
@@ -16,7 +14,7 @@
 #include "reduct/proto/storage/entry.pb.h"
 #include "reduct/storage/async_reader.h"
 #include "reduct/storage/async_writer.h"
-#include "reduct/storage/block_helpers.h"
+#include "reduct/storage/block_manager.h"
 
 namespace reduct::storage {
 
@@ -38,21 +36,21 @@ class Entry : public IEntry {
    */
   explicit Entry(Options options) : options_(std::move(options)), block_set_(), size_counter_{}, record_counter_{} {
     full_path_ = options_.path / options_.name;
+    block_manager_ = IBlockManager::Build(full_path_);
     if (!fs::create_directories(full_path_)) {
       for (const auto& file : fs::directory_iterator(full_path_)) {
         auto& path = file.path();
         if (fs::is_regular_file(file) && path.extension() == kMetaExt) {
           try {
             auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoul(path.stem().c_str()));
-            proto::Block block;
-            auto err = LoadBlockByTimestamp(full_path_, ts, &block);
+            auto [block, err] = block_manager_->LoadBlock(ts);
             if (err) {
               LOG_ERROR("{}", err.ToString());
               continue;
             }
             block_set_.insert(ts);
-            size_counter_ += block.size();
-            record_counter_ += block.records_size();
+            size_counter_ += block->size();
+            record_counter_ += block->records_size();
           } catch (std::exception& err) {
             LOG_ERROR("Wrong filename format {}: {}", path.string(), err.what());
           }
@@ -61,100 +59,115 @@ class Entry : public IEntry {
     }
   }
 
-  [[nodiscard]] Result<async::IAsyncWriter::UPtr> BeginWrite(const Time& time, size_t size) override {
+  [[nodiscard]] Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t content_size) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
+    RecordType type = RecordType::kLatest;
 
     const auto proto_ts = FromTimePoint(time);
 
-    RecordType type = RecordType::kLatest;
-    proto::Block block;
-    if (!block_set_.empty()) {
-      // Load last block if it is exists
-      if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
+    auto start_new_block = [this](const Timestamp& ts, size_t content_size) -> Result<IBlockManager::BlockSPtr> {
+      auto [block, err] = block_manager_->StartBlock(ts, std::max(options_.max_block_size, content_size));
+      if (err) {
         return {{}, err};
       }
+
+      block_set_.insert(block->begin_time());
+      return {block, Error::kOk};
+    };
+
+    auto get_block = [this, content_size, &start_new_block](auto ts) {
+      if (!block_set_.empty()) {
+        // Load last block if it exists
+        return block_manager_->LoadBlock(*block_set_.rbegin());
+      } else {
+        return start_new_block(ts, content_size);
+      }
+    };
+
+    auto [block, get_err] = get_block(proto_ts);
+    if (get_err) {
+      return {{}, std::move(get_err)};
     }
 
-    if (block.has_latest_record_time() && block.latest_record_time() >= proto_ts) {
+    if (block->has_latest_record_time() && block->latest_record_time() >= proto_ts) {
       LOG_DEBUG("Timestamp {} is belated. Finding proper block", TimeUtil::ToString(proto_ts));
 
+      Result<IBlockManager::BlockSPtr> ret;
       if (*block_set_.begin() > proto_ts) {
         LOG_DEBUG("Timestamp earlier than first record");
         type = RecordType::kBelatedFirst;
-        block = proto::Block();  // add a new block
+        ret = start_new_block(proto_ts, content_size);
       } else {
         type = RecordType::kBelated;
-        auto err = FindBlock(proto_ts, &block);
-        if (err) {
-          return {{}, err};
-        }
+        ret = FindBlock(proto_ts);
       }
-    }
-    if (!block.has_begin_time()) {
-      LOG_DEBUG("First record_entry for current block");
-      block.mutable_begin_time()->CopyFrom(proto_ts);
+
+      if (ret.error) {
+        return {{}, ret.error};
+      }
+      block = ret.result;
     }
 
-    if (type == RecordType::kLatest && block.size() > options_.max_block_size) {
-      LOG_DEBUG("Block {} is full. Create a new one", TimeUtil::TimestampToMicroseconds(block.begin_time()));
-      auto ret = StartNextBlock(proto_ts);
+    if (!block->has_begin_time()) {
+      LOG_DEBUG("First record_entry for current block");
+      block->mutable_begin_time()->CopyFrom(proto_ts);
+    }
+
+    auto has_no_space = block->size() + content_size > options_.max_block_size;
+    auto too_many_records = block->records_size() + 1 > options_.max_block_records;
+
+    if (type == RecordType::kLatest && (has_no_space || too_many_records)) {
+      LOG_DEBUG("Create a new block");
+      if (auto err = block_manager_->FinishBlock(block)) {
+        LOG_ERROR("Failed to finish the current block");
+        return {{}, err};
+      }
+
+      auto ret = start_new_block(proto_ts, content_size);
       if (ret.error) {
-        LOG_ERROR("Failed create a next block");
+        LOG_ERROR("Failed to create a next block");
         return {{}, ret.error};
       }
 
       block = std::move(ret.result);
     }
 
-    auto block_path = BlockPath(full_path_, block);
-    LOG_DEBUG("Write a record_entry for ts={} ({} kB) to {}", TimeUtil::ToString(proto_ts), size / 1024,
-              block_path.string());
-
-    if (block.records_size() == 0) {
-      // allocate the whole block
-      int fd = open(block_path.c_str(), O_WRONLY | O_RDONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-      if (fd < 0) {
-        return {{}, {.code = 500, .message = "Failed create a new block for writing"}};
-      }
-      if (posix_fallocate(fd, 0, options_.max_block_size) != 0) {
-        return {{}, {.code = 500, .message = fmt::format("Failed allocate a new block: {}", std::strerror(errno))}};
-      }
-
-      close(fd);
-    }
-
     // Update writing block
-    auto record = block.add_records();
+    auto record = block->add_records();
     record->set_state(proto::Record::kStarted);
     record->mutable_timestamp()->CopyFrom(proto_ts);
-    record->set_begin(block.size());
-    record->set_end(block.size() + size);
+    record->set_begin(block->size());
+    record->set_end(block->size() + content_size);
 
-    block.set_size(block.size() + size);
+    block->set_size(block->size() + content_size);
 
     // Update counters
     record_counter_++;
-    size_counter_ += size;
+    size_counter_ += content_size;
 
     switch (type) {
       case RecordType::kLatest:
-        block.mutable_latest_record_time()->CopyFrom(proto_ts);
+        block->mutable_latest_record_time()->CopyFrom(proto_ts);
         break;
       case RecordType::kBelatedFirst:
-        block.mutable_begin_time()->CopyFrom(proto_ts);
+        block->mutable_begin_time()->CopyFrom(proto_ts);
         break;
       case RecordType::kBelated:
         break;
     }
 
-    return {
-        BuildAsyncWriter(
-            block, {.path = BlockPath(full_path_, block), .record_index = block.records_size() - 1, .size = size}),
-        SaveBlock(block),
-    };
+    if (auto err = block_manager_->SaveBlock(block)) {
+      return {{}, std::move(err)};
+    }
+
+    return block_manager_->BeginWrite(block, {
+                                                 .path = BlockPath(full_path_, *block),
+                                                 .record_index = block->records_size() - 1,
+                                                 .size = content_size,
+                                             });
   }
 
-  [[nodiscard]] Result<async::IAsyncReader::UPtr> BeginRead(const Time& time) const override {
+  [[nodiscard]] Result<async::IAsyncReader::SPtr> BeginRead(const Time& time) const override {
     const auto proto_ts = FromTimePoint(time);
 
     LOG_DEBUG("Read a record for ts={}", TimeUtil::ToString(proto_ts));
@@ -163,24 +176,19 @@ class Entry : public IEntry {
       return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
-    proto::Block block;
-    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
-      return {{}, err};
+    if (auto err = CheckLatestRecord(proto_ts)) {
+      return {{}, std::move(err)};
     }
 
-    if (block.latest_record_time() < proto_ts) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}};
-    }
-
-    auto err = FindBlock(proto_ts, &block);
+    auto [block, err] = FindBlock(proto_ts);
     if (err) {
       LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(proto_ts));
       return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
     }
 
     int record_index = -1;
-    for (int i = 0; i < block.records_size(); ++i) {
-      const auto& current_record = block.records(i);
+    for (int i = 0; i < block->records_size(); ++i) {
+      const auto& current_record = block->records(i);
       if (current_record.timestamp() == proto_ts) {
         record_index = i;
         break;
@@ -191,10 +199,10 @@ class Entry : public IEntry {
       return {{}, {.code = 404, .message = "No records for this timestamp"}};
     }
 
-    auto block_path = BlockPath(full_path_, block);
+    auto block_path = BlockPath(full_path_, *block);
     LOG_DEBUG("Found block {} with needed record", block_path.string());
 
-    auto record = block.records(record_index);
+    auto record = block->records(record_index);
     if (record.state() == proto::Record::kStarted) {
       return {{}, {.code = 425, .message = "Record is still being written"}};
     }
@@ -203,13 +211,14 @@ class Entry : public IEntry {
       return {{}, {.code = 500, .message = "Record is broken"}};
     }
 
-    return {BuildAsyncReader(block, AsyncReaderParameters{.path = BlockPath(full_path_, block),
-                                                          .record_index = record_index,
-                                                          .chunk_size = kDefaultMaxReadChunk}),
-            Error::kOk};
+    return block_manager_->BeginRead(block, AsyncReaderParameters{
+                                                .path = block_path,
+                                                .record_index = record_index,
+                                                .chunk_size = kDefaultMaxReadChunk,
+                                            });
   }
 
-  [[nodiscard]] ListResult List(const Time& start, const Time& stop) const override {
+  [[nodiscard]] core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const override {
     auto start_ts = FromTimePoint(start);
     auto stop_ts = FromTimePoint(stop);
     LOG_DEBUG("List records for interval: ({}, {})", TimeUtil::ToString(start_ts), TimeUtil::ToString(stop_ts));
@@ -226,12 +235,7 @@ class Entry : public IEntry {
       return {{}, {.code = 404, .message = "No records for time interval"}};
     }
 
-    proto::Block block;
-    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &block)) {
-      return {{}, err};
-    }
-
-    if (block.latest_record_time() < start_ts) {
+    if (auto err = CheckLatestRecord(start_ts)) {
       return {{}, {.code = 404, .message = "No records for time interval"}};
     }
 
@@ -247,15 +251,15 @@ class Entry : public IEntry {
 
     std::vector<RecordInfo> records;
     for (auto block_it = start_block; block_it != stop_block; ++block_it) {
-      proto::Block block;
-      auto err = LoadBlockByTimestamp(full_path_, *block_it, &block);
+      auto [block, err] = block_manager_->LoadBlock(*block_it);
       if (err) {
         return {{}, err};
       }
 
-      for (auto record_index = 0; record_index < block.records_size(); ++record_index) {
-        const auto& record = block.records(record_index);
-        if (record.timestamp() >= start_ts && record.timestamp() < stop_ts) {
+      for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
+        const auto& record = block->records(record_index);
+        if (record.timestamp() >= start_ts && record.timestamp() < stop_ts &&
+            record.state() == proto::Record::kFinished) {
           records.push_back(RecordInfo{.time = ToTimePoint(record.timestamp()), .size = record.end() - record.begin()});
         }
       }
@@ -274,30 +278,31 @@ class Entry : public IEntry {
       return {.code = 500, .message = "Tries to remove a block in empty entry"};
     }
 
-    proto::Block first_block;
-    if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.begin(), &first_block)) {
+    auto [first_block, err] = block_manager_->LoadBlock(*block_set_.begin());
+    if (err) {
       return err;
     }
 
-    fs::remove(BlockPath(full_path_, first_block));
-    fs::remove(BlockPath(full_path_, first_block, kMetaExt));
+    if (auto remove_err = block_manager_->RemoveBlock(first_block)) {
+      return remove_err;
+    }
 
-    size_counter_ -= first_block.size();
-    record_counter_ -= first_block.records_size();
-    block_set_.erase(first_block.begin_time());
+    size_counter_ -= first_block->size();
+    record_counter_ -= first_block->records_size();
+    block_set_.erase(first_block->begin_time());
     return {};
   }
 
   [[nodiscard]] EntryInfo GetInfo() const override {
     Timestamp oldest_record, latest_record;
     if (!block_set_.empty()) {
-      proto::Block latest_block;
-      if (auto err = LoadBlockByTimestamp(full_path_, *block_set_.rbegin(), &latest_block)) {
+      auto [latest_block, err] = block_manager_->LoadBlock(*block_set_.rbegin());
+      if (err) {
         LOG_ERROR("{}", err.ToString());
       }
 
       oldest_record = *block_set_.begin();
-      latest_record = latest_block.latest_record_time();
+      latest_record = latest_block->latest_record_time();
     }
 
     EntryInfo info;
@@ -314,18 +319,7 @@ class Entry : public IEntry {
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
  private:
-  Error SaveBlock(proto::Block block) {
-    block_set_.insert(block.begin_time());
-    return storage::SaveBlock(full_path_, std::move(block));
-  }
-
-  Result<proto::Block> StartNextBlock(const Timestamp& ts) {
-    proto::Block block;
-    block.mutable_begin_time()->CopyFrom(ts);
-    return {block, SaveBlock(std::move(block))};
-  }
-
-  Error FindBlock(Timestamp proto_ts, proto::Block* block) const {
+  Result<IBlockManager::BlockSPtr> FindBlock(Timestamp proto_ts) const {
     auto ts = block_set_.upper_bound(proto_ts);
     if (ts == block_set_.end()) {
       proto_ts = *block_set_.rbegin();
@@ -333,7 +327,7 @@ class Entry : public IEntry {
       proto_ts = *std::prev(ts);
     }
 
-    return LoadBlockByTimestamp(full_path_, proto_ts, block);
+    return block_manager_->LoadBlock(proto_ts);
   }
 
   static google::protobuf::Timestamp FromTimePoint(const Time& time) {
@@ -345,10 +339,24 @@ class Entry : public IEntry {
     return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
   }
 
+  Error CheckLatestRecord(const google::protobuf::Timestamp& proto_ts) const {
+    auto [block, err] = block_manager_->LoadBlock(*block_set_.rbegin());
+    if (err) {
+      return err;
+    }
+
+    if (block->latest_record_time() < proto_ts) {
+      return {.code = 404, .message = "No records for this timestamp"};
+    }
+
+    return Error::kOk;
+  }
+
   Options options_;
   fs::path full_path_;
 
   std::set<google::protobuf::Timestamp> block_set_;
+  std::shared_ptr<IBlockManager> block_manager_;
   size_t size_counter_;
   size_t record_counter_;
 };

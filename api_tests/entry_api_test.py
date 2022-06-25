@@ -1,102 +1,102 @@
-import hashlib
 import json
-import random
 
 import numpy as np
 import pytest
-import requests
 
 from conftest import get_detail
 
 
 @pytest.fixture(name='bucket')
-def _make_bucket_and_return_name(base_url, headers, bucket_name) -> str:
-    resp = requests.post(f'{base_url}/b/{bucket_name}', headers=headers)
+def _make_bucket_and_return_name(base_url, session, bucket_name) -> str:
+    resp = session.post(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 200
     return bucket_name
 
 
 @pytest.mark.parametrize("data,ts", [(b"some_data_1", 100), (b"some_data_2", 60), (b"some_data_3", 1000)])
-def test_read_write_entries_ok(base_url, headers, bucket, data, ts):
+def test_read_write_entries_ok(base_url, session, bucket, data, ts):
     """Should write few entries and read them back"""
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data=data)
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data=data)
     assert resp.status_code == 200
 
-    resp = requests.get(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts={ts}')
     assert resp.status_code == 200
     assert resp.content == data
 
 
-def test_read_write_entries_big_blob_ok(base_url, headers, bucket):
+def test_read_write_entries_big_blob_ok(base_url, session, bucket):
     """Should write and read files more than max block size"""
     huge_data = b"xaz" * 1024 * 1024
     ts = 1000
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data=huge_data)
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data=huge_data)
     assert resp.status_code == 200
 
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts + 100}', headers=headers, data=huge_data)
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 100}', data=huge_data)
     assert resp.status_code == 200
 
-    resp = requests.get(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts={ts}')
     assert resp.status_code == 200
     assert resp.content == huge_data
 
+    assert resp.headers['Content-Type'] == "application/octet-stream"
 
-def test_read_no_bucket(base_url, headers):
+
+def test_read_no_bucket(base_url, session):
     """Should return 404 if no bucket found"""
-    resp = requests.get(f'{base_url}/b/xxx/entry?ts=100', headers=headers)
+    resp = session.get(f'{base_url}/b/xxx/entry?ts=100')
     assert resp.status_code == 404
     assert 'xxx' in get_detail(resp)
 
 
-def test_read_no_data(base_url, headers, bucket):
+def test_read_no_data(base_url, session, bucket):
     """Should return 404 if no data for ts"""
-    resp = requests.get(f'{base_url}/b/{bucket}/entry?ts=100', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts=100')
     assert resp.status_code == 404
 
 
-def test_read_bad_ts(base_url, headers, bucket):
+def test_read_bad_ts(base_url, session, bucket):
     """Should return 400 if ts is bad"""
-    requests.post(f"{base_url}/b/{bucket}/entry?ts=100", data=b"somedata", headers=headers)
-    resp = requests.get(f'{base_url}/b/{bucket}/entry?ts=XXXX', headers=headers)
+    session.post(f"{base_url}/b/{bucket}/entry?ts=100", data=b"somedata")
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts=XXXX')
+
     assert resp.status_code == 422
     assert 'XXX' in get_detail(resp)
 
 
-def test_read_bad_no_entry(base_url, headers, bucket):
+def test_read_bad_no_entry(base_url, session, bucket):
     """Should return 400 if ts is bad"""
-    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 404
     assert 'entry' in get_detail(resp)
 
 
-def test_write_no_bucket(base_url, headers):
+def test_write_no_bucket(base_url, session):
     """Should return 404 if no bucket found"""
-    resp = requests.post(f'{base_url}/b/xxx/entry?ts=100', headers=headers)
+    resp = session.post(f'{base_url}/b/xxx/entry?ts=100')
     assert resp.status_code == 404
     assert 'xxx' in get_detail(resp)
 
 
-def test_write_bad_ts(base_url, headers, bucket):
+def test_write_bad_ts(base_url, session, bucket):
     """Should return 422 if ts is bad"""
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts=XXXX', headers=headers)
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts=XXXX')
     assert resp.status_code == 422
     assert 'XXX' in get_detail(resp)
 
 
-def test_list_entry_ok(base_url, headers, bucket):
+def test_list_entry_ok(base_url, session, bucket):
     """Should return list with timestamps and sizes"""
     ts = 1000
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data="some_data")
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
     assert resp.status_code == 200
 
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts + 100}', headers=headers, data="some_data")
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 100}', data="some_data")
     assert resp.status_code == 200
 
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts + 200}', headers=headers, data="some_data")
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 200}', data="some_data")
     assert resp.status_code == 200
 
-    resp = requests.get(f'{base_url}/b/{bucket}/entry/list?start={ts}&stop={ts + 200}', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry/list?start={ts}&stop={ts + 200}')
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
@@ -105,35 +105,35 @@ def test_list_entry_ok(base_url, headers, bucket):
     assert data["records"][1] == {'ts': '1100', 'size': '9'}
 
 
-def test_list_entry_no_data(base_url, headers, bucket):
+def test_list_entry_no_data(base_url, session, bucket):
     """Should return 404 if no data for request"""
-    resp = requests.get(f'{base_url}/b/{bucket}/entry/list?start=100&stop=200', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry/list?start=100&stop=200')
     assert resp.status_code == 404
 
 
-def test_latest_record(base_url, headers, bucket):
+def test_latest_record(base_url, session, bucket):
     """Should return the latest record"""
     ts = 1000
-    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 404
 
-    requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data="some_data1")
-    requests.post(f'{base_url}/b/{bucket}/entry?ts={ts + 10}', headers=headers, data="some_data2")
+    session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data1")
+    session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 10}', data="some_data2")
 
-    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
 
 
-def test_read_write_big_blob(base_url, headers, bucket):
+def test_read_write_big_blob(base_url, session, bucket):
     """Should read and write a big blob"""
     blob = np.random.bytes(2 ** 20).hex()
     ts = 1000
 
-    resp = requests.post(f'{base_url}/b/{bucket}/entry?ts={ts}', headers=headers, data=blob)
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data=blob)
     assert resp.status_code == 200
 
-    resp = requests.get(f'{base_url}/b/{bucket}/entry', headers=headers)
+    resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 200
     assert len(resp.text) == len(blob)
     assert resp.text == blob

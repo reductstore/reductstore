@@ -7,10 +7,13 @@ description: Bucket API provides HTTP methods to create, modify or delete a buck
 Before starting recording, a user has to create a bucket with the following settings:
 
 * Maximal block size
+* Maximal number of records
 * Quota type
 * Quota size
 
 For more information, you can read more about buckets in [How does it work?](../how-does-it-work.md)
+
+
 
 {% swagger method="get" path=" " baseUrl="/b/:bucket_name " summary="Get information about a bucket" %}
 {% swagger-description %}
@@ -27,6 +30,7 @@ Name of bucket
   "settings": {
         "max_block_size": "integer",            // max block content_length in bytes
         "quota_type": Union["NONE", "FIFO"],    // quota type
+        "max_block_records": "integer",         // max number of records in a block
         "quota_size": "integer"                 // quota content_length in bytes
     }
     "info": {
@@ -96,7 +100,11 @@ Name of new bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal content_length of a data block in bytes (default: 64Mb)
+Maximal size of a data block in bytes (default: 64Mb)
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="max_block_records" type="String/Integer" %}
+Maximal number of records in a block (default 1024)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
@@ -143,6 +151,10 @@ Name of bucket
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
 Maximal content_length of a data block in bytes
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="max_block_records" type="String/Integer" %}
+Maximal number of records in a block
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}

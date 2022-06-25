@@ -86,18 +86,15 @@ class WhenWritable {
 template <bool SSL, typename Callback>
 class BasicApiHandler {
  public:
-  BasicApiHandler(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req)
+  BasicApiHandler(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
+                  std::string_view content_type = "application/json")
       : http_resp_(res),
+        origin_(req->getHeader("origin")),
         authorization_(req->getHeader("authorization")),
         url_(req->getUrl()),
-        method_(req->getMethod()) {
+        method_(req->getMethod()),
+        content_type_(content_type) {
     std::transform(method_.begin(), method_.end(), method_.begin(), [](auto &ch) { return std::toupper(ch); });
-
-    // Allow CORS
-    auto origin = req->getHeader("origin");
-    if (!origin.empty()) {
-      res->writeHeader("access-control-allow-origin", origin);
-    }
 
     http_resp_->onAborted([*this] { LOG_ERROR("{} {}: aborted", method_, url_); });
   }
@@ -125,7 +122,22 @@ class BasicApiHandler {
     }
 
     LOG_DEBUG("{} {}: OK", method_, url_);
-    http_resp_->end(on_success(std::move(resp)));
+    auto content = on_success(std::move(resp));
+    PrepareHeaders(!content.empty(), content_type_);
+
+    http_resp_->end(std::move(content));
+  }
+
+  void PrepareHeaders(bool has_content, std::string_view content_type) const {  // Allow CORS
+    if (!origin_.empty()) {
+      http_resp_->writeHeader("access-control-allow-origin", origin_);
+    }
+
+    if (has_content && !content_type_.empty()) {
+      http_resp_->writeHeader("content-type", content_type);
+    }
+
+    http_resp_->writeHeader("server", "ReductStorage");
   }
 
   void SendError(core::Error err) const noexcept {
@@ -134,7 +146,9 @@ class BasicApiHandler {
     } else {
       LOG_DEBUG("{} {}: {}", method_, url_, err.ToString());
     }
+
     http_resp_->writeStatus(std::to_string(err.code));
+    PrepareHeaders(true, "application/json");
     http_resp_->end(fmt::format(R"({{"detail":"{}"}})", err.message));
   }
 
@@ -143,6 +157,8 @@ class BasicApiHandler {
   std::string url_;
   std::string method_;
   std::string authorization_;
+  std::string origin_;
+  std::string_view content_type_;
 };
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_HANDLERS_COMMON_H

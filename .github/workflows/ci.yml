@@ -18,6 +18,8 @@ jobs:
         run: docker run -v ${PWD}:/app cpplint bash -c "find src/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
       - name: Check code in /unit_tests
         run: docker run -v ${PWD}:/app cpplint bash -c "find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
+      - name: Check code in /benchmarks
+        run: docker run -v ${PWD}:/app cpplint bash -c "find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
 
   build:
     runs-on: ubuntu-latest

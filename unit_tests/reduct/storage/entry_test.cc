@@ -5,6 +5,8 @@
 #include <catch2/catch.hpp>
 #include <google/protobuf/util/time_util.h>
 
+#include <filesystem>
+
 #include "reduct/helpers.h"
 
 using reduct::ReadOne;
@@ -15,12 +17,14 @@ using reduct::storage::IEntry;
 using google::protobuf::util::TimeUtil;
 
 using std::chrono::seconds;
+namespace fs = std::filesystem;
 
 static auto MakeDefaultOptions() {
   return IEntry::Options{
       .name = "entry_1",
       .path = BuildTmpDirectory(),
       .max_block_size = 100,
+      .max_block_records = 1024,
   };
 }
 
@@ -28,6 +32,13 @@ static const auto kTimestamp = IEntry::Time() + std::chrono::microseconds(10'100
 
 auto ToMicroseconds(IEntry::Time tp) {
   return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
+}
+
+auto GetBlockSize(IEntry::Options options, IEntry::Time begin_ts) {
+  return fs::file_size(
+      options.path / options.name /
+      fmt::format("{}.blk",
+                  std::chrono::duration_cast<std::chrono::microseconds>(begin_ts.time_since_epoch()).count()));
 }
 
 TEST_CASE("storage::Entry should record data to a block", "[entry]") {
@@ -101,6 +112,45 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
 
     REQUIRE(ReadOne(*entry, kTimestamp + seconds(5)).result == "other_data1");
   }
+}
+
+TEST_CASE("storage::Entry should resize finished block") {
+  const auto options = MakeDefaultOptions();
+  auto entry = IEntry::Build(options);
+  REQUIRE(entry);
+
+  auto big_data = std::string(options.max_block_size - 10, 'c');
+  REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, big_data, kTimestamp + seconds(1)) == Error::kOk);
+
+  REQUIRE(GetBlockSize(options, kTimestamp) == big_data.size());
+  REQUIRE(GetBlockSize(options, kTimestamp + seconds(1)) == options.max_block_size);
+}
+
+TEST_CASE("storage::Entry start a new block if it has more records than max_block_records") {
+  auto options = MakeDefaultOptions();
+  options.max_block_records = 2;
+
+  auto entry = IEntry::Build(options);
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "data", kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "data", kTimestamp + seconds(1)) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "data", kTimestamp + seconds(2)) == Error::kOk);
+
+  REQUIRE(GetBlockSize(options, kTimestamp) == 8);
+  REQUIRE(GetBlockSize(options, kTimestamp + seconds(2)) == options.max_block_size);
+}
+
+TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size") {
+  const auto options = MakeDefaultOptions();
+  auto entry = IEntry::Build(options);
+  REQUIRE(entry);
+
+  auto big_data = std::string(options.max_block_size + 10, 'c');
+  REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
+
+  REQUIRE(GetBlockSize(options, kTimestamp) == big_data.size());
 }
 
 TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
@@ -265,12 +315,12 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
     }
 
     SECTION("if there is overlap it is ok") {
-      auto records = entry->List(kTimestamp + seconds(1), kTimestamp + seconds(4)).records;
+      auto records = entry->List(kTimestamp + seconds(1), kTimestamp + seconds(4)).result;
       REQUIRE(records.size() == 2);
       REQUIRE(records[0].time == kTimestamp + seconds(1));
       REQUIRE(records[1].time == kTimestamp + seconds(2));
 
-      records = entry->List(kTimestamp - seconds(1), kTimestamp + seconds(2)).records;
+      records = entry->List(kTimestamp - seconds(1), kTimestamp + seconds(2)).result;
       REQUIRE(records.size() == 2);
       REQUIRE(records[0].time == kTimestamp);
       REQUIRE(records[1].time == kTimestamp + seconds(1));
@@ -288,4 +338,44 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
       REQUIRE(entry->List(kTimestamp + seconds(5), kTimestamp + seconds(12)).error == Error::kOk);
     }
   }
+}
+
+TEST_CASE("storage::Entry should not list records which is not finished") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  auto writer = entry->BeginWrite(kTimestamp, 1).result;
+  REQUIRE(entry->List(kTimestamp - seconds(1), kTimestamp + seconds(1)).result.empty());
+
+  REQUIRE(writer->Write("x") == Error::kOk);
+  REQUIRE(entry->List(kTimestamp - seconds(1), kTimestamp + seconds(1)).result.size() == 1);
+}
+
+TEST_CASE("storage::Entry should wait when read operations finish before removing block") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
+
+  auto [reader, err] = entry->BeginRead(kTimestamp);
+  REQUIRE(err == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active readers"});
+  auto [chunk, read_err] = reader->Read();
+  REQUIRE(read_err == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
+}
+
+TEST_CASE("storage::Entry should wait when write operations finish before removing block") {
+  auto entry = IEntry::Build(MakeDefaultOptions());
+  REQUIRE(entry);
+
+  auto [writer, err] = entry->BeginWrite(kTimestamp, 5);
+  REQUIRE(err == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active writers"});
+  REQUIRE(writer->Write("12345", true) == Error::kOk);
+
+  REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
 }

@@ -36,6 +36,8 @@ TEST_CASE("storage::Bucket should restore from folder", "[bucket]") {
   settings.set_max_block_size(100);
   settings.set_quota_type(BucketSettings::FIFO);
   settings.set_quota_size(1000);
+  settings.set_max_block_records(2000);
+
   auto bucket = IBucket::Build(dir_path / "bucket", settings);
 
   REQUIRE(bucket->GetOrCreateEntry("entry1").error == Error::kOk);
@@ -58,7 +60,13 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
   SECTION("create a new entry") {
     auto [entry, err] = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(err == Error::kOk);
+
     REQUIRE(entry.lock());
+    auto options = entry.lock()->GetOptions();
+
+    REQUIRE(options.name == "entry_1");
+    REQUIRE(options.max_block_size == bucket->GetSettings().max_block_size());
+    REQUIRE(options.max_block_records == bucket->GetSettings().max_block_records());
   }
 
   SECTION("get an existing entry") {
@@ -154,13 +162,14 @@ TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]"
   auto bucket = IBucket::Build(dir_path / "bucket");
 
   BucketSettings settings;
-  settings.set_max_block_size(600);
   settings.set_quota_type(BucketSettings::FIFO);
   settings.set_quota_size(1000);
 
   REQUIRE(bucket->SetSettings(settings) == Error::kOk);
-  REQUIRE(bucket->GetSettings() == settings);
+  REQUIRE(bucket->GetSettings().quota_size() == settings.quota_size());
+  REQUIRE(bucket->GetSettings().quota_type() == settings.quota_type());
 
   bucket = IBucket::Restore(dir_path / "bucket");
-  REQUIRE(bucket->GetSettings() == settings);
+  REQUIRE(bucket->GetSettings().quota_size() == settings.quota_size());
+  REQUIRE(bucket->GetSettings().quota_type() == settings.quota_type());
 }
