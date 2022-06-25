@@ -1,3 +1,9 @@
+### Release 0.6.1 (2022-06-25)
+
+**Other**:
+
+* Use Web Console v0.2.1, [PR-120](https://github.com/reduct-storage/reduct-storage/pull/120)
+
 ## Release 0.6.0 (2022-06-25)
 
 **Features**:
