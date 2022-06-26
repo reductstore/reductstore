@@ -1,3 +1,5 @@
+## Release 0.7.0 (in progress)
+
 ### Release 0.6.1 (2022-06-25)
 
 **Other**:
