@@ -1,5 +1,9 @@
 ## Release 0.7.0 (in progress)
 
+**Documentation**:
+
+* Fix typo in API documentation, [PR-124](https://github.com/reduct-storage/reduct-storage/pull/124)
+
 ### Release 0.6.1 (2022-06-25)
 
 **Other**:
