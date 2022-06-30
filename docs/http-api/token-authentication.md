@@ -20,7 +20,7 @@ The storage uses the token authentication when`RS_API_TOKEN is set.`
 
 ### Refresh Token
 
-{% swagger method="post" path=" " baseUrl="/autj/refresh " summary="Refresh access token" %}
+{% swagger method="post" path=" " baseUrl="/auth/refresh " summary="Refresh access token" %}
 {% swagger-description %}
 The client has to request an access token by using this method with a header 
 
