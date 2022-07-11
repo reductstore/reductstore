@@ -4,7 +4,7 @@
 ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/reduct-storage/reduct-storage/ci)
 
 
-Reduct Storage aims to solve a problem of storing data in a case where you need to write some data intensively and read it accidentally by some time interval. 
+Reduct Storage aims to solve a problem of storing data in a case where you need to write some data intensively and read it randomly by some time interval. 
 The storage engine has a simple HTTP API and stores data as a history of blobs. Read more [here](https://docs.reduct-storage.dev/).
 
 ## Features:
