@@ -29,7 +29,7 @@ or you can use the demo storage: https://play.reduct-storage.dev
 
 ## Usage Example
 
-Reudct Storage porvides a simple HTTP API, so you could use it with `curl`:
+Reduct Storage porvides a simple HTTP API, so you could use it with `curl`:
 
 ```
 # Create a bucket
