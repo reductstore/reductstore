@@ -2,7 +2,7 @@
 
 ## What Is Time Series Storage?
 
-Reduct Storage is a storage engine which aims to solve the problem of storing data when you need to write data intensively and read it accidentally by some time interval. The storage engine uses an [HTTP API ](http-api/)and stores the data as blobs. This means:
+Reduct Storage is a storage engine which aims to solve the problem of storing data when you need to write data intensively and read it occasionally. The storage engine uses an [HTTP API ](http-api/)and stores the data as blobs. This means:
 
 * Reduct Storage has no information about the format of the stored data. So, you can write whatever you want, but the storage can't aggregate your data. You have to read the same data, what you have written.
 * The [HTTP API](http-api/) provides a simple and portable way to communicate with the storage engine, but the engine doesn't provide any query language to access the data.
