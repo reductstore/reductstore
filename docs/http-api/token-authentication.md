@@ -12,7 +12,7 @@ The storage uses a simple authentication model with a bearer token.  This token 
 Bearer <ACCESS_TOKEN>
 ```
 
-The access token expires 5 minutes after it was created. After that, the client will receive a 401 HTTP error for any requests and has to refresh it.
+The access token expires 5 minutes after it was created. After that, the client will receive a 401 HTTP error for any requests and has to refresh the token.
 
 {% hint style="info" %}
 The storage uses the token authentication when`RS_API_TOKEN` is set.
