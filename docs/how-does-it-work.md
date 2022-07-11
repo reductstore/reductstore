@@ -12,7 +12,7 @@ In comparison to other S3-like object storage, Reduct Storage works differently:
 
 * **Access By Time.** Each record in an entry is written with a timestamp and to read it you need to know the entry name and time.
 * **Flat Storage Structure.** It doesn't have a tree-like structure for data. There are only buckets and entries with unique names in them.
-* **Batching Data.** It doesn't store each record as a single file. It batches them into blocks of a fixed size so that it can store small objects more efficiently. You don't waste disk space because of minimum size file system blocks. Moreover, Reduct Storage pre-allocate blocks space to increase performance for write operations.&#x20;
+* **Batching Data.** It doesn't store each record as a single file. It batches them into blocks of a fixed size so that it can store small objects more efficiently. You don't waste disk space because of the minimum size of file system blocks. Moreover, Reduct Storage pre-allocate blocks space to increase performance for write operations.&#x20;
 * **Forward Writing.** The engine records data fastest if it only needs to append records to the current block. It means that, for better performance, you should always write data with the newest timestamps.
 * **Strong FIFO Quota.** When you have intensive write operations, you may run out of disk space quickly. The engine removes the oldest block in a bucket as soon as the amount of the data reaches a specified quota limit.
 
