@@ -9,7 +9,7 @@ description: Server API provides information about the storage and its state
 You can use this method to get stats of the storage and check its version.
 {% endswagger-description %}
 
-{% swagger-response status="200: OK" description="Returns inforamtion in JSON format" %}
+{% swagger-response status="200: OK" description="Returns information in JSON format" %}
 ```javascript
 {
     "version": "string",
