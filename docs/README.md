@@ -51,15 +51,15 @@ RS_DATA_PATH=./data bin/reduct-storage
 
 ## Environment Variables
 
-The storage can be customized with the following environment variables:
+The storage can be customized with the following environmental variables:
 
 | Name                | Default   | Description                                                                         |
 | ------------------- | --------- | ----------------------------------------------------------------------------------- |
 | RS\_LOG\_LEVEL      | INFO      | Logging level, can be: TRACE, DEBUG, INFO, WARNING, ERROR                           |
-| RS\_HOST            | 0.0.0.0 | Listening IP address                                                                |
+| RS\_HOST            | 0.0.0.0   | Listening IP address                                                                |
 | RS\_PORT            | 8383      | Listening port                                                                      |
 | RS\_API\_BASE\_PATH | /         | Prefix for all URLs of requests                                                     |
-| RS\_DATA\_PATH      | /data     | Path to a folder where the storage stores the data                          |
-| RS\_API\_TOKEN      |           | If set, the storage uses [token authorization](broken-reference)              |
-| RS\_CERT\_PATH      |           | Path to an SSL certificate. If unset, the storage uses HTTP instead of HTTPS |
+| RS\_DATA\_PATH      | /data     | Path to a folder where the storage stores the data                                  |
+| RS\_API\_TOKEN      |           | If set, the storage uses [token authorization](broken-reference)                    |
+| RS\_CERT\_PATH      |           | Path to an SSL certificate. If unset, the storage uses HTTP instead of HTTPS        |
 | RS\_CERT\_KEY\_PATH |           | Path to the private key of the desired SSL certificate. Should be set with RS\_CERT\_PATH       |
