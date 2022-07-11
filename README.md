@@ -42,7 +42,7 @@ curl -d "some_data" \
   -X POST \
   -a https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 
-# Read the data with its timestamp
+# Read the data by using its timestamp
 curl https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 ```
 
