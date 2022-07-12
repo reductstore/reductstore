@@ -3,6 +3,7 @@
 **Documentation**:
 
 * Fix typo in API documentation, [PR-124](https://github.com/reduct-storage/reduct-storage/pull/124)
+* Minor style fixes in documentation, [PR-129](https://github.com/reduct-storage/reduct-storage/pull/129)
 
 ### Release 0.6.1 (2022-06-25)
 

@@ -4,14 +4,14 @@
 ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/reduct-storage/reduct-storage/ci)
 
 
-Reduct Storage aims to solve a problem of storing data in a case where you need to write some data intensively and read it randomly by some time interval. 
+Reduct Storage aims to solve the problem of storing data when you need to write intensively but read it occasionally and randomly via a time interval. 
 The storage engine has a simple HTTP API and stores data as a history of blobs. Read more [here](https://docs.reduct-storage.dev/).
 
 ## Features:
 
 * HTTP(S) API
-* Storing and access blobs as time series
-* Optimized for little files
+* Storing and accessing blobs as time series
+* Optimized for small files
 * Real-time quota for buckets
 * Token authentication
 * Embedded Web Console
@@ -29,7 +29,7 @@ or you can use the demo storage: https://play.reduct-storage.dev
 
 ## Usage Example
 
-Reudct Storage porvides a simple HTTP API, so you can use it with `curl`:
+Reduct Storage porvides a simple HTTP API, so you could use it with `curl`:
 
 ```
 # Create a bucket
@@ -42,7 +42,7 @@ curl -d "some_data" \
   -X POST \
   -a https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 
-# Read the data by timestamp
+# Read the data by using its timestamp
 curl https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 ```
 

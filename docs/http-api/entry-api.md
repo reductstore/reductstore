@@ -6,7 +6,7 @@ description: Entry API provides methods to write, read and browse the data
 
 {% swagger method="post" path=" " baseUrl="/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
 {% swagger-description %}
-The storage creates an entry at the first write operation. The record should be placed to the body of the request. The body can be empty.
+The storage creates an entry on the first write operation. The record should be placed in the body of the request. The body can also be empty.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -22,7 +22,7 @@ A UNIX timestamp in microseconds
 {% endswagger-parameter %}
 
 {% swagger-parameter in="header" required="true" name="Content-Length" %}
-Content-length is required to start asynchronous write operation
+Content-length is required to start an asynchronous write operation
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="The record is written" %}
@@ -64,7 +64,7 @@ Name of entry
 {% endswagger-parameter %}
 
 {% swagger-parameter in="query" name="ts" type="Integer" required="false" %}
-A UNIX timestamp in microseconds. If it is empty, returns the latest record.
+A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="The record is found and returned in body of the response" %}
@@ -73,7 +73,7 @@ A UNIX timestamp in microseconds. If it is empty, returns the latest record.
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket or record with the timestamp doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket or record with the timestamp doesn't exist" %}
 ```javascript
 {
    "detail": "string"
@@ -124,7 +124,7 @@ A UNIX timestamp in microseconds
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket doesn't exist" %}
 ```javascript
 {
    "detail": "string"
