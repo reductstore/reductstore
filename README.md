@@ -4,8 +4,7 @@
 ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/reduct-storage/reduct-storage/ci)
 
 
-Reduct Storage aims to solve the problem of storing data when you need to write intensively but read it occasionally and randomly via a time interval. 
-The storage engine has a simple HTTP API and stores data as a history of blobs. Read more [here](https://docs.reduct-storage.dev/).
+Reduct Storage is a time series database for big data. It has no limitation on the size of stored objects or the volume of stored data. It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read more [here](https://docs.reduct-storage.dev/).
 
 ## Features:
 
