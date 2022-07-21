@@ -50,3 +50,7 @@ curl https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 * [Python Client SDK](https://github.com/reduct-storage/reduct-py)
 * [JavaScript Client SDK](https://github.com/reduct-storage/reduct-js)
 * [C++ Client SDK](https://github.com/reduct-storage/reduct-cpp)
+
+##  Tools
+
+* [Web Console](https://github.com/reduct-storage/web-console)

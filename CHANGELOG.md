@@ -1,5 +1,8 @@
 ## Release 0.7.0 (in progress)
 
+**Features**:
+
+* Update Web Console to v0.3.0, [PR-133](https://github.com/reduct-storage/reduct-storage/pull/133)
 **Documentation**:
 
 * Fix typo in API documentation, [PR-124](https://github.com/reduct-storage/reduct-storage/pull/124)
