@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Web Console v0.3.0, [PR-133](https://github.com/reduct-storage/reduct-storage/pull/133)
 
+### Changed:
+
+- Use `Keep a log` format for CHANGLOG, [PR-136](https://github.com/reduct-storage/reduct-storage/pull/136)
+
 ### Fixed:
 
 - Typo in API documentation, [PR-124](https://github.com/reduct-storage/reduct-storage/pull/124)
