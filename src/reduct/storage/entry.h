@@ -86,6 +86,12 @@ class IEntry {
   [[nodiscard]] virtual const Options& GetOptions() const = 0;
 
   /**
+   * @brief Set options
+   * @return
+   */
+  virtual void SetOptions(const Options&) = 0;
+
+  /**
    * @brief Creates a new entry.
    * Directory path/name must be empty
    * @param options

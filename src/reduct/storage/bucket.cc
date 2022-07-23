@@ -137,6 +137,12 @@ class Bucket : public IBucket {
 
   Error SetSettings(BucketSettings settings) override {
     settings_ = InitSettings(std::move(settings), settings_);
+    for (auto [key, entry] : entry_map_) {
+      entry->SetOptions({
+          .max_block_size = settings_.max_block_size(),
+          .max_block_records = settings_.max_block_records(),
+      });
+    }
     return SaveDescriptor();
   }
 

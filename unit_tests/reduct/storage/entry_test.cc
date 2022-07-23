@@ -129,7 +129,8 @@ TEST_CASE("storage::Entry should resize finished block") {
 }
 
 TEST_CASE("storage::Entry start a new block if it has more records than max_block_records") {
-  const auto options = MakeDefaultOptions();
+  auto options = MakeDefaultOptions();
+  options.max_block_records = 2;
   const auto path = BuildTmpDirectory();
   auto entry = IEntry::Build(kName, path, options);
 
@@ -208,7 +209,8 @@ TEST_CASE("storage::Entry should read from empty entry with 404", "[entry]") {
 }
 
 TEST_CASE("storage::Entry should remove last block", "[entry]") {
-  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
+  const auto path = BuildTmpDirectory();
+  auto entry = IEntry::Build(kName, path, MakeDefaultOptions());
   REQUIRE(entry);
 
   const std::string blob(entry->GetOptions().max_block_size + 1, 'x');
@@ -235,7 +237,7 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
 
     SECTION("recovery") {
       auto info = entry->GetInfo();
-      entry = IEntry::Build(kName, BuildTmpDirectory(), entry->GetOptions());
+      entry = IEntry::Build(kName, path, entry->GetOptions());
 
       REQUIRE(entry);
       REQUIRE(entry->GetInfo() == info);

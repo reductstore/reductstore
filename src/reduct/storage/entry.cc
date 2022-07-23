@@ -319,6 +319,8 @@ class Entry : public IEntry {
 
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
 
+  void SetOptions(const Options& options) override { options_ = options; }
+
  private:
   Result<IBlockManager::BlockSPtr> FindBlock(Timestamp proto_ts) const {
     auto ts = block_set_.upper_bound(proto_ts);

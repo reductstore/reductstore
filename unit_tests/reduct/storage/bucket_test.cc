@@ -179,12 +179,14 @@ TEST_CASE("storage::Bucket should change block settings and apply them", "[bucke
   auto bucket = IBucket::Build(dir_path / "bucket");
 
   auto entry = bucket->GetOrCreateEntry("test-entry").entry.lock();
-  REQUIRE(entry->GetOptions().max_block_size == reduct::kDefaultMaxBlockSize);
 
   BucketSettings settings;
   settings.set_max_block_size(1);
+  settings.set_max_block_records(2);
+
   REQUIRE(bucket->SetSettings(settings) == Error::kOk);
   REQUIRE(bucket->GetSettings().max_block_size() == settings.max_block_size());
 
   REQUIRE(entry->GetOptions().max_block_size == 1);
+  REQUIRE(entry->GetOptions().max_block_records == 2);
 }
