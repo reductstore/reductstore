@@ -10,9 +10,9 @@ option(REDUCT_BUILD_TEST "Build unit tests" ON)
 option(REDUCT_BUILD_BENCHMARKS "Build unit tests" ON)
 
 
-set(DEFAULT_MAX_BLOCK_SIZE 67108864 CACHE STRING "Default max size for block with data")
+set(DEFAULT_MAX_BLOCK_SIZE 64000000 CACHE STRING "Default max size for block with data")
 set(DEFAULT_MAX_BLOCK_RECORDS 1024 CACHE STRING "Default max number of records in a block")
-set(DEFAULT_MAX_READ_CHUNK 524288 CACHE STRING "Default max chunk for reading")
+set(DEFAULT_MAX_READ_CHUNK 512000 CACHE STRING "Default max chunk for reading")
 set(WEB_CONSOLE_PATH "" CACHE STRING "Path to the built web console")
 
 project(reduct_storage VERSION ${FULL_VERSION})
