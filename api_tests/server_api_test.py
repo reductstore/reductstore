@@ -13,7 +13,7 @@ def test_get_info(base_url, session):
     assert int(data['latest_record']) >= 0
     assert int(data['oldest_record']) >= 0
 
-    assert data['defaults']['bucket'] == {'max_block_records': '1024', 'max_block_size': '67108864', 'quota_size': '0',
+    assert data['defaults']['bucket'] == {'max_block_records': '1024', 'max_block_size': '64000000', 'quota_size': '0',
                                           'quota_type': 'NONE'}
     assert resp.headers['server'] == "ReductStorage"
     assert resp.headers['Content-Type'] == "application/json"
