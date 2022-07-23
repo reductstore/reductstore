@@ -1,4 +1,4 @@
-FROM ubuntu:21.10 AS builder
+FROM ubuntu:22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -20,7 +20,7 @@ ARG BUILD_TYPE=Release
 RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} /src
 RUN make -j4
 
-FROM ubuntu:21.10
+FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y libatomic1 #needed for raspianos
 
