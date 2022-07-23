@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use `Keep a log` format for CHANGELOG, [PR-136](https://github.com/reduct-storage/reduct-storage/pull/136)
 - SI for max block and read chunk sizes, [PR-137](https://github.com/reduct-storage/reduct-storage/pull/137)
+- SHA256 hash for API token is optional, [PR-139](https://github.com/reduct-storage/reduct-storage/pull/139)
 
 ### Fixed:
 
