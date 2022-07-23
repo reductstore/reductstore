@@ -19,10 +19,10 @@ using google::protobuf::util::TimeUtil;
 using std::chrono::seconds;
 namespace fs = std::filesystem;
 
+const auto kName = "entry_1";
+
 static auto MakeDefaultOptions() {
   return IEntry::Options{
-      .name = "entry_1",
-      .path = BuildTmpDirectory(),
       .max_block_size = 100,
       .max_block_records = 1024,
   };
@@ -34,15 +34,15 @@ auto ToMicroseconds(IEntry::Time tp) {
   return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
 }
 
-auto GetBlockSize(IEntry::Options options, IEntry::Time begin_ts) {
+auto GetBlockSize(std::string_view name, fs::path path, IEntry::Options options, IEntry::Time begin_ts) {
   return fs::file_size(
-      options.path / options.name /
+      path / name /
       fmt::format("{}.blk",
                   std::chrono::duration_cast<std::chrono::microseconds>(begin_ts.time_since_epoch()).count()));
 }
 
 TEST_CASE("storage::Entry should record data to a block", "[entry]") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
@@ -82,7 +82,7 @@ TEST_CASE("storage::Entry should record data to a block", "[entry]") {
 }
 
 TEST_CASE("storage::Entry should create a new block if the current > max_block_size", "[entry]") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   auto big_data = std::string(MakeDefaultOptions().max_block_size + 1, 'c');
@@ -116,45 +116,47 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
 
 TEST_CASE("storage::Entry should resize finished block") {
   const auto options = MakeDefaultOptions();
-  auto entry = IEntry::Build(options);
+  const auto path = BuildTmpDirectory();
+  auto entry = IEntry::Build(kName, path, options);
   REQUIRE(entry);
 
   auto big_data = std::string(options.max_block_size - 10, 'c');
   REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
   REQUIRE(WriteOne(*entry, big_data, kTimestamp + seconds(1)) == Error::kOk);
 
-  REQUIRE(GetBlockSize(options, kTimestamp) == big_data.size());
-  REQUIRE(GetBlockSize(options, kTimestamp + seconds(1)) == options.max_block_size);
+  REQUIRE(GetBlockSize(kName, path, options, kTimestamp) == big_data.size());
+  REQUIRE(GetBlockSize(kName, path, options, kTimestamp + seconds(1)) == options.max_block_size);
 }
 
 TEST_CASE("storage::Entry start a new block if it has more records than max_block_records") {
-  auto options = MakeDefaultOptions();
-  options.max_block_records = 2;
+  const auto options = MakeDefaultOptions();
+  const auto path = BuildTmpDirectory();
+  auto entry = IEntry::Build(kName, path, options);
 
-  auto entry = IEntry::Build(options);
   REQUIRE(entry);
 
   REQUIRE(WriteOne(*entry, "data", kTimestamp) == Error::kOk);
   REQUIRE(WriteOne(*entry, "data", kTimestamp + seconds(1)) == Error::kOk);
   REQUIRE(WriteOne(*entry, "data", kTimestamp + seconds(2)) == Error::kOk);
 
-  REQUIRE(GetBlockSize(options, kTimestamp) == 8);
-  REQUIRE(GetBlockSize(options, kTimestamp + seconds(2)) == options.max_block_size);
+  REQUIRE(GetBlockSize(kName, path, options, kTimestamp) == 8);
+  REQUIRE(GetBlockSize(kName, path, options, kTimestamp + seconds(2)) == options.max_block_size);
 }
 
 TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size") {
   const auto options = MakeDefaultOptions();
-  auto entry = IEntry::Build(options);
+  const auto path = BuildTmpDirectory();
+  auto entry = IEntry::Build(kName, path, options);
   REQUIRE(entry);
 
   auto big_data = std::string(options.max_block_size + 10, 'c');
   REQUIRE(WriteOne(*entry, big_data, kTimestamp) == Error::kOk);
 
-  REQUIRE(GetBlockSize(options, kTimestamp) == big_data.size());
+  REQUIRE(GetBlockSize(kName, path, options, kTimestamp) == big_data.size());
 }
 
 TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   auto big_blob = std::string(100, 'c');
@@ -177,10 +179,12 @@ TEST_CASE("storage::Entry should write data for random kTimestamp", "[entry]") {
 
 TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
   const auto options = MakeDefaultOptions();
-  auto entry = IEntry::Build(options);
+  const auto path = BuildTmpDirectory();
+  auto entry = IEntry::Build(kName, path, options);
+
   REQUIRE(entry);
   REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
-  entry = IEntry::Build(options);
+  entry = IEntry::Build(kName, path, options);
   REQUIRE(entry->GetOptions() == options);
 
   const auto info = entry->GetInfo();
@@ -197,14 +201,14 @@ TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
 }
 
 TEST_CASE("storage::Entry should read from empty entry with 404", "[entry]") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
 
   REQUIRE(entry);
   REQUIRE(ReadOne(*entry, IEntry::Time()).error.code == 404);
 }
 
 TEST_CASE("storage::Entry should remove last block", "[entry]") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   const std::string blob(entry->GetOptions().max_block_size + 1, 'x');
@@ -231,7 +235,7 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
 
     SECTION("recovery") {
       auto info = entry->GetInfo();
-      entry = IEntry::Build(entry->GetOptions());
+      entry = IEntry::Build(kName, BuildTmpDirectory(), entry->GetOptions());
 
       REQUIRE(entry);
       REQUIRE(entry->GetInfo() == info);
@@ -240,7 +244,7 @@ TEST_CASE("storage::Entry should remove last block", "[entry]") {
 }
 
 TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   SECTION("empty record") {
@@ -341,7 +345,7 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
 }
 
 TEST_CASE("storage::Entry should not list records which is not finished") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   auto writer = entry->BeginWrite(kTimestamp, 1).result;
@@ -352,7 +356,7 @@ TEST_CASE("storage::Entry should not list records which is not finished") {
 }
 
 TEST_CASE("storage::Entry should wait when read operations finish before removing block") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
@@ -368,7 +372,7 @@ TEST_CASE("storage::Entry should wait when read operations finish before removin
 }
 
 TEST_CASE("storage::Entry should wait when write operations finish before removing block") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   auto [writer, err] = entry->BeginWrite(kTimestamp, 5);

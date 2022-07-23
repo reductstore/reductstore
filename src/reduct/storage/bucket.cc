@@ -56,12 +56,11 @@ class Bucket : public IBucket {
     for (const auto& folder : fs::directory_iterator(full_path_)) {
       if (fs::is_directory(folder)) {
         auto entry_name = folder.path().filename().string();
-        auto entry = IEntry::Build(IEntry::Options{
-            .name = folder.path().filename().string(),
-            .path = folder.path().parent_path().string(),
-            .max_block_size = settings_.max_block_size(),
-            .max_block_records = settings_.max_block_records(),
-        });
+        auto entry = IEntry::Build(folder.path().filename().string(), folder.path().parent_path().string(),
+                                   {
+                                       .max_block_size = settings_.max_block_size(),
+                                       .max_block_records = settings_.max_block_records(),
+                                   });
         if (entry) {
           entry_map_[entry_name] = std::move(entry);
         } else {
@@ -77,12 +76,11 @@ class Bucket : public IBucket {
       return {it->second, Error::kOk};
     } else {
       LOG_DEBUG("No '{}' entry in a bucket. Try to create one", name);
-      auto entry = IEntry::Build({
-          .name = name,
-          .path = full_path_,
-          .max_block_size = settings_.max_block_size(),
-          .max_block_records = settings_.max_block_records(),
-      });
+      auto entry = IEntry::Build(name, full_path_,
+                                 {
+                                     .max_block_size = settings_.max_block_size(),
+                                     .max_block_records = settings_.max_block_records(),
+                                 });
 
       if (entry) {
         std::shared_ptr<IEntry> ptr = std::move(entry);

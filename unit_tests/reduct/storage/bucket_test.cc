@@ -65,7 +65,6 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
     REQUIRE(entry.lock());
     auto options = entry.lock()->GetOptions();
 
-    REQUIRE(options.name == "entry_1");
     REQUIRE(options.max_block_size == bucket->GetSettings().max_block_size());
     REQUIRE(options.max_block_records == bucket->GetSettings().max_block_records());
   }

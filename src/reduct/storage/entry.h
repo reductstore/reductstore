@@ -23,10 +23,8 @@ class IEntry {
    * Options
    */
   struct Options {
-    std::string name;            // name of entry
-    std::filesystem::path path;  // path to entry (path to bucket)
-    size_t max_block_size;       // max block quota_size after that we create a new one
-    size_t max_block_records;    // max number of records in a block
+    size_t max_block_size;     // max block quota_size after that we create a new one
+    size_t max_block_records;  // max number of records in a block
 
     bool operator<=>(const Options& rhs) const = default;
   };
@@ -93,7 +91,7 @@ class IEntry {
    * @param options
    * @return pointer to entre or nullptr if failed to create
    */
-  static std::unique_ptr<IEntry> Build(Options options);
+  static std::unique_ptr<IEntry> Build(std::string_view name, const std::filesystem::path& path, Options options);
 
   /**
    * @brief Restores entry from dir
