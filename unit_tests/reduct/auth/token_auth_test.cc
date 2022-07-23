@@ -22,7 +22,7 @@ TEST_CASE("auth::TokenAuthorization should return 401 if head is bad") {
 }
 
 TEST_CASE("auth::TokenAuthorization should refresh token") {
-  const std::string kBearer = "Bearer 9C928547A5DCE2FCC2788DE34FE163942F64E50FEA570D33774822D5EACBF1EC";
+  const std::string kBearer = "Bearer sometoken";
   auto auth = ITokenAuthentication::Build("sometoken", {.expiration_time_s = 1});
 
   auto [resp, err] = OnRefreshToken(auth.get(), kBearer).Get();
@@ -48,4 +48,13 @@ TEST_CASE("auth::TokenAuthorization should refresh token") {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     REQUIRE(auth->Check("Bearer " + resp.access_token()) == Error{.code = 401, .message = "Expired token"});
   }
+}
+
+TEST_CASE("auth::TokenAuthorization should support hashed token", "[deprecated]") {
+  const std::string kBearer = "Bearer 9C928547A5DCE2FCC2788DE34FE163942F64E50FEA570D33774822D5EACBF1EC";
+  auto auth = ITokenAuthentication::Build("sometoken", {.expiration_time_s = 1});
+
+  auto [resp, err] = OnRefreshToken(auth.get(), kBearer).Get();
+  REQUIRE(err == Error::kOk);
+  REQUIRE(auth->Check("Bearer " + resp.access_token()) == Error::kOk);
 }
