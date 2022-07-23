@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GET `/b/:bucket/:entry` to avoid creating an empty
   entry, [PR-95](https://github.com/reduct-storage/reduct-storage/pull/95)
+- Update of bucket settings, [PR-138](https://github.com/reduct-storage/reduct-storage/pull/138)
 
 ## [0.5.0] - 2022-05-15
 

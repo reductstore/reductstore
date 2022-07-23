@@ -34,8 +34,9 @@ class Entry : public IEntry {
    * Create a new entry
    * @param options
    */
-  explicit Entry(Options options) : options_(std::move(options)), block_set_(), size_counter_{}, record_counter_{} {
-    full_path_ = options_.path / options_.name;
+  Entry(std::string_view name, std::filesystem::path path, Options options)
+      : name_(name), options_(std::move(options)), block_set_(), size_counter_{}, record_counter_{} {
+    full_path_ = path / name_;
     block_manager_ = IBlockManager::Build(full_path_);
     if (!fs::create_directories(full_path_)) {
       for (const auto& file : fs::directory_iterator(full_path_)) {
@@ -182,7 +183,7 @@ class Entry : public IEntry {
 
     auto [block, err] = FindBlock(proto_ts);
     if (err) {
-      LOG_ERROR("No block in entry '{}' for ts={}", options_.name, TimeUtil::ToString(proto_ts));
+      LOG_ERROR("No block in entry '{}' for ts={}", name_, TimeUtil::ToString(proto_ts));
       return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
     }
 
@@ -306,7 +307,7 @@ class Entry : public IEntry {
     }
 
     EntryInfo info;
-    info.set_name(options_.name);
+    info.set_name(name_);
     info.set_size(size_counter_);
     info.set_record_count(record_counter_);
     info.set_block_count(block_set_.size());
@@ -317,6 +318,8 @@ class Entry : public IEntry {
   }
 
   [[nodiscard]] const Options& GetOptions() const override { return options_; }
+
+  void SetOptions(const Options& options) override { options_ = options; }
 
  private:
   Result<IBlockManager::BlockSPtr> FindBlock(Timestamp proto_ts) const {
@@ -352,6 +355,7 @@ class Entry : public IEntry {
     return Error::kOk;
   }
 
+  std::string name_;
   Options options_;
   fs::path full_path_;
 
@@ -361,7 +365,9 @@ class Entry : public IEntry {
   size_t record_counter_;
 };
 
-std::unique_ptr<IEntry> IEntry::Build(IEntry::Options options) { return std::make_unique<Entry>(std::move(options)); }
+std::unique_ptr<IEntry> IEntry::Build(std::string_view name, const fs::path& path, IEntry::Options options) {
+  return std::make_unique<Entry>(name, path, std::move(options));
+}
 
 /**
  * Streams
