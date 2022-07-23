@@ -4,6 +4,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "reduct/config.h"
 #include "reduct/helpers.h"
 
 using reduct::core::Error;
@@ -172,4 +173,19 @@ TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]"
   bucket = IBucket::Restore(dir_path / "bucket");
   REQUIRE(bucket->GetSettings().quota_size() == settings.quota_size());
   REQUIRE(bucket->GetSettings().quota_type() == settings.quota_type());
+}
+
+TEST_CASE("storage::Bucket should change block settings and apply them", "[bucket]") {
+  const auto dir_path = BuildTmpDirectory();
+  auto bucket = IBucket::Build(dir_path / "bucket");
+
+  auto entry = bucket->GetOrCreateEntry("test-entry").entry.lock();
+  REQUIRE(entry->GetOptions().max_block_size == reduct::kDefaultMaxBlockSize);
+
+  BucketSettings settings;
+  settings.set_max_block_size(1);
+  REQUIRE(bucket->SetSettings(settings) == Error::kOk);
+  REQUIRE(bucket->GetSettings().max_block_size() == settings.max_block_size());
+
+  REQUIRE(entry->GetOptions().max_block_size == 1);
 }
