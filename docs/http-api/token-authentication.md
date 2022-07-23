@@ -22,15 +22,9 @@ The storage uses the token authentication when`RS_API_TOKEN` is set.
 
 {% swagger method="post" path=" " baseUrl="/auth/refresh " summary="Refresh access token" %}
 {% swagger-description %}
-The client has to request an access token by using this method with a header 
+The client has to request an access token by using this method with a header `Authorization` whith the value 
+of the `RS_API_TOKEN` environment variable.
 
-`Authorization`
-
-which contains SHA256 hash of 
-
-`RS_API_TOKEN.`
-
-The token must be a hexadecimal string.
 {% endswagger-description %}
 
 {% swagger-parameter in="header" name="Authorization" %}
@@ -58,6 +52,6 @@ Bearer <SHA256 hash of RS_API_TOKEN>
 #### Example in Python
 
 ```python
-hasher = hashlib.sha256(bytes(os.getenv("API_TOKEN"), 'utf-8'))
-resp = requests.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {hasher.hexdigest()}'})
+api_token = "SOME_TOKEN"
+resp = requests.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {api_token}'})
 ```
