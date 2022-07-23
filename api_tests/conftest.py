@@ -29,8 +29,7 @@ def _session(base_url):
 
     resp = session.get(f'{base_url}/info')
     if resp.status_code == 401:
-        hasher = hashlib.sha256(bytes(os.getenv("API_TOKEN"), 'utf-8'))
-        resp = session.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {hasher.hexdigest()}'})
+        resp = session.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {os.getenv("API_TOKEN")}'})
         if resp.status_code == 200:
             session.headers['Authorization'] = f'Bearer {resp.json()["access_token"]}'
         else:
