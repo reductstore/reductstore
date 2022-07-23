@@ -1,159 +1,189 @@
-## Release 0.7.0 (in progress)
+# Changelog
 
-**Features**:
+All notable changes to this project will be documented in this file.
 
-* Update Web Console to v0.3.0, [PR-133](https://github.com/reduct-storage/reduct-storage/pull/133)
-**Documentation**:
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-* Fix typo in API documentation, [PR-124](https://github.com/reduct-storage/reduct-storage/pull/124)
-* Minor style fixes in documentation, [PR-129](https://github.com/reduct-storage/reduct-storage/pull/129)
+## [Unreleased]
 
-### Release 0.6.1 (2022-06-25)
+### Added:
 
-**Other**:
+- Web Console v0.3.0, [PR-133](https://github.com/reduct-storage/reduct-storage/pull/133)
 
-* Use Web Console v0.2.1, [PR-120](https://github.com/reduct-storage/reduct-storage/pull/120)
+### Changed:
 
-## Release 0.6.0 (2022-06-25)
+- Use `Keep a log` format for CHANGLOG, [PR-136](https://github.com/reduct-storage/reduct-storage/pull/136)
 
-**Features**:
+### Fixed:
 
-* Filter unfinished records in GET /b/:bucket/:entry/list
+- Typo in API documentation, [PR-124](https://github.com/reduct-storage/reduct-storage/pull/124)
+- Style in documentation, [PR-129](https://github.com/reduct-storage/reduct-storage/pull/129)
+
+## [0.6.1] - 2022-06-25
+
+### Added:
+
+- Use Web Console v0.2.1, [PR-120](https://github.com/reduct-storage/reduct-storage/pull/120)
+
+## [0.6.0] - 2022-06-25
+
+### Added:
+
+- `Content-Type` header to responses, [PR-107](https://github.com/reduct-storage/reduct-storage/pull/107)
+- `max_block_records` to bucket settings, [PR-108](https://github.com/reduct-storage/reduct-storage/pull/108)
+- HEAD `/alive` method for health check, [PR-114](https://github.com/reduct-storage/reduct-storage/pull/114)
+
+### Changed:
+
+- Filter unfinished records in GET /b/:bucket/:entry/list
   endpoint, [PR-106](https://github.com/reduct-storage/reduct-storage/pull/106)
-* Add content-type header to responses, [PR-107](https://github.com/reduct-storage/reduct-storage/pull/107)
-* Add `max_block_records` to bucket settings, [PR-108](https://github.com/reduct-storage/reduct-storage/pull/108)
-* Add HEAD `/alive` method for health check, [PR-114](https://github.com/reduct-storage/reduct-storage/pull/114)
 
-**Bugs**:
+### Fixed:
 
-* Fix Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
-* Fix wasting disk space in XFS filesystem, [PR-100](https://github.com/reduct-storage/reduct-storage/pull/100)
-* Fix base path in server url, [PR-105](https://github.com/reduct-storage/reduct-storage/pull/105)
-* Fix updating record state in asynchronous write
+- Web Console for RS_API_BASE_PATH, [PR-92](https://github.com/reduct-storage/reduct-storage/pull/92)
+- Wasting disk space in XFS filesystem, [PR-100](https://github.com/reduct-storage/reduct-storage/pull/100)
+- Base path in server url, [PR-105](https://github.com/reduct-storage/reduct-storage/pull/105)
+- Updating record state in asynchronous write
   operation, [PR-109](https://github.com/reduct-storage/reduct-storage/pull/109)
-* Fix SEGFAULT when entry removed but async writer is
+- SEGFAULT when entry removed but async writer is
   alive, [PR-110](https://github.com/reduct-storage/reduct-storage/pull/110)
-* Fix removing a block with active readers or
+- Removing a block with active readers or
   writers, [PR-111](https://github.com/reduct-storage/reduct-storage/pull/111)
-* Fix loading bucket settings from disk, [PR-112](https://github.com/reduct-storage/reduct-storage/pull/112)
-* Fix 404 error for react routes, [PR-116](https://github.com/reduct-storage/reduct-storage/pull/116)
-* Fix no token error message, [PR-118](https://github.com/reduct-storage/reduct-storage/pull/118)
-* Fix updating bucket settings, [PR-119](https://github.com/reduct-storage/reduct-storage/pull/119)
+- Loading bucket settings from disk, [PR-112](https://github.com/reduct-storage/reduct-storage/pull/112)
+- 404 error for react routes, [PR-116](https://github.com/reduct-storage/reduct-storage/pull/116)
+- No token error message, [PR-118](https://github.com/reduct-storage/reduct-storage/pull/118)
+- Updating bucket settings, [PR-119](https://github.com/reduct-storage/reduct-storage/pull/119)
+- Benchmarks and refactor block management [PR-99](https://github.com/reduct-storage/reduct-storage/pull/99)
+- CURL to deploy image [PR-104](https://github.com/reduct-storage/reduct-storage/pull/104)
 
-**Other**:
+### Changed:
 
-* Optimise write operation, [PR-96](https://github.com/reduct-storage/reduct-storage/pull/96)
-* Add benchmarks and refactor block management [PR-99](https://github.com/reduct-storage/reduct-storage/pull/99)
-* Add curl to deploy image [PR-104](https://github.com/reduct-storage/reduct-storage/pull/104)
-* Disable SSL verification in API tests, [PR-113](https://github.com/reduct-storage/reduct-storage/pull/113)
+- Optimise write operation, [PR-96](https://github.com/reduct-storage/reduct-storage/pull/96)
+- Disable SSL verification in API tests, [PR-113](https://github.com/reduct-storage/reduct-storage/pull/113)
 
-### Release 0.5.1 (2022-05-24)
+## [0.5.1] - 2022-05-24
 
-**Bugs**:
+### Fixed:
 
-* GET /b/:bucket/:entry doesn't create an empty entry, [PR-95](https://github.com/reduct-storage/reduct-storage/pull/95)
+- GET `/b/:bucket/:entry` to avoid creating an empty
+  entry, [PR-95](https://github.com/reduct-storage/reduct-storage/pull/95)
 
-## Release 0.5.0 (2022-05-15)
+## [0.5.0] - 2022-05-15
 
-**Features**:
+### Added:
 
-* Integrate Web Console, [PR-77](https://github.com/reduct-storage/reduct-storage/pull/77)
-* Print only HTTP errors 50x to the logs, [PR-84](https://github.com/reduct-storage/reduct-storage/issues/84)
-* Add default settings for a new bucket in GET /info, [PR-87](https://github.com/reduct-storage/reduct-storage/pull/87)
+- Web Console, [PR-77](https://github.com/reduct-storage/reduct-storage/pull/77)
+- Add default settings for a new bucket in GET /info, [PR-87](https://github.com/reduct-storage/reduct-storage/pull/87)
+- Link to JS SDK to documentation, [PR-88](https://github.com/reduct-storage/reduct-storage/pull/88)
 
-**Bugs**:
+### Changed:
 
-* Fix CORS functionality, [PR-72](https://github.com/reduct-storage/reduct-storage/pull/72)
-* Fix quota policy, [PR-83](https://github.com/reduct-storage/reduct-storage/pull/83)
+- Only HTTP errors 50x in the logs, [PR-84](https://github.com/reduct-storage/reduct-storage/issues/84)
 
-**Documentation**:
+### Fixed:
 
-* Add link to JS SDK, [PR-88](https://github.com/reduct-storage/reduct-storage/pull/88)
+- CORS functionality, [PR-72](https://github.com/reduct-storage/reduct-storage/pull/72)
+- Quota policy, [PR-83](https://github.com/reduct-storage/reduct-storage/pull/83)
 
-### Release 0.4.3 (2022-05-01)
+## [0.4.3] - 2022-05-01
 
-**Bugs**:
+### Fixed:
 
-* Fix sending big blobs [PR-80](https://github.com/reduct-storage/reduct-storage/pull/80)
-* Fix handling offset in tryEnd [PR-81](https://github.com/reduct-storage/reduct-storage/pull/81)
+- Sending big blobs [PR-80](https://github.com/reduct-storage/reduct-storage/pull/80)
+- Handling offset in tryEnd [PR-81](https://github.com/reduct-storage/reduct-storage/pull/81)
 
-### Release 0.4.2 (2022-04-30)
+## [0.4.2] - 2022-04-30
 
-**Bugs**:
+### Fixed:
 
-* Fix deadlock during sending data, [PR-78](https://github.com/reduct-storage/reduct-storage/pull/78)
+- Deadlock during sending data, [PR-78](https://github.com/reduct-storage/reduct-storage/pull/78)
 
-### Release 0.4.1 (2022-04-04)
+## [0.4.1] - 2022-04-04
 
-**Bugs**:
+### Fixed:
 
-* Fix timestamp for oldest record, [PR-68](https://github.com/reduct-storage/reduct-storage/pull/68)
+- Timestamp for oldest record, [PR-68](https://github.com/reduct-storage/reduct-storage/pull/68)
 
-## Release 0.4.0 (2022-04-01)
+## [0.4.0] - 2022-04-01
 
-**Features**:
+### Added:
 
-* Asynchronous write/read operations with data blocks, [PR-62](https://github.com/reduct-storage/reduct-storage/pull/62)
+- Asynchronous write/read operations with data blocks, [PR-62](https://github.com/reduct-storage/reduct-storage/pull/62)
 
-**Bugs**:
+### Fixed:
 
-* Fix searching start block in Entry List request, [PR-61](https://github.com/reduct-storage/reduct-storage/pull/61)
-* Fix aborting GET requests, [PR-64](https://github.com/reduct-storage/reduct-storage/pull/64)
+- Searching start block in Entry List request, [PR-61](https://github.com/reduct-storage/reduct-storage/pull/61)
+- Qborting GET requests, [PR-64](https://github.com/reduct-storage/reduct-storage/pull/64)
 
-**Other**:
+### Changed:
 
-* Refactor block structure in entry, [PR-58](https://github.com/reduct-storage/reduct-storage/pull/58)
+- Block structure in entry, [PR-58](https://github.com/reduct-storage/reduct-storage/pull/58)
 
-## Release 0.3.0 (2022-03-14)
+## [0.3.0]  - 2022-03-14
 
-**Features**:
+### Added
 
-* Add secure HTTP, [PR-49](https://github.com/reduct-storage/reduct-storage/pull/49)
-* Extend GET /b/:bucket method with stats and list
-  entries, [PR-51](https://github.com/reduct-storage/reduct-storage/pull/51)
-* Add access to the latest record, [PR-53](https://github.com/reduct-storage/reduct-storage/pull/53)
+- Secure HTTP, [PR-49](https://github.com/reduct-storage/reduct-storage/pull/49)
+- Stats and list entries to GET /b/:bucket method with
+  , [PR-51](https://github.com/reduct-storage/reduct-storage/pull/51)
+- Access to the latest record, [PR-53](https://github.com/reduct-storage/reduct-storage/pull/53)
 
-**Bugs**:
+### Fixed:
 
-* Fix sending two responses for HTTP error, [PR-48](https://github.com/reduct-storage/reduct-storage/pull/48)
+- Sending two responses for HTTP error, [PR-48](https://github.com/reduct-storage/reduct-storage/pull/48)
 
-**Other**:
+### Changed:
 
-* Replace nholmann/json with Protobuf, [PR-47](https://github.com/reduct-storage/reduct-storage/pull/47)
+- Replace nholmann/json with Protobuf, [PR-47](https://github.com/reduct-storage/reduct-storage/pull/47)
 
-### Release 0.2.1 (2022-03-07)
+## [0.2.1] - 2022-03-07
 
-**Bugs**:
+### Fixed:
 
-* Fix crushing when API token is wrong, [PR-42](https://github.com/reduct-storage/reduct-storage/pull/42)
-* Fix order of authentication checks, [PR-43](https://github.com/reduct-storage/reduct-storage/pull/43)
+* Crushing when API token is wrong, [PR-42](https://github.com/reduct-storage/reduct-storage/pull/42)
+* Order of authentication checks, [PR-43](https://github.com/reduct-storage/reduct-storage/pull/43)
 
-## Release 0.2.0 (2022-02-26)
+## [0.2.0] - 2022-02-26
 
-**Features**:
+### Added:
 
-* Add HEAD method to Bucket API, [PR-30](https://github.com/reduct-storage/reduct-storage/pull/30)
-* PUT method of Bucket API has optional parameters, [PR-32](https://github.com/reduct-storage/reduct-storage/pull/32)
-* Extends information from GET method of Server API, [PR-33](https://github.com/reduct-storage/reduct-storage/pull/33)
-* Add GET /list end point to browse buckets, [PR-34](https://github.com/reduct-storage/reduct-storage/pull/34)
-* Add bearer token authentication, [PR-36](https://github.com/reduct-storage/reduct-storage/pull/36)
+- HEAD method to Bucket API, [PR-30](https://github.com/reduct-storage/reduct-storage/pull/30)
+- Extends information from GET method of Server API, [PR-33](https://github.com/reduct-storage/reduct-storage/pull/33)
+- GET /list end point to browse buckets, [PR-34](https://github.com/reduct-storage/reduct-storage/pull/34)
+- Bearer token authentication, [PR-36](https://github.com/reduct-storage/reduct-storage/pull/36)
 
-**Bugs**:
+### Changed:
 
-* Fix docker build on ARM32, [PR-29](https://github.com/reduct-storage/reduct-storage/pull/29)
-* Fix IBucket::List error 500 for timestamps between
+- PUT method of Bucket API has optional parameters, [PR-32](https://github.com/reduct-storage/reduct-storage/pull/32)
+
+### Fixed:
+
+- Docker build on ARM32, [PR-29](https://github.com/reduct-storage/reduct-storage/pull/29)
+- IBucket::List error 500 for timestamps between
   blocks, [PR-31](https://github.com/reduct-storage/reduct-storage/pull/31)
+- Wrong parameters in Entry API documentation, [PR-38](https://github.com/reduct-storage/reduct-storage/pull/38)
 
-**Documentation**:
+## [0.1.1] - 2022-02-13
 
-* Fix wrong parameters in Entry API documentation, [PR-38](https://github.com/reduct-storage/reduct-storage/pull/38)
+### Fixed:
 
-### Release 0.1.1 (2022-02-13)
+- Default folder for data in Docker image, [PR-23](https://github.com/reduct-storage/reduct-storage/pull/23)
 
-**Bugs**:
+## [0.1.0] - 2022-01-24
 
-* Fix default folder for data in Docker image, [PR-23](https://github.com/reduct-storage/reduct-storage/pull/23)
+- Initial release with basic HTTP API and FIFO bucket quota
 
-## Release 0.1.0 (2022-01-24)
-
-* Initial release with basic HTTP API and FIFO bucket quota
+[Unreleased]: https://github.com/reduct-storage/reduct-storage/compare/v0.6.1...HEAD
+[0.6.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.3...v0.5.0
+[0.4.3]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/reduct-storage/reduct-storage/releases/tag/v0.1.0
