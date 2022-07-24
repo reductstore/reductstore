@@ -52,4 +52,4 @@ async::IAsyncReader::UPtr BuildAsyncReader(const proto::Block& block, AsyncReade
   return std::make_unique<AsyncReader>(block, std::move(parameters));
 }
 
-}  // namespace reduct::storage
+}  // namespace reduct::storage::io

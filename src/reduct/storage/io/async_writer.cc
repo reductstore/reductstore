@@ -69,4 +69,4 @@ async::IAsyncWriter::UPtr BuildAsyncWriter(const proto::Block& block, AsyncWrite
                                            OnStateUpdated callback) {
   return std::make_unique<AsyncWriter>(block, std::move(parameters), std::move(callback));
 }
-}  // namespace reduct::storage
+}  // namespace reduct::storage::io

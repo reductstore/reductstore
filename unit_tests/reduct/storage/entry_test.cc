@@ -144,7 +144,8 @@ TEST_CASE("storage::Entry start a new block if it has more records than max_bloc
   REQUIRE(GetBlockSize(kName, path, options, kTimestamp + seconds(2)) == options.max_block_size);
 }
 
-TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size", "[entry][block]") {
+TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size",
+          "[entry][block]") {
   const auto options = MakeDefaultOptions();
   const auto path = BuildTmpDirectory();
   auto entry = IEntry::Build(kName, path, options);

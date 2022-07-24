@@ -1,7 +1,7 @@
 // Copyright 2022 Alexey Timin
 
-#ifndef REDUCT_STORAGE_ASYNC_READER_H
-#define REDUCT_STORAGE_ASYNC_READER_H
+#ifndef REDUCT_STORAGE_IO_ASYNC_READER_H
+#define REDUCT_STORAGE_IO_ASYNC_READER_H
 
 #include <filesystem>
 
@@ -18,6 +18,6 @@ struct AsyncReaderParameters {
 
 async::IAsyncReader::UPtr BuildAsyncReader(const proto::Block& block, AsyncReaderParameters parameters);
 
-}  // namespace reduct::storage
+}  // namespace reduct::storage::io
 
-#endif  // REDUCT_STORAGE_ASYNC_READER_H
+#endif  // REDUCT_STORAGE_IO_ASYNC_READER_H
