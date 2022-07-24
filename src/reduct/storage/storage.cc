@@ -278,6 +278,61 @@ class Storage : public IStorage {
     });
   }
 
+  [[nodiscard]] Run<IQueryCallback::Result> OnQuery(const IQueryCallback::Request& req) const override {
+    using Callback = IQueryCallback;
+
+    return Run<Callback::Result>([this, req] {
+      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      if (err) {
+        return Callback::Result{{}, err};
+      }
+
+      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
+      if (ref_error) {
+        return Callback::Result{{}, ref_error};
+      }
+
+      std::optional<IEntry::Time> start_ts;
+      if (!req.start_timestamp.empty()) {
+        auto [ts, parse_err] = ParseTimestamp(req.start_timestamp, "start_timestamp");
+        if (parse_err) {
+          return Callback::Result{{}, parse_err};
+        }
+        start_ts = ts;
+      }
+
+      std::optional<IEntry::Time> stop_ts;
+      if (!req.stop_timestamp.empty()) {
+        auto [ts, parse_err] = ParseTimestamp(req.stop_timestamp, "stop_timestamp");
+        if (parse_err) {
+          return Callback::Result{{}, parse_err};
+        }
+        stop_ts = ts;
+      }
+
+      std::chrono::seconds ttl{5};
+      if (!req.ttl.empty()) {
+        auto [val, parse_err] = ParseUInt(req.ttl, "ttl");
+        if (parse_err) {
+          return Callback::Result{{}, parse_err};
+        }
+
+        ttl = std::chrono::seconds(val);
+      }
+
+      auto entry_ptr = entry.lock();
+      if (!entry_ptr) {
+        return Callback::Result{{}, {.code = 500, .message = "Failed to resolve entry"}};
+      }
+
+      auto [id, query_err] = entry_ptr->Query(start_ts, stop_ts, query::IQuery::Options{.ttl = ttl});
+
+      Callback::Response resp;
+      resp.set_id(id);
+      return Callback::Result{resp, Error::kOk};
+    });
+  }
+
  private:
   using BucketMap = std::map<std::string, std::unique_ptr<IBucket>>;
 
@@ -290,8 +345,7 @@ class Storage : public IStorage {
     return {it, Error::kOk};
   }
 
-  static std::tuple<IEntry::Time, Error> ParseTimestamp(std::string_view timestamp,
-                                                        std::string_view param_name = "ts") {
+  static core::Result<IEntry::Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
     auto ts = IEntry::Time::clock::now();
     if (timestamp.empty()) {
       return {IEntry::Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
@@ -304,6 +358,21 @@ class Storage : public IStorage {
               Error{.code = 422,
                     .message = fmt::format("Failed to parse '{}' parameter: {} should unix times in microseconds",
                                            param_name, std::string{timestamp})}};
+    }
+  }
+
+  static core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_view param_name) {
+    uint64_t val = 0;
+    if (timestamp.empty()) {
+      return {val, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
+    }
+    try {
+      val = std::stoul(std::string{timestamp});
+      return {val, Error::kOk};
+    } catch (...) {
+      return {val, Error{.code = 422,
+                         .message = fmt::format("Failed to parse '{}' parameter: {} should be unsigned integer",
+                                                param_name, std::string{timestamp})}};
     }
   }
 

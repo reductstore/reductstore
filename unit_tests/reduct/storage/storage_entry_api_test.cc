@@ -25,6 +25,7 @@ using reduct::MakeDefaultBucketSettings;
 using reduct::OnCreateBucket;
 using reduct::OnGetBucket;
 using reduct::OnListEntry;
+using reduct::OnQuery;
 using reduct::OnReadEntry;
 using reduct::OnWriteEntry;
 
@@ -176,10 +177,76 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
   }
 
   SECTION("error, if bucket not found") {
-     REQUIRE(OnListEntry(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
+    REQUIRE(OnListEntry(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
                                         .entry_name = "entry",
                                         .start_timestamp = "1000",
                                         .stop_timestamp = "1200"})
+                .Get()
+                .error == Error{.code = 404, .message = "Bucket 'UNKNOWN_BUCKET' is not found"});
+  }
+}
+
+TEST_CASE("storage::Storage should query records by timestamps", "[storage][entry]") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+
+  REQUIRE(
+      OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
+      Error::kOk);
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .content_length = "9"})
+              .Get()
+              .result->Write("some_data") == Error::kOk);
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862001", .content_length = "9"})
+              .Get()
+              .result->Write("some_data") == Error::kOk);
+  REQUIRE(OnWriteEntry(
+              storage.get(),
+              {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862002", .content_length = "9"})
+              .Get()
+              .result->Write("some_data") == Error::kOk);
+
+  auto [result, err] = OnQuery(storage.get(), {.bucket_name = "bucket",
+                                               .entry_name = "entry",
+                                               .start_timestamp = "1610387457862000",
+                                               .stop_timestamp = "1610387457862002"})
+                           .Get();
+
+  REQUIRE(err == Error::kOk);
+  REQUIRE(result.id() >= 0);
+
+  SECTION("error if bad timestamps") {
+    Error bad_ts_err =
+        OnQuery(storage.get(),
+                {.bucket_name = "bucket", .entry_name = "entry", .start_timestamp = "XXX", .stop_timestamp = "1200"})
+            .Get();
+    REQUIRE(bad_ts_err ==
+            Error{.code = 422,
+                  .message = "Failed to parse 'start_timestamp' parameter: XXX should unix times in microseconds"});
+
+    bad_ts_err =
+        OnQuery(storage.get(),
+                {.bucket_name = "bucket", .entry_name = "entry", .start_timestamp = "1000", .stop_timestamp = "XXX"})
+            .Get();
+    REQUIRE(bad_ts_err ==
+            Error{.code = 422,
+                  .message = "Failed to parse 'stop_timestamp' parameter: XXX should unix times in microseconds"});
+  }
+
+  SECTION("error if bad ttl") {
+    Error bad_ts_err = OnQuery(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .ttl = "XXX"}).Get();
+    REQUIRE(bad_ts_err ==
+            Error{.code = 422,
+                  .message = "Failed to parse 'ttl' parameter: XXX should be unsigned integer"});
+  }
+
+  SECTION("error, if bucket not found") {
+    REQUIRE(OnQuery(storage.get(), {.bucket_name = "UNKNOWN_BUCKET",
+                                    .entry_name = "entry",
+                                    .start_timestamp = "1000",
+                                    .stop_timestamp = "1200"})
                 .Get()
                 .error == Error{.code = 404, .message = "Bucket 'UNKNOWN_BUCKET' is not found"});
   }

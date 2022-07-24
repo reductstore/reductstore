@@ -175,6 +175,24 @@ class IListEntryCallback {
   [[nodiscard]] virtual async::Run<Result> OnListEntry(const Request& req) const = 0;
 };
 
+/**
+ * Query callback
+ */
+class IQueryCallback {
+ public:
+  struct Request {
+    std::string_view bucket_name;
+    std::string_view entry_name;
+    std::string_view start_timestamp;
+    std::string_view stop_timestamp;
+    std::string_view ttl;
+  };
+
+  using Response = proto::api::QueryInfo;
+
+  using Result = core::Result<Response>;
+  virtual async::Run<Result> OnQuery(const Request& req) const = 0;
+};
 
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

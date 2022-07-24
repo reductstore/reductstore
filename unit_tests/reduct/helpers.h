@@ -141,6 +141,13 @@ inline async::Task<api::IListEntryCallback::Result> OnListEntry(storage::IStorag
   auto result = co_await storage->OnListEntry(std::move(req));
   co_return result;
 }
+
+inline async::Task<api::IQueryCallback::Result> OnQuery(storage::IStorage* storage,
+                                                                api::IQueryCallback::Request req) {
+  auto result = co_await storage->OnQuery(std::move(req));
+  co_return result;
+}
+
 }  // namespace reduct
 
 #endif  // REDUCT_STORAGE_HELPERS_H
