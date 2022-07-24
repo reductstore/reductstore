@@ -22,6 +22,7 @@ using core::Error;
 using core::Result;
 using io::AsyncReaderParameters;
 using proto::api::EntryInfo;
+using query::IQuery;
 
 using google::protobuf::Timestamp;
 using google::protobuf::util::TimeUtil;
@@ -223,22 +224,8 @@ class Entry : public IEntry {
   [[nodiscard]] core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const override {
     auto start_ts = FromTimePoint(start);
     auto stop_ts = FromTimePoint(stop);
-    LOG_DEBUG("List records for interval: ({}, {})", TimeUtil::ToString(start_ts), TimeUtil::ToString(stop_ts));
-    if (start_ts > stop_ts) {
-      return {{}, {.code = 422, .message = "Start timestamp cannot be older stop timestamp"}};
-    }
-
-    // Check boarders (is it okay if at least one record inside the interval
-    if (block_set_.empty()) {
-      return {{}, {.code = 404, .message = "No records in the entry"}};
-    }
-
-    if (stop_ts < *block_set_.begin()) {
-      return {{}, {.code = 404, .message = "No records for time interval"}};
-    }
-
-    if (auto err = CheckLatestRecord(start_ts)) {
-      return {{}, {.code = 404, .message = "No records for time interval"}};
+    if (auto err = CheckDataForTimeInterval(start_ts, stop_ts)) {
+      return {{}, std::move(err)};
     }
 
     // Find block range
@@ -275,8 +262,79 @@ class Entry : public IEntry {
     return {records, {}};
   }
 
-  [[nodiscard]] core::Result<std::vector<RecordInfo>> Query(const Time& start, const Time& stop,
-                                                            const QueryOptions& options) const override {}
+  core::Result<uint64_t> Query(const std::optional<Time>& start, const std::optional<Time>& stop,
+                               const query::IQuery::Options& options) override {
+    static uint64_t query_id = 0;
+    queries[query_id] = QueryInfo{.start = start, .stop = stop, .options = options};
+
+    return {query_id++, Error::kOk};
+  }
+
+  Result<NextRecord> Next(uint64_t query_id) const override {
+    if (!queries.contains(query_id)) {
+      return {{},
+              {.code = 404, .message = fmt::format("Query id={} doesn't exist. It expired or was finished", query_id)}};
+    }
+
+    if (block_set_.empty()) {
+      return {{}, {.code = 202, .message = "No Content"}};
+    }
+
+    auto& query_info = queries[query_id];
+
+    auto start_ts = FromTimePoint(*query_info.start);
+    if (query_info.next_record) {
+      start_ts = FromTimePoint(*query_info.next_record);
+    }
+    auto stop_ts = FromTimePoint(*query_info.stop);
+
+    auto [block, err] = FindBlock(start_ts);
+    if (err) {
+      queries.erase(query_id);
+      return {{}, {.code = 202, .message = "No Content"}};
+    }
+
+    std::vector<IQuery::NextRecord> records;
+    records.reserve(block->records_size());
+    for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
+      const auto& record = block->records(record_index);
+      if (record.timestamp() >= start_ts && record.timestamp() < stop_ts &&
+          record.state() == proto::Record::kFinished) {
+        records.push_back({.time = ToTimePoint(record.timestamp()), .size = record.end() - record.begin()});
+      }
+    }
+    if (records.empty()) {
+      queries.erase(query_id);
+      return {{}, {.code = 202, .message = "No Content"}};
+    }
+
+    std::ranges::sort(records, {}, &IQuery::NextRecord::time);
+    auto& record = records[0];
+
+    bool last = false;
+    if (records.size() > 1) {
+      query_info.next_record = records[1].time;
+    } else {
+      auto next_block_it = std::next(block_set_.find(block->latest_record_time()));
+      if (next_block_it != std::end(block_set_)) {
+        if (*next_block_it < stop_ts) {
+          query_info.next_record = ToTimePoint(*next_block_it);
+        } else {
+          last = true;
+        }
+      } else {
+        // no next block
+        last = true;
+      }
+    }
+
+    if (last) {
+      queries.erase(query_id);
+      record.last = true;
+    }
+
+    return {record, Error::kOk};
+  }
 
   Error RemoveOldestBlock() override {
     if (block_set_.empty()) {
@@ -346,7 +404,29 @@ class Entry : public IEntry {
     return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
   }
 
-  Error CheckLatestRecord(const google::protobuf::Timestamp& proto_ts) const {
+  Error CheckDataForTimeInterval(const Timestamp& start_ts, const Timestamp& stop_ts) const {
+    LOG_DEBUG("List records for interval: ({}, {})", TimeUtil::ToString(start_ts), TimeUtil::ToString(stop_ts));
+    if (start_ts > stop_ts) {
+      return {.code = 422, .message = "Start timestamp cannot be older stop timestamp"};
+    }
+
+    // Check boarders (is it okay if at least one record inside the interval
+    if (block_set_.empty()) {
+      return {.code = 404, .message = "No records in the entry"};
+    }
+
+    if (stop_ts < *block_set_.begin()) {
+      return {.code = 404, .message = "No records for time interval"};
+    }
+
+    if (auto err = CheckLatestRecord(start_ts)) {
+      return {.code = 404, .message = "No records for time interval"};
+    }
+
+    return Error::kOk;
+  }
+
+  Error CheckLatestRecord(const Timestamp& proto_ts) const {
     auto [block, err] = block_manager_->LoadBlock(*block_set_.rbegin());
     if (err) {
       return err;
@@ -367,10 +447,19 @@ class Entry : public IEntry {
   std::shared_ptr<IBlockManager> block_manager_;
   size_t size_counter_;
   size_t record_counter_;
+
+  struct QueryInfo {
+    std::optional<IEntry::Time> start;
+    std::optional<IEntry::Time> stop;
+    std::optional<IEntry::Time> next_record;
+    query::IQuery::Options options;
+  };
+
+  mutable std::unordered_map<uint64_t, QueryInfo> queries;
 };
 
 std::unique_ptr<IEntry> IEntry::Build(std::string_view name, const fs::path& path, IEntry::Options options) {
-  return std::make_unique<Entry>(name, path, std::move(options));
+  return std::make_unique<Entry>(name, path, options);
 }
 
 /**

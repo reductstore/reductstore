@@ -11,13 +11,14 @@
 #include "reduct/core/result.h"
 #include "reduct/proto/api/entry.pb.h"
 #include "reduct/storage/io/async_io.h"
+#include "reduct/storage/query/quiery.h"
 
 namespace reduct::storage {
 
 /**
  *  Entry of a bucket. Store history of blobs as time series
  */
-class IEntry : public io::IAsyncIO {
+class IEntry : public io::IAsyncIO, public query::IQuery {
  public:
   /**
    * Options
@@ -51,21 +52,6 @@ class IEntry : public io::IAsyncIO {
    */
   [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const = 0;
 
-  /**
-   * Query Options
-   */
-  struct QueryOptions {
-    std::chrono::seconds ttl;  // TTL of query in entries cache
-  };
-
-  /**
-   * @brief List records for the time interval [start, stop)
-   * @param start
-   * @param stop
-   * @return return time stamps and size of records,  empty if no data
-   */
-  [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> Query(const Time& start, const Time& stop,
-                                                                    const QueryOptions& options) const = 0;
   /**
    * @brief Remove the oldest block from disk
    * @return

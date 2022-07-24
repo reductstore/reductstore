@@ -13,7 +13,7 @@ namespace reduct::core {
  * Error with code and message
  */
 struct [[nodiscard]] Error {  // NOLINT
-  int code = 0;
+  int code = 200;
   std::string message{};
 
   /**

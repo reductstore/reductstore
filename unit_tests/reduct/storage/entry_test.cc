@@ -114,7 +114,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
   }
 }
 
-TEST_CASE("storage::Entry should resize finished block") {
+TEST_CASE("storage::Entry should resize finished block", "[entry][block]") {
   const auto options = MakeDefaultOptions();
   const auto path = BuildTmpDirectory();
   auto entry = IEntry::Build(kName, path, options);
@@ -128,7 +128,7 @@ TEST_CASE("storage::Entry should resize finished block") {
   REQUIRE(GetBlockSize(kName, path, options, kTimestamp + seconds(1)) == options.max_block_size);
 }
 
-TEST_CASE("storage::Entry start a new block if it has more records than max_block_records") {
+TEST_CASE("storage::Entry start a new block if it has more records than max_block_records", "[entry][block]") {
   auto options = MakeDefaultOptions();
   options.max_block_records = 2;
   const auto path = BuildTmpDirectory();
@@ -144,7 +144,7 @@ TEST_CASE("storage::Entry start a new block if it has more records than max_bloc
   REQUIRE(GetBlockSize(kName, path, options, kTimestamp + seconds(2)) == options.max_block_size);
 }
 
-TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size") {
+TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size", "[entry][block]") {
   const auto options = MakeDefaultOptions();
   const auto path = BuildTmpDirectory();
   auto entry = IEntry::Build(kName, path, options);
@@ -346,7 +346,7 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
   }
 }
 
-TEST_CASE("storage::Entry should not list records which is not finished") {
+TEST_CASE("storage::Entry should not list records which is not finished", "[entry]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
@@ -357,7 +357,7 @@ TEST_CASE("storage::Entry should not list records which is not finished") {
   REQUIRE(entry->List(kTimestamp - seconds(1), kTimestamp + seconds(1)).result.size() == 1);
 }
 
-TEST_CASE("storage::Entry should wait when read operations finish before removing block") {
+TEST_CASE("storage::Entry should wait when read operations finish before removing block", "[entry][block]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
@@ -373,7 +373,7 @@ TEST_CASE("storage::Entry should wait when read operations finish before removin
   REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
 }
 
-TEST_CASE("storage::Entry should wait when write operations finish before removing block") {
+TEST_CASE("storage::Entry should wait when write operations finish before removing block", "[entry][block]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
