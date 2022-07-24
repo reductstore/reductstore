@@ -265,7 +265,11 @@ class Entry : public IEntry {
   core::Result<uint64_t> Query(const std::optional<Time>& start, const std::optional<Time>& stop,
                                const query::IQuery::Options& options) override {
     static uint64_t query_id = 0;
-    queries[query_id] = QueryInfo{.start = start, .stop = stop, .options = options};
+    queries[query_id] = QueryInfo{
+        .start = (start ? *start : Time::min()),
+        .stop = (stop ? *stop : Time::max()),
+        .options = options,
+    };
 
     return {query_id++, Error::kOk};
   }
@@ -282,11 +286,11 @@ class Entry : public IEntry {
 
     auto& query_info = queries[query_id];
 
-    auto start_ts = FromTimePoint(*query_info.start);
+    auto start_ts = FromTimePoint(query_info.start);
     if (query_info.next_record) {
       start_ts = FromTimePoint(*query_info.next_record);
     }
-    auto stop_ts = FromTimePoint(*query_info.stop);
+    auto stop_ts = FromTimePoint(query_info.stop);
 
     auto start_block = block_set_.upper_bound(start_ts);
     if (start_block == block_set_.end()) {
@@ -459,8 +463,8 @@ class Entry : public IEntry {
   size_t record_counter_;
 
   struct QueryInfo {
-    std::optional<IEntry::Time> start;
-    std::optional<IEntry::Time> stop;
+    IEntry::Time start;
+    IEntry::Time stop;
     std::optional<IEntry::Time> next_record;
     query::IQuery::Options options;
   };

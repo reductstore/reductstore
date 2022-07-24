@@ -80,8 +80,13 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
                      });
     }
 
-    SECTION("with overlap") {
-      auto [id, err] = entry->Query(kTimestamp - seconds(1), kTimestamp + seconds(4), kDefaultOptions);
+    SECTION("with overlap and default values") {
+      auto [start, stop] =
+          GENERATE(std::make_pair(std::make_optional(kTimestamp - seconds(1)), std::make_optional(kTimestamp + seconds(4))),
+                   std::make_pair(std::make_optional(kTimestamp - seconds(1)), std::nullopt),
+                   std::make_pair(std::nullopt, std::make_optional(kTimestamp + seconds(4))));
+
+      auto [id, err] = entry->Query(start, stop, kDefaultOptions);
 
       auto ret = entry->Next(id);
       REQUIRE(ret.error == Error::kOk);
