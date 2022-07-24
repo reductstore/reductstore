@@ -288,10 +288,17 @@ class Entry : public IEntry {
     }
     auto stop_ts = FromTimePoint(*query_info.stop);
 
-    auto [block, err] = FindBlock(start_ts);
+    auto start_block = block_set_.upper_bound(start_ts);
+    if (start_block == block_set_.end()) {
+      start_block = std::prev(start_block);
+    } else if (start_block != block_set_.begin()) {
+      start_block = std::prev(start_block);
+    }
+
+    auto [block, err] = block_manager_->LoadBlock(*start_block);
     if (err) {
       queries.erase(query_id);
-      return {{}, {.code = 202, .message = "No Content"}};
+      return {{}, err};
     }
 
     std::vector<IQuery::NextRecord> records;
@@ -303,6 +310,7 @@ class Entry : public IEntry {
         records.push_back({.time = ToTimePoint(record.timestamp()), .size = record.end() - record.begin()});
       }
     }
+
     if (records.empty()) {
       queries.erase(query_id);
       return {{}, {.code = 202, .message = "No Content"}};
@@ -315,11 +323,13 @@ class Entry : public IEntry {
     if (records.size() > 1) {
       query_info.next_record = records[1].time;
     } else {
-      auto next_block_it = std::next(block_set_.find(block->latest_record_time()));
+      // Only one record in current block check next one
+      auto next_block_it = std::next(start_block);
       if (next_block_it != std::end(block_set_)) {
         if (*next_block_it < stop_ts) {
           query_info.next_record = ToTimePoint(*next_block_it);
         } else {
+          // no records in next block
           last = true;
         }
       } else {
