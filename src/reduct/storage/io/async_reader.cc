@@ -1,12 +1,12 @@
 // Copyright 2022 Alexey Timin
 
-#include "reduct/storage/async_reader.h"
+#include "async_reader.h"
 
 #include <fstream>
 
 #include "reduct/core/logger.h"
 
-namespace reduct::storage {
+namespace reduct::storage::io {
 
 using core::Error;
 

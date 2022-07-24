@@ -7,17 +7,17 @@
 #include <ostream>
 #include <vector>
 
-#include "reduct/async/io.h"
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/api/entry.pb.h"
+#include "reduct/storage/io/async_io.h"
 
 namespace reduct::storage {
 
 /**
  *  Entry of a bucket. Store history of blobs as time series
  */
-class IEntry {
+class IEntry : public io::IAsyncIO {
  public:
   /**
    * Options
@@ -44,23 +44,6 @@ class IEntry {
   };
 
   /**
-   * @brief Write a data with timestamp to corresponding block
-   * The method provides the best performance if a new timestamp is always new the stored ones.
-   * Then the engine doesn't need to find a proper block and just records data into the current one.
-   * @param time timestamp of the data
-   * @return async writer or error
-   */
-  [[nodiscard]] virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t size) = 0;
-
-  /**
-   * @brief Finds the record for the timestamp and read the blob
-   * Current implementation provide only exact matching.
-   * @param time timestamp of record to read
-   * @return async reader or error (404 - if no record found, 500 some internal errors)
-   */
-  [[nodiscard]] virtual core::Result<async::IAsyncReader::SPtr> BeginRead(const Time& time) const = 0;
-
-  /**
    * @brief List records for the time interval [start, stop)
    * @param start
    * @param stop
@@ -68,6 +51,21 @@ class IEntry {
    */
   [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const = 0;
 
+  /**
+   * Query Options
+   */
+  struct QueryOptions {
+    std::chrono::seconds ttl;  // TTL of query in entries cache
+  };
+
+  /**
+   * @brief List records for the time interval [start, stop)
+   * @param start
+   * @param stop
+   * @return return time stamps and size of records,  empty if no data
+   */
+  [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> Query(const Time& start, const Time& stop,
+                                                                    const QueryOptions& options) const = 0;
   /**
    * @brief Remove the oldest block from disk
    * @return

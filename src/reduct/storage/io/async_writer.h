@@ -8,7 +8,7 @@
 #include "reduct/async/io.h"
 #include "reduct/proto/storage/entry.pb.h"
 
-namespace reduct::storage {
+namespace reduct::storage::io {
 
 struct AsyncWriterParameters {
   std::filesystem::path path;

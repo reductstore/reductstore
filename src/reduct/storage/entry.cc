@@ -12,14 +12,15 @@
 #include "reduct/core/logger.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/storage/entry.pb.h"
-#include "reduct/storage/async_reader.h"
-#include "reduct/storage/async_writer.h"
 #include "reduct/storage/block_manager.h"
+#include "reduct/storage/io/async_reader.h"
+#include "reduct/storage/io/async_writer.h"
 
 namespace reduct::storage {
 
 using core::Error;
 using core::Result;
+using io::AsyncReaderParameters;
 using proto::api::EntryInfo;
 
 using google::protobuf::Timestamp;
@@ -273,6 +274,9 @@ class Entry : public IEntry {
     std::ranges::sort(records, {}, &RecordInfo::time);
     return {records, {}};
   }
+
+  [[nodiscard]] core::Result<std::vector<RecordInfo>> Query(const Time& start, const Time& stop,
+                                                            const QueryOptions& options) const override {}
 
   Error RemoveOldestBlock() override {
     if (block_set_.empty()) {
