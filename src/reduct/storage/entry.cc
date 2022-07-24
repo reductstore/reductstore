@@ -265,9 +265,14 @@ class Entry : public IEntry {
   core::Result<uint64_t> Query(const std::optional<Time>& start, const std::optional<Time>& stop,
                                const query::IQuery::Options& options) override {
     static uint64_t query_id = 0;
+
+    RemoveOutDatedQueries();
+
+    const auto current_time = IEntry::Time::clock::now();
     queries[query_id] = QueryInfo{
         .start = (start ? *start : Time::min()),
         .stop = (stop ? *stop : Time::max()),
+        .last_update = IEntry::Time::clock::now(),
         .options = options,
     };
 
@@ -275,6 +280,8 @@ class Entry : public IEntry {
   }
 
   Result<NextRecord> Next(uint64_t query_id) const override {
+    RemoveOutDatedQueries();
+
     if (!queries.contains(query_id)) {
       return {{},
               {.code = 404, .message = fmt::format("Query id={} doesn't exist. It expired or was finished", query_id)}};
@@ -285,6 +292,7 @@ class Entry : public IEntry {
     }
 
     auto& query_info = queries[query_id];
+    query_info.last_update = IEntry::Time::clock::now();
 
     auto start_ts = FromTimePoint(query_info.start);
     if (query_info.next_record) {
@@ -453,6 +461,15 @@ class Entry : public IEntry {
     return Error::kOk;
   }
 
+  void RemoveOutDatedQueries() const {
+    const auto current_time = IEntry::Time::clock::now();
+
+    std::erase_if(queries, [current_time](const auto& item) {
+      auto const& [id, query] = item;
+      return query.last_update + query.options.ttl < current_time;
+    });
+  }
+
   std::string name_;
   Options options_;
   fs::path full_path_;
@@ -466,6 +483,8 @@ class Entry : public IEntry {
     IEntry::Time start;
     IEntry::Time stop;
     std::optional<IEntry::Time> next_record;
+    IEntry::Time last_update;
+
     query::IQuery::Options options;
   };
 

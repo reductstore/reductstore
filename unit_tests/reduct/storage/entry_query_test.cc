@@ -179,3 +179,41 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
     }
   }
 }
+
+TEST_CASE("storage::Entry should have TTL", "[entry][query]") {
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
+  REQUIRE(entry);
+
+  const IQuery::Options kDefaultOptions = {.ttl = seconds(1)};
+
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(1)) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2)) == Error::kOk);
+
+  SECTION("expires in TTL seconds") {
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(2), kDefaultOptions);
+
+    std::this_thread::sleep_for(kDefaultOptions.ttl);
+    err = entry->Next(id);
+    REQUIRE(err == Error{
+                       .code = 404,
+                       .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id),
+                   });
+  }
+
+  SECTION("expires in TTL seconds after Next") {
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(2), kDefaultOptions);
+
+    std::this_thread::sleep_for(kDefaultOptions.ttl - std::chrono::milliseconds(500));
+    err = entry->Next(id);
+    REQUIRE(err == Error::kOk);
+
+
+    std::this_thread::sleep_for(kDefaultOptions.ttl);
+    err = entry->Next(id);
+    REQUIRE(err == Error{
+                       .code = 404,
+                       .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id),
+                   });
+  }
+}
