@@ -6,14 +6,14 @@
 #include <chrono>
 #include <optional>
 
+#include "reduct/async/io.h"
 #include "reduct/core/result.h"
+#include "reduct/core/time.h"
 
 namespace reduct::storage::query {
 
 class IQuery {
  public:
-  using Time = std::chrono::system_clock::time_point;
-
   /**
    * Query Options
    */
@@ -28,14 +28,13 @@ class IQuery {
    * @param options options
    * @return return query Id
    */
-  [[nodiscard]] virtual core::Result<uint64_t> Query(const std::optional<Time>& start, const std::optional<Time>& stop,
-                                                     const Options& options) = 0;
+  [[nodiscard]] virtual core::Result<uint64_t> Query(const std::optional<core::Time>& start,
+                                                     const std::optional<core::Time>& stop, const Options& options) = 0;
   /**
    * Information about record
    */
   struct NextRecord {
-    Time time;
-    size_t size{};
+    async::IAsyncReader::SPtr reader;
     bool last{};
 
     bool operator<=>(const NextRecord&) const = default;

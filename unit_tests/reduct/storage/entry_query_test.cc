@@ -10,7 +10,9 @@
 
 using reduct::ReadOne;
 using reduct::WriteOne;
+using reduct::async::IAsyncReader;
 using reduct::core::Error;
+using reduct::core::Time;
 using reduct::storage::IEntry;
 using reduct::storage::query::IQuery;
 
@@ -28,7 +30,7 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time() + std::chrono::microseconds(10'100'200);  // to check um precision
+static const auto kTimestamp = Time() + std::chrono::microseconds(10'100'200);  // to check um precision
 
 TEST_CASE("storage::Entry should query records", "[entry][query]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
@@ -67,11 +69,14 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
 
       auto ret = entry->Next(id);
       REQUIRE(ret.error == Error::kOk);
-      REQUIRE(ret.result == IQuery::NextRecord{.time = kTimestamp, .size = 100, .last = false});
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp);
+      REQUIRE(ret.result.last == false);
 
       ret = entry->Next(id);
       REQUIRE(ret.error == Error::kOk);
-      REQUIRE(ret.result == IQuery::NextRecord{.time = kTimestamp + seconds(1), .size = 100, .last = true});
+      REQUIRE(ret.result.last == true);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(1));
+      REQUIRE(ret.result.reader->Read().result == IAsyncReader::DataChunk{.data = blob, .last = true});
 
       err = entry->Next(id);
       REQUIRE(err == Error{
@@ -114,11 +119,15 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
     REQUIRE(err == Error::kOk);
     auto ret = entry->Next(id);
     REQUIRE(ret.error == Error::kOk);
-    REQUIRE(ret.result == IQuery::NextRecord{.time = kTimestamp, .size = 4, .last = false});
+    REQUIRE(ret.result.reader->timestamp() == kTimestamp);
+    REQUIRE(ret.result.reader->size() == 4);
+    REQUIRE(ret.result.last == false);
 
     ret = entry->Next(id);
     REQUIRE(ret.error == Error::kOk);
-    REQUIRE(ret.result == IQuery::NextRecord{.time = kTimestamp + seconds(1), .size = 4, .last = true});
+    REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(1));
+    REQUIRE(ret.result.reader->size() == 4);
+    REQUIRE(ret.result.last == true);
   }
 
   SECTION("should send records sorted") {
@@ -131,11 +140,15 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
     REQUIRE(err == Error::kOk);
     auto ret = entry->Next(id);
     REQUIRE(ret.error == Error::kOk);
-    REQUIRE(ret.result == IQuery::NextRecord{.time = kTimestamp, .size = 4, .last = false});
+    REQUIRE(ret.result.reader->timestamp() == kTimestamp);
+    REQUIRE(ret.result.reader->size() == 4);
+    REQUIRE(ret.result.last == false);
 
     ret = entry->Next(id);
     REQUIRE(ret.error == Error::kOk);
-    REQUIRE(ret.result == IQuery::NextRecord{.time = kTimestamp + seconds(1), .size = 4, .last = true});
+    REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(1));
+    REQUIRE(ret.result.reader->size() == 4);
+    REQUIRE(ret.result.last == true);
   }
 
   SECTION("extreme cases") {
@@ -157,12 +170,12 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
 
     SECTION("if there is overlap it is ok") {
       auto [id, err] = entry->Query(kTimestamp + seconds(1), kTimestamp + seconds(4), kDefaultOptions);
-      REQUIRE(entry->Next(id).result.time == kTimestamp + seconds(1));
-      REQUIRE(entry->Next(id).result.time == kTimestamp + seconds(2));
+      REQUIRE(entry->Next(id).result.reader->timestamp() == kTimestamp + seconds(1));
+      REQUIRE(entry->Next(id).result.reader->timestamp() == kTimestamp + seconds(2));
 
       id = entry->Query(kTimestamp - seconds(1), kTimestamp + seconds(2), kDefaultOptions).result;
-      REQUIRE(entry->Next(id).result.time == kTimestamp);
-      REQUIRE(entry->Next(id).result.time == kTimestamp + seconds(1));
+      REQUIRE(entry->Next(id).result.reader->timestamp() == kTimestamp);
+      REQUIRE(entry->Next(id).result.reader->timestamp() == kTimestamp + seconds(1));
     }
 
     SECTION("if timestamp between two blocks") {
@@ -207,7 +220,6 @@ TEST_CASE("storage::Entry should have TTL", "[entry][query]") {
     std::this_thread::sleep_for(kDefaultOptions.ttl - std::chrono::milliseconds(500));
     err = entry->Next(id);
     REQUIRE(err == Error::kOk);
-
 
     std::this_thread::sleep_for(kDefaultOptions.ttl);
     err = entry->Next(id);

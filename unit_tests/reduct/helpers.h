@@ -62,7 +62,7 @@ static proto::api::BucketSettings MakeDefaultBucketSettings() {
  * @param ts
  * @return
  */
-inline auto WriteOne(storage::IEntry& entry, std::string_view blob, storage::IEntry::Time ts) {  // NOLINT
+inline auto WriteOne(storage::IEntry& entry, std::string_view blob, core::Time ts) {  // NOLINT
   auto [ret, err] = entry.BeginWrite(ts, blob.size());
   if (err) {
     return err;
@@ -76,7 +76,7 @@ inline auto WriteOne(storage::IEntry& entry, std::string_view blob, storage::IEn
  * @param ts
  * @return
  */
-inline core::Result<std::string> ReadOne(const storage::IEntry& entry, storage::IEntry::Time ts) {
+inline core::Result<std::string> ReadOne(const storage::IEntry& entry, core::Time ts) {
   auto [reader, err] = entry.BeginRead(ts);
   if (err) {
     return {{}, err};
@@ -102,13 +102,13 @@ inline async::Task<api::IListStorageCallback::Result> OnStorageList(storage::ISt
 
 inline async::Task<api::ICreateBucketCallback::Result> OnCreateBucket(storage::IStorage* storage,
                                                                       api::ICreateBucketCallback::Request req) {
-  auto result = co_await storage->OnCreateBucket(std::move(req));
+  auto result = co_await storage->OnCreateBucket(req);
   co_return result;
 }
 
 inline async::Task<api::IGetBucketCallback::Result> OnGetBucket(storage::IStorage* storage,
                                                                 api::IGetBucketCallback::Request req) {
-  auto result = co_await storage->OnGetBucket(std::move(req));
+  auto result = co_await storage->OnGetBucket(req);
   co_return result;
 }
 

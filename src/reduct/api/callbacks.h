@@ -194,5 +194,22 @@ class IQueryCallback {
   virtual async::Run<Result> OnQuery(const Request& req) const = 0;
 };
 
+/**
+ * Query callback
+ */
+class INextCallback {
+ public:
+  using Response = async::IAsyncReader::SPtr;
+
+  struct Request {
+    std::string_view bucket_name;
+    std::string_view entry_name;
+    std::string_view id;
+  };
+
+  using Result = core::Result<Response>;
+  virtual async::Run<Result> OnNextQuery(const Request& req) const = 0;
+};
+
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

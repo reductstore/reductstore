@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include "reduct/async/io.h"
+#include "reduct/core/time.h"
 #include "reduct/proto/storage/entry.pb.h"
 
 namespace reduct::storage::io {
@@ -14,6 +15,7 @@ struct AsyncReaderParameters {
   std::filesystem::path path;
   int record_index;
   size_t chunk_size;
+  core::Time time;
 };
 
 async::IAsyncReader::UPtr BuildAsyncReader(const proto::Block& block, AsyncReaderParameters parameters);

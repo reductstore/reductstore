@@ -9,6 +9,7 @@
 
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
+#include "reduct/core/time.h"
 #include "reduct/proto/api/entry.pb.h"
 #include "reduct/storage/io/async_io.h"
 #include "reduct/storage/query/quiery.h"
@@ -30,14 +31,12 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
     bool operator<=>(const Options& rhs) const = default;
   };
 
-  using Time = std::chrono::system_clock::time_point;
-
   /**
    * Info about a record in a block
    */
   struct RecordInfo {
-    Time time;    // time when it was created
-    size_t size;  // size in bytes
+    core::Time time;  // time when it was created
+    size_t size;      // size in bytes
 
     bool operator<=>(const RecordInfo& rhs) const = default;
 
@@ -50,7 +49,8 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
    * @param stop
    * @return return time stamps and size of records,  empty if no data
    */
-  [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const = 0;
+  [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> List(const core::Time& start,
+                                                                   const core::Time& stop) const = 0;
 
   /**
    * @brief Remove the oldest block from disk

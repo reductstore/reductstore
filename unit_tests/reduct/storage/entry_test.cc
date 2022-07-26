@@ -12,6 +12,7 @@
 using reduct::ReadOne;
 using reduct::WriteOne;
 using reduct::core::Error;
+using reduct::core::Time;
 using reduct::storage::IEntry;
 
 using google::protobuf::util::TimeUtil;
@@ -28,13 +29,13 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time() + std::chrono::microseconds(10'100'200);  // to check um precision
+static const auto kTimestamp = Time() + std::chrono::microseconds(10'100'200);  // to check um precision
 
-auto ToMicroseconds(IEntry::Time tp) {
+auto ToMicroseconds(Time tp) {
   return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
 }
 
-auto GetBlockSize(std::string_view name, fs::path path, IEntry::Options options, IEntry::Time begin_ts) {
+auto GetBlockSize(std::string_view name, fs::path path, IEntry::Options options, Time begin_ts) {
   return fs::file_size(
       path / name /
       fmt::format("{}.blk",
@@ -206,7 +207,7 @@ TEST_CASE("storage::Entry should read from empty entry with 404", "[entry]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
 
   REQUIRE(entry);
-  REQUIRE(ReadOne(*entry, IEntry::Time()).error.code == 404);
+  REQUIRE(ReadOne(*entry, Time()).error.code == 404);
 }
 
 TEST_CASE("storage::Entry should remove last block", "[entry]") {

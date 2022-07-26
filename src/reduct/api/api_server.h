@@ -27,7 +27,8 @@ class IApiHandler : public IInfoCallback,
                     public IWriteEntryCallback,
                     public IReadEntryCallback,
                     public IListEntryCallback,
-                    public IQueryCallback {};
+                    public IQueryCallback,
+                    public INextCallback {};
 
 /**
  * HTTP API Server

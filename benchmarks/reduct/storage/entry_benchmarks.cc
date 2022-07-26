@@ -11,6 +11,7 @@
 
 namespace fs = std::filesystem;
 
+using reduct::core::Time;
 using reduct::core::Error;
 using reduct::proto::api::BucketSettings;
 using reduct::storage::IBucket;
@@ -27,11 +28,11 @@ TEST_CASE("storage::IEntry write operation") {
   auto entry = bucket->GetOrCreateEntry("entry-1").entry.lock();
 
   for (int i = 0; i < 10000; ++i) {
-    auto [writer, err] = entry->BeginWrite(IEntry::Time::clock::now(), 10);
+    auto [writer, err] = entry->BeginWrite(Time::clock::now(), 10);
     [[maybe_unused]] auto ret = writer->Write("1234567890");
   }
   BENCHMARK("Write forward") {
-    auto [writer, err] = entry->BeginWrite(IEntry::Time::clock::now(), 10);
+    auto [writer, err] = entry->BeginWrite(Time::clock::now(), 10);
     [[maybe_unused]] auto ret = writer->Write("1234567890");
   };
 }

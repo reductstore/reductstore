@@ -15,6 +15,7 @@ namespace reduct::storage {
 
 using async::Run;
 using core::Error;
+using core::Time;
 
 namespace fs = std::filesystem;
 
@@ -223,7 +224,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, ref_error};
       }
 
-      IEntry::Time ts;
+      Time ts;
       if (!req.latest) {
         auto [parsed_ts, parse_err] = ParseTimestamp(req.timestamp);
         if (parse_err) {
@@ -231,7 +232,7 @@ class Storage : public IStorage {
         }
         ts = parsed_ts;
       } else {
-        ts = IEntry::Time() + std::chrono::microseconds(entry.lock()->GetInfo().latest_record());
+        ts = Time() + std::chrono::microseconds(entry.lock()->GetInfo().latest_record());
       }
 
       return entry.lock()->BeginRead(ts);
@@ -292,7 +293,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, ref_error};
       }
 
-      std::optional<IEntry::Time> start_ts;
+      std::optional<Time> start_ts;
       if (!req.start_timestamp.empty()) {
         auto [ts, parse_err] = ParseTimestamp(req.start_timestamp, "start_timestamp");
         if (parse_err) {
@@ -301,7 +302,7 @@ class Storage : public IStorage {
         start_ts = ts;
       }
 
-      std::optional<IEntry::Time> stop_ts;
+      std::optional<Time> stop_ts;
       if (!req.stop_timestamp.empty()) {
         auto [ts, parse_err] = ParseTimestamp(req.stop_timestamp, "stop_timestamp");
         if (parse_err) {
@@ -333,6 +334,12 @@ class Storage : public IStorage {
     });
   }
 
+  [[nodiscard]] Run<INextCallback::Result> OnNextQuery(const INextCallback::Request& req) const override {
+    using Callback = INextCallback;
+
+    return Run<Callback::Result>([]() { return Callback::Result{}; });
+  }
+
  private:
   using BucketMap = std::map<std::string, std::unique_ptr<IBucket>>;
 
@@ -345,16 +352,16 @@ class Storage : public IStorage {
     return {it, Error::kOk};
   }
 
-  static core::Result<IEntry::Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
-    auto ts = IEntry::Time::clock::now();
+  static core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
+    auto ts = Time::clock::now();
     if (timestamp.empty()) {
-      return {IEntry::Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
+      return {Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
     }
     try {
-      ts = IEntry::Time{} + std::chrono::microseconds(std::stol(std::string{timestamp}));
+      ts = Time{} + std::chrono::microseconds(std::stol(std::string{timestamp}));
       return {ts, Error::kOk};
     } catch (...) {
-      return {IEntry::Time{},
+      return {Time{},
               Error{.code = 422,
                     .message = fmt::format("Failed to parse '{}' parameter: {} should unix times in microseconds",
                                            param_name, std::string{timestamp})}};

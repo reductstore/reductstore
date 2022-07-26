@@ -8,6 +8,7 @@
 #include "reduct/helpers.h"
 
 using reduct::core::Error;
+using reduct::core::Time;
 using reduct::proto::api::BucketSettings;
 using reduct::storage::IBucket;
 using reduct::storage::IEntry;
@@ -73,7 +74,7 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
     auto ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
     REQUIRE(ref.entry.lock()->GetInfo().record_count() == 0);
-    REQUIRE(ref.entry.lock()->BeginWrite(IEntry::Time::clock::now(), 9).result->Write("some_blob") == Error::kOk);
+    REQUIRE(ref.entry.lock()->BeginWrite(Time::clock::now(), 9).result->Write("some_blob") == Error::kOk);
 
     ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
@@ -106,7 +107,7 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   auto entry1 = bucket->GetOrCreateEntry("entry_1").entry.lock();
   auto entry2 = bucket->GetOrCreateEntry("entry_2").entry.lock();
 
-  const auto ts = IEntry::Time();
+  const auto ts = Time();
   std::string blob(400, 'x');
 
   SECTION("3 big blobs 3*400 should be shrunk to 2") {

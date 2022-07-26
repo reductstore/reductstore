@@ -20,13 +20,14 @@ namespace reduct::storage {
 
 using core::Error;
 using core::Result;
+using core::Time;
 using io::AsyncReaderParameters;
 using proto::api::EntryInfo;
 using query::IQuery;
 
 using google::protobuf::Timestamp;
 using google::protobuf::util::TimeUtil;
-auto to_time_t = IEntry::Time::clock::to_time_t;
+auto to_time_t = core::Time::clock::to_time_t;
 
 namespace fs = std::filesystem;
 
@@ -268,11 +269,11 @@ class Entry : public IEntry {
 
     RemoveOutDatedQueries();
 
-    const auto current_time = IEntry::Time::clock::now();
-    queries[query_id] = QueryInfo{
+    const auto current_time = Time::clock::now();
+    queries_[query_id] = QueryInfo{
         .start = (start ? *start : Time::min()),
         .stop = (stop ? *stop : Time::max()),
-        .last_update = IEntry::Time::clock::now(),
+        .last_update = Time::clock::now(),
         .options = options,
     };
 
@@ -282,7 +283,7 @@ class Entry : public IEntry {
   Result<NextRecord> Next(uint64_t query_id) const override {
     RemoveOutDatedQueries();
 
-    if (!queries.contains(query_id)) {
+    if (!queries_.contains(query_id)) {
       return {{},
               {.code = 404, .message = fmt::format("Query id={} doesn't exist. It expired or was finished", query_id)}};
     }
@@ -291,8 +292,8 @@ class Entry : public IEntry {
       return {{}, {.code = 202, .message = "No Content"}};
     }
 
-    auto& query_info = queries[query_id];
-    query_info.last_update = IEntry::Time::clock::now();
+    auto& query_info = queries_[query_id];
+    query_info.last_update = Time::clock::now();
 
     auto start_ts = FromTimePoint(query_info.start);
     if (query_info.next_record) {
@@ -307,33 +308,34 @@ class Entry : public IEntry {
       start_block = std::prev(start_block);
     }
 
-    auto [block, err] = block_manager_->LoadBlock(*start_block);
+    const auto [block, err] = block_manager_->LoadBlock(*start_block);
     if (err) {
-      queries.erase(query_id);
+      queries_.erase(query_id);
       return {{}, err};
     }
 
-    std::vector<IQuery::NextRecord> records;
+    std::vector<int> records;
     records.reserve(block->records_size());
     for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
       const auto& record = block->records(record_index);
       if (record.timestamp() >= start_ts && record.timestamp() < stop_ts &&
           record.state() == proto::Record::kFinished) {
-        records.push_back({.time = ToTimePoint(record.timestamp()), .size = record.end() - record.begin()});
+        records.push_back(record_index);
       }
     }
 
     if (records.empty()) {
-      queries.erase(query_id);
+      queries_.erase(query_id);
       return {{}, {.code = 202, .message = "No Content"}};
     }
 
-    std::ranges::sort(records, {}, &IQuery::NextRecord::time);
-    auto& record = records[0];
+    auto get_timestamp = [block](int index) { return block->records(index).timestamp(); };
+    std::ranges::sort(records, {}, get_timestamp);
+    auto& record_index = records[0];
 
     bool last = false;
     if (records.size() > 1) {
-      query_info.next_record = records[1].time;
+      query_info.next_record = ToTimePoint(get_timestamp(records[1]));
     } else {
       // Only one record in current block check next one
       auto next_block_it = std::next(start_block);
@@ -351,11 +353,24 @@ class Entry : public IEntry {
     }
 
     if (last) {
-      queries.erase(query_id);
-      record.last = true;
+      queries_.erase(query_id);
     }
 
-    return {record, Error::kOk};
+    auto [reader, reader_err] =
+        block_manager_->BeginRead(block, AsyncReaderParameters{.path = BlockPath(full_path_, *block),
+                                                               .record_index = record_index,
+                                                               .chunk_size = kDefaultMaxReadChunk,
+                                                               .time = ToTimePoint(get_timestamp(record_index))});
+    if (reader_err) {
+      return {{}, reader_err};
+    }
+
+    NextRecord next_record{
+        .reader = reader,
+        .last = last,
+    };
+
+    return {next_record, Error::kOk};
   }
 
   Error RemoveOldestBlock() override {
@@ -462,9 +477,9 @@ class Entry : public IEntry {
   }
 
   void RemoveOutDatedQueries() const {
-    const auto current_time = IEntry::Time::clock::now();
+    const auto current_time = Time::clock::now();
 
-    std::erase_if(queries, [current_time](const auto& item) {
+    std::erase_if(queries_, [current_time](const auto& item) {
       auto const& [id, query] = item;
       return query.last_update + query.options.ttl < current_time;
     });
@@ -480,15 +495,15 @@ class Entry : public IEntry {
   size_t record_counter_;
 
   struct QueryInfo {
-    IEntry::Time start;
-    IEntry::Time stop;
-    std::optional<IEntry::Time> next_record;
-    IEntry::Time last_update;
+    Time start;
+    Time stop;
+    std::optional<Time> next_record;
+    Time last_update;
 
     query::IQuery::Options options;
   };
 
-  mutable std::unordered_map<uint64_t, QueryInfo> queries;
+  mutable std::unordered_map<uint64_t, QueryInfo> queries_;
 };
 
 std::unique_ptr<IEntry> IEntry::Build(std::string_view name, const fs::path& path, IEntry::Options options) {
