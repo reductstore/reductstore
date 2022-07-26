@@ -25,6 +25,7 @@ using reduct::MakeDefaultBucketSettings;
 using reduct::OnCreateBucket;
 using reduct::OnGetBucket;
 using reduct::OnListEntry;
+using reduct::OnNextRecord;
 using reduct::OnQuery;
 using reduct::OnReadEntry;
 using reduct::OnWriteEntry;
@@ -217,6 +218,19 @@ TEST_CASE("storage::Storage should query records by timestamps", "[storage][entr
   REQUIRE(err == Error::kOk);
   REQUIRE(result.id() >= 0);
 
+  auto id = std::to_string(result.id());
+  auto ret = OnNextRecord(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .id = id}).Get();
+
+  REQUIRE(ret.error == Error::kOk);
+  REQUIRE_FALSE(ret.result.last);
+  REQUIRE(ret.result.reader->Read().result == IAsyncReader::DataChunk{.data = "some_data", .last = true});
+
+  ret = OnNextRecord(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .id = id}).Get();
+
+  REQUIRE(ret.error == Error::kOk);
+  REQUIRE(ret.result.last);
+  REQUIRE(ret.result.reader->Read().result == IAsyncReader::DataChunk{.data = "some_data", .last = true});
+
   SECTION("error if bad timestamps") {
     Error bad_ts_err =
         OnQuery(storage.get(),
@@ -238,8 +252,7 @@ TEST_CASE("storage::Storage should query records by timestamps", "[storage][entr
   SECTION("error if bad ttl") {
     Error bad_ts_err = OnQuery(storage.get(), {.bucket_name = "bucket", .entry_name = "entry", .ttl = "XXX"}).Get();
     REQUIRE(bad_ts_err ==
-            Error{.code = 422,
-                  .message = "Failed to parse 'ttl' parameter: XXX should be unsigned integer"});
+            Error{.code = 422, .message = "Failed to parse 'ttl' parameter: XXX should be unsigned integer"});
   }
 
   SECTION("error, if bucket not found") {

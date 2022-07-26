@@ -21,6 +21,10 @@ namespace reduct::storage {
  */
 class IEntry : public io::IAsyncIO, public query::IQuery {
  public:
+  using UPtr = std::unique_ptr<IEntry>;
+  using SPtr = std::shared_ptr<IEntry>;
+  using WPtr = std::weak_ptr<IEntry>;
+
   /**
    * Options
    */
@@ -81,15 +85,7 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
    * @param options
    * @return pointer to entre or nullptr if failed to create
    */
-  static std::unique_ptr<IEntry> Build(std::string_view name, const std::filesystem::path& path, Options options);
-
-  /**
-   * @brief Restores entry from dir
-   * Reads files of settings and descriptor
-   * @param full_path path to folder of the entry
-   * @return pointer to entre or nullptr if failed to create
-   */
-  static std::unique_ptr<IEntry> Restore(std::filesystem::path full_path);
+  static IEntry::UPtr Build(std::string_view name, const std::filesystem::path& path, Options options);
 };
 
 }  // namespace reduct::storage

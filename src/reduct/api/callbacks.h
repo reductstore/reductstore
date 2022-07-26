@@ -199,7 +199,10 @@ class IQueryCallback {
  */
 class INextCallback {
  public:
-  using Response = async::IAsyncReader::SPtr;
+  struct Response {
+    async::IAsyncReader::SPtr reader;
+    bool last;
+  };
 
   struct Request {
     std::string_view bucket_name;
@@ -208,7 +211,7 @@ class INextCallback {
   };
 
   using Result = core::Result<Response>;
-  virtual async::Run<Result> OnNextQuery(const Request& req) const = 0;
+  virtual async::Run<Result> OnNextRecord(const Request& req) const = 0;
 };
 
 }  // namespace reduct::api

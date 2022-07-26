@@ -25,7 +25,7 @@ TEST_CASE("storage::IEntry write operation") {
 
   BucketSettings settings;
   auto bucket = IBucket::Build(dir_path, settings);
-  auto entry = bucket->GetOrCreateEntry("entry-1").entry.lock();
+  auto entry = bucket->GetOrCreateEntry("entry-1").result.lock();
 
   for (int i = 0; i < 10000; ++i) {
     auto [writer, err] = entry->BeginWrite(Time::clock::now(), 10);

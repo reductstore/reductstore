@@ -506,7 +506,7 @@ class Entry : public IEntry {
   mutable std::unordered_map<uint64_t, QueryInfo> queries_;
 };
 
-std::unique_ptr<IEntry> IEntry::Build(std::string_view name, const fs::path& path, IEntry::Options options) {
+IEntry::UPtr IEntry::Build(std::string_view name, const fs::path& path, IEntry::Options options) {
   return std::make_unique<Entry>(name, path, options);
 }
 

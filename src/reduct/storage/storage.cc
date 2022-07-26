@@ -168,7 +168,7 @@ class Storage : public IStorage {
   [[nodiscard]] IWriteEntryCallback::Result OnWriteEntry(const IWriteEntryCallback::Request& req) noexcept override {
     using Callback = IWriteEntryCallback;
 
-    auto [bucket_it, err] = FindBucket(req.bucket_name);
+    auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name);
     if (err) {
       return Callback::Result{{}, err};
     }
@@ -176,11 +176,6 @@ class Storage : public IStorage {
     auto [ts, parse_err] = ParseTimestamp(req.timestamp);
     if (parse_err) {
       return Callback::Result{{}, parse_err};
-    }
-
-    auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
-    if (ref_error) {
-      return Callback::Result{{}, ref_error};
     }
 
     int64_t size;
@@ -193,8 +188,9 @@ class Storage : public IStorage {
       return {{}, {.code = 411, .message = "bad or empty content-length"}};
     }
 
-    auto [writer, writer_err] = entry.lock()->BeginWrite(ts, size);
+    auto [writer, writer_err] = entry->BeginWrite(ts, size);
     if (!writer_err) {
+      auto [bucket_it, _] = FindBucket(req.bucket_name);
       auto quota_error = bucket_it->second->KeepQuota();
       if (quota_error) {
         LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
@@ -208,20 +204,9 @@ class Storage : public IStorage {
     using Callback = IReadEntryCallback;
 
     return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name, true);
       if (err) {
         return Callback::Result{{}, err};
-      }
-
-      auto& bucket = bucket_it->second;
-      if (!bucket->HasEntry(req.entry_name.data())) {
-        return Callback::Result{{},
-                                {.code = 404, .message = fmt::format("Entry '{}' could not be found", req.entry_name)}};
-      }
-
-      auto [entry, ref_error] = bucket->GetOrCreateEntry(req.entry_name.data());
-      if (ref_error) {
-        return Callback::Result{{}, ref_error};
       }
 
       Time ts;
@@ -232,10 +217,10 @@ class Storage : public IStorage {
         }
         ts = parsed_ts;
       } else {
-        ts = Time() + std::chrono::microseconds(entry.lock()->GetInfo().latest_record());
+        ts = Time() + std::chrono::microseconds(entry->GetInfo().latest_record());
       }
 
-      return entry.lock()->BeginRead(ts);
+      return entry->BeginRead(ts);
     });
   }
 
@@ -243,14 +228,9 @@ class Storage : public IStorage {
     using Callback = IListEntryCallback;
 
     return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name);
       if (err) {
         return Callback::Result{{}, err};
-      }
-
-      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
-      if (ref_error) {
-        return Callback::Result{{}, ref_error};
       }
 
       auto [start_ts, parse_start_err] = ParseTimestamp(req.start_timestamp, "start_timestamp");
@@ -263,7 +243,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, parse_stop_err};
       }
 
-      auto [list, list_err] = entry.lock()->List(start_ts, stop_ts);
+      auto [list, list_err] = entry->List(start_ts, stop_ts);
       if (list_err) {
         return Callback::Result{{}, list_err};
       }
@@ -283,14 +263,9 @@ class Storage : public IStorage {
     using Callback = IQueryCallback;
 
     return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
+      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name, true);
       if (err) {
         return Callback::Result{{}, err};
-      }
-
-      auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(std::string(req.entry_name));
-      if (ref_error) {
-        return Callback::Result{{}, ref_error};
       }
 
       std::optional<Time> start_ts;
@@ -321,12 +296,7 @@ class Storage : public IStorage {
         ttl = std::chrono::seconds(val);
       }
 
-      auto entry_ptr = entry.lock();
-      if (!entry_ptr) {
-        return Callback::Result{{}, {.code = 500, .message = "Failed to resolve entry"}};
-      }
-
-      auto [id, query_err] = entry_ptr->Query(start_ts, stop_ts, query::IQuery::Options{.ttl = ttl});
+      auto [id, query_err] = entry->Query(start_ts, stop_ts, query::IQuery::Options{.ttl = ttl});
 
       Callback::Response resp;
       resp.set_id(id);
@@ -334,10 +304,27 @@ class Storage : public IStorage {
     });
   }
 
-  [[nodiscard]] Run<INextCallback::Result> OnNextQuery(const INextCallback::Request& req) const override {
+  [[nodiscard]] Run<INextCallback::Result> OnNextRecord(const INextCallback::Request& req) const override {
     using Callback = INextCallback;
 
-    return Run<Callback::Result>([]() { return Callback::Result{}; });
+    return Run<Callback::Result>([this, req]() {
+      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name, true);
+      if (err) {
+        return Callback::Result{{}, err};
+      }
+
+      auto [id, parse_err] = ParseUInt(req.id, "id");
+      if (parse_err) {
+        return Callback::Result{{}, parse_err};
+      }
+
+      auto [next, start_err] = entry->Next(id);
+      if (start_err) {
+        return Callback::Result{{}, start_err};
+      }
+
+      return Callback::Result{{next.reader, next.last}, Error::kOk};
+    });
   }
 
  private:
@@ -350,6 +337,30 @@ class Storage : public IStorage {
     }
 
     return {it, Error::kOk};
+  }
+
+  [[nodiscard]] core::Result<IEntry::SPtr> GetOrCreateEntry(std::string_view bucket_name, std::string_view entry_name,
+                                                            bool must_exist = false) const {
+    auto [bucket_it, err] = FindBucket(bucket_name);
+    if (err) {
+      return {{}, err};
+    }
+
+    if (must_exist && !bucket_it->second->HasEntry(entry_name.data())) {
+      return {{}, {.code = 404, .message = fmt::format("Entry '{}' could not be found", entry_name)}};
+    }
+
+    auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(entry_name.data());
+    if (ref_error) {
+      return {{}, ref_error};
+    }
+
+    auto entry_ptr = entry.lock();
+    if (!entry_ptr) {
+      return {{}, {.code = 500, .message = "Failed to resolve entry"}};
+    }
+
+    return {entry_ptr, Error::kOk};
   }
 
   static core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
