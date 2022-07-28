@@ -219,6 +219,7 @@ class Entry : public IEntry {
                                                 .path = block_path,
                                                 .record_index = record_index,
                                                 .chunk_size = kDefaultMaxReadChunk,
+                                                .time = time
                                             });
   }
 

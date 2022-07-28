@@ -102,7 +102,7 @@ class ApiServer : public IApiServer {
         .get(base_path + "b/:bucket_name/:entry_name",
              [this](auto *res, auto *req) {
                ReadEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
-                         std::string(req->getQuery("ts")));
+                         std::string(req->getQuery("ts")), std::string(req->getQuery("q")));
              })
         .get(base_path + "b/:bucket_name/:entry_name/list",
              [this](auto *res, auto *req) {
@@ -376,14 +376,29 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL = false>
   async::VoidTask ReadEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
-                            std::string ts) const {
+                            std::string ts, std::string query_id) const {
     auto handler = BasicApiHandler<SSL, IReadEntryCallback>(res, req);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
-    IReadEntryCallback::Request data{.bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
-    auto [reader, err] = co_await storage_->OnReadEntry(data);
+    Error err;
+    async::IAsyncReader::SPtr  reader;
+    bool last = true;
+    if (query_id.empty()) {
+      IReadEntryCallback::Request data{
+          .bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
+      auto ret = co_await storage_->OnReadEntry(data);
+      reader = ret.result;
+      err = ret.error;
+    } else {
+      INextCallback::Request data{
+          .bucket_name = bucket, .entry_name = entry, .id = query_id};
+      auto ret = co_await storage_->OnNextRecord(data);
+      reader = ret.result.reader;
+      last = ret.result.last;
+      err = ret.error;
+    }
 
     if (err) {
       handler.SendError(err);
@@ -404,6 +419,10 @@ class ApiServer : public IApiServer {
     });
 
     handler.PrepareHeaders(true, "application/octet-stream");
+    res->writeHeader(
+        "x-reduct-time",
+        std::chrono::duration_cast<std::chrono::microseconds>(reader->timestamp().time_since_epoch()).count());
+    res->writeHeader("x-reduct-last", last);
 
     bool complete = false;
     while (!aborted && !complete) {
