@@ -12,9 +12,10 @@ set(SRC_FILES
         reduct/core/env_test.cc
         reduct/auth/token_auth_test.cc
 
-        reduct/storage/async_io_test.cc
+        reduct/storage/io/async_io_test.cc
         reduct/storage/bucket_test.cc
         reduct/storage/entry_test.cc
+        reduct/storage/entry_query_test.cc
         reduct/storage/storage_bucket_api_test.cc
         reduct/storage/storage_server_api_test.cc
         reduct/storage/storage_entry_api_test.cc

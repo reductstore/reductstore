@@ -6,6 +6,7 @@
 #include "reduct/storage/entry.h"
 
 using reduct::core::Error;
+using reduct::core::Time;
 using reduct::storage::IEntry;
 
 using reduct::ReadOne;
@@ -23,7 +24,7 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time();
+static const auto kTimestamp = Time();
 
 TEST_CASE("AsyncWriter should provide async writing in the same block") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());

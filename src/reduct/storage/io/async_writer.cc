@@ -1,6 +1,6 @@
 // Copyright 2022 Alexey Timin
 
-#include "reduct/storage/async_writer.h"
+#include "async_writer.h"
 
 #include <filesystem>
 #include <fstream>
@@ -9,7 +9,7 @@
 #include "reduct/core/logger.h"
 #include "reduct/storage/block_manager.h"
 
-namespace reduct::storage {
+namespace reduct::storage::io {
 
 using core::Error;
 using google::protobuf::Timestamp;
@@ -69,4 +69,4 @@ async::IAsyncWriter::UPtr BuildAsyncWriter(const proto::Block& block, AsyncWrite
                                            OnStateUpdated callback) {
   return std::make_unique<AsyncWriter>(block, std::move(parameters), std::move(callback));
 }
-}  // namespace reduct::storage
+}  // namespace reduct::storage::io

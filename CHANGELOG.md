@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added:
 
 - Web Console v0.3.0, [PR-133](https://github.com/reduct-storage/reduct-storage/pull/133)
+- GET `/b/:bucket/:entry/q?` endpoint for iterating data, [PR-141](https://github.com/reduct-storage/reduct-storage/pull/141)
 
 ### Changed:
 

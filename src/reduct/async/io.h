@@ -7,6 +7,7 @@
 
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
+#include "reduct/core/time.h"
 
 namespace reduct::async {
 
@@ -43,6 +44,7 @@ class IAsyncReader {
   virtual core::Result<DataChunk> Read() noexcept = 0;
 
   [[nodiscard]] virtual bool is_done() const noexcept = 0;
+  [[nodiscard]] virtual core::Time timestamp() const noexcept = 0;
   [[nodiscard]] virtual size_t size() const noexcept = 0;
 };
 

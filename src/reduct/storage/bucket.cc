@@ -70,7 +70,7 @@ class Bucket : public IBucket {
     }
   }
 
-  EntryRef GetOrCreateEntry(const std::string& name) override {
+  core::Result<IEntry::WPtr> GetOrCreateEntry(const std::string& name) override {
     auto it = entry_map_.find(name);
     if (it != entry_map_.end()) {
       return {it->second, Error::kOk};

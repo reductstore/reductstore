@@ -12,6 +12,7 @@
 using reduct::ReadOne;
 using reduct::WriteOne;
 using reduct::core::Error;
+using reduct::core::Time;
 using reduct::storage::IEntry;
 
 using google::protobuf::util::TimeUtil;
@@ -28,13 +29,13 @@ static auto MakeDefaultOptions() {
   };
 }
 
-static const auto kTimestamp = IEntry::Time() + std::chrono::microseconds(10'100'200);  // to check um precision
+static const auto kTimestamp = Time() + std::chrono::microseconds(10'100'200);  // to check um precision
 
-auto ToMicroseconds(IEntry::Time tp) {
+auto ToMicroseconds(Time tp) {
   return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
 }
 
-auto GetBlockSize(std::string_view name, fs::path path, IEntry::Options options, IEntry::Time begin_ts) {
+auto GetBlockSize(std::string_view name, fs::path path, IEntry::Options options, Time begin_ts) {
   return fs::file_size(
       path / name /
       fmt::format("{}.blk",
@@ -114,7 +115,7 @@ TEST_CASE("storage::Entry should create a new block if the current > max_block_s
   }
 }
 
-TEST_CASE("storage::Entry should resize finished block") {
+TEST_CASE("storage::Entry should resize finished block", "[entry][block]") {
   const auto options = MakeDefaultOptions();
   const auto path = BuildTmpDirectory();
   auto entry = IEntry::Build(kName, path, options);
@@ -128,7 +129,7 @@ TEST_CASE("storage::Entry should resize finished block") {
   REQUIRE(GetBlockSize(kName, path, options, kTimestamp + seconds(1)) == options.max_block_size);
 }
 
-TEST_CASE("storage::Entry start a new block if it has more records than max_block_records") {
+TEST_CASE("storage::Entry start a new block if it has more records than max_block_records", "[entry][block]") {
   auto options = MakeDefaultOptions();
   options.max_block_records = 2;
   const auto path = BuildTmpDirectory();
@@ -144,7 +145,8 @@ TEST_CASE("storage::Entry start a new block if it has more records than max_bloc
   REQUIRE(GetBlockSize(kName, path, options, kTimestamp + seconds(2)) == options.max_block_size);
 }
 
-TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size") {
+TEST_CASE("storage::Entry should create block with size of record it  is bigger than max_block_size",
+          "[entry][block]") {
   const auto options = MakeDefaultOptions();
   const auto path = BuildTmpDirectory();
   auto entry = IEntry::Build(kName, path, options);
@@ -205,7 +207,7 @@ TEST_CASE("storage::Entry should read from empty entry with 404", "[entry]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
 
   REQUIRE(entry);
-  REQUIRE(ReadOne(*entry, IEntry::Time()).error.code == 404);
+  REQUIRE(ReadOne(*entry, Time()).error.code == 404);
 }
 
 TEST_CASE("storage::Entry should remove last block", "[entry]") {
@@ -346,7 +348,7 @@ TEST_CASE("storage::Entry should list records for time interval", "[entry]") {
   }
 }
 
-TEST_CASE("storage::Entry should not list records which is not finished") {
+TEST_CASE("storage::Entry should not list records which is not finished", "[entry]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
@@ -357,7 +359,7 @@ TEST_CASE("storage::Entry should not list records which is not finished") {
   REQUIRE(entry->List(kTimestamp - seconds(1), kTimestamp + seconds(1)).result.size() == 1);
 }
 
-TEST_CASE("storage::Entry should wait when read operations finish before removing block") {
+TEST_CASE("storage::Entry should wait when read operations finish before removing block", "[entry][block]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
@@ -373,7 +375,7 @@ TEST_CASE("storage::Entry should wait when read operations finish before removin
   REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
 }
 
-TEST_CASE("storage::Entry should wait when write operations finish before removing block") {
+TEST_CASE("storage::Entry should wait when write operations finish before removing block", "[entry][block]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 

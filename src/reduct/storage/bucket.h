@@ -16,19 +16,12 @@ namespace reduct::storage {
 class IBucket {
  public:
   /**
-   * Reference to an entry in the bucket
-   */
-  struct EntryRef {
-    std::weak_ptr<IEntry> entry;  // weak pointer because the bucket may remove it
-    core::Error error;            // error if failed to create or get an entry
-  };
-  /**
    * @brief Tries to get an entry by name
    * If there is no entry with the name, the bucket creates one
    * @param name
    * @return error if it failed to create a bucket
    */
-  [[nodiscard]] virtual EntryRef GetOrCreateEntry(const std::string& name) = 0;
+  [[nodiscard]] virtual core::Result<IEntry::WPtr> GetOrCreateEntry(const std::string& name) = 0;
 
   /**
    * @brief Remove data of all the buckets
@@ -69,7 +62,6 @@ class IBucket {
    * @return
    */
   virtual std::vector<proto::api::EntryInfo> GetEntryList() const = 0;
-
 
   virtual bool HasEntry(const std::string& name) const = 0;
   /**

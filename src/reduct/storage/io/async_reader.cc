@@ -1,14 +1,17 @@
 // Copyright 2022 Alexey Timin
 
-#include "reduct/storage/async_reader.h"
+#include "async_reader.h"
+
+#include <google/protobuf/util/time_util.h>
 
 #include <fstream>
 
 #include "reduct/core/logger.h"
 
-namespace reduct::storage {
+namespace reduct::storage::io {
 
 using core::Error;
+using google::protobuf::util::TimeUtil;
 
 class AsyncReader : public async::IAsyncReader {
  public:
@@ -40,6 +43,7 @@ class AsyncReader : public async::IAsyncReader {
 
   size_t size() const noexcept override { return size_; }
   bool is_done() const noexcept override { return size_ == read_bytes_; }
+  core::Time timestamp() const noexcept override { return parameters_.time; }
 
  private:
   AsyncReaderParameters parameters_;
@@ -52,4 +56,4 @@ async::IAsyncReader::UPtr BuildAsyncReader(const proto::Block& block, AsyncReade
   return std::make_unique<AsyncReader>(block, std::move(parameters));
 }
 
-}  // namespace reduct::storage
+}  // namespace reduct::storage::io
