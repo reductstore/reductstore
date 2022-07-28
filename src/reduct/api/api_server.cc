@@ -109,6 +109,12 @@ class ApiServer : public IApiServer {
                ListEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
                          std::string(req->getQuery("start")), std::string(req->getQuery("stop")));
              })
+        .get(base_path + "b/:bucket_name/:entry_name/q",
+             [this](auto *res, auto *req) {
+               QueryEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
+                          std::string(req->getQuery("start")), std::string(req->getQuery("stop")),
+                          std::string(req->getQuery("ttl")));
+             })
         .get(base_path,
              [base_path](auto *res, auto *req) {
                res->writeStatus("301");
@@ -455,11 +461,35 @@ class ApiServer : public IApiServer {
     co_return;
   }
 
+  /**
+   * GET /b/:bucket/:entry/query
+   */
+  template <bool SSL = false>
+  async::VoidTask QueryEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
+                             std::string start_ts, std::string stop_ts, std::string ttl) const {
+    auto handler = BasicApiHandler<SSL, IQueryCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+
+    IQueryCallback::Request data{
+        .bucket_name = bucket,
+        .entry_name = entry,
+        .start_timestamp = start_ts,
+        .stop_timestamp = stop_ts,
+        .ttl = ttl,
+    };
+
+    handler.Run(co_await storage_->OnQuery(data),
+                [](const IQueryCallback::Response &app_resp) { return PrintToJson(app_resp); });
+    co_return;
+  }
+
   template <bool SSL = false>
   async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string_view base_path,
                             std::string path) const {
     struct Callback {
-      struct [[maybe_unused]] Request {}; // NOLINT
+      struct [[maybe_unused]] Request {};  // NOLINT
       using Response = std::string;
       using Result = core::Result<Response>;
     };

@@ -137,3 +137,41 @@ def test_read_write_big_blob(base_url, session, bucket):
     assert resp.status_code == 200
     assert len(resp.text) == len(blob)
     assert resp.text == blob
+
+
+def test_query_entry_ok(base_url, session, bucket):
+    """Should return incrementing id with """
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 100}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 200}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id >= 0
+
+    last_id = query_id
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id > last_id
+
+    last_id = query_id
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?stop={ts+200}')
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id > last_id
+
+    last_id = query_id
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q')
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id > last_id
