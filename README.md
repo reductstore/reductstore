@@ -31,18 +31,24 @@ or you can use the demo storage: https://play.reduct-storage.dev
 Reduct Storage porvides a simple HTTP API, so you could use it with `curl`:
 
 ```
+# Take access a temporal token by using API token
+curl -X POST --header "Authorization: Bearer ${API_TOKEN}" -a https://play.reduct-storage.dev/auth/refresh
+
 # Create a bucket
 curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
   -X POST \
+  --header "Authorization: Bearer ${ACESS_TOKEN}"   \
   -a https://play.reduct-storage.dev/b/my_data
 
 # Write some data
 curl -d "some_data" \
   -X POST \
+  --header "Authorization: Bearer ${ACESS_TOKEN}"   \
   -a https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 
 # Read the data by using its timestamp
-curl https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
+curl --header "Authorization: Bearer ${ACESS_TOKEN}"   \
+    https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 ```
 
 ##  Client SDKs
