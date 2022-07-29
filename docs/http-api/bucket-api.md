@@ -6,8 +6,8 @@ description: Bucket API provides HTTP methods to create, modify or delete a buck
 
 Before starting recording, a user has to create a bucket with the following settings:
 
-* Maximal block size
-* Maximal number of records
+* Maximum block size
+* Maximum number of records
 * Quota type
 * Quota size
 
@@ -100,11 +100,11 @@ Name of new bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal size of a data block in bytes (default: 64Mb)
+Maximum size of a data block in bytes (default: 64Mb)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_records" type="String/Integer" %}
-Maximal number of records in a block (default 1024)
+Maximum number of records in a block (default 1024)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
@@ -150,11 +150,11 @@ Name of bucket
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_size" type="String/Integer" required="false" %}
-Maximal content_length of a data block in bytes
+Maximum content_length of a data block in bytes
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_records" type="String/Integer" %}
-Maximal number of records in a block
+Maximum number of records in a block
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}

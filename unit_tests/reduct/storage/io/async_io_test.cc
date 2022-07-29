@@ -6,6 +6,7 @@
 #include "reduct/storage/entry.h"
 
 using reduct::core::Error;
+using reduct::core::Time;
 using reduct::storage::IEntry;
 
 using reduct::ReadOne;
@@ -14,18 +15,19 @@ using reduct::async::IAsyncReader;
 
 using std::chrono::seconds;
 
+std::string_view kName = "entry_1";
+
 static auto MakeDefaultOptions() {
   return IEntry::Options{
-      .name = "entry_1",
-      .path = BuildTmpDirectory(),
       .max_block_size = 1000,
+      .max_block_records = 100,
   };
 }
 
-static const auto kTimestamp = IEntry::Time();
+static const auto kTimestamp = Time();
 
 TEST_CASE("AsyncWriter should provide async writing in the same block") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   auto [writer_1, err_1] = entry->BeginWrite(kTimestamp, 10);
@@ -44,7 +46,7 @@ TEST_CASE("AsyncWriter should provide async writing in the same block") {
 }
 
 TEST_CASE("AsyncWriter should check size") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
@@ -53,7 +55,7 @@ TEST_CASE("AsyncWriter should check size") {
 }
 
 TEST_CASE("AsyncWriter should mark finished records") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
@@ -66,7 +68,7 @@ TEST_CASE("AsyncWriter should mark finished records") {
 }
 
 TEST_CASE("AsyncReader should read a big file in two chunks") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   const auto size = reduct::kDefaultMaxReadChunk * 2 - 1;
@@ -80,13 +82,13 @@ TEST_CASE("AsyncReader should read a big file in two chunks") {
 }
 
 TEST_CASE("AsyncReader should not spoil data") {
-  auto entry = IEntry::Build(MakeDefaultOptions());
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
   const auto size = reduct::kDefaultMaxReadChunk - 1;
   std::string blob(size, 'a');
   for (int i = 0; i < size; ++i) {
-    blob[i] = static_cast<char>(rand() % 127); // NOLINT
+    blob[i] = static_cast<char>(rand() % 127);  // NOLINT
   }
 
   REQUIRE(WriteOne(*entry, blob, kTimestamp) == Error::kOk);

@@ -39,6 +39,8 @@ def test_read_write_entries_big_blob_ok(base_url, session, bucket):
     assert resp.content == huge_data
 
     assert resp.headers['Content-Type'] == "application/octet-stream"
+    assert resp.headers['x-reduct-time'] == str(ts)
+    assert resp.headers['x-reduct-last'] == '1'
 
 
 def test_read_no_bucket(base_url, session):
@@ -123,6 +125,8 @@ def test_latest_record(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
+    assert resp.headers['x-reduct-time'] == '1010'
+    assert resp.headers['x-reduct-last'] == '1'
 
 
 def test_read_write_big_blob(base_url, session, bucket):
@@ -137,3 +141,99 @@ def test_read_write_big_blob(base_url, session, bucket):
     assert resp.status_code == 200
     assert len(resp.text) == len(blob)
     assert resp.text == blob
+
+
+def test_query_entry_ok(base_url, session, bucket):
+    """Should return incrementing id with """
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id >= 0
+
+    last_id = query_id
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id > last_id
+
+    last_id = query_id
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?stop={ts + 200}')
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id > last_id
+
+    last_id = query_id
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q')
+
+    query_id = int(json.loads(resp.content)["id"])
+    assert query_id > last_id
+
+
+def test_query_entry_next(base_url, session, bucket):
+    """Should read next few records"""
+
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 100}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 200}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+
+    assert resp.status_code == 200
+    assert resp.content == b"some_data"
+    assert resp.headers['x-reduct-time'] == '1000'
+    assert resp.headers['x-reduct-last'] == '0'
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+
+    assert resp.status_code == 200
+    assert resp.content == b"some_data"
+    assert resp.headers['x-reduct-time'] == '1100'
+    assert resp.headers['x-reduct-last'] == '1'
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 404
+
+
+def test_query_ttl(base_url, session, bucket):
+    """Should keep TTL of query"""
+
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}&ttl=0')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 404
+
+
+def test_query_entry_no_next(base_url, session, bucket):
+    """Should return no content if there is no record for the query"""
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts+1}&stop={ts + 200}')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 202

@@ -7,13 +7,13 @@ def test_get_info(base_url, session):
 
     assert resp.status_code == 200
     data = json.loads(resp.content)
-    assert data['version'] >= '0.6.0'
+    assert data['version'] >= '0.7.0'
     assert int(data['bucket_count']) > 0
     assert int(data['uptime']) >= 0
     assert int(data['latest_record']) >= 0
     assert int(data['oldest_record']) >= 0
 
-    assert data['defaults']['bucket'] == {'max_block_records': '1024', 'max_block_size': '67108864', 'quota_size': '0',
+    assert data['defaults']['bucket'] == {'max_block_records': '1024', 'max_block_size': '64000000', 'quota_size': '0',
                                           'quota_type': 'NONE'}
     assert resp.headers['server'] == "ReductStorage"
     assert resp.headers['Content-Type'] == "application/json"

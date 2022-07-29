@@ -102,12 +102,18 @@ class ApiServer : public IApiServer {
         .get(base_path + "b/:bucket_name/:entry_name",
              [this](auto *res, auto *req) {
                ReadEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
-                         std::string(req->getQuery("ts")));
+                         std::string(req->getQuery("ts")), std::string(req->getQuery("q")));
              })
         .get(base_path + "b/:bucket_name/:entry_name/list",
              [this](auto *res, auto *req) {
                ListEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
                          std::string(req->getQuery("start")), std::string(req->getQuery("stop")));
+             })
+        .get(base_path + "b/:bucket_name/:entry_name/q",
+             [this](auto *res, auto *req) {
+               QueryEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
+                          std::string(req->getQuery("start")), std::string(req->getQuery("stop")),
+                          std::string(req->getQuery("ttl")));
              })
         .get(base_path,
              [base_path](auto *res, auto *req) {
@@ -177,7 +183,7 @@ class ApiServer : public IApiServer {
     }
 
     handler.Run(co_await storage_->OnInfo({}),
-                [](IInfoCallback::Response app_resp) { return PrintToJson(std::move(app_resp)); });
+                [](const IInfoCallback::Response &app_resp) { return PrintToJson(app_resp); });
     co_return;
   }
 
@@ -191,7 +197,7 @@ class ApiServer : public IApiServer {
       co_return;
     }
     handler.Run(co_await storage_->OnStorageList({}),
-                [](IListStorageCallback::Response app_resp) { return PrintToJson(std::move(app_resp.buckets)); });
+                [](const IListStorageCallback::Response &app_resp) { return PrintToJson(app_resp.buckets); });
     co_return;
   }
 
@@ -204,7 +210,7 @@ class ApiServer : public IApiServer {
     std::string header(req->getHeader("authorization"));
     auto handler = BasicApiHandler<SSL, IRefreshToken>(res, req);
     handler.Run(co_await auth_->OnRefreshToken(header),
-                [](IRefreshToken::Response resp) { return PrintToJson(std::move(resp)); });
+                [](const IRefreshToken::Response &resp) { return PrintToJson(resp); });
     co_return;
   }
 
@@ -260,7 +266,7 @@ class ApiServer : public IApiServer {
 
     IGetBucketCallback::Request app_request{.bucket_name = name};
     handler.Run(co_await storage_->OnGetBucket(app_request),
-                [](IGetBucketCallback::Response resp) { return PrintToJson(resp); });
+                [](const IGetBucketCallback::Response &resp) { return PrintToJson(resp); });
     co_return;
   }
 
@@ -354,7 +360,8 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    err = co_await AsyncHttpReceiver<SSL>(res, [&](auto chunk, bool last) { return async_writer->Write(chunk, last); });
+    err = co_await AsyncHttpReceiver<SSL>(
+        res, [async_writer](auto chunk, bool last) { return async_writer->Write(chunk, last); });
     if (err) {
       handler.SendError(err);
       co_return;
@@ -369,17 +376,39 @@ class ApiServer : public IApiServer {
    */
   template <bool SSL = false>
   async::VoidTask ReadEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
-                            std::string ts) const {
+                            std::string ts, std::string query_id) const {
     auto handler = BasicApiHandler<SSL, IReadEntryCallback>(res, req);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
-    IReadEntryCallback::Request data{.bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
-    auto [reader, err] = co_await storage_->OnReadEntry(data);
+    Error err;
+    async::IAsyncReader::SPtr reader;
+    bool last = true;
+    if (query_id.empty()) {
+      IReadEntryCallback::Request data{
+          .bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
+      auto ret = co_await storage_->OnReadEntry(data);
+      reader = ret.result;
+      err = ret.error;
+    } else {
+      INextCallback::Request data{.bucket_name = bucket, .entry_name = entry, .id = query_id};
+      auto ret = co_await storage_->OnNextRecord(data);
+      reader = ret.result.reader;
+      last = ret.result.last;
+      err = ret.error;
+    }
 
     if (err) {
       handler.SendError(err);
+      co_return;
+    }
+
+    if (!reader) {
+      // No records to read
+      res->writeStatus(std::to_string(err.code));
+      handler.PrepareHeaders(false);
+      res->end({});
       co_return;
     }
 
@@ -397,6 +426,10 @@ class ApiServer : public IApiServer {
     });
 
     handler.PrepareHeaders(true, "application/octet-stream");
+    res->writeHeader(
+        "x-reduct-time",
+        std::chrono::duration_cast<std::chrono::microseconds>(reader->timestamp().time_since_epoch()).count());
+    res->writeHeader("x-reduct-last", last);
 
     bool complete = false;
     while (!aborted && !complete) {
@@ -450,7 +483,31 @@ class ApiServer : public IApiServer {
     };
 
     handler.Run(co_await storage_->OnListEntry(data),
-                [](IListEntryCallback::Response app_resp) { return PrintToJson(app_resp); });
+                [](const IListEntryCallback::Response &app_resp) { return PrintToJson(app_resp); });
+    co_return;
+  }
+
+  /**
+   * GET /b/:bucket/:entry/query
+   */
+  template <bool SSL = false>
+  async::VoidTask QueryEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
+                             std::string start_ts, std::string stop_ts, std::string ttl) const {
+    auto handler = BasicApiHandler<SSL, IQueryCallback>(res, req);
+    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
+      co_return;
+    }
+
+    IQueryCallback::Request data{
+        .bucket_name = bucket,
+        .entry_name = entry,
+        .start_timestamp = start_ts,
+        .stop_timestamp = stop_ts,
+        .ttl = ttl,
+    };
+
+    handler.Run(co_await storage_->OnQuery(data),
+                [](const IQueryCallback::Response &app_resp) { return PrintToJson(app_resp); });
     co_return;
   }
 
@@ -458,7 +515,7 @@ class ApiServer : public IApiServer {
   async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string_view base_path,
                             std::string path) const {
     struct Callback {
-      struct Request {};
+      struct [[maybe_unused]] Request {};  // NOLINT
       using Response = std::string;
       using Result = core::Result<Response>;
     };

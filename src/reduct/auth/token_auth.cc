@@ -41,6 +41,7 @@ class JwtAuthentication : public ITokenAuthentication {
     Botan::AutoSeeded_RNG rng;
     iv_ = rng.random_vec(16);
     key_ = HashToken(api_token);
+    original_ = api_token;
   }
 
   Error Check(std::string_view authorization_header) const override {
@@ -75,18 +76,23 @@ class JwtAuthentication : public ITokenAuthentication {
   }
 
   [[nodiscard]] Run<Result> OnRefreshToken(const Request& req) const override {
-    return async::Run<Result>([this, api_token = req] {
-      if (!api_token.starts_with("Bearer ")) {
+    return async::Run<Result>([this, req] {
+      if (!req.starts_with("Bearer ")) {
         return Result{{}, Error{.code = 401, .message = "No bearer token in response header"}};
       }
 
-      try {
-        if (key_ != Botan::hex_decode(api_token.substr(7, api_token.size() - 7))) {
-          return Result{{}, Error{.code = 401, .message = "Invalid API token"}};
+      const auto api_token = req.substr(7, req.size() - 7);
+      if (api_token != original_) {
+        // TODO(Alexey Timin): Deprecated check. Remove in 1.0.0
+        try {
+          if (key_ != Botan::hex_decode(api_token)) {
+            return Result{{}, Error{.code = 401, .message = "Invalid API token"}};
+          }
+        } catch (...) {
+          return Result{{}, Error{.code = 401, .message = "Failed to decode API token"}};
         }
-      } catch (...) {
-        return Result{{}, Error{.code = 401, .message = "Failed to decode API token"}};
       }
+
 
       Token token;
       token.mutable_expired_at()->CopyFrom(TimeUtil::GetCurrentTime() +
@@ -118,6 +124,7 @@ class JwtAuthentication : public ITokenAuthentication {
   Options options_;
   Botan::OctetString key_;
   Botan::SecureVector<uint8_t> iv_;
+  std::string original_;
 };
 
 std::unique_ptr<ITokenAuthentication> ITokenAuthentication::Build(std::string_view api_token, Options options) {

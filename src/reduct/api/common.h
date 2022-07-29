@@ -128,7 +128,7 @@ class BasicApiHandler {
     http_resp_->end(std::move(content));
   }
 
-  void PrepareHeaders(bool has_content, std::string_view content_type) const {  // Allow CORS
+  void PrepareHeaders(bool has_content, std::string_view content_type = "") const {  // Allow CORS
     if (!origin_.empty()) {
       http_resp_->writeHeader("access-control-allow-origin", origin_);
     }

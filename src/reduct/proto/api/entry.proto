@@ -22,3 +22,8 @@ message RecordInfo {
 message RecordInfoList {
   repeated RecordInfo records = 1;
 }
+
+// Query Info
+message QueryInfo {
+  uint64  id = 1; // id to fetch records
+}

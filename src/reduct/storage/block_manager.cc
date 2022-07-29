@@ -18,6 +18,8 @@ using google::protobuf::Timestamp;
 using google::protobuf::util::TimeUtil;
 
 using core::Error;
+using io::AsyncReaderParameters;
+using io::AsyncWriterParameters;
 
 std::filesystem::path BlockPath(const fs::path& parent, const proto::Block& block, std::string_view ext) {
   auto block_path = parent / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(block.begin_time()), ext);

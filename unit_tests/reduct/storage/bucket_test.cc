@@ -4,9 +4,11 @@
 
 #include <catch2/catch.hpp>
 
+#include "reduct/config.h"
 #include "reduct/helpers.h"
 
 using reduct::core::Error;
+using reduct::core::Time;
 using reduct::proto::api::BucketSettings;
 using reduct::storage::IBucket;
 using reduct::storage::IEntry;
@@ -64,7 +66,6 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
     REQUIRE(entry.lock());
     auto options = entry.lock()->GetOptions();
 
-    REQUIRE(options.name == "entry_1");
     REQUIRE(options.max_block_size == bucket->GetSettings().max_block_size());
     REQUIRE(options.max_block_records == bucket->GetSettings().max_block_records());
   }
@@ -72,12 +73,12 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
   SECTION("get an existing entry") {
     auto ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
-    REQUIRE(ref.entry.lock()->GetInfo().record_count() == 0);
-    REQUIRE(ref.entry.lock()->BeginWrite(IEntry::Time::clock::now(), 9).result->Write("some_blob") == Error::kOk);
+    REQUIRE(ref.result.lock()->GetInfo().record_count() == 0);
+    REQUIRE(ref.result.lock()->BeginWrite(Time::clock::now(), 9).result->Write("some_blob") == Error::kOk);
 
     ref = bucket->GetOrCreateEntry("entry_1");
     REQUIRE(ref.error == Error::kOk);
-    REQUIRE(ref.entry.lock()->GetInfo().record_count() == 1);
+    REQUIRE(ref.result.lock()->GetInfo().record_count() == 1);
   }
 }
 
@@ -103,10 +104,10 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
   const auto path = BuildTmpDirectory();
   auto bucket = IBucket::Build(path / "bucket", std::move(settings));
 
-  auto entry1 = bucket->GetOrCreateEntry("entry_1").entry.lock();
-  auto entry2 = bucket->GetOrCreateEntry("entry_2").entry.lock();
+  auto entry1 = bucket->GetOrCreateEntry("entry_1").result.lock();
+  auto entry2 = bucket->GetOrCreateEntry("entry_2").result.lock();
 
-  const auto ts = IEntry::Time();
+  const auto ts = Time();
   std::string blob(400, 'x');
 
   SECTION("3 big blobs 3*400 should be shrunk to 2") {
@@ -172,4 +173,21 @@ TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]"
   bucket = IBucket::Restore(dir_path / "bucket");
   REQUIRE(bucket->GetSettings().quota_size() == settings.quota_size());
   REQUIRE(bucket->GetSettings().quota_type() == settings.quota_type());
+}
+
+TEST_CASE("storage::Bucket should change block settings and apply them", "[bucket]") {
+  const auto dir_path = BuildTmpDirectory();
+  auto bucket = IBucket::Build(dir_path / "bucket");
+
+  auto entry = bucket->GetOrCreateEntry("test-entry").result.lock();
+
+  BucketSettings settings;
+  settings.set_max_block_size(1);
+  settings.set_max_block_records(2);
+
+  REQUIRE(bucket->SetSettings(settings) == Error::kOk);
+  REQUIRE(bucket->GetSettings().max_block_size() == settings.max_block_size());
+
+  REQUIRE(entry->GetOptions().max_block_size == 1);
+  REQUIRE(entry->GetOptions().max_block_records == 2);
 }

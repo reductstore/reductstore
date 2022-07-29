@@ -10,8 +10,8 @@
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/storage/entry.pb.h"
-#include "reduct/storage/async_reader.h"
-#include "reduct/storage/async_writer.h"
+#include "reduct/storage/io/async_reader.h"
+#include "reduct/storage/io/async_writer.h"
 
 namespace reduct::storage {
 
@@ -71,10 +71,11 @@ class IBlockManager {
    * @param params
    * @return
    */
-  virtual core::Result<async::IAsyncReader::SPtr> BeginRead(const BlockSPtr& block, AsyncReaderParameters params) = 0;
+  virtual core::Result<async::IAsyncReader::SPtr> BeginRead(const BlockSPtr& block,
+                                                            io::AsyncReaderParameters params) = 0;
 
-
-  virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const BlockSPtr& block, AsyncWriterParameters params) = 0;
+  virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const BlockSPtr& block,
+                                                             io::AsyncWriterParameters params) = 0;
 
   /**
    * Factory method
