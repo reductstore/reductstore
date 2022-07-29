@@ -223,3 +223,17 @@ def test_query_ttl(base_url, session, bucket):
     query_id = int(json.loads(resp.content)["id"])
     resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
     assert resp.status_code == 404
+
+
+def test_query_entry_no_next(base_url, session, bucket):
+    """Should return no content if there is no record for the query"""
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts+1}&stop={ts + 200}')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 202

@@ -323,7 +323,7 @@ class Storage : public IStorage {
         return Callback::Result{{}, start_err};
       }
 
-      return Callback::Result{{next.reader, next.last}, Error::kOk};
+      return Callback::Result{{next.reader, next.last}, start_err};
     });
   }
 

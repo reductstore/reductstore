@@ -383,7 +383,7 @@ class ApiServer : public IApiServer {
     }
 
     Error err;
-    async::IAsyncReader::SPtr  reader;
+    async::IAsyncReader::SPtr reader;
     bool last = true;
     if (query_id.empty()) {
       IReadEntryCallback::Request data{
@@ -392,8 +392,7 @@ class ApiServer : public IApiServer {
       reader = ret.result;
       err = ret.error;
     } else {
-      INextCallback::Request data{
-          .bucket_name = bucket, .entry_name = entry, .id = query_id};
+      INextCallback::Request data{.bucket_name = bucket, .entry_name = entry, .id = query_id};
       auto ret = co_await storage_->OnNextRecord(data);
       reader = ret.result.reader;
       last = ret.result.last;
@@ -402,6 +401,14 @@ class ApiServer : public IApiServer {
 
     if (err) {
       handler.SendError(err);
+      co_return;
+    }
+
+    if (!reader) {
+      // No records to read
+      res->writeStatus(std::to_string(err.code));
+      handler.PrepareHeaders(false);
+      res->end({});
       co_return;
     }
 
