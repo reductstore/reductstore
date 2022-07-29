@@ -16,4 +16,4 @@
 
 ## VERSIONS
 
-* [Latest](https://docs.reduct-storage.dev)
+* [Develop](https://devdocs.reduct-storage.dev)
