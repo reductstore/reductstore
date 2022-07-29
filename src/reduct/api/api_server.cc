@@ -530,7 +530,7 @@ class ApiServer : public IApiServer {
 
     auto ret = console_->Read(path);
     switch (ret.error.code) {
-      case 0: {
+      case 200: {
         auto content = std::regex_replace(ret.result, std::regex("/ui/"), fmt::format("{}ui/", base_path));
         res->end(std::move(content));
         handler.Run(std::move(ret), replace_base_path);
