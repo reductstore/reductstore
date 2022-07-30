@@ -96,7 +96,7 @@ TEST_CASE("storage::Bucket should remove all entries", "[bucket]") {
   REQUIRE_FALSE(fs::exists(dir_path / "bucket" / "entry_2"));
 }
 
-TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
+TEST_CASE("storage::Bucket should keep quota", "[bucket][quota]") {
   BucketSettings settings;
   settings.set_max_block_size(100);
   settings.set_quota_type(BucketSettings::FIFO);
@@ -156,6 +156,28 @@ TEST_CASE("storage::Bucket should keep quota", "[bucket]") {
     REQUIRE(bucket->KeepQuota() == Error::kOk);
     REQUIRE(entry1->GetInfo().record_count() == 2);
   }
+}
+
+TEST_CASE("storage::Bucket should not remove block with active reader", "[bucket][quota]") {
+  BucketSettings settings;
+  settings.set_max_block_size(100);
+  settings.set_quota_type(BucketSettings::FIFO);
+  settings.set_quota_size(1000);
+
+  const auto path = BuildTmpDirectory();
+  auto bucket = IBucket::Build(path / "bucket", std::move(settings));
+  const auto ts = Time();
+  std::string blob(400, 'x');
+
+  auto entry1 = bucket->GetOrCreateEntry("entry_1").result.lock();
+  REQUIRE(entry1->BeginWrite(ts + seconds(1), blob.size()).result->Write(blob) == Error::kOk);
+  REQUIRE(entry1->BeginWrite(ts + seconds(2), blob.size()).result->Write(blob) == Error::kOk);
+  REQUIRE(entry1->BeginWrite(ts + seconds(3), blob.size()).result->Write(blob) == Error::kOk);
+
+  auto [reader, err] = entry1->BeginRead(ts + seconds(1));
+  REQUIRE(err == Error::kOk);
+
+  REQUIRE(bucket->KeepQuota() == Error{.code = 500, .message = "No blocks to remove"});
 }
 
 TEST_CASE("storage::Bucket should change quota settings and save it", "[bucket]") {
