@@ -6,6 +6,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
+#include <ranges>
 
 #include "reduct/async/io.h"
 #include "reduct/config.h"
@@ -110,6 +111,15 @@ class Entry : public IEntry {
         return {{}, ret.error};
       }
       block = ret.result;
+      // Check if block doesn't have the record already
+      auto exist =
+          std::ranges::any_of(block->records(), [proto_ts](auto& record) { return record.timestamp() == proto_ts; });
+      if (exist) {
+        return {{},
+                {.code = 409,
+                 .message = fmt::format("A record with timestamp {} already exists",
+                                        TimeUtil::TimestampToMicroseconds(proto_ts))}};
+      }
     }
 
     if (!block->has_begin_time()) {
@@ -215,12 +225,9 @@ class Entry : public IEntry {
       return {{}, {.code = 500, .message = "Record is broken"}};
     }
 
-    return block_manager_->BeginRead(block, AsyncReaderParameters{
-                                                .path = block_path,
-                                                .record_index = record_index,
-                                                .chunk_size = kDefaultMaxReadChunk,
-                                                .time = time
-                                            });
+    return block_manager_->BeginRead(
+        block, AsyncReaderParameters{
+                   .path = block_path, .record_index = record_index, .chunk_size = kDefaultMaxReadChunk, .time = time});
   }
 
   [[nodiscard]] core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const override {
