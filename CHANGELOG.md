@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Infinite loop in Bucket::KeepQuota, [PR-146](https://github.com/reduct-storage/reduct-storage/pull/146)
 
+
+## Changed:
+
+- Duplication of timestamps is not allowed, [PR147](https://github.com/reduct-storage/reduct-storage/pull/147)
+
 ## [0.7.1] - 2022-07-30
 
 ### Fixed:

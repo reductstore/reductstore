@@ -1,4 +1,4 @@
----
++---
 description: Entry API provides methods to write, read and browse the data
 ---
 
@@ -37,6 +37,14 @@ Content-length is required to start an asynchronous write operation
 ```javascript
 {
     "detail": "string"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="409: Conflict" description="A record with the same timestamp already exists" %}
+```javascript
+{
+   "detail": "string"
 }
 ```
 {% endswagger-response %}
@@ -104,7 +112,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 
 {% swagger method="get" path="" baseUrl="/b/:bucket_name/:entry_name/q " summary="Query records for a time interval" %}
 {% swagger-description %}
-The method response with a JSON document with ID which can be used to integrate records with method 
+The method response with a JSON document with ID which can be used to integrate records with method
 
 **GET /b/:bucket_name/:entry_name?q=ID.**
 
@@ -134,7 +142,7 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 {% swagger-response status="200: OK" description="" %}
 ```javascript
 {
-   "id": "integer" // ID of query wich can be used in GET /b/:bucket/:entry request 
+   "id": "integer" // ID of query wich can be used in GET /b/:bucket/:entry request
 }
 ```
 {% endswagger-response %}
