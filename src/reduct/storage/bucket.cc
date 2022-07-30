@@ -115,8 +115,8 @@ class Bucket : public IBucket {
           std::vector<EntryInfo> candidates(std::ranges::begin(rr), std::ranges::end(rr));
           std::ranges::sort(candidates, [](auto& a, auto& b) { return a.oldest_record() < b.oldest_record(); });
 
-          for (int i = 0; i < candidates.size(); ++i) {
-            const auto& entry = candidates[i];
+          bool success = false;
+          for (auto& entry : candidates) {
             LOG_DEBUG("Remove the oldest block in entry '{}'", entry.name());
             auto entry_ptr = entry_map_.at(entry.name());
             err = entry_ptr->RemoveOldestBlock();
@@ -127,8 +127,13 @@ class Bucket : public IBucket {
               }
 
               bucket_size = GetInfo().size();
+              success = true;
               break;
             }
+          }
+
+          if (!success) {
+            return {.code = 500, .message = "No blocks to remove"};
           }
         }
     }
