@@ -193,7 +193,7 @@ class Storage : public IStorage {
       auto [bucket_it, _] = FindBucket(req.bucket_name);
       auto quota_error = bucket_it->second->KeepQuota();
       if (quota_error) {
-        LOG_ERROR("Didn't mange to keep quota: {}", quota_error.ToString());
+        LOG_WARNING("Didn't mange to keep quota: {}", quota_error.ToString());
       }
     }
 
