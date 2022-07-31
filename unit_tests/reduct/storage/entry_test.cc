@@ -82,6 +82,15 @@ TEST_CASE("storage::Entry should record data to a block", "[entry]") {
   }
 }
 
+TEST_CASE("storage::Entry should not overwrite record", "[entry]") {
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "some_data", kTimestamp) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "some_data", kTimestamp) ==
+          Error{.code = 409, .message = "A record with timestamp 10100200 already exists"});
+}
+
 TEST_CASE("storage::Entry should create a new block if the current > max_block_size", "[entry]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
