@@ -367,7 +367,7 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    res->end({});
+    handler.Run({{}, Error::kOk});
     co_return;
   }
 
@@ -537,6 +537,7 @@ class ApiServer : public IApiServer {
         break;
       }
       case 404: {
+        // It's React.js paths
         ret = console_->Read("index.html");
         handler.Run(std::move(ret), replace_base_path);
         break;

@@ -31,9 +31,14 @@ struct AsyncHttpReceiver {
   using Callback = uWS::MoveOnlyFunction<core::Error(std::string_view, bool)>;
   explicit AsyncHttpReceiver(uWS::HttpResponse<SSL> *res, Callback callback) : finish_{}, error_{}, res_(res) {
     res->onData([this, callback = std::move(callback)](std::string_view data, bool last) mutable {
-      LOG_TRACE("Received chuck {} kB", data.size() / 1024);
+      LOG_DEBUG("Received chuck {} kB", data.size() / 1024);
       error_ = callback(data, last);
       finish_ = last;
+    });
+
+    res->onAborted([this] {
+      LOG_ERROR("Aborted write operation");
+      error_ = core::Error{.code = 400};
     });
   }
 
