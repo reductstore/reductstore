@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed:
 
 - Infinite loop in Bucket::KeepQuota, [PR-146](https://github.com/reduct-storage/reduct-storage/pull/146)
-
+- waiting data from HTTP client if it aborts
+  connection, [PR-151](https://github.com/reduct-storage/reduct-storage/pull/151)
 
 ## Changed:
 
@@ -27,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added:
 
 - Web Console v0.3.0, [PR-133](https://github.com/reduct-storage/reduct-storage/pull/133)
-- GET `/b/:bucket/:entry/q?` endpoint for iterating data, [PR-141](https://github.com/reduct-storage/reduct-storage/pull/141)
+- GET `/b/:bucket/:entry/q?` endpoint for iterating
+  data, [PR-141](https://github.com/reduct-storage/reduct-storage/pull/141)
 
 ### Changed:
 
@@ -196,18 +198,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release with basic HTTP API and FIFO bucket quota
 
 [Unreleased]: https://github.com/reduct-storage/reduct-storage/compare/v0.7.1...HEAD
+
 [0.7.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.7.0...v0.7.1
+
 [0.7.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.6.1...v0.7.0
+
 [0.6.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.6.0...v0.6.1
+
 [0.6.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.5.1...v0.6.0
+
 [0.5.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.5.0...v0.5.1
+
 [0.5.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.3...v0.5.0
+
 [0.4.3]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.2...v0.4.3
+
 [0.4.2]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.1...v0.4.2
+
 [0.4.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.4.0...v0.4.1
+
 [0.4.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.3.0...v0.4.0
+
 [0.3.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.2.1...v0.3.0
+
 [0.2.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.2.0...v0.2.1
+
 [0.2.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.1.1...v0.2.0
+
 [0.1.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.1.0...v0.1.1
+
 [0.1.0]: https://github.com/reduct-storage/reduct-storage/releases/tag/v0.1.0
