@@ -33,7 +33,7 @@ class AsyncWriter : public async::IAsyncWriter {
   Error Write(std::string_view chunk, bool last) noexcept override {
     const auto& record = parameters_.record_index;
     if (!file_) {
-      update_record_(record, proto::Record::kErrored);
+      update_record_(record, proto::Record::kInvalid);
       return {.code = 500, .message = "Bad block"};
     }
 
@@ -44,7 +44,7 @@ class AsyncWriter : public async::IAsyncWriter {
     }
 
     if (!file_.write(chunk.data(), chunk.size())) {
-      update_record_(record, proto::Record::kErrored);
+      update_record_(record, proto::Record::kInvalid);
       return {.code = 500, .message = "Failed to write a chunk into a block"};
     }
 

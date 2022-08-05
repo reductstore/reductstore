@@ -151,6 +151,10 @@ class BlockManager : public IBlockManager {
           if (auto err = SaveBlock(blk)) {
             LOG_ERROR("{}", err.ToString());
           }
+
+          if (state == proto::Record::kInvalid) {
+            blk->set_invalid(true);
+          }
         });
 
     auto& writers = RemoveDeadWriters(block);

@@ -130,11 +130,10 @@ class Entry : public IEntry {
     auto has_no_space = block->size() + content_size > options_.max_block_size;
     auto too_many_records = block->records_size() + 1 > options_.max_block_records;
 
-    if (type == RecordType::kLatest && (has_no_space || too_many_records)) {
+    if (type == RecordType::kLatest && (has_no_space || too_many_records || block->invalid())) {
       LOG_DEBUG("Create a new block");
       if (auto err = block_manager_->FinishBlock(block)) {
-        LOG_ERROR("Failed to finish the current block");
-        return {{}, err};
+        LOG_WARNING("Failed to finish the current block: {}", err.ToString());
       }
 
       auto ret = start_new_block(proto_ts, content_size);
