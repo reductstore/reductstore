@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added:
+
+- `Connection` header, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
+
 ### Fixed:
 
 - Infinite loop in Bucket::KeepQuota, [PR-146](https://github.com/reduct-storage/reduct-storage/pull/146)
 - Waiting data from HTTP client if it aborts
   connection, [PR-151](https://github.com/reduct-storage/reduct-storage/pull/151)
 - Writing record when current block is broken, [PR-15-](https://github.com/reduct-storage/reduct-storage/pull/153)
+- Closing uSocket, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
 
 ### Changed:
 
