@@ -105,8 +105,6 @@ class BlockManager : public IBlockManager {
   }
 
   Error RemoveBlock(const BlockSPtr& block) override {
-    std::error_code ec;
-
     const auto& readers = RemoveDeadReaders(block);
     if (!readers.empty()) {
       return {.code = 500, .message = "Block has active readers"};
@@ -117,17 +115,27 @@ class BlockManager : public IBlockManager {
       return {.code = 500, .message = "Block has active writers"};
     }
 
-    fs::remove(BlockPath(parent_, *block), ec);
+    std::error_code ec;
+    auto path = BlockPath(parent_, *block);
+    auto make_error = [&ec, &path] {
+      return Error{.code = 500, .message = fmt::format("Failed to remove block {}: {}", path.string(), ec.message())};
+    };
+
+    // remove block with date
+    fs::remove(path, ec);
+    Error err;
     if (ec) {
-      return {.code = 500, .message = ec.message()};
+      err = make_error();
     }
 
-    fs::remove(BlockPath(parent_, *block, kMetaExt), ec);
+    // remove descriptor
+    path = BlockPath(parent_, *block, kMetaExt);
+    fs::remove(path, ec);
     if (ec) {
-      return {.code = 500, .message = ec.message()};
+      err = make_error();
     }
 
-    return Error::kOk;
+    return err;
   }
 
   core::Result<async::IAsyncReader::SPtr> BeginRead(const BlockSPtr& block, AsyncReaderParameters params) override {
@@ -147,7 +155,12 @@ class BlockManager : public IBlockManager {
             LOG_ERROR("{}", load_err.ToString());
             return;
           }
+
           blk->mutable_records(index)->set_state(state);
+          if (state == proto::Record::kInvalid) {
+            blk->set_invalid(true);
+          }
+
           if (auto err = SaveBlock(blk)) {
             LOG_ERROR("{}", err.ToString());
           }

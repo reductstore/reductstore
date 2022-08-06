@@ -130,11 +130,10 @@ class Entry : public IEntry {
     auto has_no_space = block->size() + content_size > options_.max_block_size;
     auto too_many_records = block->records_size() + 1 > options_.max_block_records;
 
-    if (type == RecordType::kLatest && (has_no_space || too_many_records)) {
+    if (type == RecordType::kLatest && (has_no_space || too_many_records || block->invalid())) {
       LOG_DEBUG("Create a new block");
       if (auto err = block_manager_->FinishBlock(block)) {
-        LOG_ERROR("Failed to finish the current block");
-        return {{}, err};
+        LOG_WARNING("Failed to finish the current block: {}", err.ToString());
       }
 
       auto ret = start_new_block(proto_ts, content_size);
@@ -309,6 +308,7 @@ class Entry : public IEntry {
     }
     auto stop_ts = FromTimePoint(query_info.stop);
 
+    // Find start block
     auto start_block = block_set_.upper_bound(start_ts);
     if (start_block == block_set_.end()) {
       start_block = std::prev(start_block);
@@ -316,10 +316,27 @@ class Entry : public IEntry {
       start_block = std::prev(start_block);
     }
 
-    const auto [block, err] = block_manager_->LoadBlock(*start_block);
+    auto [block, err] = block_manager_->LoadBlock(*start_block);
     if (err) {
       queries_.erase(query_id);
       return {{}, err};
+    }
+
+    // Check if it is valid
+    if (block->invalid()) {
+      start_block = std::next(start_block);
+      if (start_block != std::end(block_set_) && *start_block < stop_ts) {
+          const auto [next_block, next_err] = block_manager_->LoadBlock(*start_block);
+          if (next_err) {
+            queries_.erase(query_id);
+            return {{}, next_err};
+          }
+
+          block = next_block;
+      } else {
+        queries_.erase(query_id);
+        return {{}, {.code = 202, .message = "No Content"}};
+      }
     }
 
     std::vector<int> records;
