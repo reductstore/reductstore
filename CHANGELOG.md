@@ -10,16 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed:
 
 - Infinite loop in Bucket::KeepQuota, [PR-146](https://github.com/reduct-storage/reduct-storage/pull/146)
-- waiting data from HTTP client if it aborts
+- Waiting data from HTTP client if it aborts
   connection, [PR-151](https://github.com/reduct-storage/reduct-storage/pull/151)
+- Writing record when current block is broken, [PR-15-](https://github.com/reduct-storage/reduct-storage/pull/153)
 
 ### Changed:
 
 - Duplication of timestamps is not allowed, [PR-147](https://github.com/reduct-storage/reduct-storage/pull/147)
-
-### Fixed:
-
-- writing record when current block is broken, [PR-15-](https://github.com/reduct-storage/reduct-storage/pull/153)
 
 ## [0.7.1] - 2022-07-30
 

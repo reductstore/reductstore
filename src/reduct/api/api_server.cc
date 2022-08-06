@@ -77,43 +77,67 @@ class ApiServer : public IApiServer {
       base_path.push_back('/');
     }
     // Server API
-    app.head(base_path + "alive", [this](auto *res, auto *req) { Alive(res, req); })
-        .get(base_path + "info", [this](auto *res, auto *req) { Info(res, req); })
-        .get(base_path + "list", [this](auto *res, auto *req) { List(res, req); })
+    app.head(base_path + "alive",
+             [this, running](auto *res, auto *req) {
+               Alive(HttpContext<SSL>{res, req, running});
+             })
+        .get(base_path + "info",
+             [this, running](auto *res, auto *req) {
+               Info(HttpContext<SSL>{res, req, running});
+             })
+        .get(base_path + "list",
+             [this, running](auto *res, auto *req) {
+               List(HttpContext<SSL>{res, req, running});
+             })
         // Auth API
-        .post(base_path + "auth/refresh", [this](auto *res, auto *req) { RefreshToken(res, req); })
+        .post(base_path + "auth/refresh",
+              [this, running](auto *res, auto *req) {
+                RefreshToken(HttpContext<SSL>{res, req, running});
+              })
         // Bucket API
         .post(base_path + "b/:bucket_name",
-              [this](auto *res, auto *req) { CreateBucket(res, req, std::string(req->getParameter(0))); })
+              [this, running](auto *res, auto *req) {
+                CreateBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+              })
         .get(base_path + "b/:bucket_name",
-             [this](auto *res, auto *req) { GetBucket(res, req, std::string(req->getParameter(0))); })
+             [this, running](auto *res, auto *req) {
+               GetBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+             })
         .head(base_path + "b/:bucket_name",
-              [this](auto *res, auto *req) { HeadBucket(res, req, std::string(req->getParameter(0))); })
+              [this, running](auto *res, auto *req) {
+                HeadBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+              })
         .put(base_path + "b/:bucket_name",
-             [this](auto *res, auto *req) { UpdateBucket(res, req, std::string(req->getParameter(0))); })
+             [this, running](auto *res, auto *req) {
+               UpdateBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+             })
         .del(base_path + "b/:bucket_name",
-             [this](auto *res, auto *req) { RemoveBucket(res, req, std::string(req->getParameter(0))); })
+             [this, running](auto *res, auto *req) {
+               RemoveBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+             })
         // Entry API
         .post(base_path + "b/:bucket_name/:entry_name",
-              [this](auto *res, auto *req) {
-                WriteEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
-                           std::string(req->getQuery("ts")));
+              [this, running](auto *res, auto *req) {
+                WriteEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
+                           std::string(req->getParameter(1)), std::string(req->getQuery("ts")));
               })
         .get(base_path + "b/:bucket_name/:entry_name",
-             [this](auto *res, auto *req) {
-               ReadEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
-                         std::string(req->getQuery("ts")), std::string(req->getQuery("q")));
+             [this, running](auto *res, auto *req) {
+               ReadEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
+                         std::string(req->getParameter(1)), std::string(req->getQuery("ts")),
+                         std::string(req->getQuery("q")));
              })
         .get(base_path + "b/:bucket_name/:entry_name/list",
-             [this](auto *res, auto *req) {
-               ListEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
-                         std::string(req->getQuery("start")), std::string(req->getQuery("stop")));
+             [this, running](auto *res, auto *req) {
+               ListEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
+                         std::string(req->getParameter(1)), std::string(req->getQuery("start")),
+                         std::string(req->getQuery("stop")));
              })
         .get(base_path + "b/:bucket_name/:entry_name/q",
-             [this](auto *res, auto *req) {
-               QueryEntry(res, req, std::string(req->getParameter(0)), std::string(req->getParameter(1)),
-                          std::string(req->getQuery("start")), std::string(req->getQuery("stop")),
-                          std::string(req->getQuery("ttl")));
+             [this, running](auto *res, auto *req) {
+               QueryEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
+                          std::string(req->getParameter(1)), std::string(req->getQuery("start")),
+                          std::string(req->getQuery("stop")), std::string(req->getQuery("ttl")));
              })
         .get(base_path,
              [base_path](auto *res, auto *req) {
@@ -122,7 +146,7 @@ class ApiServer : public IApiServer {
                res->end({});
              })
         .get(base_path + "ui/*",
-             [this, base_path](auto *res, auto *req) {
+             [this, base_path, running](auto *res, auto *req) {
                std::string path(req->getUrl());
                path = path.substr(base_path.size() + 3, path.size());
 
@@ -130,7 +154,7 @@ class ApiServer : public IApiServer {
                  path = "index.html";
                }
 
-               UiRequest(res, req, base_path, path);
+               UiRequest(HttpContext<SSL>{res, req, running}, base_path, path);
              })
         .any("/*",
              [](auto *res, auto *req) {
@@ -149,7 +173,7 @@ class ApiServer : public IApiServer {
                       }
 
                       LOG_INFO("Stopping storage...");
-                      us_listen_socket_close(0, sock);
+                      us_listen_socket_close(SSL, sock);
                     });
 
                     stopper.detach();
@@ -165,10 +189,17 @@ class ApiServer : public IApiServer {
    * HEAD /alive
    */
   template <bool SSL>
-  VoidTask Alive(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
-    auto handler = BasicApiHandler<SSL, IInfoCallback>(res, req);
-    handler.PrepareHeaders(false, "");
-    res->end({});
+  VoidTask Alive(HttpContext<SSL> ctx) const {
+    class IAliveCallback {
+     public:
+      struct Response {};
+      struct Request {};
+      using Result = core::Result<Response>;
+    };
+
+    auto handler = BasicApiHandler<SSL, IAliveCallback>(ctx, "");
+    typename IAliveCallback::Result result{};
+    handler.Send(std::move(result));
     co_return;
   }
 
@@ -176,14 +207,14 @@ class ApiServer : public IApiServer {
    * GET /info
    */
   template <bool SSL>
-  VoidTask Info(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
-    auto handler = BasicApiHandler<SSL, IInfoCallback>(res, req);
+  VoidTask Info(HttpContext<SSL> ctx) const {
+    auto handler = BasicApiHandler<SSL, IInfoCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
-    handler.Run(co_await storage_->OnInfo({}),
-                [](const IInfoCallback::Response &app_resp) { return PrintToJson(app_resp); });
+    handler.Send(co_await storage_->OnInfo({}),
+                 [](const IInfoCallback::Response &app_resp) { return PrintToJson(app_resp); });
     co_return;
   }
 
@@ -191,13 +222,13 @@ class ApiServer : public IApiServer {
    * GET /list
    */
   template <bool SSL>
-  VoidTask List(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
-    auto handler = BasicApiHandler<SSL, IListStorageCallback>(res, req);
+  VoidTask List(HttpContext<SSL> ctx) const {
+    auto handler = BasicApiHandler<SSL, IListStorageCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
-    handler.Run(co_await storage_->OnStorageList({}),
-                [](const IListStorageCallback::Response &app_resp) { return PrintToJson(app_resp.buckets); });
+    handler.Send(co_await storage_->OnStorageList({}),
+                 [](const IListStorageCallback::Response &app_resp) { return PrintToJson(app_resp.buckets); });
     co_return;
   }
 
@@ -206,11 +237,11 @@ class ApiServer : public IApiServer {
    * POST /auth/refresh
    */
   template <bool SSL>
-  VoidTask RefreshToken(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req) const {
-    std::string header(req->getHeader("authorization"));
-    auto handler = BasicApiHandler<SSL, IRefreshToken>(res, req);
-    handler.Run(co_await auth_->OnRefreshToken(header),
-                [](const IRefreshToken::Response &resp) { return PrintToJson(resp); });
+  VoidTask RefreshToken(HttpContext<SSL> ctx) const {
+    std::string header(ctx.req->getHeader("authorization"));
+    auto handler = BasicApiHandler<SSL, IRefreshToken>(ctx);
+    handler.Send(co_await auth_->OnRefreshToken(header),
+                 [](const IRefreshToken::Response &resp) { return PrintToJson(resp); });
     co_return;
   }
 
@@ -219,14 +250,14 @@ class ApiServer : public IApiServer {
    * POST /b/:name
    */
   template <bool SSL>
-  VoidTask CreateBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
-    auto handler = BasicApiHandler<SSL, ICreateBucketCallback>(res, req);
+  VoidTask CreateBucket(HttpContext<SSL> ctx, std::string name) const {
+    auto handler = BasicApiHandler<SSL, ICreateBucketCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
     std::string data;
-    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck, bool _) {
+    auto err = co_await AsyncHttpReceiver<SSL>(ctx.res, [&data](auto chuck, bool _) {
       data += chuck;
       return Error::kOk;
     });
@@ -250,7 +281,7 @@ class ApiServer : public IApiServer {
         .bucket_settings = std::move(settings),
     };
 
-    handler.Run(co_await storage_->OnCreateBucket(app_request));
+    handler.Send(co_await storage_->OnCreateBucket(app_request));
     co_return;
   }
 
@@ -258,15 +289,15 @@ class ApiServer : public IApiServer {
    * GET /b/:name
    */
   template <bool SSL>
-  VoidTask GetBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(res, req);
+  VoidTask GetBucket(HttpContext<SSL> ctx, std::string name) const {
+    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
     IGetBucketCallback::Request app_request{.bucket_name = name};
-    handler.Run(co_await storage_->OnGetBucket(app_request),
-                [](const IGetBucketCallback::Response &resp) { return PrintToJson(resp); });
+    handler.Send(co_await storage_->OnGetBucket(app_request),
+                 [](const IGetBucketCallback::Response &resp) { return PrintToJson(resp); });
     co_return;
   }
 
@@ -274,14 +305,14 @@ class ApiServer : public IApiServer {
    * HEAD /b/:name
    */
   template <bool SSL>
-  VoidTask HeadBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(res, req);
+  VoidTask HeadBucket(HttpContext<SSL> ctx, std::string name) const {
+    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
     IGetBucketCallback::Request app_request{.bucket_name = name};
-    handler.Run(co_await storage_->OnGetBucket(app_request));
+    handler.Send(co_await storage_->OnGetBucket(app_request));
     co_return;
   }
 
@@ -289,14 +320,14 @@ class ApiServer : public IApiServer {
    * PUT /b/:name
    */
   template <bool SSL>
-  VoidTask UpdateBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IUpdateBucketCallback>(res, req);
+  VoidTask UpdateBucket(HttpContext<SSL> ctx, std::string name) const {
+    auto handler = BasicApiHandler<SSL, IUpdateBucketCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
     std::string data;
-    auto err = co_await AsyncHttpReceiver<SSL>(res, [&data](auto chuck, bool _) {
+    auto err = co_await AsyncHttpReceiver<SSL>(ctx.res, [&data](auto chuck, bool _) {
       data += chuck;
       return Error::kOk;
     });
@@ -317,7 +348,7 @@ class ApiServer : public IApiServer {
         .bucket_name = name,
         .new_settings = std::move(settings),
     };
-    handler.Run(co_await storage_->OnUpdateCallback(app_request));
+    handler.Send(co_await storage_->OnUpdateCallback(app_request));
     co_return;
   }
 
@@ -325,14 +356,14 @@ class ApiServer : public IApiServer {
    * DELETE /b/:name
    */
   template <bool SSL>
-  VoidTask RemoveBucket(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IRemoveBucketCallback>(res, req);
+  VoidTask RemoveBucket(HttpContext<SSL> ctx, std::string name) const {
+    auto handler = BasicApiHandler<SSL, IRemoveBucketCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
 
     IRemoveBucketCallback::Request app_request{.bucket_name = name};
-    handler.Run(co_await storage_->OnRemoveBucket(app_request));
+    handler.Send(co_await storage_->OnRemoveBucket(app_request));
     co_return;
   }
 
@@ -341,9 +372,8 @@ class ApiServer : public IApiServer {
    * POST /b/:bucket/:entry
    */
   template <bool SSL>
-  async::VoidTask WriteEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
-                             std::string ts) const {
-    auto handler = BasicApiHandler<SSL, IWriteEntryCallback>(res, req);
+  async::VoidTask WriteEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string ts) const {
+    auto handler = BasicApiHandler<SSL, IWriteEntryCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
@@ -351,7 +381,7 @@ class ApiServer : public IApiServer {
         .bucket_name = bucket,
         .entry_name = entry,
         .timestamp = ts,
-        .content_length = req->getHeader("content-length"),
+        .content_length = ctx.req->getHeader("content-length"),
     };
 
     auto [async_writer, err] = storage_->OnWriteEntry(app_req);
@@ -361,13 +391,13 @@ class ApiServer : public IApiServer {
     }
 
     err = co_await AsyncHttpReceiver<SSL>(
-        res, [async_writer](auto chunk, bool last) { return async_writer->Write(chunk, last); });
+        ctx.res, [async_writer](auto chunk, bool last) { return async_writer->Write(chunk, last); });
     if (err) {
       handler.SendError(err);
       co_return;
     }
 
-    handler.Run({{}, Error::kOk});
+    handler.SendOk();
     co_return;
   }
 
@@ -375,9 +405,9 @@ class ApiServer : public IApiServer {
    * GET /b/:bucket/:entry
    */
   template <bool SSL = false>
-  async::VoidTask ReadEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
-                            std::string ts, std::string query_id) const {
-    auto handler = BasicApiHandler<SSL, IReadEntryCallback>(res, req);
+  async::VoidTask ReadEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string ts,
+                            std::string query_id) const {
+    auto handler = BasicApiHandler<SSL, IReadEntryCallback>(ctx, "application/octet-stream");
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
@@ -399,37 +429,26 @@ class ApiServer : public IApiServer {
       err = ret.error;
     }
 
-    if (err) {
+    if (err || !reader) {
       handler.SendError(err);
       co_return;
     }
-
-    if (!reader) {
-      // No records to read
-      res->writeStatus(std::to_string(err.code));
-      handler.PrepareHeaders(false);
-      res->end({});
-      co_return;
-    }
-
     bool ready_to_continue = false;
-    res->onWritable([&ready_to_continue](auto _) {
+    ctx.res->onWritable([&ready_to_continue](auto _) {
       LOG_DEBUG("ready");
       ready_to_continue = true;
       return true;
     });
 
     bool aborted = false;
-    res->onAborted([&aborted] {
+    ctx.res->onAborted([&aborted] {
       LOG_WARNING("aborted");
       aborted = true;
     });
 
+    handler.AddHeader("x-reduct-time", core::ToMicroseconds(reader->timestamp()));
+    handler.AddHeader("x-reduct-last", static_cast<int>(last));
     handler.PrepareHeaders(true, "application/octet-stream");
-    res->writeHeader(
-        "x-reduct-time",
-        std::chrono::duration_cast<std::chrono::microseconds>(reader->timestamp().time_since_epoch()).count());
-    res->writeHeader("x-reduct-last", last);
 
     bool complete = false;
     while (!aborted && !complete) {
@@ -440,16 +459,16 @@ class ApiServer : public IApiServer {
         co_return;
       }
 
-      const auto offset = res->getWriteOffset();
+      const auto offset = ctx.res->getWriteOffset();
       while (!aborted) {
         ready_to_continue = false;
-        auto [ok, responded] = res->tryEnd(chuck.data.substr(res->getWriteOffset() - offset), reader->size());
+        auto [ok, responded] = ctx.res->tryEnd(chuck.data.substr(ctx.res->getWriteOffset() - offset), reader->size());
         if (ok) {
           complete = responded;
           break;
         } else {
           // Have to wait until onWritable sets flag
-          LOG_DEBUG("Failed to send data: {} {}/{} kB", ts, res->getWriteOffset() / 1024, reader->size() / 1024);
+          LOG_DEBUG("Failed to send data: {} {}/{} kB", ts, ctx.res->getWriteOffset() / 1024, reader->size() / 1024);
           while (!ready_to_continue && !aborted) {
             co_await Sleep(async::kTick);
           }
@@ -459,8 +478,10 @@ class ApiServer : public IApiServer {
       }
     }
 
-    LOG_DEBUG("Sent {} {}/{} kB", ts, res->getWriteOffset() / 1024, reader->size() / 1024);
+    LOG_DEBUG("Sent {} {}/{} kB", ts, ctx.res->getWriteOffset() / 1024, reader->size() / 1024);
 
+
+    handler.SendOk();
     co_return;
   }
 
@@ -468,9 +489,9 @@ class ApiServer : public IApiServer {
    * GET /b/:bucket/:entry/list
    */
   template <bool SSL = false>
-  async::VoidTask ListEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
-                            std::string start_ts, std::string stop_ts) const {
-    auto handler = BasicApiHandler<SSL, IListEntryCallback>(res, req);
+  async::VoidTask ListEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string start_ts,
+                            std::string stop_ts) const {
+    auto handler = BasicApiHandler<SSL, IListEntryCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
@@ -482,8 +503,8 @@ class ApiServer : public IApiServer {
         .stop_timestamp = stop_ts,
     };
 
-    handler.Run(co_await storage_->OnListEntry(data),
-                [](const IListEntryCallback::Response &app_resp) { return PrintToJson(app_resp); });
+    handler.Send(co_await storage_->OnListEntry(data),
+                 [](const IListEntryCallback::Response &app_resp) { return PrintToJson(app_resp); });
     co_return;
   }
 
@@ -491,9 +512,9 @@ class ApiServer : public IApiServer {
    * GET /b/:bucket/:entry/query
    */
   template <bool SSL = false>
-  async::VoidTask QueryEntry(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string bucket, std::string entry,
-                             std::string start_ts, std::string stop_ts, std::string ttl) const {
-    auto handler = BasicApiHandler<SSL, IQueryCallback>(res, req);
+  async::VoidTask QueryEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string start_ts,
+                             std::string stop_ts, std::string ttl) const {
+    auto handler = BasicApiHandler<SSL, IQueryCallback>(ctx);
     if (handler.CheckAuth(auth_.get()) != Error::kOk) {
       co_return;
     }
@@ -506,21 +527,20 @@ class ApiServer : public IApiServer {
         .ttl = ttl,
     };
 
-    handler.Run(co_await storage_->OnQuery(data),
-                [](const IQueryCallback::Response &app_resp) { return PrintToJson(app_resp); });
+    handler.Send(co_await storage_->OnQuery(data),
+                 [](const IQueryCallback::Response &app_resp) { return PrintToJson(app_resp); });
     co_return;
   }
 
   template <bool SSL = false>
-  async::VoidTask UiRequest(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req, std::string_view base_path,
-                            std::string path) const {
+  async::VoidTask UiRequest(HttpContext<SSL> ctx, std::string_view base_path, std::string path) const {
     struct Callback {
       struct [[maybe_unused]] Request {};  // NOLINT
       using Response = std::string;
       using Result = core::Result<Response>;
     };
 
-    auto handler = BasicApiHandler<SSL, Callback>(res, req, "");
+    auto handler = BasicApiHandler<SSL, Callback>(ctx, "");
 
     auto replace_base_path = [&base_path](typename Callback::Response resp) {
       // substitute RS_API_BASE_PATH to make web console work
@@ -532,14 +552,14 @@ class ApiServer : public IApiServer {
     switch (ret.error.code) {
       case 200: {
         auto content = std::regex_replace(ret.result, std::regex("/ui/"), fmt::format("{}ui/", base_path));
-        res->end(std::move(content));
-        handler.Run(std::move(ret), replace_base_path);
+        ctx.res->end(std::move(content));
+        handler.Send(std::move(ret), replace_base_path);
         break;
       }
       case 404: {
         // It's React.js paths
         ret = console_->Read("index.html");
-        handler.Run(std::move(ret), replace_base_path);
+        handler.Send(std::move(ret), replace_base_path);
         break;
       }
       default: {

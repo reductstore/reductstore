@@ -88,17 +88,25 @@ class WhenWritable {
   size_t max_size_;
 };
 
+template <bool SSL>
+struct HttpContext {
+  uWS::HttpResponse<SSL> *res;
+  uWS::HttpRequest *req;
+  bool running;
+};
+
 template <bool SSL, typename Callback>
 class BasicApiHandler {
  public:
-  BasicApiHandler(uWS::HttpResponse<SSL> *res, uWS::HttpRequest *req,
-                  std::string_view content_type = "application/json")
-      : http_resp_(res),
-        origin_(req->getHeader("origin")),
-        authorization_(req->getHeader("authorization")),
-        url_(req->getUrl()),
-        method_(req->getMethod()),
-        content_type_(content_type) {
+  explicit BasicApiHandler(HttpContext<SSL> ctx, std::string_view content_type = "application/json")
+      : http_resp_(ctx.res),
+        origin_(ctx.req->getHeader("origin")),
+        authorization_(ctx.req->getHeader("authorization")),
+        url_(ctx.req->getUrl()),
+        method_(ctx.req->getMethod()),
+        content_type_(content_type),
+        running_(ctx.running),
+        headers_{} {
     std::transform(method_.begin(), method_.end(), method_.begin(), [](auto &ch) { return std::toupper(ch); });
 
     http_resp_->onAborted([*this] { LOG_ERROR("{} {}: aborted", method_, url_); });
@@ -117,7 +125,7 @@ class BasicApiHandler {
     return err;
   }
 
-  void Run(
+  void Send(
       typename Callback::Result &&result,
       std::function<std::string(typename Callback::Response)> on_success = [](auto) { return ""; }) const noexcept {
     auto [resp, err] = std::move(result);
@@ -126,23 +134,14 @@ class BasicApiHandler {
       return;
     }
 
+    SendOk(on_success(std::move(resp)));
+  }
+
+  void SendOk(std::string_view content = "") const noexcept {
     LOG_DEBUG("{} {}: OK", method_, url_);
-    auto content = on_success(std::move(resp));
     PrepareHeaders(!content.empty(), content_type_);
 
     http_resp_->end(std::move(content));
-  }
-
-  void PrepareHeaders(bool has_content, std::string_view content_type = "") const {  // Allow CORS
-    if (!origin_.empty()) {
-      http_resp_->writeHeader("access-control-allow-origin", origin_);
-    }
-
-    if (has_content && !content_type_.empty()) {
-      http_resp_->writeHeader("content-type", content_type);
-    }
-
-    http_resp_->writeHeader("server", "ReductStorage");
   }
 
   void SendError(core::Error err) const noexcept {
@@ -157,6 +156,28 @@ class BasicApiHandler {
     http_resp_->end(fmt::format(R"({{"detail":"{}"}})", err.message));
   }
 
+  template <class T>
+  void AddHeader(std::string_view header, T value) noexcept {
+    headers_[header] = fmt::format("{}", value);
+  }
+
+  void PrepareHeaders(bool has_content, std::string_view content_type = "") const {  // Allow CORS
+    if (!origin_.empty()) {
+      http_resp_->writeHeader("access-control-allow-origin", origin_);
+    }
+
+    if (has_content && !content_type_.empty()) {
+      http_resp_->writeHeader("content-type", content_type);
+    }
+
+    http_resp_->writeHeader("connection", running_ ? "keep-alive" : "close");
+    http_resp_->writeHeader("server", "ReductStorage");
+
+    for (auto &[key, val] : headers_) {
+      http_resp_->writeHeader(key, val);
+    }
+  }
+
  private:
   uWS::HttpResponse<SSL> *http_resp_;
   std::string url_;
@@ -164,6 +185,9 @@ class BasicApiHandler {
   std::string authorization_;
   std::string origin_;
   std::string_view content_type_;
+
+  std::map<std::string_view, std::string> headers_;
+  bool running_;
 };
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_HANDLERS_COMMON_H
