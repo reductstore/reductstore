@@ -308,6 +308,7 @@ class Entry : public IEntry {
     }
     auto stop_ts = FromTimePoint(query_info.stop);
 
+    // Find start block
     auto start_block = block_set_.upper_bound(start_ts);
     if (start_block == block_set_.end()) {
       start_block = std::prev(start_block);
@@ -315,10 +316,27 @@ class Entry : public IEntry {
       start_block = std::prev(start_block);
     }
 
-    const auto [block, err] = block_manager_->LoadBlock(*start_block);
+    auto [block, err] = block_manager_->LoadBlock(*start_block);
     if (err) {
       queries_.erase(query_id);
       return {{}, err};
+    }
+
+    // Check if it is valid
+    if (block->invalid()) {
+      start_block = std::next(start_block);
+      if (start_block != std::end(block_set_) && *start_block < stop_ts) {
+          const auto [next_block, next_err] = block_manager_->LoadBlock(*start_block);
+          if (next_err) {
+            queries_.erase(query_id);
+            return {{}, next_err};
+          }
+
+          block = next_block;
+      } else {
+        queries_.erase(query_id);
+        return {{}, {.code = 202, .message = "No Content"}};
+      }
     }
 
     std::vector<int> records;

@@ -13,6 +13,7 @@ using reduct::WriteOne;
 using reduct::async::IAsyncReader;
 using reduct::core::Error;
 using reduct::core::Time;
+using reduct::core::ToMicroseconds;
 using reduct::storage::IEntry;
 using reduct::storage::query::IQuery;
 
@@ -22,6 +23,7 @@ using std::chrono::seconds;
 namespace fs = std::filesystem;
 
 const auto kName = "entry_1";
+const IQuery::Options kDefaultOptions = {.ttl = seconds(1)};
 
 static auto MakeDefaultOptions() {
   return IEntry::Options{
@@ -35,8 +37,6 @@ static const auto kTimestamp = Time() + std::chrono::microseconds(10'100'200);  
 TEST_CASE("storage::Entry should query records", "[entry][query]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
-
-  const IQuery::Options kDefaultOptions = {.ttl = seconds(1)};
 
   SECTION("empty entry") {
     auto [start, stop] =
@@ -197,8 +197,6 @@ TEST_CASE("storage::Entry should have TTL", "[entry][query]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
-  const IQuery::Options kDefaultOptions = {.ttl = seconds(1)};
-
   REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
   REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(1)) == Error::kOk);
   REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2)) == Error::kOk);
@@ -228,4 +226,24 @@ TEST_CASE("storage::Entry should have TTL", "[entry][query]") {
                        .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id),
                    });
   }
+}
+
+TEST_CASE("storage::Entry should handle invalid blocks", "[entry][query]") {
+  auto const path = BuildTmpDirectory();
+  auto entry = IEntry::Build(kName, path, MakeDefaultOptions());
+
+  std::string data = "xxxx";
+  REQUIRE(WriteOne(*entry, data, kTimestamp) == Error::kOk);
+  // remove block with data to make write operation invalid
+  REQUIRE(fs::remove(path / kName / fmt::format("{}.blk", ToMicroseconds(kTimestamp))));
+  REQUIRE(WriteOne(*entry, data, kTimestamp + seconds(1)) == Error{.code = 500, .message = "Bad block"});
+
+  REQUIRE(WriteOne(*entry, data, kTimestamp + seconds(2)) == Error::kOk);
+
+  auto [id, _] = entry->Query(kTimestamp, kTimestamp + seconds(3), kDefaultOptions);
+
+  auto [record, err] = entry->Next(id);
+  REQUIRE(err == Error::kOk);
+  REQUIRE(record.reader->timestamp() == kTimestamp + seconds(2));
+  REQUIRE(record.last);
 }
