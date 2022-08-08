@@ -121,11 +121,12 @@ class BlockManager : public IBlockManager {
       return Error{.code = 500, .message = fmt::format("Failed to remove block {}: {}", path.string(), ec.message())};
     };
 
-    // remove block with date
+    // remove block with data
     fs::remove(path, ec);
     Error err;
     if (ec) {
       err = make_error();
+      LOG_WARNING(err.ToString());
     }
 
     // remove descriptor
@@ -133,6 +134,7 @@ class BlockManager : public IBlockManager {
     fs::remove(path, ec);
     if (ec) {
       err = make_error();
+      LOG_WARNING(err.ToString());
     }
 
     return err;

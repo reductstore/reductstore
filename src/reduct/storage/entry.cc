@@ -414,8 +414,8 @@ class Entry : public IEntry {
 
     size_counter_ -= first_block->size();
     record_counter_ -= first_block->records_size();
-    block_set_.erase(first_block->begin_time());
-    return {};
+    block_set_.erase(block_set_.begin());
+    return Error::kOk;
   }
 
   [[nodiscard]] EntryInfo GetInfo() const override {
