@@ -62,9 +62,9 @@ Content-length is required to start an asynchronous write operation
 {% swagger-description %}
 The method return a content of the requested record in the body of the HTTP response. It also sends additional information in headers:
 
-**-x-reduct-time** - UNIX timestamp of the record in microseconds
+**x-reduct-time** - UNIX timestamp of the record in microseconds
 
-**-x-reduct-last** - 1 - if a record is the last record in the query&#x20;
+**x-reduct-last** - 1 - if a record is the last record in the query&#x20;
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
