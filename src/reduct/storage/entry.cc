@@ -44,15 +44,26 @@ class Entry : public IEntry {
     block_manager_ = IBlockManager::Build(full_path_);
     if (!fs::create_directories(full_path_)) {
       for (const auto& file : fs::directory_iterator(full_path_)) {
-        auto& path = file.path();
+        auto path = file.path();
         if (fs::is_regular_file(file) && path.extension() == kMetaExt) {
           try {
             auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoul(path.stem().c_str()));
             auto [block, err] = block_manager_->LoadBlock(ts);
-            if (err) {
-              LOG_ERROR("{}", err.ToString());
+
+            if (err || block->begin_time().seconds() == 0 || block->invalid()) {
+              LOG_WARNING("Block {} looks broken. Remove it.", path.string());
+              std::error_code ec;
+              if (!fs::remove(path, ec)) {
+                LOG_ERROR("Failed to remove {}: {}", path.string(), ec.message());
+              }
+
+              path = path.parent_path() / fmt::format("{}{}", path.stem().string(), kBlockExt);
+              if (!fs::remove(path, ec)) {
+                LOG_ERROR("Failed to remove {}: {}", path.string(), ec.message());
+              }
               continue;
             }
+
             block_set_.insert(ts);
             size_counter_ += block->size();
             record_counter_ += block->records_size();
@@ -326,13 +337,13 @@ class Entry : public IEntry {
     if (block->invalid()) {
       start_block = std::next(start_block);
       if (start_block != std::end(block_set_) && *start_block < stop_ts) {
-          const auto [next_block, next_err] = block_manager_->LoadBlock(*start_block);
-          if (next_err) {
-            queries_.erase(query_id);
-            return {{}, next_err};
-          }
+        const auto [next_block, next_err] = block_manager_->LoadBlock(*start_block);
+        if (next_err) {
+          queries_.erase(query_id);
+          return {{}, next_err};
+        }
 
-          block = next_block;
+        block = next_block;
       } else {
         queries_.erase(query_id);
         return {{}, {.code = 202, .message = "No Content"}};

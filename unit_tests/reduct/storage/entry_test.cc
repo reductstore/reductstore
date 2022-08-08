@@ -6,8 +6,10 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
+#include <fstream>
 
 #include "reduct/helpers.h"
+#include "reduct/proto/storage/entry.pb.h"
 
 using reduct::ReadOne;
 using reduct::WriteOne;
@@ -15,6 +17,7 @@ using reduct::core::Error;
 using reduct::core::Time;
 using reduct::core::ToMicroseconds;
 using reduct::storage::IEntry;
+using reduct::proto::Block;
 
 using google::protobuf::util::TimeUtil;
 
@@ -31,7 +34,6 @@ static auto MakeDefaultOptions() {
 }
 
 static const auto kTimestamp = Time() + std::chrono::microseconds(10'100'200);  // to check um precision
-
 
 auto GetBlockSize(std::string_view name, fs::path path, IEntry::Options options, Time begin_ts) {
   return fs::file_size(path / name / fmt::format("{}.blk", ToMicroseconds(begin_ts)));
@@ -217,9 +219,24 @@ TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
   REQUIRE(info.latest_record() == ToMicroseconds(kTimestamp));
   REQUIRE(info.oldest_record() == ToMicroseconds(kTimestamp));
 
-  SECTION("should work ok after restoring") {
+  SECTION("should work ok after restarting") {
     REQUIRE(WriteOne(*entry, "next_data", kTimestamp + seconds(5)) == Error::kOk);
     REQUIRE(ReadOne(*entry, kTimestamp + seconds(5)).result == "next_data");
+  }
+
+  SECTION("should remove block if it is invalid") {
+    std::string_view ts = "1659810772861000";
+    const auto meta_path = path / kName / fmt::format("{}.{}", ts, "meta");
+    const auto block_path = path / kName / fmt::format("{}.{}", ts, "blk");
+    std::ofstream meta(meta_path);
+    std::ofstream block(block_path);
+
+    auto content = GENERATE("", "garbage");
+    meta << content << std::flush;
+
+    entry = IEntry::Build(kName, path, options);
+    REQUIRE_FALSE(fs::exists(meta_path));
+    REQUIRE_FALSE(fs::exists(block_path));
   }
 }
 
