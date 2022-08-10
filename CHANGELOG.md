@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Writing record when current block is broken, [PR-15-](https://github.com/reduct-storage/reduct-storage/pull/153)
 - Closing uSocket, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
 - Removing broken block when it keeps quota, [PR-155](https://github.com/reduct-storage/reduct-storage/pull/155)
+- Sending headers twice, [PR-156](https://github.com/reduct-storage/reduct-storage/pull/156)
 
 ### Changed:
 
