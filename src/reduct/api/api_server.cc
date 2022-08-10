@@ -481,7 +481,7 @@ class ApiServer : public IApiServer {
     LOG_DEBUG("Sent {} {}/{} kB", ts, ctx.res->getWriteOffset() / 1024, reader->size() / 1024);
 
 
-    handler.SendOk();
+    handler.SendOk("", true);
     co_return;
   }
 

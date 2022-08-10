@@ -137,10 +137,11 @@ class BasicApiHandler {
     SendOk(on_success(std::move(resp)));
   }
 
-  void SendOk(std::string_view content = "") const noexcept {
+  void SendOk(std::string_view content = "", bool no_headers = false) const noexcept {
     LOG_DEBUG("{} {}: OK", method_, url_);
-    PrepareHeaders(!content.empty(), content_type_);
-
+    if (!no_headers) {
+      PrepareHeaders(!content.empty(), content_type_);
+    }
     http_resp_->end(std::move(content));
   }
 
@@ -161,7 +162,8 @@ class BasicApiHandler {
     headers_[header] = fmt::format("{}", value);
   }
 
-  void PrepareHeaders(bool has_content, std::string_view content_type = "") const {  // Allow CORS
+  void PrepareHeaders(bool has_content, std::string_view content_type = "") const {
+    // Allow CORS
     if (!origin_.empty()) {
       http_resp_->writeHeader("access-control-allow-origin", origin_);
     }
