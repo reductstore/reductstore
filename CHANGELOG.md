@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added:
 
+- Direction to `cd` into the `build/` directory while building the server locally, [PR-159](https://github.com/reduct-storage/reduct-storage/pull/159)
 - `Connection` header, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
 
 ### Fixed:
