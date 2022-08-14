@@ -38,7 +38,7 @@ sudo pip3 install conan
 After all the requirements are installed, you can build the storage:
 
 ```
-mkdir build
+mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
