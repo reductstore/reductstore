@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed:
 
+- Ignoring error code after a failed bucket update, [PR-161](https://github.com/reduct-storage/reduct-storage/pull/161)
 - Infinite loop in Bucket::KeepQuota, [PR-146](https://github.com/reduct-storage/reduct-storage/pull/146)
 - Waiting data from HTTP client if it aborts
   connection, [PR-151](https://github.com/reduct-storage/reduct-storage/pull/151)
