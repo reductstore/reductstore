@@ -159,6 +159,10 @@ class Storage : public IStorage {
       }
 
       err = bucket_it->second->SetSettings(std::move(req.new_settings));
+      if (err) {
+        return Callback::Result{{}, err};
+      }
+
       return Callback::Result{{}, Error::kOk};
     });
   }
