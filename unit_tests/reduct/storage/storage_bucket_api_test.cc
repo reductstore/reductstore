@@ -84,7 +84,8 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
 }
 
 TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
-  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+  auto data_path = BuildTmpDirectory();
+  auto storage = IStorage::Build({.data_path = data_path});
 
   ICreateBucketCallback::Request req{
       .bucket_name = "bucket",
@@ -124,6 +125,20 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
     REQUIRE(err == Error::kOk);
     REQUIRE(info.settings().max_block_size() == MakeDefaultBucketSettings().max_block_size());
     REQUIRE(info.settings().quota_type() == change_req.new_settings.quota_type());
+  }
+
+  SECTION("settings update should fail if underlying directory has been deleted") {
+    BucketSettings settings;
+    settings.set_quota_size(100);
+
+    IUpdateBucketCallback::Request change_req{
+        .bucket_name = "bucket",
+        .new_settings = settings
+    };
+
+    fs::remove(data_path / "bucket");
+    auto result = OnChangeBucketSettings(storage.get(), change_req).Get();
+    REQUIRE(result == Error{.code = 500, .message = "Failed to open file of bucket settings"});
   }
 }
 
