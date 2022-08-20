@@ -136,7 +136,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
         .new_settings = settings
     };
 
-    fs::remove(data_path / "bucket");
+    fs::remove_all(data_path / "bucket");
     auto result = OnChangeBucketSettings(storage.get(), change_req).Get();
     REQUIRE(result == Error{.code = 500, .message = "Failed to open file of bucket settings"});
   }
