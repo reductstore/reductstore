@@ -162,7 +162,7 @@ jobs:
       - api_tests_without_auth
       - api_tests_with_ssl
       - unit_tests
-#    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v2
       - name: Log in to the Container registry
