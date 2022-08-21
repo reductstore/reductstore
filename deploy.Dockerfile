@@ -1,4 +1,4 @@
-FROM reductstorage/console:v0.4.0 AS web-console
+FROM ghcr.io/reduct-storage/web-console:v0.4.0 AS web-console
 FROM ubuntu:22.04 AS builder
 
 RUN apt update && apt install -y cmake python3-pip zip
