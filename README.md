@@ -21,7 +21,7 @@ Reduct Storage is a time series database for big data. It has no limitation on t
 The easiest way to start is to use Docker image:
 
 ```shell
-docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-storage:main
+docker run -p 8383:8383 -v ${PWD}/data:/data reductstorage/engine:latest
 ```
 
 or you can use the demo storage: https://play.reduct-storage.dev

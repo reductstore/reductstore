@@ -11,7 +11,7 @@ The current version supports only Linux OS and was tested on an AMD64 platform w
 The easiest way to start using Reduct Storage is to run Docker image:
 
 ```
-docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-storage:main 
+docker run -p 8383:8383 -v ${PWD}/data:/data reductstorage/engine:latest 
 ```
 
 The storage will be available on port http://127.0.01:8383 and stores data in the `./data` directory. You may check if it's working with a simple HTTP request:
