@@ -26,7 +26,6 @@ class IApiHandler : public IInfoCallback,
                     public IUpdateBucketCallback,
                     public IWriteEntryCallback,
                     public IReadEntryCallback,
-                    public IListEntryCallback,
                     public IQueryCallback,
                     public INextCallback {};
 

@@ -127,12 +127,6 @@ class ApiServer : public IApiServer {
                          std::string(req->getParameter(1)), std::string(req->getQuery("ts")),
                          std::string(req->getQuery("q")));
              })
-        .get(base_path + "b/:bucket_name/:entry_name/list",
-             [this, running](auto *res, auto *req) {
-               ListEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
-                         std::string(req->getParameter(1)), std::string(req->getQuery("start")),
-                         std::string(req->getQuery("stop")));
-             })
         .get(base_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
                QueryEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
@@ -482,29 +476,6 @@ class ApiServer : public IApiServer {
 
 
     handler.SendOk("", true);
-    co_return;
-  }
-
-  /**
-   * GET /b/:bucket/:entry/list
-   */
-  template <bool SSL = false>
-  async::VoidTask ListEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string start_ts,
-                            std::string stop_ts) const {
-    auto handler = BasicApiHandler<SSL, IListEntryCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    IListEntryCallback::Request data{
-        .bucket_name = bucket,
-        .entry_name = entry,
-        .start_timestamp = start_ts,
-        .stop_timestamp = stop_ts,
-    };
-
-    handler.Send(co_await storage_->OnListEntry(data),
-                 [](const IListEntryCallback::Response &app_resp) { return PrintToJson(app_resp); });
     co_return;
   }
 

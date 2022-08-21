@@ -228,41 +228,6 @@ class Storage : public IStorage {
     });
   }
 
-  [[nodiscard]] Run<IListEntryCallback::Result> OnListEntry(const IListEntryCallback::Request& req) const override {
-    using Callback = IListEntryCallback;
-
-    return Run<Callback::Result>([this, req] {
-      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      auto [start_ts, parse_start_err] = ParseTimestamp(req.start_timestamp, "start_timestamp");
-      if (parse_start_err) {
-        return Callback::Result{{}, parse_start_err};
-      }
-
-      auto [stop_ts, parse_stop_err] = ParseTimestamp(req.stop_timestamp, "stop_timestamp");
-      if (parse_stop_err) {
-        return Callback::Result{{}, parse_stop_err};
-      }
-
-      auto [list, list_err] = entry->List(start_ts, stop_ts);
-      if (list_err) {
-        return Callback::Result{{}, list_err};
-      }
-
-      Callback::Response resp;
-      for (const auto& info : list) {
-        auto rec = resp.add_records();
-        rec->set_ts(std::chrono::duration_cast<std::chrono::microseconds>(info.time.time_since_epoch()).count());
-        rec->set_size(info.size);
-      }
-
-      return Callback::Result{std::move(resp), {}};
-    });
-  }
-
   [[nodiscard]] Run<IQueryCallback::Result> OnQuery(const IQueryCallback::Request& req) const override {
     using Callback = IQueryCallback;
 

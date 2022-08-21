@@ -155,26 +155,6 @@ class IReadEntryCallback {
   virtual async::Run<Result> OnReadEntry(const Request& req) = 0;
 };
 
-class IListEntryCallback {
- public:
-  struct RecordInfo {
-    int64_t timestamp;
-    size_t size;
-  };
-
-  using Response = proto::api::RecordInfoList;
-
-  struct Request {
-    std::string_view bucket_name;
-    std::string_view entry_name;
-    std::string_view start_timestamp;
-    std::string_view stop_timestamp;
-  };
-
-  using Result = core::Result<Response>;
-  [[nodiscard]] virtual async::Run<Result> OnListEntry(const Request& req) const = 0;
-};
-
 /**
  * Query callback
  */

@@ -136,12 +136,6 @@ inline async::Task<api::IReadEntryCallback::Result> OnReadEntry(storage::IStorag
   co_return result;
 }
 
-inline async::Task<api::IListEntryCallback::Result> OnListEntry(storage::IStorage* storage,
-                                                                api::IListEntryCallback::Request req) {
-  auto result = co_await storage->OnListEntry(std::move(req));
-  co_return result;
-}
-
 inline async::Task<api::IQueryCallback::Result> OnQuery(storage::IStorage* storage,
                                                                 api::IQueryCallback::Request req) {
   auto result = co_await storage->OnQuery(std::move(req));
