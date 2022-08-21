@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed:
 
 - Duplication of timestamps is not allowed, [PR-147](https://github.com/reduct-storage/reduct-storage/pull/147)
+- Update dependencies, [PR-163](https://github.com/reduct-storage/reduct-storage/pull/163)
 
 ## [0.7.1] - 2022-07-30
 
