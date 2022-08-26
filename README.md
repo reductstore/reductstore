@@ -32,22 +32,22 @@ Reduct Storage porvides a simple HTTP API, so you could use it with `curl`:
 
 ```
 # Take a temporal access token by using the API token
-curl -X POST --header "Authorization: Bearer ${API_TOKEN}" -a https://play.reduct-storage.dev/auth/refresh
+export API_TOKEN=reduct
 
 # Create a bucket
 curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
   -X POST \
-  --header "Authorization: Bearer ${ACCESS_TOKEN}"   \
+  --header "Authorization: Bearer ${API_TOKEN}"   \
   -a https://play.reduct-storage.dev/b/my_data
 
 # Write some data
 curl -d "some_data" \
   -X POST \
-  --header "Authorization: Bearer ${ACCESS_TOKEN}"   \
+  --header "Authorization: Bearer ${API_TOKEN}"   \
   -a https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 
 # Read the data by using its timestamp
-curl --header "Authorization: Bearer ${ACCESS_TOKEN}"   \
+curl --header "Authorization: Bearer ${API_TOKEN}"   \
     https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
 ```
 

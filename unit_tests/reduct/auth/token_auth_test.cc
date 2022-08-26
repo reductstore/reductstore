@@ -21,7 +21,12 @@ TEST_CASE("auth::TokenAuthorization should return 401 if head is bad") {
   REQUIRE(auth->Check("Bearer AABBCC") == Error{.code = 401, .message = "Invalid token"});
 }
 
-TEST_CASE("auth::TokenAuthorization should refresh token") {
+TEST_CASE("auth::TokenAuthorization should use API token to check") {
+  auto auth = ITokenAuthentication::Build("some_token");
+  REQUIRE(auth->Check("Bearer some_token") == Error::kOk);
+}
+
+TEST_CASE("auth::TokenAuthorization should refresh token", "[depricated]") {
   const std::string kBearer = "Bearer sometoken";
   auto auth = ITokenAuthentication::Build("sometoken", {.expiration_time_s = 1});
 
