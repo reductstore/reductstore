@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2022-08-26
+
 ### Added:
 
 - Web Console v0.4.0
 - `Connection` header, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
 - Publish image to DockerHub, [PR-162](https://github.com/reduct-storage/reduct-storage/pull/162)
+- Use API token as an access token, [PR-167](https://github.com/reduct-storage/reduct-storage/pull/167)
 
 ### Fixed:
 
@@ -24,7 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removing broken block when it keeps quota, [PR-155](https://github.com/reduct-storage/reduct-storage/pull/155)
 - Sending headers twice, [PR-156](https://github.com/reduct-storage/reduct-storage/pull/156)
 - Direction to `cd` into the `build/` directory while building the server locally, [PR-159](https://github.com/reduct-storage/reduct-storage/pull/159)
-- Use API token as an access token, [PR-167](https://github.com/reduct-storage/reduct-storage/pull/167)
 
 ### Changed:
 
@@ -215,7 +217,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reduct-storage/reduct-storage/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/reduct-storage/reduct-storage/compare/v0.8.0...HEAD
+
+[0.8.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.7.1...v0.8.0
 
 [0.7.1]: https://github.com/reduct-storage/reduct-storage/compare/v0.7.0...v0.7.1
 
