@@ -11,7 +11,7 @@ The current version supports only Linux OS and was tested on an AMD64 platform w
 The easiest way to start using Reduct Storage is to run Docker image:
 
 ```
-docker run -p 8383:8383 -v ${PWD}/data:/data reductstorage/engine:latest 
+docker run -p 8383:8383 -v ${PWD}/data:/data ghcr.io/reduct-storage/reduct-storage:main 
 ```
 
 The storage will be available on port http://127.0.01:8383 and stores data in the `./data` directory. You may check if it's working with a simple HTTP request:
@@ -38,7 +38,7 @@ sudo pip3 install conan
 After all the requirements are installed, you can build the storage:
 
 ```
-mkdir build && cd build
+mkdir build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
@@ -53,13 +53,13 @@ RS_DATA_PATH=./data bin/reduct-storage
 
 The storage can be customized with the following environmental variables:
 
-| Name                | Default   | Description                                                                         |
-| ------------------- | --------- | ----------------------------------------------------------------------------------- |
-| RS\_LOG\_LEVEL      | INFO      | Logging level, can be: TRACE, DEBUG, INFO, WARNING, ERROR                           |
-| RS\_HOST            | 0.0.0.0   | Listening IP address                                                                |
-| RS\_PORT            | 8383      | Listening port                                                                      |
-| RS\_API\_BASE\_PATH | /         | Prefix for all URLs of requests                                                     |
-| RS\_DATA\_PATH      | /data     | Path to a folder where the storage stores the data                                  |
-| RS\_API\_TOKEN      |           | If set, the storage uses [token authorization](broken-reference)                    |
-| RS\_CERT\_PATH      |           | Path to an SSL certificate. If unset, the storage uses HTTP instead of HTTPS        |
-| RS\_CERT\_KEY\_PATH |           | Path to the private key of the desired SSL certificate. Should be set with RS\_CERT\_PATH       |
+| Name                | Default | Description                                                                                                                                              |
+| ------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RS\_LOG\_LEVEL      | INFO    | Logging level, can be: TRACE, DEBUG, INFO, WARNING, ERROR                                                                                                |
+| RS\_HOST            | 0.0.0.0 | Listening IP address                                                                                                                                     |
+| RS\_PORT            | 8383    | Listening port                                                                                                                                           |
+| RS\_API\_BASE\_PATH | /       | Prefix for all URLs of requests                                                                                                                          |
+| RS\_DATA\_PATH      | /data   | Path to a folder where the storage stores the data                                                                                                       |
+| RS\_API\_TOKEN      |         | If set, the storage uses [token authorization](https://github.com/reduct-storage/reduct-storage/blob/reduct-storage-122/docs/broken-reference/README.md) |
+| RS\_CERT\_PATH      |         | Path to an SSL certificate. If unset, the storage uses HTTP instead of HTTPS                                                                             |
+| RS\_CERT\_KEY\_PATH |         | Path to the private key of the desired SSL certificate. Should be set with RS\_CERT\_PATH                                                                |
