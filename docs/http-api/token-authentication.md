@@ -6,37 +6,29 @@ description: Here you can find how to access to storage with token authenticatio
 
 ### Access Token
 
-The storage uses a simple authentication model with a bearer token. This token should be sent as the`Authorization` header in the following format:
+The storage uses a simple authentication model with a bearer token.  This token should be sent as `Authorization` header in the following format:
 
 ```
 Bearer <ACCESS_TOKEN>
 ```
 
-`ACCESS_TOKEN` should be the same as the `RS_API_TOKEN` environment variable of the server.
-
-An example of a request with CURL:
-
-```shell
- curl   --header "Authorization: Bearer ${API_TOKEN}" -a http://127.0.0.1:8383/info
-```
+The access token expires 5 minutes after it was created. After that, the client will receive a 401 HTTP error for any requests and has to refresh the token.
 
 {% hint style="info" %}
 The storage uses the token authentication when`RS_API_TOKEN` is set.
 {% endhint %}
 
-### Refresh Token \[DEPRECATED]
-
-
+### Refresh Token
 
 {% swagger method="post" path=" " baseUrl="/auth/refresh " summary="Refresh access token" %}
 {% swagger-description %}
-The client has to request an access token by using this method with a header `Authorization` whith the value of the `RS_API_TOKEN` environment variable.
+The client has to request an access token by using this method with a header `Authorization` whith the value 
+of the `RS_API_TOKEN` environment variable.
 
-The access token expires 5 minutes after it was created. After that, the client will receive a 401 HTTP error for any requests and has to refresh the token.
 {% endswagger-description %}
 
-{% swagger-parameter in="header" name="Authorization" required="false" %}
-Bearer
+{% swagger-parameter in="header" name="Authorization" %}
+Bearer <SHA256 hash of RS_API_TOKEN>
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="" %}
