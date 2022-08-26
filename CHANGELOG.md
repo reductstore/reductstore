@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added:
 
 - Web Console v0.4.0
-- Direction to `cd` into the `build/` directory while building the server locally, [PR-159](https://github.com/reduct-storage/reduct-storage/pull/159)
 - `Connection` header, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
 - Publish image to DockerHub, [PR-162](https://github.com/reduct-storage/reduct-storage/pull/162)
 
@@ -24,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Closing uSocket, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
 - Removing broken block when it keeps quota, [PR-155](https://github.com/reduct-storage/reduct-storage/pull/155)
 - Sending headers twice, [PR-156](https://github.com/reduct-storage/reduct-storage/pull/156)
+- Direction to `cd` into the `build/` directory while building the server locally, [PR-159](https://github.com/reduct-storage/reduct-storage/pull/159)
 
 ### Changed:
 

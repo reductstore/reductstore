@@ -34,14 +34,14 @@ class NoAuthentication : public ITokenAuthentication {
   }
 };
 
-class JwtAuthentication : public ITokenAuthentication {
+class BearerTokenAuthentication : public ITokenAuthentication {
  public:
-  explicit JwtAuthentication(std::string_view api_token, Options options) : options_(std::move(options)) {
+  explicit BearerTokenAuthentication(std::string_view api_token, Options options) : options_(std::move(options)) {
     // generate fresh nonce (IV)
     Botan::AutoSeeded_RNG rng;
     iv_ = rng.random_vec(16);
     key_ = HashToken(api_token);
-    original_ = api_token;
+    api_token_ = api_token;
   }
 
   Error Check(std::string_view authorization_header) const override {
@@ -50,7 +50,11 @@ class JwtAuthentication : public ITokenAuthentication {
     }
 
     auto access_token = authorization_header.substr(7, authorization_header.size() - 7);
+    if (access_token == api_token_) {
+      return Error::kOk;
+    }
 
+    // TODO(Alexey Timin):  Access token is deprecated , is removed in 1.0.0
     Botan::SecureVector<uint8_t> input_key;
     try {
       input_key = Botan::hex_decode_locked(access_token.data(), access_token.size());
@@ -82,7 +86,7 @@ class JwtAuthentication : public ITokenAuthentication {
       }
 
       const auto api_token = req.substr(7, req.size() - 7);
-      if (api_token != original_) {
+      if (api_token != api_token_) {
         // TODO(Alexey Timin): Deprecated check. Remove in 1.0.0
         try {
           if (key_ != Botan::hex_decode(api_token)) {
@@ -124,7 +128,7 @@ class JwtAuthentication : public ITokenAuthentication {
   Options options_;
   Botan::OctetString key_;
   Botan::SecureVector<uint8_t> iv_;
-  std::string original_;
+  std::string api_token_;
 };
 
 std::unique_ptr<ITokenAuthentication> ITokenAuthentication::Build(std::string_view api_token, Options options) {
@@ -133,7 +137,7 @@ std::unique_ptr<ITokenAuthentication> ITokenAuthentication::Build(std::string_vi
     return std::make_unique<NoAuthentication>();
   }
 
-  return std::make_unique<JwtAuthentication>(api_token, std::move(options));
+  return std::make_unique<BearerTokenAuthentication>(api_token, std::move(options));
 }
 
 }  // namespace reduct::auth

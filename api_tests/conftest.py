@@ -1,7 +1,6 @@
 import json
 import os
 import random
-import hashlib
 
 import pytest
 import requests
@@ -26,13 +25,5 @@ def _session(base_url):
     session = requests.session()
     session.verify = False
     session.trust_env = False
-
-    resp = session.get(f'{base_url}/info')
-    if resp.status_code == 401:
-        resp = session.post(f'{base_url}/auth/refresh', headers={'Authorization': f'Bearer {os.getenv("API_TOKEN")}'})
-        if resp.status_code == 200:
-            session.headers['Authorization'] = f'Bearer {resp.json()["access_token"]}'
-        else:
-            raise RuntimeError(f'Failed to get access: {resp.content}')
-
+    session.headers['Authorization'] = f'Bearer {os.getenv("API_TOKEN")}'
     return session
