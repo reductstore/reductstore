@@ -2,7 +2,7 @@
 
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reduct-storage/reduct-storage)
 ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/reduct-storage/reduct-storage/ci)
-
+![Docker Pulls](https://img.shields.io/docker/pulls/reductstorage/engine)
 
 Reduct Storage is a time series database for big data. It has no limitation on the size of stored objects or the volume of stored data. It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read more [here](https://docs.reduct-storage.dev/).
 
@@ -30,7 +30,7 @@ or you can use the demo storage: https://play.reduct-storage.dev
 
 Reduct Storage porvides a simple HTTP API, so you could use it with `curl`:
 
-```
+```shell
 # Take a temporal access token by using the API token
 export API_TOKEN=reduct
 
