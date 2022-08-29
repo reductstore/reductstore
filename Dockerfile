@@ -1,10 +1,5 @@
-FROM ubuntu:22.04 AS builder
+FROM ghcr.io/reduct-storage/alpine-build-image:main AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y gcc cmake python3-pip
-
-RUN pip3 install conan
 
 WORKDIR /src
 
@@ -17,13 +12,14 @@ COPY CMakeLists.txt .
 WORKDIR /build
 
 ARG BUILD_TYPE=Release
-RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} /src
+RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DFULL_STATIC_BINARY=ON /src
 RUN make -j4
 
-FROM ubuntu:22.04
-
-RUN apt-get update && apt-get install -y libatomic1 #needed for raspianos
-
-COPY --from=builder /build/bin/ /usr/local/bin/
 RUN mkdir /data
+
+FROM scratch
+
+COPY --from=builder /data /data
+COPY --from=builder /build/bin/ /usr/local/bin/
+ENV PATH=/usr/local/bin/
 CMD ["reduct-storage"]

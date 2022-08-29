@@ -3,7 +3,7 @@ FROM ubuntu:22.04 AS builder
 
 RUN apt update && apt install -y cmake python3-pip zip
 
-RUN pip3 install conan
+RUN pip3 install conan==1.51.1
 
 WORKDIR /src
 
@@ -20,7 +20,7 @@ RUN make -j4
 
 FROM ubuntu:22.04
 
-RUN apt-get update && apt-get install -y curl
+RUN apt-get update && apt-get install -y curl libatomic1
 
 COPY --from=builder /build/bin/reduct-storage /usr/local/bin/reduct-storage
 RUN mkdir /data
