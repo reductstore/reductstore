@@ -186,7 +186,7 @@ jobs:
           docker load --input /tmp/image_Release.tar
           docker image ls -a
           id=$(docker create ${{github.repository}})
-          docker cp $id:/usr/local/bin/reduct-storage -> reduct-storage
+          docker cp $id:/usr/local/bin/reduct-storage reduct-storage
           tar -czvf reduct-storage.linux-amd64.tar.gz reduct-storage
       - name: upload artifact
         uses: actions/upload-release-asset@v1
