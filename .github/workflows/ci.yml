@@ -75,6 +75,11 @@ jobs:
         build_type: [ "Debug", "Release" ]
         token: ["", "XXXX"]
         cert_path: ["", "/misc/certificate.crt"]
+        include:
+          - cert_path: "/misc/certificate.crt"
+            url: https://127.0.0.1:8383
+          - cert_path: ""
+            url: http://127.0.0.1:8383
     steps:
       - uses: actions/checkout@v2
       - name: Download artifact
@@ -91,7 +96,7 @@ jobs:
       - name: Run Storage
         run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
       - name: Run API tests
-        run: docker run --network=host --env API_TOKEN=${{matrix.token}} api_tests
+        run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
 
 #  push_image_github:
 #    runs-on: ubuntu-latest
