@@ -69,7 +69,7 @@ jobs:
   api_tests:
     name: API Tests
     runs-on: ubuntu-latest
-    needs: build
+    needs: unit_tests
     strategy:
       matrix:
         build_type: [ "Debug", "Release" ]
@@ -89,7 +89,7 @@ jobs:
       - name: Build API tests
         run: docker build -t api_tests ./api_tests
       - name: Run Storage
-        run: docker run --network=host --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
+        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
       - name: Run API tests
         run: docker run --network=host --env API_TOKEN=${{matrix.token}} api_tests
 
@@ -98,7 +98,6 @@ jobs:
     name: Push to Github Registry
     needs:
       - api_tests
-      - unit_tests
     if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@v2
@@ -129,7 +128,6 @@ jobs:
     name: Push to DockerHub Registry
     needs:
       - api_tests
-      - unit_tests
     if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v2
@@ -153,3 +151,20 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+
+  make_release:
+    runs-on: ubuntu-latest
+    name: Make release
+    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/create-release@v1
+        id: create_release
+        with:
+          draft: false
+          prerelease: false
+          release_name: ${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref }}
+          body_path: CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
