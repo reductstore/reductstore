@@ -37,7 +37,7 @@ jobs:
         with:
           context: .
           tags: ${{github.repository}}:latest
-          outputs: type=docker,dest=/tmp/image.tar
+          outputs: type=docker,dest=/tmp/image_${{ matrix.build_type }}.tar
           build-args: BUILD_TYPE=${{ matrix.build_type }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
@@ -46,7 +46,7 @@ jobs:
           path: /tmp/image_${{ matrix.build_type }}.tar
 
   unit_tests:
-    name: Unit Test
+    name: Unit Tests
     needs: build
     runs-on: ubuntu-latest
     strategy:
@@ -67,6 +67,7 @@ jobs:
         run: docker run ${{github.repository}} reduct-tests
 
   api_tests:
+    name: API Tests
     runs-on: ubuntu-latest
     needs: build
     strategy:
