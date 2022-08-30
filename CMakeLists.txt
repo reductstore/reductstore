@@ -8,7 +8,7 @@ set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
 
 option(REDUCT_BUILD_TEST "Build unit tests" ON)
 option(REDUCT_BUILD_BENCHMARKS "Build unit tests" ON)
-
+option(FULL_STATIC_BINARY "Link everything static" OFF)
 
 set(DEFAULT_MAX_BLOCK_SIZE 64000000 CACHE STRING "Default max size for block with data")
 set(DEFAULT_MAX_BLOCK_RECORDS 1024 CACHE STRING "Default max number of records in a block")
@@ -39,7 +39,6 @@ include(${CMAKE_BINARY_DIR}/conan.cmake)
 conan_cmake_autodetect(settings)
 conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
         BUILD missing
-        UPDATE OFF
         SETTINGS ${settings})
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)

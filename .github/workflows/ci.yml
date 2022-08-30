@@ -9,7 +9,7 @@ on:
 jobs:
   cpplint:
     runs-on: ubuntu-latest
-
+    name: C++ Linter
     steps:
       - uses: actions/checkout@v2
       - name: Build cpplint image
@@ -22,8 +22,12 @@ jobs:
         run: docker run -v ${PWD}:/app cpplint bash -c "find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
 
   build:
+    name: Build Docker image
     runs-on: ubuntu-latest
     needs: cpplint
+    strategy:
+      matrix:
+        build_type: ["Debug", "Release"]
     steps:
       - uses: actions/checkout@v2
       - name: Set up Docker Buildx
@@ -33,17 +37,21 @@ jobs:
         with:
           context: .
           tags: ${{github.repository}}:latest
-          outputs: type=docker,dest=/tmp/image.tar
-          build-args: BUILD_TYPE=Debug
+          outputs: type=docker,dest=/tmp/image_${{ matrix.build_type }}.tar
+          build-args: BUILD_TYPE=${{ matrix.build_type }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
           name: image
-          path: /tmp/image.tar
+          path: /tmp/image_${{ matrix.build_type }}.tar
 
   unit_tests:
+    name: Unit Tests
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: ["Debug", "Release"]
 
     steps:
       - name: Download artifact
@@ -53,14 +61,25 @@ jobs:
           path: /tmp/
       - name: Load image
         run: |
-          docker load --input /tmp/image.tar
+          docker load --input /tmp/image_${{ matrix.build_type }}.tar
           docker image ls -a
       - name: Run tests
         run: docker run ${{github.repository}} reduct-tests
 
-  api_tests_without_auth:
+  api_tests:
+    name: API Tests
     runs-on: ubuntu-latest
-    needs: build
+    needs: unit_tests
+    strategy:
+      matrix:
+        build_type: [ "Debug", "Release" ]
+        token: ["", "XXXX"]
+        cert_path: ["", "/misc/certificate.crt"]
+        include:
+          - cert_path: "/misc/certificate.crt"
+            url: https://127.0.0.1:8383
+          - cert_path: ""
+            url: http://127.0.0.1:8383
     steps:
       - uses: actions/checkout@v2
       - name: Download artifact
@@ -70,65 +89,20 @@ jobs:
           path: /tmp/
       - name: Load image
         run: |
-          docker load --input /tmp/image.tar
+          docker load --input /tmp/image_${{matrix.build_type}}.tar
           docker image ls -a
       - name: Build API tests
         run: docker build -t api_tests ./api_tests
       - name: Run Storage
-        run: docker run --network=host -d ${{github.repository}}
+        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
       - name: Run API tests
-        run: docker run --network=host api_tests
-
-  api_tests_with_auth:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v2
-      - name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: image
-          path: /tmp/
-      - name: Load image
-        run: |
-          docker load --input /tmp/image.tar
-          docker image ls -a
-      - name: Build API tests
-        run: docker build -t api_tests ./api_tests
-      - name: Run Storage
-        run: docker run --network=host --env RS_API_TOKEN="XXXX" -d ${{github.repository}}
-      - name: Run API tests
-        run: docker run --network=host --env API_TOKEN="XXXX" api_tests
-
-  api_tests_with_ssl:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v2
-      - name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: image
-          path: /tmp/
-      - name: Load image
-        run: |
-          docker load --input /tmp/image.tar
-          docker image ls -a
-      - name: Build API tests
-        run: docker build -t api_tests ./api_tests
-      - name: Run Storage
-        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_CERT_PATH=/misc/certificate.crt --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
-      - name: Run API tests
-        run: docker run --network=host --env STORAGE_URL=https://127.0.0.1:8383 --env CURL_CA_BUNDLE="" api_tests
+        run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
 
   push_image_github:
     runs-on: ubuntu-latest
     name: Push to Github Registry
     needs:
-      - api_tests_with_auth
-      - api_tests_without_auth
-      - api_tests_with_ssl
-      - unit_tests
+      - api_tests
     if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@v2
@@ -158,17 +132,13 @@ jobs:
     runs-on: ubuntu-latest
     name: Push to DockerHub Registry
     needs:
-      - api_tests_with_auth
-      - api_tests_without_auth
-      - api_tests_with_ssl
-      - unit_tests
+      - api_tests
     if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v2
       - name: Log in to the Container registry
         uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
         with:
-
           username: ${{ secrets.DOCKER_USER }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
@@ -186,3 +156,44 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  make_release:
+    runs-on: ubuntu-latest
+    needs:
+      - api_tests
+    name: Make release
+    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/create-release@v1
+        id: create_release
+        with:
+          draft: true
+          prerelease: false
+          release_name: Release ${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref }}
+          body: Copy changes from CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Download artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: image
+          path: /tmp/
+      - name: Load image and get binary
+        run: |
+          docker load --input /tmp/image_Release.tar
+          docker image ls -a
+          id=$(docker create ${{github.repository}})
+          docker cp $id:/usr/local/bin/reduct-storage reduct-storage
+          tar -czvf reduct-storage.linux-amd64.tar.gz reduct-storage
+      - name: upload artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: reduct-storage.linux-amd64.tar.gz
+          asset_name: reduct-storage.linux-amd64.tar.gz
+          asset_content_type: application/gzip

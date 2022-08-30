@@ -10,7 +10,7 @@ def requires_env(key):
     env = os.environ.get(key)
 
     return pytest.mark.skipif(
-        env is None,
+        env is None or env == "",
         reason=f"Not suitable environment {key} for current test"
     )
 
