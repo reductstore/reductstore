@@ -168,11 +168,11 @@ jobs:
       - uses: actions/create-release@v1
         id: create_release
         with:
-          draft: false
+          draft: true
           prerelease: false
           release_name: Release ${{ steps.version.outputs.version }}
           tag_name: ${{ github.ref }}
-          body_path: CHANGELOG.md
+          body: Copy changes from CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -186,7 +186,7 @@ jobs:
           docker load --input /tmp/image_Release.tar
           docker image ls -a
           id=$(docker create ${{github.repository}})
-          docker cp $id://usr/local/bin/reudct-storage -> reduct-storage
+          docker cp $id:/usr/local/bin/reudct-storage -> reduct-storage
           tar -czvf reduct-storage.linux-amd64.tar.gz reduct-storage
       - name: upload artifact
         uses: actions/upload-release-asset@v1
