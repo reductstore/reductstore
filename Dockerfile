@@ -15,7 +15,6 @@ RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DFULL_STATIC_BINARY=ON /src
 RUN make -j4
 
 RUN mkdir /data
-RUN mkdir /tmp
 
 FROM scratch
 

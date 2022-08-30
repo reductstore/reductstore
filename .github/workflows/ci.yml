@@ -24,6 +24,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: cpplint
+    strategy:
+      matrix:
+        build_type: ["Debug", "Release"]
     steps:
       - uses: actions/checkout@v2
       - name: Set up Docker Buildx
@@ -34,16 +37,19 @@ jobs:
           context: .
           tags: ${{github.repository}}:latest
           outputs: type=docker,dest=/tmp/image.tar
-          build-args: BUILD_TYPE=Debug
+          build-args: BUILD_TYPE={{ matrix.build_type }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
           name: image
-          path: /tmp/image.tar
+          path: /tmp/image_${{ matrix.build_type }}.tar
 
   unit_tests:
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: ["Debug", "Release"]
 
     steps:
       - name: Download artifact
@@ -53,7 +59,7 @@ jobs:
           path: /tmp/
       - name: Load image
         run: |
-          docker load --input /tmp/image.tar
+          docker load --input /tmp/image_${{ matrix.build_type }}.tar
           docker image ls -a
       - name: Run tests
         run: docker run ${{github.repository}} reduct-tests
