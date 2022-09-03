@@ -26,11 +26,13 @@ jobs:
     runs-on: macos-12
     steps:
       - uses: actions/checkout@v2
-      - run: |
+      - name: Install conan dependencies and build
+        run: |
           pip3 install -U pip
           pip3 install conan
+          brew install gcc
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
+          CC=gcc CXX=g++ cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build . -- -j
           
 
