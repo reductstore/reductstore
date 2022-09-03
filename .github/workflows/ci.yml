@@ -27,7 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: |
-          pip install conan
+          pip3 install -U pip
+          pip3 install conan
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build . -- -j
