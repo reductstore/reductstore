@@ -220,6 +220,7 @@ jobs:
           run: |
             uname -a
             echo ::set-output name=uname::$(uname -a)
+            apk --no-cache add gcc g++ cmake make python3 py3-pip wget pythonispython3 perl linux-headers
             pip install -U pip
             pip install conan
             mkdir build
