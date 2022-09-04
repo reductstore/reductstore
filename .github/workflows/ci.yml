@@ -32,13 +32,13 @@ jobs:
           pip3 install conan
           brew install gcc@11
           mkdir build && cd build
-          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=OFF -DREDUCT_BUILD_BENCHMARKS=OFF -DFULL_STATIC_BINARY=ON ..
+          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=OFF -DREDUCT_BUILD_BENCHMARKS=OFF ..
           cmake --build . -- -j
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
           name: image
-          path: build/bin
+          path: build/bin/reduct-storage
 
 
 #  build:
