@@ -22,8 +22,8 @@ jobs:
         run: docker run -v ${PWD}:/app cpplint bash -c "find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
 
   build-macos:
-    name: Build for MacOS-12
-    runs-on: macos-12
+    name: Build for MacOS-11
+    runs-on: macos-11
     steps:
       - uses: actions/checkout@v2
       - name: Install conan dependencies and build
