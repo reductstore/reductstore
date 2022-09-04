@@ -61,7 +61,7 @@ if (WEB_CONSOLE_PATH)
             COMMAND cd ${WEB_CONSOLE_PATH} && zip ${CMAKE_CURRENT_BINARY_DIR}/console.zip -r ./
             COMMAND cd ${CMAKE_CURRENT_BINARY_DIR} && ld -r -b binary -o console.o console.zip
             COMMAND objcopy --rename-section .data=.rodata,alloc,load,readonly,data,contents
-                ${CMAKE_CURRENT_BINARY_DIR}/console.o ${CMAKE_CURRENT_BINARY_DIR}/console.o)
+            ${CMAKE_CURRENT_BINARY_DIR}/console.o ${CMAKE_CURRENT_BINARY_DIR}/console.o)
 
     add_library(console STATIC console.o)
 
@@ -85,4 +85,6 @@ else ()
     target_link_libraries(reduct-storage reduct ${CONAN_LIBS})
 endif ()
 
-
+if (WIN32)
+    target_compile_options(reduct-storage PUBLIC /experimental:preprocessor)
+endif ()
