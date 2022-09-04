@@ -85,6 +85,6 @@ else ()
     target_link_libraries(reduct-storage reduct ${CONAN_LIBS})
 endif ()
 
-if (WIN32)
+if (MSVC)
     target_compile_options(reduct-storage PUBLIC /experimental:preprocessor)
 endif ()
