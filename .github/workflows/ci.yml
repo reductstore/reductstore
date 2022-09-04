@@ -99,6 +99,8 @@ jobs:
        with:
          name: macos_binary
          path: /tmp/
+     - name: Make executable
+       run: chmod +x /tmp/reduct-tests
      - name: Run tests
        run: /tmp/reduct-tests
 
