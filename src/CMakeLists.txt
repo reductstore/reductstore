@@ -86,5 +86,5 @@ else ()
 endif ()
 
 if (MSVC)
-    target_compile_options(reduct-storage PUBLIC /experimental:preprocessor)
+    target_compile_options(reduct-storage PUBLIC /Zc:preprocessor)
 endif ()
