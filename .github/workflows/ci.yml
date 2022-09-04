@@ -235,7 +235,7 @@ jobs:
           path: /tmp/
       - name: Archive MacOs binary
         run: |
-          tar -czvf reduct-storage.linux-amd64.tar.gz  /tmp/reduct-storage
+          tar -czvf reduct-storage.macos-amd64.tar.gz  /tmp/reduct-storage
       - name: Upload MacOs artifact
         uses: actions/upload-release-asset@v1
         env:
