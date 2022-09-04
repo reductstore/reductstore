@@ -4,7 +4,7 @@ description: Here you can learn how to start working with Reduct Storage
 
 # 💡 Getting Started
 
-The current version supports only Linux OS and was tested on an AMD64 platform with EXT4 and XFS file systems.
+The current version supports Linux OS, MacOS and was tested on an AMD64 platform with EXT4 and XFS file systems.
 
 ### Start With Docker
 
@@ -28,11 +28,18 @@ To build the storage from source code, you need:
 * CMake 18 or higher
 * conan
 
-On Ubuntu 21.10 you can install with:
+On Ubuntu 21.10 or higher:
 
 ```
 sudo apt install build-essential cmake python3-pip
 sudo pip3 install conan
+```
+
+On Macos
+
+```
+brew install gcc@11 python cmake
+pip install conan
 ```
 
 After all the requirements are installed, you can build the storage:
@@ -40,7 +47,7 @@ After all the requirements are installed, you can build the storage:
 ```
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j
+cmake --build . -- -j
 ```
 
 Finally, you can launch the storage:
@@ -53,13 +60,13 @@ RS_DATA_PATH=./data bin/reduct-storage
 
 The storage can be customized with the following environmental variables:
 
-| Name                | Default   | Description                                                                         |
-| ------------------- | --------- | ----------------------------------------------------------------------------------- |
-| RS\_LOG\_LEVEL      | INFO      | Logging level, can be: TRACE, DEBUG, INFO, WARNING, ERROR                           |
-| RS\_HOST            | 0.0.0.0   | Listening IP address                                                                |
-| RS\_PORT            | 8383      | Listening port                                                                      |
-| RS\_API\_BASE\_PATH | /         | Prefix for all URLs of requests                                                     |
-| RS\_DATA\_PATH      | /data     | Path to a folder where the storage stores the data                                  |
-| RS\_API\_TOKEN      |           | If set, the storage uses [token authorization](broken-reference)                    |
-| RS\_CERT\_PATH      |           | Path to an SSL certificate. If unset, the storage uses HTTP instead of HTTPS        |
-| RS\_CERT\_KEY\_PATH |           | Path to the private key of the desired SSL certificate. Should be set with RS\_CERT\_PATH       |
+| Name                | Default | Description                                                                               |
+|---------------------|---------|-------------------------------------------------------------------------------------------|
+| RS\_LOG\_LEVEL      | INFO    | Logging level, can be: TRACE, DEBUG, INFO, WARNING, ERROR                                 |
+| RS\_HOST            | 0.0.0.0 | Listening IP address                                                                      |
+| RS\_PORT            | 8383    | Listening port                                                                            |
+| RS\_API\_BASE\_PATH | /       | Prefix for all URLs of requests                                                           |
+| RS\_DATA\_PATH      | /data   | Path to a folder where the storage stores the data                                        |
+| RS\_API\_TOKEN      |         | If set, the storage uses [token authorization](broken-reference)                          |
+| RS\_CERT\_PATH      |         | Path to an SSL certificate. If unset, the storage uses HTTP instead of HTTPS              |
+| RS\_CERT\_KEY\_PATH |         | Path to the private key of the desired SSL certificate. Should be set with RS\_CERT\_PATH |

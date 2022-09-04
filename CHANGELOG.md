@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added:
 
 - Build a static executable for AMD64 and upload it to release from CI, [PR-171](https://github.com/reduct-storage/reduct-storage/pull/171)
+- Build on MacOS, [PR-173](https://github.com/reduct-storage/reduct-storage/pull/173)
 
 ## [0.8.0] - 2022-08-26
 
