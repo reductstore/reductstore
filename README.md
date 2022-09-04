@@ -14,7 +14,7 @@ Reduct Storage is a time series database for big data. It has no limitation on t
 * Real-time quota for buckets
 * Token authentication
 * Embedded Web Console
-* Support EXT4, XFS filesystems
+* Support Linux and MacOS AMD64
 
 ## Get started
 
