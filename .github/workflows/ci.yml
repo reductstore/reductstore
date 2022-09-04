@@ -91,7 +91,7 @@ jobs:
 
   unit_tests_macos:
     name: Unit Tests On MacOs
-    needs: build
+    needs: build_macos
     runs-on: macos-12
     steps:
      - name: Download Macos artifact
