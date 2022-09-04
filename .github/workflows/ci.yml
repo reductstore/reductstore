@@ -22,33 +22,55 @@ jobs:
         run: docker run -v ${PWD}:/app cpplint bash -c "find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
 
 
-  build:
-    name: Build Linux Docker image
-    runs-on: ubuntu-latest
-    needs: cpplint
-    strategy:
-      matrix:
-        build_type: ["Debug", "Release"]
-    steps:
-      - uses: actions/checkout@v2
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      - name: Build and export
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          tags: ${{github.repository}}:latest
-          outputs: type=docker,dest=/tmp/image_${{ matrix.build_type }}.tar
-          build-args: BUILD_TYPE=${{ matrix.build_type }}
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: image
-          path: /tmp/image_${{ matrix.build_type }}.tar
+#  build:
+#    name: Build Linux Docker image
+#    runs-on: ubuntu-latest
+#    needs: cpplint
+#    strategy:
+#      matrix:
+#        build_type: ["Debug", "Release"]
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Set up Docker Buildx
+#        uses: docker/setup-buildx-action@v1
+#      - name: Build and export
+#        uses: docker/build-push-action@v2
+#        with:
+#          context: .
+#          tags: ${{github.repository}}:latest
+#          outputs: type=docker,dest=/tmp/image_${{ matrix.build_type }}.tar
+#          build-args: BUILD_TYPE=${{ matrix.build_type }}
+#      - name: Upload artifact
+#        uses: actions/upload-artifact@v2
+#        with:
+#          name: image
+#          path: /tmp/image_${{ matrix.build_type }}.tar
+#
+#  build_macos:
+#    name: Build for MacOS-12
+#    runs-on: macos-12
+#    needs: cpplint
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Install conan dependencies and build
+#        run: |
+#          pip3 install -U pip
+#          pip3 install conan
+#          brew install gcc@11
+#          mkdir build && cd build
+#          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON ..
+#          cmake --build . -- -j
+#      - name: Run unit tests
+#        run: build/bin/reduct-tests
+#      - name: Upload artifact
+#        uses: actions/upload-artifact@v2
+#        with:
+#          name: macos_binary
+#          path: build/bin/
 
-  build_macos:
-    name: Build for MacOS-12
-    runs-on: macos-12
+  build_windows:
+    name: Build for Windows
+    runs-on: windows-2022
     needs: cpplint
     steps:
       - uses: actions/checkout@v2
@@ -56,203 +78,202 @@ jobs:
         run: |
           pip3 install -U pip
           pip3 install conan
-          brew install gcc@11
           mkdir build && cd build
-          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON ..
           cmake --build . -- -j
       - name: Run unit tests
         run: build/bin/reduct-tests
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
-          name: macos_binary
+          name: windows_binary
           path: build/bin/
-
-  unit_tests:
-    name: Unit Tests On Linux
-    needs: build
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        build_type: ["Debug", "Release"]
-
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: image
-          path: /tmp/
-      - name: Load image
-        run: |
-          docker load --input /tmp/image_${{ matrix.build_type }}.tar
-          docker image ls -a
-      - name: Run tests
-        run: docker run ${{github.repository}} reduct-tests
-
-  unit_tests_macos:
-    name: Unit Tests On MacOs
-    needs: build_macos
-    runs-on: macos-12
-    steps:
-     - name: Download Macos artifact
-       uses: actions/download-artifact@v2
-       with:
-         name: macos_binary
-         path: /tmp/
-     - name: Make executable
-       run: chmod +x /tmp/reduct-tests
-     - name: Run tests
-       run: /tmp/reduct-tests
-
-  api_tests:
-    name: API Tests
-    runs-on: ubuntu-latest
-    needs: unit_tests
-    strategy:
-      matrix:
-        build_type: [ "Debug", "Release" ]
-        token: ["", "XXXX"]
-        cert_path: ["", "/misc/certificate.crt"]
-        include:
-          - cert_path: "/misc/certificate.crt"
-            url: https://127.0.0.1:8383
-          - cert_path: ""
-            url: http://127.0.0.1:8383
-    steps:
-      - uses: actions/checkout@v2
-      - name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: image
-          path: /tmp/
-      - name: Load image
-        run: |
-          docker load --input /tmp/image_${{matrix.build_type}}.tar
-          docker image ls -a
-      - name: Build API tests
-        run: docker build -t api_tests ./api_tests
-      - name: Run Storage
-        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
-      - name: Run API tests
-        run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
-
-  push_image_github:
-    runs-on: ubuntu-latest
-    name: Push to Github Registry
-    needs:
-      - api_tests
-      - unit_tests_macos
-    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: ghcr.io/${{github.repository}}
-
-      - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-        with:
-          context: .
-          file: deploy.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  push_image_dockerhub:
-    runs-on: ubuntu-latest
-    name: Push to DockerHub Registry
-    needs:
-      - api_tests
-      - unit_tests_macos
-    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
-        with:
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: reductstorage/engine
-
-      - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-        with:
-          context: .
-          file: deploy.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  make_release:
-    runs-on: ubuntu-latest
-    needs:
-      - api_tests
-      - unit_tests_macos
-    name: Make release
-    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/create-release@v1
-        id: create_release
-        with:
-          draft: true
-          prerelease: false
-          release_name: Release ${{ steps.version.outputs.version }}
-          tag_name: ${{ github.ref }}
-          body: Copy changes from CHANGELOG.md
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Download Linux artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: image
-          path: /tmp/
-      - name: Load Linux image and get binary
-        run: |
-          docker load --input /tmp/image_Release.tar
-          docker image ls -a
-          id=$(docker create ${{github.repository}})
-          docker cp $id:/usr/local/bin/reduct-storage reduct-storage
-          tar -czvf reduct-storage.linux-amd64.tar.gz reduct-storage
-      - name: Upload Linux artifact
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: reduct-storage.linux-amd64.tar.gz
-          asset_name: reduct-storage.linux-amd64.tar.gz
-          asset_content_type: application/gzip
-      - name: Download Macos artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: macos_binary
-          path: /tmp/
-      - name: Archive MacOs binary
-        run: |
-          cd /tmp
-          tar -czvf reduct-storage.macos-amd64.tar.gz  reduct-storage
-      - name: Upload MacOs artifact
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: reduct-storage.macos-amd64.tar.gz
-          asset_name: reduct-storage.macos-amd64.tar.gz
-          asset_content_type: application/gzip
+#
+#  unit_tests:
+#    name: Unit Tests On Linux
+#    needs: build
+#    runs-on: ubuntu-latest
+#    strategy:
+#      matrix:
+#        build_type: ["Debug", "Release"]
+#
+#    steps:
+#      - name: Download artifact
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: image
+#          path: /tmp/
+#      - name: Load image
+#        run: |
+#          docker load --input /tmp/image_${{ matrix.build_type }}.tar
+#          docker image ls -a
+#      - name: Run tests
+#        run: docker run ${{github.repository}} reduct-tests
+#
+#  unit_tests_macos:
+#    name: Unit Tests On MacOs
+#    needs: build_macos
+#    runs-on: macos-12
+#    steps:
+#     - name: Download Macos artifact
+#       uses: actions/download-artifact@v2
+#       with:
+#         name: macos_binary
+#         path: /tmp/
+#     - name: Make executable
+#       run: chmod +x /tmp/reduct-tests
+#     - name: Run tests
+#       run: /tmp/reduct-tests
+#
+#  api_tests:
+#    name: API Tests
+#    runs-on: ubuntu-latest
+#    needs: unit_tests
+#    strategy:
+#      matrix:
+#        build_type: [ "Debug", "Release" ]
+#        token: ["", "XXXX"]
+#        cert_path: ["", "/misc/certificate.crt"]
+#        include:
+#          - cert_path: "/misc/certificate.crt"
+#            url: https://127.0.0.1:8383
+#          - cert_path: ""
+#            url: http://127.0.0.1:8383
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Download artifact
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: image
+#          path: /tmp/
+#      - name: Load image
+#        run: |
+#          docker load --input /tmp/image_${{matrix.build_type}}.tar
+#          docker image ls -a
+#      - name: Build API tests
+#        run: docker build -t api_tests ./api_tests
+#      - name: Run Storage
+#        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
+#      - name: Run API tests
+#        run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
+#
+#  push_image_github:
+#    runs-on: ubuntu-latest
+#    name: Push to Github Registry
+#    needs:
+#      - api_tests
+#      - unit_tests_macos
+#    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Log in to the Container registry
+#        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+#        with:
+#          registry: ghcr.io
+#          username: ${{ github.actor }}
+#          password: ${{ secrets.GITHUB_TOKEN }}
+#
+#      - name: Extract metadata (tags, labels) for Docker
+#        id: meta
+#        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+#        with:
+#          images: ghcr.io/${{github.repository}}
+#
+#      - name: Build and push Docker image to GitHub repo
+#        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+#        with:
+#          context: .
+#          file: deploy.Dockerfile
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}
+#
+#  push_image_dockerhub:
+#    runs-on: ubuntu-latest
+#    name: Push to DockerHub Registry
+#    needs:
+#      - api_tests
+#      - unit_tests_macos
+#    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Log in to the Container registry
+#        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+#        with:
+#          username: ${{ secrets.DOCKER_USER }}
+#          password: ${{ secrets.DOCKER_TOKEN }}
+#
+#      - name: Extract metadata (tags, labels) for Docker
+#        id: meta
+#        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+#        with:
+#          images: reductstorage/engine
+#
+#      - name: Build and push Docker image to GitHub repo
+#        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+#        with:
+#          context: .
+#          file: deploy.Dockerfile
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}
+#
+#  make_release:
+#    runs-on: ubuntu-latest
+#    needs:
+#      - api_tests
+#      - unit_tests_macos
+#    name: Make release
+#    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+#    steps:
+#      - uses: actions/checkout@v2
+#      - uses: actions/create-release@v1
+#        id: create_release
+#        with:
+#          draft: true
+#          prerelease: false
+#          release_name: Release ${{ steps.version.outputs.version }}
+#          tag_name: ${{ github.ref }}
+#          body: Copy changes from CHANGELOG.md
+#        env:
+#          GITHUB_TOKEN: ${{ github.token }}
+#
+#      - name: Download Linux artifact
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: image
+#          path: /tmp/
+#      - name: Load Linux image and get binary
+#        run: |
+#          docker load --input /tmp/image_Release.tar
+#          docker image ls -a
+#          id=$(docker create ${{github.repository}})
+#          docker cp $id:/usr/local/bin/reduct-storage reduct-storage
+#          tar -czvf reduct-storage.linux-amd64.tar.gz reduct-storage
+#      - name: Upload Linux artifact
+#        uses: actions/upload-release-asset@v1
+#        env:
+#          GITHUB_TOKEN: ${{ github.token }}
+#        with:
+#          upload_url: ${{ steps.create_release.outputs.upload_url }}
+#          asset_path: reduct-storage.linux-amd64.tar.gz
+#          asset_name: reduct-storage.linux-amd64.tar.gz
+#          asset_content_type: application/gzip
+#      - name: Download Macos artifact
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: macos_binary
+#          path: /tmp/
+#      - name: Archive MacOs binary
+#        run: |
+#          cd /tmp
+#          tar -czvf reduct-storage.macos-amd64.tar.gz  reduct-storage
+#      - name: Upload MacOs artifact
+#        uses: actions/upload-release-asset@v1
+#        env:
+#          GITHUB_TOKEN: ${{ github.token }}
+#        with:
+#          upload_url: ${{ steps.create_release.outputs.upload_url }}
+#          asset_path: reduct-storage.macos-amd64.tar.gz
+#          asset_name: reduct-storage.macos-amd64.tar.gz
+#          asset_content_type: application/gzip
