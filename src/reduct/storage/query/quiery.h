@@ -37,7 +37,7 @@ class IQuery {
     async::IAsyncReader::SPtr reader;
     bool last{};
 
-    bool operator<=>(const NextRecord&) const = default;
+    std::strong_ordering operator<=>(const NextRecord&) const = default;
   };
 
   /**

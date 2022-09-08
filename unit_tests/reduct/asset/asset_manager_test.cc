@@ -19,7 +19,7 @@ TEST_CASE("asset::IAssetManager should extract files form zip") {
   using libzippp::ZipArchive;
 
   const auto tmp = std::filesystem::temp_directory_path();
-  ZipArchive zf(tmp / "archive.zip");
+  ZipArchive zf((tmp / "archive.zip").string());
   zf.open(ZipArchive::Write);
   zf.addData("helloworld.txt", "Hello,World!", 12);
   zf.close();

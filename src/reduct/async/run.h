@@ -41,7 +41,7 @@ struct Run {
 
  private:
   Run() = default;
-  inline bool CheckTask() const { return task_.template wait_for(Us(10)) == std::future_status::ready; }
+  inline bool CheckTask() const { return task_.wait_for(Us(10)) == std::future_status::ready; }
   std::future<T> task_;
 };
 
@@ -92,7 +92,7 @@ struct RunUntil {
 
  private:
   RunUntil() = default;
-  inline bool CheckTask() const { return task_.template wait_for(Us(10)) == std::future_status::ready; }
+  inline bool CheckTask() const { return task_.wait_for(Us(10)) == std::future_status::ready; }
 
   std::future<std::optional<T>> task_;
   std::optional<T> result_;

@@ -49,6 +49,11 @@ set(SRC_FILES
 
 add_library(reduct STATIC ${SRC_FILES} ${PROTOBUF_FILES})
 
+if (MSVC)
+    target_compile_options(reduct PUBLIC /Zc:preprocessor)
+    target_compile_definitions(reduct PUBLIC NOMINMAX)
+endif ()
+
 
 configure_file(config.h.in ${CMAKE_BINARY_DIR}/reduct/config.h @ONLY)
 
@@ -83,8 +88,4 @@ if (WEB_CONSOLE_PATH)
     target_link_libraries(reduct-storage reduct ${CONAN_LIBS} console)
 else ()
     target_link_libraries(reduct-storage reduct ${CONAN_LIBS})
-endif ()
-
-if (MSVC)
-    target_compile_options(reduct-storage PUBLIC /Zc:preprocessor)
 endif ()

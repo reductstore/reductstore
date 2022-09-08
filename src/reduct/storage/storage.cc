@@ -29,7 +29,7 @@ class Storage : public IStorage {
 
     for (const auto& folder : fs::directory_iterator(options_.data_path)) {
       if (folder.is_directory()) {
-        auto bucket_name = folder.path().filename();
+        auto bucket_name = folder.path().filename().string();
         if (auto bucket = IBucket::Restore(folder)) {
           buckets_[bucket_name] = std::move(bucket);
         }

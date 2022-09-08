@@ -19,7 +19,7 @@ using reduct::auth::ITokenAuthentication;
 using reduct::core::EnvVariable;
 using reduct::core::Error;
 using reduct::core::Logger;
-using reduct::storage::IStorage;
+using ReductStorage = reduct::storage::IStorage;
 
 #ifdef WITH_CONSOLE
 extern const char _binary_console_zip_start[];
@@ -64,7 +64,7 @@ int main() {
 #endif
 
   IApiServer::Components components{
-      .storage = IStorage::Build({.data_path = data_path}),
+      .storage = ReductStorage::Build({.data_path = data_path}),
       .auth = ITokenAuthentication::Build(api_token),
       .console = std::move(console),
   };
