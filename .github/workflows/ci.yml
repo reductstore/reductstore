@@ -74,12 +74,16 @@ jobs:
     needs: cpplint
     steps:
       - uses: actions/checkout@v2
+      - name: Update windows SDK
+        uses: fbactions/setup-winsdk@v1
+        with:
+          winsdk-build-version: 19041
       - name: Install conan dependencies and build
         run: |
           pip3 install -U pip
           pip3 install conan
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION=10.0.19041.0 ..
           cmake --build . -j --config Release
       - name: Run unit tests
         run: build/bin/reduct-tests
