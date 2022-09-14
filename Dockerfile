@@ -12,7 +12,7 @@ COPY web-console web-console
 WORKDIR /build
 
 ARG BUILD_TYPE=Release
-RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DFULL_STATIC_BINARY=ON -DWEB_CONSOLE_PATH=./web-console /src
+RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DFULL_STATIC_BINARY=ON -DWEB_CONSOLE_PATH=/src/web-console /src
 RUN make -j4
 
 RUN mkdir /data
