@@ -402,12 +402,15 @@ TEST_CASE("storage::Entry should wait when read operations finish before removin
 
   REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
 
-  auto [reader, err] = entry->BeginRead(kTimestamp);
-  REQUIRE(err == Error::kOk);
+  {
+    // reader must be removed
+    auto [reader, err] = entry->BeginRead(kTimestamp);
+    REQUIRE(err == Error::kOk);
 
-  REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active readers"});
-  auto [chunk, read_err] = reader->Read();
-  REQUIRE(read_err == Error::kOk);
+    REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active readers"});
+    auto [chunk, read_err] = reader->Read();
+    REQUIRE(read_err == Error::kOk);
+  }
 
   REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
 }
@@ -416,11 +419,14 @@ TEST_CASE("storage::Entry should wait when write operations finish before removi
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
-  auto [writer, err] = entry->BeginWrite(kTimestamp, 5);
-  REQUIRE(err == Error::kOk);
+  {
+    // writer must be removed
+    auto [writer, err] = entry->BeginWrite(kTimestamp, 5);
+    REQUIRE(err == Error::kOk);
 
-  REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active writers"});
-  REQUIRE(writer->Write("12345", true) == Error::kOk);
+    REQUIRE(entry->RemoveOldestBlock() == Error{.code = 500, .message = "Block has active writers"});
+    REQUIRE(writer->Write("12345", true) == Error::kOk);
+  }
 
   REQUIRE(entry->RemoveOldestBlock() == Error::kOk);
 }
