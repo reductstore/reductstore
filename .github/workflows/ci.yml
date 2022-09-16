@@ -78,17 +78,15 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: web_console
-          path: ./web-console
+          path: ${{ github.workspace }}/web-console
       - name: Install conan dependencies and build
         run: |
           pip3 install -U pip
           pip3 install conan
           brew install gcc@11
           mkdir build && cd build
-          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  -DWEB_CONSOLE_PATH=../web-console ..
+          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console ..
           cmake --build . -- -j
-      - name: Run unit tests
-        run: build/bin/reduct-tests
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
@@ -111,13 +109,13 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: web_console
-          path: ./web-console
+          path: ${{ github.workspace }}/web-console
       - name: Install conan dependencies and build
         run: |
           pip3 install -U pip
           pip3 install conan
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION="10.0.19041.0" -DWEB_CONSOLE_PATH="../web-console" ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION="10.0.19041.0" -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console  ..
           cmake --build . -j --config Release
       - name: Upload artifact
         uses: actions/upload-artifact@v2
