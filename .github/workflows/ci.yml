@@ -98,19 +98,26 @@ jobs:
   build_windows:
     name: Build for Windows
     runs-on: windows-2019
-    needs: cpplint
+    needs:
+      - cpplint
+      - download_console
     steps:
       - uses: actions/checkout@v2
       - name: Update windows SDK
         uses: fbactions/setup-winsdk@v1
         with:
           winsdk-build-version: 19041
+      - name: Download Web Console
+        uses: actions/download-artifact@v2
+        with:
+          name: web_console
+          path: ./web-console
       - name: Install conan dependencies and build
         run: |
           pip3 install -U pip
           pip3 install conan
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION="10.0.19041.0" -DWEB_CONSOLE_PATH=./web-console ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION="10.0.19041.0" -DWEB_CONSOLE_PATH=".\web-console" ..
           cmake --build . -j --config Release
       - name: Upload artifact
         uses: actions/upload-artifact@v2

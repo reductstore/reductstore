@@ -47,7 +47,7 @@ class Entry : public IEntry {
         auto path = file.path();
         if (fs::is_regular_file(file) && path.extension() == kMetaExt) {
           try {
-            auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoul(path.stem().c_str()));
+            auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoull(path.stem().c_str()));
             auto [block, err] = block_manager_->LoadBlock(ts);
 
             if (err || block->begin_time().seconds() == 0 || block->invalid()) {
