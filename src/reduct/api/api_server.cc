@@ -156,6 +156,10 @@ class ApiServer : public IApiServer {
 
                UiRequest(HttpContext<SSL>{res, req, running}, base_path, path);
              })
+        .get(base_path + "ui",
+             [this, base_path, running](auto *res, auto *req) {
+               UiRequest(HttpContext<SSL>{res, req, running}, base_path, "index.html");
+             })
         .any("/*",
              [](auto *res, auto *req) {
                res->writeStatus("404");
@@ -479,7 +483,6 @@ class ApiServer : public IApiServer {
     }
 
     LOG_DEBUG("Sent {} {}/{} kB", ts, ctx.res->getWriteOffset() / 1024, reader->size() / 1024);
-
 
     handler.SendOk("", true);
     co_return;
