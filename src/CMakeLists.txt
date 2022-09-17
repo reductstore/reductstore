@@ -62,7 +62,7 @@ add_executable(reduct-storage main.cc)
 if (WEB_CONSOLE_PATH)
     message(STATUS "Embedding Console from ${WEB_CONSOLE_PATH}")
 
-    execute_process(COMMAND zip ${CMAKE_CURRENT_BINARY_DIR}/console.zip -r . WORKING_DIRECTORY ${WEB_CONSOLE_PATH})
+    file(ARCHIVE_CREATE FORMAT zip OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/console.zip PATHS ${WEB_CONSOLE_PATH})
     file(READ ${CMAKE_CURRENT_BINARY_DIR}/console.zip ZIPPED_CONSOLE HEX)
     configure_file(console.h.in ${CMAKE_BINARY_DIR}/reduct/console.h @ONLY)
     target_compile_definitions(reduct PUBLIC WITH_CONSOLE)

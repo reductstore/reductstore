@@ -50,8 +50,8 @@ std::unique_ptr<IAssetManager> IAssetManager::BuildFromZip(std::string_view zipp
     std::string new_string;
     for (int i = 0; i < len; i += 2) {
       auto byte = hex.substr(i, 2);
-          char chr = (byte[0] - (byte[0] < 'A' ?  0x30 : 0x37) << 4) + (byte[1] - (byte[1] < 'A' ?  0x30 : 0x37));
-          new_string.push_back(chr);
+      char chr = (byte[0] - (byte[0] < 'A' ? 0x30 : 0x37) << 4) + (byte[1] - (byte[1] < 'A' ? 0x30 : 0x37));
+      new_string.push_back(chr);
     }
 
     return new_string;
@@ -68,13 +68,18 @@ std::unique_ptr<IAssetManager> IAssetManager::BuildFromZip(std::string_view zipp
   fs::path asset_path = fs::temp_directory_path() /
                         fmt::format("asset_{}", std::chrono::high_resolution_clock::now().time_since_epoch().count());
   fs::create_directory(asset_path);
+  std::string root;
   for (auto&& entry : zf->getEntries()) {
-    auto path = asset_path / fs::path(entry.getName()).relative_path();
     if (entry.isDirectory()) {
-      fs::create_directory(path);
+      if (root.empty()) {
+        root = entry.getName();
+      } else {
+        fs::create_directory(asset_path / entry.getName().substr(root.size()));
+      }
     }
 
     if (entry.isFile()) {
+      auto path = asset_path / entry.getName().substr(root.size());
       std::ofstream out(path);
       if (!out) {
         LOG_ERROR("Failed open file {}: {}", path.string(), std::strerror(errno));
