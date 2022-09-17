@@ -12,6 +12,10 @@
 #include "reduct/core/logger.h"
 #include "reduct/storage/storage.h"
 
+#ifdef WITH_CONSOLE
+#include "reduct/console.h"
+#endif
+
 using reduct::api::IApiServer;
 using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
@@ -21,10 +25,7 @@ using reduct::core::Error;
 using reduct::core::Logger;
 using ReductStorage = reduct::storage::IStorage;
 
-#ifdef WITH_CONSOLE
-extern const char _binary_console_zip_start[];
-extern const char _binary_console_zip_end[];
-#endif
+
 
 class Loop : public ILoop {
  public:
@@ -58,7 +59,7 @@ int main() {
   ILoop::set_loop(&loop);
 
 #if WITH_CONSOLE
-  auto console = IAssetManager::BuildFromZip(std::string(_binary_console_zip_start, _binary_console_zip_end));
+  auto console = IAssetManager::BuildFromZip(reduct::kZippedConsole);
 #else
   auto console = IAssetManager::BuildEmpty();
 #endif

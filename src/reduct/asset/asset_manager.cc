@@ -6,6 +6,7 @@
 #include <libzippp/libzippp.h>
 
 #include <fstream>
+#include <sstream>
 
 #include "reduct/core/logger.h"
 
@@ -40,9 +41,24 @@ class AssetManager : public IAssetManager {
   fs::path asset_path_;
 };
 
-std::unique_ptr<IAssetManager> IAssetManager::BuildFromZip(std::string zipped) {
+std::unique_ptr<IAssetManager> IAssetManager::BuildFromZip(std::string_view zipped) {
   using libzippp::ZipArchive;
-  auto zf = std::unique_ptr<ZipArchive>(ZipArchive::fromBuffer(zipped.data(), zipped.size()));
+
+  auto hex_str_to_str = [](std::string hex) {
+    auto len = hex.length();
+    std::transform(hex.begin(), hex.end(), hex.begin(), toupper);
+    std::string new_string;
+    for (int i = 0; i < len; i += 2) {
+      auto byte = hex.substr(i, 2);
+          char chr = (byte[0] - (byte[0] < 'A' ?  0x30 : 0x37) << 4) + (byte[1] - (byte[1] < 'A' ?  0x30 : 0x37));
+          new_string.push_back(chr);
+    }
+
+    return new_string;
+  };
+
+  auto binary_string = hex_str_to_str(std::string(zipped));
+  auto zf = std::unique_ptr<ZipArchive>(ZipArchive::fromBuffer(binary_string.data(), binary_string.size()));
 
   if (!zf) {
     LOG_ERROR("Failed to extract asset");

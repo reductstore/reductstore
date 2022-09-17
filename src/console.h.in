@@ -1,0 +1,12 @@
+// Copyright 2022 Alexey Timin
+
+#ifndef REDUCT_STORAGE_CONSOLE_H
+#define REDUCT_STORAGE_CONSOLE_H
+
+#include <string_view>
+namespace reduct {
+
+static std::string_view kZippedConsole = "@ZIPPED_CONSOLE@";
+
+}
+#endif  // REDUCT_STORAGE_CONSOLE_H

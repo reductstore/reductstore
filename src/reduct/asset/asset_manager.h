@@ -26,11 +26,11 @@ class IAssetManager {
   virtual core::Result<std::string> Read(std::string_view relative_path) const = 0;
 
   /**
-   * Creates an asset from ZIP-ed string
+   * Creates an asset from ZIP-ed string in hex format
    * @param zipped zipped folder with files
    * @return
    */
-  static std::unique_ptr<IAssetManager> BuildFromZip(std::string zipped);
+  static std::unique_ptr<IAssetManager> BuildFromZip(std::string_view zipped);
 
   /**
    * Create an empty asset which returns only 404 error
