@@ -65,6 +65,7 @@ if (WEB_CONSOLE_PATH)
     file(ARCHIVE_CREATE FORMAT zip OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/console.zip PATHS ${WEB_CONSOLE_PATH})
     file(READ ${CMAKE_CURRENT_BINARY_DIR}/console.zip ZIPPED_CONSOLE HEX)
     configure_file(console.h.in ${CMAKE_BINARY_DIR}/reduct/console.h @ONLY)
+    execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/cmake/split_string.py ${CMAKE_BINARY_DIR}/reduct/console.h)
     target_compile_definitions(reduct PUBLIC WITH_CONSOLE)
 endif ()
 

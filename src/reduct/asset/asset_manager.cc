@@ -50,7 +50,7 @@ std::unique_ptr<IAssetManager> IAssetManager::BuildFromZip(std::string_view zipp
     std::string new_string;
     for (int i = 0; i < len; i += 2) {
       auto byte = hex.substr(i, 2);
-      char chr = (byte[0] - (byte[0] < 'A' ? 0x30 : 0x37) << 4) + (byte[1] - (byte[1] < 'A' ? 0x30 : 0x37));
+      char chr = ((byte[0] - (byte[0] < 'A' ? 0x30 : 0x37)) << 4) + (byte[1] - (byte[1] < 'A' ? 0x30 : 0x37));
       new_string.push_back(chr);
     }
 
