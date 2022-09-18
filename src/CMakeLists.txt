@@ -50,7 +50,7 @@ set(SRC_FILES
 add_library(reduct STATIC ${SRC_FILES} ${PROTOBUF_FILES})
 
 if (MSVC)
-    target_compile_options(reduct PUBLIC /Zc:preprocessor)
+    target_compile_options(reduct PUBLIC /Zc:preprocessor /MT)
     target_compile_definitions(reduct PUBLIC NOMINMAX)
 endif ()
 
