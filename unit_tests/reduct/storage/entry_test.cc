@@ -228,12 +228,14 @@ TEST_CASE("storage::Entry should restore itself from folder", "[entry]") {
     std::string_view ts = "1659810772861000";
     const auto meta_path = path / kName / fmt::format("{}.{}", ts, "meta");
     const auto block_path = path / kName / fmt::format("{}.{}", ts, "blk");
-    std::ofstream meta(meta_path);
-    std::ofstream block(block_path);
+    {
+      // Close files (Windows)
+      std::ofstream meta(meta_path);
+      std::ofstream block(block_path);
 
-    auto content = GENERATE("", "garbage");
-    meta << content << std::flush;
-
+      auto content = GENERATE("", "garbage");
+      meta << content << std::flush;
+    }
     entry = IEntry::Build(kName, path, options);
     REQUIRE_FALSE(fs::exists(meta_path));
     REQUIRE_FALSE(fs::exists(block_path));
