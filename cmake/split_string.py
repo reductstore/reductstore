@@ -1,7 +1,7 @@
 """Script to reformat long string for Windows"""
 import sys
 
-STEP = 240
+STEP = 24000
 if __name__ == "__main__":
     filename = sys.argv[1]
     split = []
