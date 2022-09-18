@@ -204,80 +204,80 @@ jobs:
       - name: Run API tests
         run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
 
-  push_image_github:
-    runs-on: ubuntu-latest
-    name: Push to Github Registry
-    needs:
-      - api_tests
-      - unit_tests_macos
-      - unit_tests_windows
-    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: ghcr.io/${{github.repository}}
-
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
-
-      - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-        with:
-          context: .
-          file: deploy.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  push_image_dockerhub:
-    runs-on: ubuntu-latest
-    name: Push to DockerHub Registry
-    needs:
-      - api_tests
-      - unit_tests_macos
-      - unit_tests_windows
-    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
-        with:
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: reductstorage/engine
-
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
-
-      - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-        with:
-          context: .
-          file: deploy.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+#  push_image_github:
+#    runs-on: ubuntu-latest
+#    name: Push to Github Registry
+#    needs:
+#      - api_tests
+#      - unit_tests_macos
+#      - unit_tests_windows
+#    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Log in to the Container registry
+#        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+#        with:
+#          registry: ghcr.io
+#          username: ${{ github.actor }}
+#          password: ${{ secrets.GITHUB_TOKEN }}
+#
+#      - name: Extract metadata (tags, labels) for Docker
+#        id: meta
+#        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+#        with:
+#          images: ghcr.io/${{github.repository}}
+#
+#      - name: Download Web Console
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: web_console
+#          path: ./web-console
+#
+#      - name: Build and push Docker image to GitHub repo
+#        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+#        with:
+#          context: .
+#          file: deploy.Dockerfile
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}
+#
+#  push_image_dockerhub:
+#    runs-on: ubuntu-latest
+#    name: Push to DockerHub Registry
+#    needs:
+#      - api_tests
+#      - unit_tests_macos
+#      - unit_tests_windows
+#    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Log in to the Container registry
+#        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+#        with:
+#          username: ${{ secrets.DOCKER_USER }}
+#          password: ${{ secrets.DOCKER_TOKEN }}
+#
+#      - name: Extract metadata (tags, labels) for Docker
+#        id: meta
+#        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+#        with:
+#          images: reductstorage/engine
+#
+#      - name: Download Web Console
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: web_console
+#          path: ./web-console
+#
+#      - name: Build and push Docker image to GitHub repo
+#        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+#        with:
+#          context: .
+#          file: deploy.Dockerfile
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}
 
   make_release:
     runs-on: ubuntu-latest
