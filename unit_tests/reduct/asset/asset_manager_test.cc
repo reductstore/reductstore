@@ -7,6 +7,10 @@
 
 #include <fstream>
 
+#ifdef WITH_CONSOLE
+#include "reduct/console.h"
+#endif
+
 using reduct::asset::IAssetManager;
 using reduct::core::Error;
 
@@ -15,22 +19,12 @@ TEST_CASE("asset::IAssetManager should have empty implementation") {
   REQUIRE(empty->Read("/").error == Error{.code = 404, .message = "No static files supported"});
 }
 
+#if WITH_CONSOLE
 TEST_CASE("asset::IAssetManager should extract files form zip") {
-  using libzippp::ZipArchive;
-
-  const auto tmp = std::filesystem::temp_directory_path();
-  ZipArchive zf(tmp / "archive.zip");
-  zf.open(ZipArchive::Write);
-  zf.addData("helloworld.txt", "Hello,World!", 12);
-  zf.close();
-
-  std::ifstream arch(tmp / "archive.zip");
-  std::stringstream ss;
-  ss << arch.rdbuf();
-
-  auto zip_asset = IAssetManager::BuildFromZip(ss.str());
+  auto zip_asset = IAssetManager::BuildFromZip(std::string(reduct::kZippedConsole));
 
   REQUIRE(zip_asset);
-  REQUIRE(zip_asset->Read("helloworld.txt").result == "Hello,World!");
+  REQUIRE(zip_asset->Read("index.html").result.size() > 0);
   REQUIRE(zip_asset->Read("noexist").error == Error{.code = 404, .message = "File 'noexist' not found"});
 }
+#endif

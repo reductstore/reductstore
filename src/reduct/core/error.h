@@ -24,7 +24,7 @@ struct [[nodiscard]] Error {  // NOLINT
 
   std::string ToString() const;
 
-  bool operator<=>(const Error& rhs) const = default;
+  std::strong_ordering operator<=>(const Error& rhs) const = default;
   friend std::ostream& operator<<(std::ostream& os, const Error& error);
 
   /**

@@ -38,7 +38,7 @@ class IAsyncReader {
     std::string data;
     bool last;
 
-    bool operator<=>(const DataChunk&) const = default;
+    std::strong_ordering operator<=>(const DataChunk&) const = default;
   };
 
   virtual core::Result<DataChunk> Read() noexcept = 0;

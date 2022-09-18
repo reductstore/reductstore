@@ -5,6 +5,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <fstream>
+#include <algorithm>
 
 #include "reduct/core/logger.h"
 

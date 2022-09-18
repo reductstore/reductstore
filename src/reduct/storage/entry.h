@@ -32,7 +32,7 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
     size_t max_block_size;     // max block quota_size after that we create a new one
     size_t max_block_records;  // max number of records in a block
 
-    bool operator<=>(const Options& rhs) const = default;
+    std::strong_ordering operator<=>(const Options& rhs) const = default;
   };
 
   /**
@@ -42,7 +42,7 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
     core::Time time;  // time when it was created
     size_t size;      // size in bytes
 
-    bool operator<=>(const RecordInfo& rhs) const = default;
+    std::strong_ordering operator<=>(const RecordInfo& rhs) const = default;
 
     friend std::ostream& operator<<(std::ostream& os, const RecordInfo& info);
   };

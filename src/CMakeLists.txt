@@ -49,6 +49,11 @@ set(SRC_FILES
 
 add_library(reduct STATIC ${SRC_FILES} ${PROTOBUF_FILES})
 
+if (MSVC)
+    target_compile_options(reduct PUBLIC /Zc:preprocessor)
+    target_compile_definitions(reduct PUBLIC NOMINMAX)
+endif ()
+
 
 configure_file(config.h.in ${CMAKE_BINARY_DIR}/reduct/config.h @ONLY)
 
@@ -57,32 +62,11 @@ add_executable(reduct-storage main.cc)
 if (WEB_CONSOLE_PATH)
     message(STATUS "Embedding Console from ${WEB_CONSOLE_PATH}")
 
-    add_custom_command(OUTPUT console.o
-            COMMAND cd ${WEB_CONSOLE_PATH} && zip ${CMAKE_CURRENT_BINARY_DIR}/console.zip -r ./
-            COMMAND cd ${CMAKE_CURRENT_BINARY_DIR} && ld -r -b binary -o console.o console.zip
-            COMMAND objcopy --rename-section .data=.rodata,alloc,load,readonly,data,contents
-                ${CMAKE_CURRENT_BINARY_DIR}/console.o ${CMAKE_CURRENT_BINARY_DIR}/console.o)
-
-    add_library(console STATIC console.o)
-
-    set_source_files_properties(
-            console.o
-            PROPERTIES
-            EXTERNAL_OBJECT true
-            GENERATED true
-    )
-
-    set_target_properties(
-            console
-            PROPERTIES
-            LINKER_LANGUAGE C
-    )
-
-    target_compile_definitions(reduct-storage PRIVATE WITH_CONSOLE)
-
-    target_link_libraries(reduct-storage reduct ${CONAN_LIBS} console)
-else ()
-    target_link_libraries(reduct-storage reduct ${CONAN_LIBS})
+    file(ARCHIVE_CREATE FORMAT zip OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/console.zip PATHS ${WEB_CONSOLE_PATH})
+    file(READ ${CMAKE_CURRENT_BINARY_DIR}/console.zip ZIPPED_CONSOLE HEX)
+    configure_file(console.h.in ${CMAKE_BINARY_DIR}/reduct/console.h @ONLY)
+    execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/cmake/split_string.py ${CMAKE_BINARY_DIR}/reduct/console.h)
+    target_compile_definitions(reduct PUBLIC WITH_CONSOLE)
 endif ()
 
-
+target_link_libraries(reduct-storage reduct ${CONAN_LIBS})

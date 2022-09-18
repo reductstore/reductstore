@@ -78,21 +78,49 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: web_console
-          path: ./web-console
+          path: ${{ github.workspace }}/web-console
       - name: Install conan dependencies and build
         run: |
           pip3 install -U pip
           pip3 install conan
           brew install gcc@11
           mkdir build && cd build
-          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON ..
+          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console ..
           cmake --build . -- -j
-      - name: Run unit tests
-        run: build/bin/reduct-tests
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
           name: macos_binary
+          path: build/bin/
+
+  build_windows:
+    name: Build for Windows
+    runs-on: windows-2019
+    needs:
+      - cpplint
+      - download_console
+    steps:
+      - uses: actions/checkout@v2
+      - name: Update windows SDK
+        uses: fbactions/setup-winsdk@v1
+        with:
+          winsdk-build-version: 19041
+      - name: Download Web Console
+        uses: actions/download-artifact@v2
+        with:
+          name: web_console
+          path: ${{ github.workspace }}/web-console
+      - name: Install conan dependencies and build
+        run: |
+          pip3 install -U pip
+          pip3 install conan
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION="10.0.19041.0" -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console  ..
+          cmake --build . -j --config Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: windows_binary
           path: build/bin/
 
   unit_tests:
@@ -131,6 +159,19 @@ jobs:
      - name: Run tests
        run: /tmp/reduct-tests
 
+  unit_tests_windows:
+    name: Unit Tests On Windows
+    needs: build_windows
+    runs-on: windows-2019
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: windows_binary
+          path: ./bin
+      - name: Run tests
+        run: ./bin/reduct-tests
+
   api_tests:
     name: API Tests
     runs-on: ubuntu-latest
@@ -163,84 +204,87 @@ jobs:
       - name: Run API tests
         run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
 
-  push_image_github:
-    runs-on: ubuntu-latest
-    name: Push to Github Registry
-    needs:
-      - api_tests
-      - unit_tests_macos
-    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: ghcr.io/${{github.repository}}
-
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
-
-      - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-        with:
-          context: .
-          file: deploy.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  push_image_dockerhub:
-    runs-on: ubuntu-latest
-    name: Push to DockerHub Registry
-    needs:
-      - api_tests
-      - unit_tests_macos
-    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
-        with:
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: reductstorage/engine
-
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
-
-      - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-        with:
-          context: .
-          file: deploy.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+#  push_image_github:
+#    runs-on: ubuntu-latest
+#    name: Push to Github Registry
+#    needs:
+#      - api_tests
+#      - unit_tests_macos
+#      - unit_tests_windows
+#    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Log in to the Container registry
+#        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+#        with:
+#          registry: ghcr.io
+#          username: ${{ github.actor }}
+#          password: ${{ secrets.GITHUB_TOKEN }}
+#
+#      - name: Extract metadata (tags, labels) for Docker
+#        id: meta
+#        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+#        with:
+#          images: ghcr.io/${{github.repository}}
+#
+#      - name: Download Web Console
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: web_console
+#          path: ./web-console
+#
+#      - name: Build and push Docker image to GitHub repo
+#        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+#        with:
+#          context: .
+#          file: deploy.Dockerfile
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}
+#
+#  push_image_dockerhub:
+#    runs-on: ubuntu-latest
+#    name: Push to DockerHub Registry
+#    needs:
+#      - api_tests
+#      - unit_tests_macos
+#      - unit_tests_windows
+#    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Log in to the Container registry
+#        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+#        with:
+#          username: ${{ secrets.DOCKER_USER }}
+#          password: ${{ secrets.DOCKER_TOKEN }}
+#
+#      - name: Extract metadata (tags, labels) for Docker
+#        id: meta
+#        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+#        with:
+#          images: reductstorage/engine
+#
+#      - name: Download Web Console
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: web_console
+#          path: ./web-console
+#
+#      - name: Build and push Docker image to GitHub repo
+#        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+#        with:
+#          context: .
+#          file: deploy.Dockerfile
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}
 
   make_release:
     runs-on: ubuntu-latest
     needs:
       - api_tests
       - unit_tests_macos
+      - unit_tests_windows
     name: Make release
     if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
@@ -277,6 +321,7 @@ jobs:
           asset_path: reduct-storage.linux-amd64.tar.gz
           asset_name: reduct-storage.linux-amd64.tar.gz
           asset_content_type: application/gzip
+
       - name: Download Macos artifact
         uses: actions/download-artifact@v2
         with:
@@ -292,6 +337,25 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: reduct-storage.macos-amd64.tar.gz
+          asset_path: /tmp/reduct-storage.macos-amd64.tar.gz
           asset_name: reduct-storage.macos-amd64.tar.gz
           asset_content_type: application/gzip
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: windows_binary
+          path: /tmp/
+      - name: Archive Windows binary
+        run: |
+          cd /tmp
+          zip -o reduct-storage.win-amd64.zip  reduct-storage.exe
+      - name: Upload Windows artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: /tmp/reduct-storage.win-amd64.zip
+          asset_name: reduct-storage.win-amd64.zip
+          asset_content_type: application/zip
