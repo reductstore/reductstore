@@ -2,7 +2,6 @@
 
 #include "reduct/auth/token_auth.h"
 
-#include <botan/hex.h>
 #include <google/protobuf/util/time_util.h>
 
 #include "reduct/core/logger.h"
