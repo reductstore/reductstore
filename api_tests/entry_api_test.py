@@ -86,7 +86,7 @@ def test_write_bad_ts(base_url, session, bucket):
     assert 'XXX' in get_detail(resp)
 
 
-def test_list_entry_ok(base_url, session, bucket):
+def test_get_record_ok(base_url, session, bucket):
     """Should return list with timestamps and sizes"""
     ts = 1000
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
@@ -97,20 +97,6 @@ def test_list_entry_ok(base_url, session, bucket):
 
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 200}', data="some_data")
     assert resp.status_code == 200
-
-    resp = session.get(f'{base_url}/b/{bucket}/entry/list?start={ts}&stop={ts + 200}')
-    assert resp.status_code == 200
-
-    data = json.loads(resp.content)
-    assert "records" in data
-    assert data["records"][0] == {'ts': '1000', 'size': '9'}
-    assert data["records"][1] == {'ts': '1100', 'size': '9'}
-
-
-def test_list_entry_no_data(base_url, session, bucket):
-    """Should return 404 if no data for request"""
-    resp = session.get(f'{base_url}/b/{bucket}/entry/list?start=100&stop=200')
-    assert resp.status_code == 404
 
 
 def test_latest_record(base_url, session, bucket):
