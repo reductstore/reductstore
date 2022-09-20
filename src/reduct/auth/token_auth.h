@@ -14,11 +14,9 @@ namespace reduct::auth {
 /**
  *  Trivial Token Authentication w/o encoded subject
  */
-class ITokenAuthentication : public api::IRefreshToken {
+class ITokenAuthentication  {
  public:
-  struct Options {
-    int expiration_time_s;
-  };
+  struct Options {};
 
   /**
    * @brief Check if the access token is valid
@@ -27,8 +25,7 @@ class ITokenAuthentication : public api::IRefreshToken {
    */
   virtual core::Error Check(std::string_view authorization_header) const = 0;
 
-  static std::unique_ptr<ITokenAuthentication> Build(std::string_view api_token,
-                                                     Options options = Options{.expiration_time_s = 300});
+  static std::unique_ptr<ITokenAuthentication> Build(std::string_view api_token, Options options = Options{});
 };
 }  // namespace reduct::auth
 

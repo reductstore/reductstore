@@ -4,7 +4,6 @@ uwebsockets/20.14.0
 protobuf/3.19.2
 gtest/1.11.0
 catch2/2.13.8
-botan/2.19.2
 zlib/1.2.12
 libzippp/5.0-1.8.0
 openssl/1.1.1q

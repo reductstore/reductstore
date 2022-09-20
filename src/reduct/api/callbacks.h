@@ -44,17 +44,6 @@ class IListStorageCallback {
   virtual async::Run<Result> OnStorageList(const Request& req) const = 0;
 };
 
-//---------------------
-// Auth API
-//---------------------
-class IRefreshToken {
- public:
-  using Request = std::string;
-  using Response = proto::api::RefreshTokenResponse;
-
-  using Result = core::Result<Response>;
-  virtual async::Run<Result> OnRefreshToken(const Request& req) const = 0;
-};
 
 //---------------------
 // Bucket API

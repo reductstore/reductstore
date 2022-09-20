@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- GET `/bucketname/entryname/list` endpoint, [PR-164](https://github.com/reduct-storage/reduct-storage/pull/164)
+- POST `/auth/refresh` endpoint, [PR-177](https://github.com/reduct-storage/reduct-storage/pull/177)
+
 ## [0.9.0] - 2022-09-18
 
 ### Added:
@@ -41,7 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Direction to `cd` into the `build/` directory while building the server locally, [PR-159](https://github.com/reduct-storage/reduct-storage/pull/159)
 
 ### Changed:
-- Removed the /bucketname/entryname/list endpoint completely, [PR-164](https://github.com/reduct-storage/reduct-storage/pull/164)
 - Duplication of timestamps is not allowed, [PR-147](https://github.com/reduct-storage/reduct-storage/pull/147)
 - Update dependencies, [PR-163](https://github.com/reduct-storage/reduct-storage/pull/163)
 

@@ -6,6 +6,10 @@ on:
       - 'v*'
   pull_request:
     branches: [ main, stable ]
+    paths-ignore:
+      - docs/**
+      - README.md
+      - CHANGELOG.md
 jobs:
   cpplint:
     runs-on: ubuntu-latest
@@ -39,11 +43,11 @@ jobs:
     name: Build Linux Docker image
     runs-on: ubuntu-latest
     needs:
-     - cpplint
-     - download_console
+      - cpplint
+      - download_console
     strategy:
       matrix:
-        build_type: ["Debug", "Release"]
+        build_type: [ "Debug", "Release" ]
     steps:
       - uses: actions/checkout@v2
       - name: Set up Docker Buildx
@@ -129,7 +133,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        build_type: ["Debug", "Release"]
+        build_type: [ "Debug", "Release" ]
 
     steps:
       - name: Download artifact
@@ -149,15 +153,15 @@ jobs:
     needs: build_macos
     runs-on: macos-12
     steps:
-     - name: Download Macos artifact
-       uses: actions/download-artifact@v2
-       with:
-         name: macos_binary
-         path: /tmp/
-     - name: Make executable
-       run: chmod +x /tmp/reduct-tests
-     - name: Run tests
-       run: /tmp/reduct-tests
+      - name: Download Macos artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: macos_binary
+          path: /tmp/
+      - name: Make executable
+        run: chmod +x /tmp/reduct-tests
+      - name: Run tests
+        run: /tmp/reduct-tests
 
   unit_tests_windows:
     name: Unit Tests On Windows
@@ -179,8 +183,8 @@ jobs:
     strategy:
       matrix:
         build_type: [ "Debug", "Release" ]
-        token: ["", "XXXX"]
-        cert_path: ["", "/misc/certificate.crt"]
+        token: [ "", "XXXX" ]
+        cert_path: [ "", "/misc/certificate.crt" ]
         include:
           - cert_path: "/misc/certificate.crt"
             url: https://127.0.0.1:8383
@@ -197,10 +201,10 @@ jobs:
         run: |
           docker load --input /tmp/image_${{matrix.build_type}}.tar
           docker image ls -a
-      - name: Build API tests
-        run: docker build -t api_tests ./api_tests
       - name: Run Storage
         run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
+      - name: Build API tests
+        run: docker build -t api_tests ./api_tests
       - name: Run API tests
         run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
 
