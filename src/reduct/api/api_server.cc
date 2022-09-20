@@ -89,11 +89,6 @@ class ApiServer : public IApiServer {
              [this, running](auto *res, auto *req) {
                List(HttpContext<SSL>{res, req, running});
              })
-        // Auth API
-        .post(base_path + "auth/refresh",
-              [this, running](auto *res, auto *req) {
-                RefreshToken(HttpContext<SSL>{res, req, running});
-              })
         // Bucket API
         .post(base_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
@@ -227,19 +222,6 @@ class ApiServer : public IApiServer {
     }
     handler.Send(co_await storage_->OnStorageList({}),
                  [](const IListStorageCallback::Response &app_resp) { return PrintToJson(app_resp.buckets); });
-    co_return;
-  }
-
-  // Auth API
-  /**
-   * POST /auth/refresh
-   */
-  template <bool SSL>
-  VoidTask RefreshToken(HttpContext<SSL> ctx) const {
-    std::string header(ctx.req->getHeader("authorization"));
-    auto handler = BasicApiHandler<SSL, IRefreshToken>(ctx);
-    handler.Send(co_await auth_->OnRefreshToken(header),
-                 [](const IRefreshToken::Response &resp) { return PrintToJson(resp); });
     co_return;
   }
 
