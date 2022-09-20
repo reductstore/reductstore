@@ -6,6 +6,8 @@ on:
       - 'v*'
   pull_request:
     branches: [ main, stable ]
+    paths-ignore:
+      - "**.md"
 jobs:
   cpplint:
     runs-on: ubuntu-latest
