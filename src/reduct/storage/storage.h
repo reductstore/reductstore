@@ -26,6 +26,12 @@ class IStorage : public api::IApiHandler {
    */
   [[nodiscard]] virtual core::Result<proto::api::ServerInfo> GetInfo() const = 0;
 
+  /***
+   * Returns list of buckets
+   * @return
+   */
+  [[nodiscard]] virtual core::Result<proto::api::BucketInfoList> GetList() const = 0;
+
   /**
    * Build storage
    * @param options

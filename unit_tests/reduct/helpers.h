@@ -90,12 +90,6 @@ inline core::Result<std::string> ReadOne(const storage::IEntry& entry, core::Tim
   return {read_res.result.data, core::Error::kOk};
 }
 
-
-inline async::Task<api::IListStorageCallback::Result> OnStorageList(storage::IStorage* storage) {
-  auto result = co_await storage->OnStorageList({});
-  co_return result;
-}
-
 inline async::Task<api::ICreateBucketCallback::Result> OnCreateBucket(storage::IStorage* storage,
                                                                       api::ICreateBucketCallback::Request req) {
   auto result = co_await storage->OnCreateBucket(req);

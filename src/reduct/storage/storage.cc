@@ -17,6 +17,9 @@ using async::Run;
 using core::Error;
 using core::Result;
 using core::Time;
+
+using proto::api::BucketInfo;
+using proto::api::BucketInfoList;
 using proto::api::ServerInfo;
 
 namespace fs = std::filesystem;
@@ -73,19 +76,12 @@ class Storage : public IStorage {
     return {std::move(info), Error::kOk};
   }
 
-  [[nodiscard]] Run<IListStorageCallback::Result> OnStorageList(
-      const IListStorageCallback::Request& req) const override {
-    using Callback = IListStorageCallback;
-    return Run<Callback::Result>([this] {
-      using proto::api::BucketInfoList;
-      using proto::api::BucketInfo;
-
-      BucketInfoList list;
-      for (const auto& [name, bucket] : buckets_) {
-        *list.add_buckets() = bucket->GetInfo();
-      }
-      return Callback::Result{.result = {.buckets = std::move(list)}, .error = Error::kOk};
-    });
+  [[nodiscard]] core::Result<BucketInfoList> GetList() const override {
+    BucketInfoList list;
+    for (const auto& [name, bucket] : buckets_) {
+      *list.add_buckets() = bucket->GetInfo();
+    }
+    return {std::move(list), Error::kOk};
   }
   /**
    * Bucket API

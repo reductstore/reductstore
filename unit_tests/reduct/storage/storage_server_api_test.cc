@@ -5,7 +5,6 @@
 #include "reduct/helpers.h"
 #include "reduct/storage/storage.h"
 
-using reduct::api::IListStorageCallback;
 
 using reduct::async::Task;
 using reduct::core::Error;
@@ -13,7 +12,6 @@ using reduct::core::Error;
 using reduct::storage::IStorage;
 
 using reduct::OnCreateBucket;
-using reduct::OnStorageList;
 using reduct::OnWriteEntry;
 
 TEST_CASE("storage::Storage should provide info about itself", "[storage][server_api]") {
@@ -83,17 +81,17 @@ TEST_CASE("storage::Storage should provide list of buckets", "[storage][server_a
           .Get()
           .result->Write("some_data") == Error::kOk);
 
-  auto [resp, err] = OnStorageList(storage.get()).Get();
-  REQUIRE(resp.buckets.buckets_size() == 2);
+  auto [resp, err] = storage->GetList();
+  REQUIRE(resp.buckets_size() == 2);
 
-  auto bucket = resp.buckets.buckets(0);
+  auto bucket = resp.buckets(0);
   REQUIRE(bucket.name() == "bucket_1");
   REQUIRE(bucket.size() == 18);
   REQUIRE(bucket.entry_count() == 2);
   REQUIRE(bucket.oldest_record() == 1'000'001);
   REQUIRE(bucket.latest_record() == 2'000'002);
 
-  bucket = resp.buckets.buckets(1);
+  bucket = resp.buckets(1);
   REQUIRE(bucket.name() == "bucket_2");
   REQUIRE(bucket.size() == 9);
   REQUIRE(bucket.entry_count() == 1);

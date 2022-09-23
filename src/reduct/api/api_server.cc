@@ -196,7 +196,7 @@ class ApiServer : public IApiServer {
              })
         .get(base_path + "list",
              [this, running](auto *res, auto *req) {
-               List(HttpContext<SSL>{res, req, running});
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this](auto r) { return List(r); });
              })
         // Bucket API
         .post(base_path + "b/:bucket_name",
@@ -327,15 +327,20 @@ class ApiServer : public IApiServer {
   /**
    * GET /list
    */
-  template <bool SSL>
-  VoidTask List(HttpContext<SSL> ctx) const {
-    auto handler = BasicApiHandler<SSL, IListStorageCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-    handler.Send(co_await storage_->OnStorageList({}),
-                 [](const IListStorageCallback::Response &app_resp) { return PrintToJson(app_resp.buckets); });
-    co_return;
+  Result<HttpResponse> List(const HttpRequest &request) const {
+    auto [resp, err] = storage_->GetList();
+    auto json = err ? "" : PrintToJson(std::move(resp));
+    return {
+        HttpResponse{
+            {},
+            json.size(),
+            [](std::string_view chunk) { return Error::kOk; },
+            [json = std::move(json), err = std::move(err)]() {
+              return Result<std::string>{json, err};
+            },
+        },
+        Error::kOk,
+    };
   }
 
   // Bucket API

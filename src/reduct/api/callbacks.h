@@ -17,23 +17,6 @@
 namespace reduct::api {
 
 //---------------------
-// Server API
-//---------------------
-
-/**
- * Get list of buckets
- */
-class IListStorageCallback {
- public:
-  struct Response {
-    proto::api::BucketInfoList buckets;
-  };
-  struct Request {};
-  using Result = core::Result<Response>;
-  virtual async::Run<Result> OnStorageList(const Request& req) const = 0;
-};
-
-//---------------------
 // Bucket API
 //---------------------
 
@@ -173,8 +156,7 @@ class INextCallback {
 /**
  * API handler with all the request callbacks
  */
-class IApiHandler : public IListStorageCallback,
-                    public ICreateBucketCallback,
+class IApiHandler : public ICreateBucketCallback,
                     public IGetBucketCallback,
                     public IRemoveBucketCallback,
                     public IUpdateBucketCallback,
