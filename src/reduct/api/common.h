@@ -108,7 +108,6 @@ class BasicApiHandler {
         running_(ctx.running),
         headers_{} {
     std::transform(method_.begin(), method_.end(), method_.begin(), [](auto &ch) { return std::toupper(ch); });
-
     http_resp_->onAborted([*this] { LOG_ERROR("{} {}: aborted", method_, url_); });
   }
 
@@ -191,5 +190,6 @@ class BasicApiHandler {
   std::map<std::string_view, std::string> headers_;
   bool running_;
 };
+
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_HANDLERS_COMMON_H

@@ -5,8 +5,8 @@
 
 #include <string>
 
-#include "reduct/async/run.h"
 #include "reduct/async/io.h"
+#include "reduct/async/run.h"
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
 #include "reduct/proto/api/auth.pb.h"
@@ -21,17 +21,6 @@ namespace reduct::api {
 //---------------------
 
 /**
- * Get info callback
- */
-class IInfoCallback {
- public:
-  using Response = proto::api::ServerInfo;
-  struct Request {};
-  using Result = core::Result<Response>;
-  virtual async::Run<Result> OnInfo(const Request& req) const = 0;
-};
-
-/**
  * Get list of buckets
  */
 class IListStorageCallback {
@@ -43,7 +32,6 @@ class IListStorageCallback {
   using Result = core::Result<Response>;
   virtual async::Run<Result> OnStorageList(const Request& req) const = 0;
 };
-
 
 //---------------------
 // Bucket API
@@ -106,7 +94,6 @@ class IUpdateBucketCallback {
 //---------------------
 // Entry API
 //---------------------
-
 
 /**
  * Write a new record to the entry
@@ -183,5 +170,17 @@ class INextCallback {
   virtual async::Run<Result> OnNextRecord(const Request& req) const = 0;
 };
 
+/**
+ * API handler with all the request callbacks
+ */
+class IApiHandler : public IListStorageCallback,
+                    public ICreateBucketCallback,
+                    public IGetBucketCallback,
+                    public IRemoveBucketCallback,
+                    public IUpdateBucketCallback,
+                    public IWriteEntryCallback,
+                    public IReadEntryCallback,
+                    public IQueryCallback,
+                    public INextCallback {};
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

@@ -66,6 +66,115 @@ class ApiServer : public IApiServer {
   }
 
  private:
+  using StringMap = std::unordered_map<std::string, std::string>;
+  struct HttpResponse {
+    StringMap headers;
+    size_t content_length;
+    std::function<Error(std::string_view)> input_call;
+    std::function<Result<std::string>()> output_call;
+  };
+  struct HttpRequest {
+    StringMap headers;
+    StringMap parameters;
+  };
+
+  using HttpResponseHandler = std::function<Result<HttpResponse>(const HttpRequest &request)>;
+
+  template <bool SSL>
+  VoidTask RegisterEndpoint(HttpContext<SSL> ctx, HttpResponseHandler &&handler) const {
+    std::string method(ctx.req->getMethod());
+    auto url = ctx.req->getUrl();
+    auto authorization = ctx.req->getHeader("authorization");
+    auto origin = ctx.req->getHeader("origin");
+
+    std::transform(method.begin(), method.end(), method.begin(), [](auto ch) { return std::toupper(ch); });
+    ctx.res->onAborted([&method, &url] { LOG_ERROR("{} {}: aborted", method, url); });
+
+    if (!origin.empty()) {
+      ctx.res->writeHeader("access-control-allow-origin", origin);
+    }
+
+    ctx.res->writeHeader("connection", ctx.running ? "keep-alive" : "close");
+    ctx.res->writeHeader("server", "ReductStorage");
+
+    auto SendError = [ctx, &method, &url](core::Error err) {
+      if (err.code >= 500) {
+        LOG_ERROR("{} {}: {}", method, url, err.ToString());
+      } else {
+        LOG_DEBUG("{} {}: {}", method, url, err.ToString());
+      }
+
+      ctx.res->writeStatus(std::to_string(err.code));
+      ctx.res->writeHeader("content-type", "application/json");
+      ctx.res->end(fmt::format(R"({{"detail":"{}"}})", err.message));
+    };
+
+    if (auto err = auth_->Check(authorization)) {
+      SendError(err);
+      co_return;
+    }
+
+    auto result = handler({});
+    if (result.error) {
+      SendError(result.error);
+      co_return;
+    }
+
+    // Receive data
+    auto [headers, content_length, input_call, output_call] = result.result;
+    auto err = co_await AsyncHttpReceiver<SSL>(
+        ctx.res, [&input_call](auto chunk, bool last) { return input_call(last ? "" : chunk); });
+
+    for (auto &[key, val] : headers) {
+      ctx.res->writeHeader(key, val);
+    }
+
+    // Send data
+    bool ready_to_continue = false;
+    ctx.res->onWritable([&ready_to_continue](auto _) {
+      LOG_DEBUG("ready");
+      ready_to_continue = true;
+      return true;
+    });
+
+    bool aborted = false;
+    ctx.res->onAborted([&aborted] {
+      LOG_WARNING("aborted");
+      aborted = true;
+    });
+
+    bool complete = false;
+    while (!aborted && !complete) {
+      co_await Sleep(async::kTick);  // switch context before start to read
+      auto [chuck, read_err] = output_call();
+      if (read_err) {
+        SendError(read_err);
+        co_return;
+      }
+
+      const auto offset = ctx.res->getWriteOffset();
+      while (!aborted) {
+        ready_to_continue = false;
+        auto [ok, responded] = ctx.res->tryEnd(chuck.substr(ctx.res->getWriteOffset() - offset), content_length);
+        if (ok) {
+          complete = responded;
+          break;
+        } else {
+          // Have to wait until onWritable sets flag
+          while (!ready_to_continue && !aborted) {
+            co_await Sleep(async::kTick);
+          }
+
+          continue;
+        }
+      }
+    }
+
+    LOG_DEBUG("Response for {} {} -- {}/{} kB", method, url, ctx.res->getWriteOffset() / 1024, content_length / 1024);
+
+    co_return;
+  }
+
   template <bool SSL>
   void RegisterEndpointsAndRun(uWS::TemplatedApp<SSL> &&app, const bool &running) const {
     auto [host, port, base_path, cert_path, cert_key_path] = options_;
@@ -83,7 +192,7 @@ class ApiServer : public IApiServer {
              })
         .get(base_path + "info",
              [this, running](auto *res, auto *req) {
-               Info(HttpContext<SSL>{res, req, running});
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this](auto r) { return Info(r); });
              })
         .get(base_path + "list",
              [this, running](auto *res, auto *req) {
@@ -199,16 +308,20 @@ class ApiServer : public IApiServer {
   /**
    * GET /info
    */
-  template <bool SSL>
-  VoidTask Info(HttpContext<SSL> ctx) const {
-    auto handler = BasicApiHandler<SSL, IInfoCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    handler.Send(co_await storage_->OnInfo({}),
-                 [](const IInfoCallback::Response &app_resp) { return PrintToJson(app_resp); });
-    co_return;
+  Result<HttpResponse> Info(const HttpRequest &request) const {
+    auto [resp, err] = storage_->GetInfo();
+    auto json = err ? "" : PrintToJson(std::move(resp));
+    return {
+        HttpResponse{
+            {},
+            json.size(),
+            [](std::string_view chunk) { return Error::kOk; },
+            [json = std::move(json), err = std::move(err)]() {
+              return Result<std::string>{json, err};
+            },
+        },
+        Error::kOk,
+    };
   }
 
   /**
@@ -527,7 +640,7 @@ class ApiServer : public IApiServer {
   }
 
   Options options_;
-  std::unique_ptr<IApiHandler> storage_;
+  std::unique_ptr<storage::IStorage> storage_;
   std::unique_ptr<ITokenAuthentication> auth_;
   std::unique_ptr<IAssetManager> console_;
 };

@@ -15,7 +15,9 @@ namespace reduct::storage {
 
 using async::Run;
 using core::Error;
+using core::Result;
 using core::Time;
+using proto::api::ServerInfo;
 
 namespace fs = std::filesystem;
 
@@ -43,37 +45,32 @@ class Storage : public IStorage {
   /**
    * Server API
    */
-  [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
-    using Callback = IInfoCallback;
+  [[nodiscard]] core::Result<ServerInfo> GetInfo() const override {
+    using proto::api::BucketSettings;
+    using proto::api::Defaults;
 
-    return Run<Callback::Result>([this] {
-      using proto::api::ServerInfo;
-      using proto::api::Defaults;
-      using proto::api::BucketSettings;
+    size_t usage = 0;
+    uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
+    uint64_t latest_ts = 0;
 
-      size_t usage = 0;
-      uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
-      uint64_t latest_ts = 0;
+    for (const auto& [_, bucket] : buckets_) {
+      auto info = bucket->GetInfo();
+      usage += info.size();
+      oldest_ts = std::min(oldest_ts, info.oldest_record());
+      latest_ts = std::max(latest_ts, info.latest_record());
+    }
 
-      for (const auto& [_, bucket] : buckets_) {
-        auto info = bucket->GetInfo();
-        usage += info.size();
-        oldest_ts = std::min(oldest_ts, info.oldest_record());
-        latest_ts = std::max(latest_ts, info.latest_record());
-      }
+    ServerInfo info;
+    info.set_version(kVersion);
+    info.set_bucket_count(buckets_.size());
+    info.set_uptime(
+        std::chrono::duration_cast<std::chrono::seconds>(decltype(start_time_)::clock::now() - start_time_).count());
+    info.set_usage(usage);
+    info.set_oldest_record(oldest_ts);
+    info.set_latest_record(latest_ts);
 
-      ServerInfo info;
-      info.set_version(kVersion);
-      info.set_bucket_count(buckets_.size());
-      info.set_uptime(
-          std::chrono::duration_cast<std::chrono::seconds>(decltype(start_time_)::clock::now() - start_time_).count());
-      info.set_usage(usage);
-      info.set_oldest_record(oldest_ts);
-      info.set_latest_record(latest_ts);
-
-      *info.mutable_defaults()->mutable_bucket() = IBucket::GetDefaults();
-      return Callback::Result{std::move(info), Error{}};
-    });
+    *info.mutable_defaults()->mutable_bucket() = IBucket::GetDefaults();
+    return {std::move(info), Error::kOk};
   }
 
   [[nodiscard]] Run<IListStorageCallback::Result> OnStorageList(

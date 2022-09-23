@@ -5,7 +5,6 @@
 #include "reduct/helpers.h"
 #include "reduct/storage/storage.h"
 
-using reduct::api::IInfoCallback;
 using reduct::api::IListStorageCallback;
 
 using reduct::async::Task;
@@ -14,7 +13,6 @@ using reduct::core::Error;
 using reduct::storage::IStorage;
 
 using reduct::OnCreateBucket;
-using reduct::OnInfo;
 using reduct::OnStorageList;
 using reduct::OnWriteEntry;
 
@@ -23,8 +21,7 @@ TEST_CASE("storage::Storage should provide info about itself", "[storage][server
 
   std::this_thread::sleep_for(std::chrono::seconds(1));  // uptime 1 second
 
-  auto task = OnInfo(storage.get());
-  auto [info, err] = task.Get();
+  auto [info, err] = storage->GetInfo();
 
   REQUIRE_FALSE(err);
   REQUIRE(info.version() == reduct::kVersion);
@@ -57,7 +54,7 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][serv
   storage = IStorage::Build({.data_path = dir});
 
 
-  auto [info, err] = OnInfo(storage.get()).Get();
+  auto [info, err] = storage->GetInfo();
   REQUIRE(info.bucket_count() == 1);
   REQUIRE(info.usage() == 18);
   REQUIRE(info.oldest_record() == 1000001);

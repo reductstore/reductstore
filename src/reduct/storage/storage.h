@@ -4,7 +4,8 @@
 
 #include <filesystem>
 
-#include "reduct/api/api_server.h"
+#include "reduct/api/callbacks.h"
+#include "reduct/proto/api/server.pb.h"
 
 namespace reduct::storage {
 
@@ -16,6 +17,14 @@ class IStorage : public api::IApiHandler {
   struct Options {
     std::filesystem::path data_path;
   };
+
+  virtual ~IStorage() = default;
+
+  /**
+   * Returns statistics about storage
+   * @return
+   */
+  [[nodiscard]] virtual core::Result<proto::api::ServerInfo> GetInfo() const = 0;
 
   /**
    * Build storage
