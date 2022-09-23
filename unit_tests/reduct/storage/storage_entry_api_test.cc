@@ -21,7 +21,6 @@ using reduct::proto::api::BucketSettings;
 using reduct::storage::IStorage;
 
 using reduct::MakeDefaultBucketSettings;
-using reduct::OnCreateBucket;
 using reduct::OnGetBucket;
 using reduct::OnNextRecord;
 using reduct::OnQuery;
@@ -35,9 +34,7 @@ namespace fs = std::filesystem;
 TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  REQUIRE(
-      OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
-      Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket", MakeDefaultBucketSettings()) == Error::kOk);
 
   auto write_ret =
       OnWriteEntry(
@@ -123,9 +120,8 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
 TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  REQUIRE(
-      OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
-      Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket", MakeDefaultBucketSettings()) == Error::kOk);
+
   REQUIRE(OnWriteEntry(
               storage.get(),
               {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .content_length = "9"})
@@ -146,9 +142,8 @@ TEST_CASE("storage::Storage should list records by timestamps", "[storage][entry
 TEST_CASE("storage::Storage should query records by timestamps", "[storage][entry]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  REQUIRE(
-      OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()}).Get() ==
-      Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket", MakeDefaultBucketSettings()) == Error::kOk);
+
   REQUIRE(OnWriteEntry(
               storage.get(),
               {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1610387457862000", .content_length = "9"})

@@ -86,25 +86,18 @@ class Storage : public IStorage {
   /**
    * Bucket API
    */
-  [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
-    using Callback = ICreateBucketCallback;
-    return Run<Callback::Result>([this, req] {
-      std::string bucket_name{req.bucket_name};
-      if (buckets_.find(bucket_name) != buckets_.end()) {
-        return Callback::Result{
-            {}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.bucket_name)}};
-      }
+  core::Error CreateBucket(const std::string& bucket_name, const proto::api::BucketSettings& settings) override {
+    if (buckets_.find(bucket_name) != buckets_.end()) {
+      return Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", bucket_name)};
+    }
 
-      auto bucket = IBucket::Build(options_.data_path / bucket_name, req.bucket_settings);
-      if (!bucket) {
-        auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
-        return Callback::Result{{},
-                                Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")}};
-      }
+    auto bucket = IBucket::Build(options_.data_path / bucket_name, settings);
+    if (!bucket) {
+      return Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
+    }
 
-      buckets_[bucket_name] = std::move(bucket);
-      return Callback::Result{{}, Error{}};
-    });
+    buckets_[bucket_name] = std::move(bucket);
+    return Error::kOk;
   }
 
   [[nodiscard]] Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) const override {

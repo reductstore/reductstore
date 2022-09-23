@@ -24,13 +24,16 @@ class IStorage : public api::IApiHandler {
    * Returns statistics about storage
    * @return
    */
-  [[nodiscard]] virtual core::Result<proto::api::ServerInfo> GetInfo() const = 0;
+  virtual core::Result<proto::api::ServerInfo> GetInfo() const = 0;
 
   /***
    * Returns list of buckets
    * @return
    */
-  [[nodiscard]] virtual core::Result<proto::api::BucketInfoList> GetList() const = 0;
+  virtual core::Result<proto::api::BucketInfoList> GetList() const = 0;
+
+
+  virtual core::Error CreateBucket(const std::string& bucket_name, const proto::api::BucketSettings& settings) = 0;
 
   /**
    * Build storage

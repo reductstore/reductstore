@@ -18,7 +18,6 @@ using reduct::api::IUpdateBucketCallback;
 using reduct::proto::api::BucketSettings;
 
 using reduct::OnChangeBucketSettings;
-using reduct::OnCreateBucket;
 using reduct::OnGetBucket;
 using reduct::OnRemoveBucket;
 using reduct::OnWriteEntry;
@@ -31,17 +30,16 @@ namespace fs = std::filesystem;
 TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()};
-  Error err = OnCreateBucket(storage.get(), req).Get();
+  Error err = storage->CreateBucket("bucket", MakeDefaultBucketSettings());
   REQUIRE_FALSE(err);
 
   SECTION("error if already exists") {
-    err = OnCreateBucket(storage.get(), req).Get();
+    err = storage->CreateBucket("bucket", MakeDefaultBucketSettings());
     REQUIRE(err == Error{.code = 409, .message = "Bucket 'bucket' already exists"});
   }
 
   SECTION("error if failed to create") {
-    err = OnCreateBucket(storage.get(), {.bucket_name = "", .bucket_settings = MakeDefaultBucketSettings()}).Get();
+    err = storage->CreateBucket("", MakeDefaultBucketSettings());
     REQUIRE(err == Error{.code = 500, .message = "Internal error: Failed to create bucket"});
   }
 }
@@ -49,8 +47,7 @@ TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
 TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   const auto settings = MakeDefaultBucketSettings();
-  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = settings};
-  REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket", settings));
 
   auto [writer, w_err] =
       OnWriteEntry(storage.get(),
@@ -87,11 +84,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
   auto data_path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = data_path});
 
-  ICreateBucketCallback::Request req{
-      .bucket_name = "bucket",
-      .bucket_settings = MakeDefaultBucketSettings(),
-  };
-  REQUIRE(OnCreateBucket(storage.get(), req).Get() == Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket", MakeDefaultBucketSettings()));
 
   SECTION("should update full settings") {
     BucketSettings settings;
@@ -131,10 +124,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
     BucketSettings settings;
     settings.set_quota_size(100);
 
-    IUpdateBucketCallback::Request change_req{
-        .bucket_name = "bucket",
-        .new_settings = settings
-    };
+    IUpdateBucketCallback::Request change_req{.bucket_name = "bucket", .new_settings = settings};
 
     fs::remove_all(data_path / "bucket");
     auto result = OnChangeBucketSettings(storage.get(), change_req).Get();
@@ -146,8 +136,7 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   auto data_path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = data_path});
 
-  ICreateBucketCallback::Request req{.bucket_name = "bucket", .bucket_settings = MakeDefaultBucketSettings()};
-  Error err = OnCreateBucket(storage.get(), req).Get();
+  Error err = storage->CreateBucket("bucket", MakeDefaultBucketSettings());
   REQUIRE(err == Error::kOk);
   REQUIRE(fs::exists(data_path / "bucket"));
 

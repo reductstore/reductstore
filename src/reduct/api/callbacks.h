@@ -156,8 +156,7 @@ class INextCallback {
 /**
  * API handler with all the request callbacks
  */
-class IApiHandler : public ICreateBucketCallback,
-                    public IGetBucketCallback,
+class IApiHandler : public IGetBucketCallback,
                     public IRemoveBucketCallback,
                     public IUpdateBucketCallback,
                     public IWriteEntryCallback,

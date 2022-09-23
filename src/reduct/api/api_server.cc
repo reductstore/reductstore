@@ -70,7 +70,7 @@ class ApiServer : public IApiServer {
   struct HttpResponse {
     StringMap headers;
     size_t content_length;
-    std::function<Error(std::string_view)> input_call;
+    std::function<Error(std::string_view, bool)> input_call;
     std::function<Result<std::string>()> output_call;
   };
   struct HttpRequest {
@@ -78,7 +78,7 @@ class ApiServer : public IApiServer {
     StringMap parameters;
   };
 
-  using HttpResponseHandler = std::function<Result<HttpResponse>(const HttpRequest &request)>;
+  using HttpResponseHandler = std::function<Result<HttpResponse>()>;
 
   template <bool SSL>
   VoidTask RegisterEndpoint(HttpContext<SSL> ctx, HttpResponseHandler &&handler) const {
@@ -114,7 +114,7 @@ class ApiServer : public IApiServer {
       co_return;
     }
 
-    auto result = handler({});
+    auto result = handler();
     if (result.error) {
       SendError(result.error);
       co_return;
@@ -123,7 +123,7 @@ class ApiServer : public IApiServer {
     // Receive data
     auto [headers, content_length, input_call, output_call] = result.result;
     auto err = co_await AsyncHttpReceiver<SSL>(
-        ctx.res, [&input_call](auto chunk, bool last) { return input_call(last ? "" : chunk); });
+        ctx.res, [&input_call](auto chunk, bool last) { return input_call(chunk, last); });
 
     for (auto &[key, val] : headers) {
       ctx.res->writeHeader(key, val);
@@ -192,16 +192,17 @@ class ApiServer : public IApiServer {
              })
         .get(base_path + "info",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this](auto r) { return Info(r); });
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this]() { return Info(); });
              })
         .get(base_path + "list",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this](auto r) { return List(r); });
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this]() { return List(); });
              })
         // Bucket API
         .post(base_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
-                CreateBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+                RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                 [this, req]() { return CreateBucket(req->getParameter(0)); });
               })
         .get(base_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
@@ -308,14 +309,14 @@ class ApiServer : public IApiServer {
   /**
    * GET /info
    */
-  Result<HttpResponse> Info(const HttpRequest &request) const {
+  Result<HttpResponse> Info() const {
     auto [resp, err] = storage_->GetInfo();
     auto json = err ? "" : PrintToJson(std::move(resp));
     return {
         HttpResponse{
-            {},
+            {{"content-type", "application/json"}},
             json.size(),
-            [](std::string_view chunk) { return Error::kOk; },
+            [](std::string_view chunk, bool last) { return Error::kOk; },
             [json = std::move(json), err = std::move(err)]() {
               return Result<std::string>{json, err};
             },
@@ -327,14 +328,14 @@ class ApiServer : public IApiServer {
   /**
    * GET /list
    */
-  Result<HttpResponse> List(const HttpRequest &request) const {
+  Result<HttpResponse> List() const {
     auto [resp, err] = storage_->GetList();
     auto json = err ? "" : PrintToJson(std::move(resp));
     return {
         HttpResponse{
-            {},
+            {{"content-type", "application/json"}},
             json.size(),
-            [](std::string_view chunk) { return Error::kOk; },
+            [](std::string_view chunk, bool last) { return Error::kOk; },
             [json = std::move(json), err = std::move(err)]() {
               return Result<std::string>{json, err};
             },
@@ -347,40 +348,32 @@ class ApiServer : public IApiServer {
   /**
    * POST /b/:name
    */
-  template <bool SSL>
-  VoidTask CreateBucket(HttpContext<SSL> ctx, std::string name) const {
-    auto handler = BasicApiHandler<SSL, ICreateBucketCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
+  Result<HttpResponse> CreateBucket(std::string_view bucket) const {
+    std::shared_ptr<std::string> data;
 
-    std::string data;
-    auto err = co_await AsyncHttpReceiver<SSL>(ctx.res, [&data](auto chuck, bool _) {
-      data += chuck;
-      return Error::kOk;
-    });
-    if (err) {
-      handler.SendError(err);
-      co_return;
-    }
+    return {
+        HttpResponse{
+            .headers = {},
+            .content_length = 0,
+            .input_call =
+                [this, data, bucket = std::string(bucket)](std::string_view chunk, bool last) mutable {
+                  data->append(chunk);
+                  if (last) {
+                    BucketSettings settings;
+                    auto status = JsonStringToMessage(*data, &settings);
+                    if (!status.ok()) {
+                      return Error{.code = 422,
+                                   .message = fmt::format("Failed parse JSON data: {}", status.message().ToString())};
+                    }
 
-    BucketSettings settings;
-    if (!data.empty()) {
-      auto status = JsonStringToMessage(data, &settings);
-      if (!status.ok()) {
-        handler.SendError(
-            Error{.code = 422, .message = fmt::format("Failed parse JSON data: {}", status.message().ToString())});
-        co_return;
-      }
-    }
-
-    ICreateBucketCallback::Request app_request{
-        .bucket_name = name,
-        .bucket_settings = std::move(settings),
+                    return storage_->CreateBucket(bucket, settings);
+                  }
+                  return Error::kOk;
+                },
+            .output_call = []() { return Result<std::string>{}; },
+        },
+        Error::kOk,
     };
-
-    handler.Send(co_await storage_->OnCreateBucket(app_request));
-    co_return;
   }
 
   /**

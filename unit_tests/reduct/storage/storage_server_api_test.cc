@@ -5,13 +5,11 @@
 #include "reduct/helpers.h"
 #include "reduct/storage/storage.h"
 
-
 using reduct::async::Task;
 using reduct::core::Error;
 
 using reduct::storage::IStorage;
 
-using reduct::OnCreateBucket;
 using reduct::OnWriteEntry;
 
 TEST_CASE("storage::Storage should provide info about itself", "[storage][server_api]") {
@@ -35,7 +33,7 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][serv
   const auto dir = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = dir});
 
-  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket", .bucket_settings = {}}).Get() == Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
   auto ret =
       OnWriteEntry(storage.get(),
                    {.bucket_name = "bucket", .entry_name = "entry", .timestamp = "1000001", .content_length = "9"})
@@ -51,7 +49,6 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][serv
 
   storage = IStorage::Build({.data_path = dir});
 
-
   auto [info, err] = storage->GetInfo();
   REQUIRE(info.bucket_count() == 1);
   REQUIRE(info.usage() == 18);
@@ -62,9 +59,9 @@ TEST_CASE("storage::Storage should be restored from filesystem", "[storage][serv
 TEST_CASE("storage::Storage should provide list of buckets", "[storage][server_api]") {
   const auto dir = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = dir});
+  REQUIRE(storage->CreateBucket("bucket_1", {}) == Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket_2", {}) == Error::kOk);
 
-  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket_1", .bucket_settings = {}}).Get() == Error::kOk);
-  REQUIRE(OnCreateBucket(storage.get(), {.bucket_name = "bucket_2", .bucket_settings = {}}).Get() == Error::kOk);
   REQUIRE(
       OnWriteEntry(storage.get(),
                    {.bucket_name = "bucket_1", .entry_name = "entry1", .timestamp = "1000001", .content_length = "9"})
