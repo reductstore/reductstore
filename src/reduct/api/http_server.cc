@@ -186,7 +186,8 @@ class HttpServer : public IHttpServer {
     // Server API
     app.head(base_path + "alive",
              [this, running](auto *res, auto *req) {
-               Alive(HttpContext<SSL>{res, req, running});
+               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                [this]() { return ServerApi::Alive(storage_.get()); });
              })
         .get(base_path + "info",
              [this, running](auto *res, auto *req) {
@@ -287,25 +288,6 @@ class HttpServer : public IHttpServer {
                   }
                 })
         .run();
-  }
-
-  // Server API
-  /**
-   * HEAD /alive
-   */
-  template <bool SSL>
-  VoidTask Alive(HttpContext<SSL> ctx) const {
-    class IAliveCallback {
-     public:
-      struct Response {};
-      struct Request {};
-      using Result = core::Result<Response>;
-    };
-
-    auto handler = BasicApiHandler<SSL, IAliveCallback>(ctx, "");
-    typename IAliveCallback::Result result{};
-    handler.Send(std::move(result));
-    co_return;
   }
 
   /**

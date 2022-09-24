@@ -11,6 +11,11 @@ namespace reduct::api {
 class ServerApi {
  public:
   /**
+   * GET /alive
+   */
+  static core::Result<HttpResponse> Alive(const storage::IStorage* storage);
+
+  /**
    * GET /info
    */
   static core::Result<HttpResponse> Info(const storage::IStorage* storage);

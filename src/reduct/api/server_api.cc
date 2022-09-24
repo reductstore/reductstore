@@ -4,8 +4,26 @@
 
 namespace reduct::api {
 
-core::Result<HttpResponse> ServerApi::Info(const storage::IStorage* storage) { return SendJson(storage->GetInfo()); }
+using core::Error;
+using core::Result;
+using storage::IStorage;
 
-core::Result<HttpResponse> ServerApi::List(const storage::IStorage* storage) { return SendJson(storage->GetList()); }
+Result<HttpResponse> ServerApi::Alive(const IStorage* storage) {
+  return {
+      {
+          {},
+          0,
+          [](std::string_view chunk, bool last) { return Error::kOk; },
+          []() {
+            return Result<std::string>{"", Error::kOk};
+          },
+      },
+      core::Error::kOk,
+  };
+}
+
+Result<HttpResponse> ServerApi::Info(const IStorage* storage) { return SendJson(storage->GetInfo()); }
+
+Result<HttpResponse> ServerApi::List(const IStorage* storage) { return SendJson(storage->GetList()); }
 
 }  // namespace reduct::api
