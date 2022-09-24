@@ -90,14 +90,17 @@ class ApiServer : public IApiServer {
     std::transform(method.begin(), method.end(), method.begin(), [](auto ch) { return std::toupper(ch); });
     ctx.res->onAborted([&method, &url] { LOG_ERROR("{} {}: aborted", method, url); });
 
-    if (!origin.empty()) {
-      ctx.res->writeHeader("access-control-allow-origin", origin);
-    }
+    auto CommonHeaders = [&ctx, &origin]() {
+      // We must write headers before status
+      if (!origin.empty()) {
+        ctx.res->writeHeader("access-control-allow-origin", origin);
+      }
 
-    ctx.res->writeHeader("connection", ctx.running ? "keep-alive" : "close");
-    ctx.res->writeHeader("server", "ReductStorage");
+      ctx.res->writeHeader("connection", ctx.running ? "keep-alive" : "close");
+      ctx.res->writeHeader("server", "ReductStorage");
+    };
 
-    auto SendError = [ctx, &method, &url](core::Error err) {
+    auto SendError = [ctx, &method, &url, CommonHeaders](core::Error err) {
       if (err.code >= 500) {
         LOG_ERROR("{} {}: {}", method, url, err.ToString());
       } else {
@@ -105,6 +108,7 @@ class ApiServer : public IApiServer {
       }
 
       ctx.res->writeStatus(std::to_string(err.code));
+      CommonHeaders();
       ctx.res->writeHeader("content-type", "application/json");
       ctx.res->end(fmt::format(R"({{"detail":"{}"}})", err.message));
     };
@@ -124,7 +128,12 @@ class ApiServer : public IApiServer {
     auto [headers, content_length, input_call, output_call] = result.result;
     auto err = co_await AsyncHttpReceiver<SSL>(
         ctx.res, [&input_call](auto chunk, bool last) { return input_call(chunk, last); });
+    if (err) {
+      SendError(err);
+      co_return;
+    }
 
+    CommonHeaders();
     for (auto &[key, val] : headers) {
       ctx.res->writeHeader(key, val);
     }
@@ -287,6 +296,56 @@ class ApiServer : public IApiServer {
                 })
         .run();
   }
+
+  template <class T>
+  static Result<HttpResponse> SendJson(Result<T> &&res) {
+    auto [data, err] = res;
+    auto json = err ? "" : PrintToJson(std::move(data));
+    return {
+        HttpResponse{
+            {{"content-type", "application/json"}},
+            json.size(),
+            [](std::string_view chunk, bool last) { return Error::kOk; },
+            [json = std::move(json), err = std::move(err)]() {
+              return Result<std::string>{json, err};
+            },
+        },
+        Error::kOk,
+    };
+  }
+
+  template <class T>
+  static Result<HttpResponse> ReceiveJson(std::function<Error(T &&)> handler) {
+    auto buffer = std::make_shared<std::string>();
+    buffer->reserve(1024);
+    return {
+        HttpResponse{
+            .headers = {},
+            .content_length = 0,
+            .input_call =
+                [data = std::move(buffer), handler = std::move(handler)](std::string_view chunk, bool last) {
+                  data->append(chunk);
+                  if (last) {
+                    T proto_message;
+                    if (!data->empty()) {
+                      auto status = JsonStringToMessage(*data, &proto_message);
+                      if (!status.ok()) {
+                        return Error{
+                            .code = 422,
+                            .message = fmt::format("Failed parse JSON buffer: {}", status.message().ToString())};
+                      }
+                    }
+
+                    return handler(std::move(proto_message));
+                  }
+                  return Error::kOk;
+                },
+            .output_call = []() { return Result<std::string>{}; },
+        },
+        Error::kOk,
+    };
+  }
+
   // Server API
   /**
    * HEAD /alive
@@ -309,71 +368,20 @@ class ApiServer : public IApiServer {
   /**
    * GET /info
    */
-  Result<HttpResponse> Info() const {
-    auto [resp, err] = storage_->GetInfo();
-    auto json = err ? "" : PrintToJson(std::move(resp));
-    return {
-        HttpResponse{
-            {{"content-type", "application/json"}},
-            json.size(),
-            [](std::string_view chunk, bool last) { return Error::kOk; },
-            [json = std::move(json), err = std::move(err)]() {
-              return Result<std::string>{json, err};
-            },
-        },
-        Error::kOk,
-    };
-  }
+  Result<HttpResponse> Info() const { return SendJson(storage_->GetInfo()); }
 
   /**
    * GET /list
    */
-  Result<HttpResponse> List() const {
-    auto [resp, err] = storage_->GetList();
-    auto json = err ? "" : PrintToJson(std::move(resp));
-    return {
-        HttpResponse{
-            {{"content-type", "application/json"}},
-            json.size(),
-            [](std::string_view chunk, bool last) { return Error::kOk; },
-            [json = std::move(json), err = std::move(err)]() {
-              return Result<std::string>{json, err};
-            },
-        },
-        Error::kOk,
-    };
-  }
+  Result<HttpResponse> List() const { return SendJson(storage_->GetList()); }
 
   // Bucket API
   /**
    * POST /b/:name
    */
   Result<HttpResponse> CreateBucket(std::string_view bucket) const {
-    std::shared_ptr<std::string> data;
-
-    return {
-        HttpResponse{
-            .headers = {},
-            .content_length = 0,
-            .input_call =
-                [this, data, bucket = std::string(bucket)](std::string_view chunk, bool last) mutable {
-                  data->append(chunk);
-                  if (last) {
-                    BucketSettings settings;
-                    auto status = JsonStringToMessage(*data, &settings);
-                    if (!status.ok()) {
-                      return Error{.code = 422,
-                                   .message = fmt::format("Failed parse JSON data: {}", status.message().ToString())};
-                    }
-
-                    return storage_->CreateBucket(bucket, settings);
-                  }
-                  return Error::kOk;
-                },
-            .output_call = []() { return Result<std::string>{}; },
-        },
-        Error::kOk,
-    };
+    return ReceiveJson<BucketSettings>(
+        [this, bucket = std::string(bucket)](auto settings) { return storage_->CreateBucket(bucket, settings); });
   }
 
   /**

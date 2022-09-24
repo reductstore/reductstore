@@ -47,7 +47,7 @@ TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
 TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   const auto settings = MakeDefaultBucketSettings();
-  REQUIRE(storage->CreateBucket("bucket", settings));
+  REQUIRE(storage->CreateBucket("bucket", settings) == Error::kOk);
 
   auto [writer, w_err] =
       OnWriteEntry(storage.get(),
@@ -84,7 +84,7 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
   auto data_path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = data_path});
 
-  REQUIRE(storage->CreateBucket("bucket", MakeDefaultBucketSettings()));
+  REQUIRE(storage->CreateBucket("bucket", MakeDefaultBucketSettings()) == Error::kOk);
 
   SECTION("should update full settings") {
     BucketSettings settings;
