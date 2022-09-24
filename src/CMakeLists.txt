@@ -30,7 +30,10 @@ add_custom_command(OUTPUT ${PROTOBUF_FILES}
 
 
 set(SRC_FILES
-        reduct/api/api_server.cc
+        reduct/api/http_server.cc
+        reduct/api/server_api.cc
+        reduct/api/bucket_api.cc
+
         reduct/asset/asset_manager.cc
         reduct/async/loop.cc
         reduct/auth/token_auth.cc

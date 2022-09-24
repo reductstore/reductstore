@@ -1,13 +1,16 @@
-// Copyright 2021-2022 Alexey Timin
+// Copyright 2022 Alexey Timin
 
-#include "reduct/api/api_server.h"
+#include "reduct/api/http_server.h"
 
 #include <App.h>
+#include <fmt/format.h>
 
 #include <filesystem>
 #include <regex>
 
-#include "common.h"
+#include "reduct/api/bucket_api.h"
+#include "reduct/api/common.h"
+#include "reduct/api/server_api.h"
 #include "reduct/async/sleep.h"
 #include "reduct/core/logger.h"
 
@@ -31,9 +34,9 @@ using core::Result;
 
 namespace fs = std::filesystem;
 
-class ApiServer : public IApiServer {
+class HttpServer : public IHttpServer {
  public:
-  ApiServer(Components components, Options options)
+  HttpServer(Components components, Options options)
       : storage_(std::move(components.storage)),
         auth_(std::move(components.auth)),
         console_(std::move(components.console)),
@@ -66,20 +69,6 @@ class ApiServer : public IApiServer {
   }
 
  private:
-  using StringMap = std::unordered_map<std::string, std::string>;
-  struct HttpResponse {
-    StringMap headers;
-    size_t content_length;
-    std::function<Error(std::string_view, bool)> input_call;
-    std::function<Result<std::string>()> output_call;
-  };
-  struct HttpRequest {
-    StringMap headers;
-    StringMap parameters;
-  };
-
-  using HttpResponseHandler = std::function<Result<HttpResponse>()>;
-
   template <bool SSL>
   VoidTask RegisterEndpoint(HttpContext<SSL> ctx, HttpResponseHandler &&handler) const {
     std::string method(ctx.req->getMethod());
@@ -201,17 +190,20 @@ class ApiServer : public IApiServer {
              })
         .get(base_path + "info",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this]() { return Info(); });
+               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                [this]() { return ServerApi::Info(storage_.get()); });
              })
         .get(base_path + "list",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this]() { return List(); });
+               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                [this]() { return ServerApi::List(storage_.get()); });
              })
         // Bucket API
         .post(base_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
-                RegisterEndpoint(HttpContext<SSL>{res, req, running},
-                                 [this, req]() { return CreateBucket(req->getParameter(0)); });
+                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                  return BucketApi::CreateBucket(storage_.get(), req->getParameter(0));
+                });
               })
         .get(base_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
@@ -297,55 +289,6 @@ class ApiServer : public IApiServer {
         .run();
   }
 
-  template <class T>
-  static Result<HttpResponse> SendJson(Result<T> &&res) {
-    auto [data, err] = res;
-    auto json = err ? "" : PrintToJson(std::move(data));
-    return {
-        HttpResponse{
-            {{"content-type", "application/json"}},
-            json.size(),
-            [](std::string_view chunk, bool last) { return Error::kOk; },
-            [json = std::move(json), err = std::move(err)]() {
-              return Result<std::string>{json, err};
-            },
-        },
-        Error::kOk,
-    };
-  }
-
-  template <class T>
-  static Result<HttpResponse> ReceiveJson(std::function<Error(T &&)> handler) {
-    auto buffer = std::make_shared<std::string>();
-    buffer->reserve(1024);
-    return {
-        HttpResponse{
-            .headers = {},
-            .content_length = 0,
-            .input_call =
-                [data = std::move(buffer), handler = std::move(handler)](std::string_view chunk, bool last) {
-                  data->append(chunk);
-                  if (last) {
-                    T proto_message;
-                    if (!data->empty()) {
-                      auto status = JsonStringToMessage(*data, &proto_message);
-                      if (!status.ok()) {
-                        return Error{
-                            .code = 422,
-                            .message = fmt::format("Failed parse JSON buffer: {}", status.message().ToString())};
-                      }
-                    }
-
-                    return handler(std::move(proto_message));
-                  }
-                  return Error::kOk;
-                },
-            .output_call = []() { return Result<std::string>{}; },
-        },
-        Error::kOk,
-    };
-  }
-
   // Server API
   /**
    * HEAD /alive
@@ -363,25 +306,6 @@ class ApiServer : public IApiServer {
     typename IAliveCallback::Result result{};
     handler.Send(std::move(result));
     co_return;
-  }
-
-  /**
-   * GET /info
-   */
-  Result<HttpResponse> Info() const { return SendJson(storage_->GetInfo()); }
-
-  /**
-   * GET /list
-   */
-  Result<HttpResponse> List() const { return SendJson(storage_->GetList()); }
-
-  // Bucket API
-  /**
-   * POST /b/:name
-   */
-  Result<HttpResponse> CreateBucket(std::string_view bucket) const {
-    return ReceiveJson<BucketSettings>(
-        [this, bucket = std::string(bucket)](auto settings) { return storage_->CreateBucket(bucket, settings); });
   }
 
   /**
@@ -651,8 +575,8 @@ class ApiServer : public IApiServer {
   std::unique_ptr<IAssetManager> console_;
 };
 
-std::unique_ptr<IApiServer> IApiServer::Build(Components components, Options options) {
-  return std::make_unique<ApiServer>(std::move(components), std::move(options));
+std::unique_ptr<IHttpServer> IHttpServer::Build(Components components, Options options) {
+  return std::make_unique<HttpServer>(std::move(components), std::move(options));
 }
 
 }  // namespace reduct::api

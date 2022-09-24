@@ -1,7 +1,7 @@
-// Copyright 2021-2022 Alexey Timin
+// Copyright 2022 Alexey Timin
 
-#ifndef REDUCT_STORAGE_API_SERVER_H
-#define REDUCT_STORAGE_API_SERVER_H
+#ifndef REDUCT_STORAGE_HTTP_SERVER_H
+#define REDUCT_STORAGE_HTTP_SERVER_H
 
 #include <filesystem>
 #include <map>
@@ -16,11 +16,10 @@
 
 namespace reduct::api {
 
-
 /**
  * HTTP API Server
  */
-class IApiServer {
+class IHttpServer {
  public:
   /**
    * Components of the API server
@@ -45,7 +44,7 @@ class IApiServer {
    * @param options
    * @return pointer to the implementation
    */
-  static std::unique_ptr<IApiServer> Build(Components components, Options options);
+  static std::unique_ptr<IHttpServer> Build(Components components, Options options);
 
   /**
    * Runs HTTP server
@@ -55,4 +54,4 @@ class IApiServer {
 
 }  // namespace reduct::api
 
-#endif  // REDUCT_STORAGE_API_SERVER_H
+#endif  // REDUCT_STORAGE_HTTP_SERVER_H
