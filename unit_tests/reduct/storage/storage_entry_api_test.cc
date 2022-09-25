@@ -8,8 +8,6 @@
 #include "reduct/helpers.h"
 #include "reduct/storage/storage.h"
 
-using reduct::api::IReadEntryCallback;
-
 using reduct::async::Run;
 using reduct::async::Task;
 using reduct::core::Error;
@@ -20,7 +18,6 @@ using reduct::storage::IStorage;
 using reduct::MakeDefaultBucketSettings;
 using reduct::OnNextRecord;
 using reduct::OnQuery;
-using reduct::OnReadEntry;
 
 using reduct::async::IAsyncReader;
 

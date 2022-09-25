@@ -17,6 +17,13 @@ class EntryApi {
   static core::Result<HttpResponse> Write(storage::IStorage* storage, std::string_view bucket_name,
                                          std::string_view entry_name, std::string_view timestamp,
                                          std::string_view content_length);
+
+  /**
+   * GET /b/:bucket_name/:entry
+   */
+  static core::Result<HttpResponse> Read(storage::IStorage* storage, std::string_view bucket_name,
+                                          std::string_view entry_name, std::string_view timestamp,
+                                          std::string_view query_id);
 };
 
 }  // namespace reduct::api

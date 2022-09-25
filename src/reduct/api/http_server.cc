@@ -123,6 +123,7 @@ class HttpServer : public IHttpServer {
       co_return;
     }
 
+    ctx.res->writeStatus(std::to_string(result.error.code));  // If Ok but not 200
     CommonHeaders();
     for (auto &[key, val] : headers) {
       ctx.res->writeHeader(key, val);
@@ -239,9 +240,10 @@ class HttpServer : public IHttpServer {
               })
         .get(base_path + "b/:bucket_name/:entry_name",
              [this, running](auto *res, auto *req) {
-               ReadEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
-                         std::string(req->getParameter(1)), std::string(req->getQuery("ts")),
-                         std::string(req->getQuery("q")));
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return EntryApi::Read(storage_.get(), req->getParameter(0), req->getParameter(1), req->getQuery("ts"),
+                                       req->getQuery("q"));
+               });
              })
         .get(base_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
@@ -297,89 +299,6 @@ class HttpServer : public IHttpServer {
                   }
                 })
         .run();
-  }
-
-  /**
-   * GET /b/:bucket/:entry
-   */
-  template <bool SSL = false>
-  async::VoidTask ReadEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string ts,
-                            std::string query_id) const {
-    auto handler = BasicApiHandler<SSL, IReadEntryCallback>(ctx, "application/octet-stream");
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    Error err;
-    async::IAsyncReader::SPtr reader;
-    bool last = true;
-    if (query_id.empty()) {
-      IReadEntryCallback::Request data{
-          .bucket_name = bucket, .entry_name = entry, .timestamp = ts, .latest = ts.empty()};
-      auto ret = co_await storage_->OnReadEntry(data);
-      reader = ret.result;
-      err = ret.error;
-    } else {
-      INextCallback::Request data{.bucket_name = bucket, .entry_name = entry, .id = query_id};
-      auto ret = co_await storage_->OnNextRecord(data);
-      reader = ret.result.reader;
-      last = ret.result.last;
-      err = ret.error;
-    }
-
-    if (err || !reader) {
-      handler.SendError(err);
-      co_return;
-    }
-    bool ready_to_continue = false;
-    ctx.res->onWritable([&ready_to_continue](auto _) {
-      LOG_DEBUG("ready");
-      ready_to_continue = true;
-      return true;
-    });
-
-    bool aborted = false;
-    ctx.res->onAborted([&aborted] {
-      LOG_WARNING("aborted");
-      aborted = true;
-    });
-
-    handler.AddHeader("x-reduct-time", core::ToMicroseconds(reader->timestamp()));
-    handler.AddHeader("x-reduct-last", static_cast<int>(last));
-    handler.PrepareHeaders(true, "application/octet-stream");
-
-    bool complete = false;
-    while (!aborted && !complete) {
-      co_await Sleep(async::kTick);  // switch context before start to read
-      auto [chuck, read_err] = reader->Read();
-      if (read_err) {
-        handler.SendError(err);
-        co_return;
-      }
-
-      const auto offset = ctx.res->getWriteOffset();
-      while (!aborted) {
-        ready_to_continue = false;
-        auto [ok, responded] = ctx.res->tryEnd(chuck.data.substr(ctx.res->getWriteOffset() - offset), reader->size());
-        if (ok) {
-          complete = responded;
-          break;
-        } else {
-          // Have to wait until onWritable sets flag
-          LOG_DEBUG("Failed to send data: {} {}/{} kB", ts, ctx.res->getWriteOffset() / 1024, reader->size() / 1024);
-          while (!ready_to_continue && !aborted) {
-            co_await Sleep(async::kTick);
-          }
-
-          continue;
-        }
-      }
-    }
-
-    LOG_DEBUG("Sent {} {}/{} kB", ts, ctx.res->getWriteOffset() / 1024, reader->size() / 1024);
-
-    handler.SendOk("", true);
-    co_return;
   }
 
   /**

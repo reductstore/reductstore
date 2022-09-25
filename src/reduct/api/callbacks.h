@@ -16,27 +16,6 @@
 
 namespace reduct::api {
 
-//---------------------
-// Entry API
-//---------------------
-
-/**
- * Read a record by its timestamp
- */
-class IReadEntryCallback {
- public:
-  using Response = async::IAsyncReader::SPtr;
-  struct Request {
-    std::string_view bucket_name;
-    std::string_view entry_name;
-    std::string_view timestamp;
-    bool latest;
-  };
-
-  using Result = core::Result<Response>;
-  virtual async::Run<Result> OnReadEntry(const Request& req) = 0;
-};
-
 /**
  * Query callback
  */
@@ -79,6 +58,6 @@ class INextCallback {
 /**
  * API handler with all the request callbacks
  */
-class IApiHandler : public IReadEntryCallback, public IQueryCallback, public INextCallback {};
+class IApiHandler : public IQueryCallback, public INextCallback {};
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

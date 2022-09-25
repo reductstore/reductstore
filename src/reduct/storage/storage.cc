@@ -123,30 +123,6 @@ class Storage : public IStorage {
     return err;
   }
 
-  Run<IReadEntryCallback::Result> OnReadEntry(const IReadEntryCallback::Request& req) override {
-    using Callback = IReadEntryCallback;
-
-    return Run<Callback::Result>([this, req] {
-      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name, true);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      Time ts;
-      if (!req.latest) {
-        auto [parsed_ts, parse_err] = ParseTimestamp(req.timestamp);
-        if (parse_err) {
-          return Callback::Result{{}, parse_err};
-        }
-        ts = parsed_ts;
-      } else {
-        ts = Time() + std::chrono::microseconds(entry->GetInfo().latest_record());
-      }
-
-      return entry->BeginRead(ts);
-    });
-  }
-
   [[nodiscard]] Run<IQueryCallback::Result> OnQuery(const IQueryCallback::Request& req) const override {
     using Callback = IQueryCallback;
 

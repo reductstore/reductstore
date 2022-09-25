@@ -27,6 +27,21 @@ inline core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string
   }
 }
 
+inline core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_view param_name) {
+  uint64_t val = 0;
+  if (timestamp.empty()) {
+    return {val, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
+  }
+  try {
+    val = std::stoul(std::string{timestamp});
+    return {val, Error::kOk};
+  } catch (...) {
+    return {val, Error{.code = 422,
+                       .message = fmt::format("Failed to parse '{}' parameter: {} should be unsigned integer",
+                                              param_name, std::string{timestamp})}};
+  }
+}
+
 inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std::string& bucket_name,
                                                    const std::string& entry_name, bool must_exist = false) {
   auto [bucket_it, err] = storage->GetBucket(bucket_name);
@@ -35,6 +50,8 @@ inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std:
   }
 
   auto bucket = bucket_it.lock();
+
+  assert(bucket && "Failed to reach bucket");
   if (must_exist && !bucket->HasEntry(entry_name)) {
     return {{}, {.code = 404, .message = fmt::format("Entry '{}' could not be found", entry_name)}};
   }
@@ -45,6 +62,8 @@ inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std:
   }
 
   auto entry_ptr = entry.lock();
+  assert(bucket && "Failed to reach entry");
+
   if (!entry_ptr) {
     return {{}, {.code = 500, .message = "Failed to resolve entry"}};
   }
@@ -87,7 +106,69 @@ core::Result<HttpResponse> EntryApi::Write(storage::IStorage* storage, std::stri
   auto http_response = HttpResponse::Default();
   http_response.input_call = [writer](std::string_view chunk, bool last) { return writer->Write(chunk, last); };
 
-  return { std::move(http_response), Error::kOk };
+  return {std::move(http_response), Error::kOk};
+}
+
+Result<HttpResponse> EntryApi::Read(IStorage* storage, std::string_view bucket_name, std::string_view entry_name,
+                                    std::string_view timestamp, std::string_view query_id) {
+  auto [entry, err] = GetOrCreateEntry(storage, std::string(bucket_name), std::string(entry_name), true);
+  if (err) {
+    return {{}, err};
+  }
+
+  bool last = true;
+  async::IAsyncReader::SPtr reader;
+  if (query_id.empty()) {
+    Time ts;
+    if (!timestamp.empty()) {
+      auto [parsed_ts, parse_err] = ParseTimestamp(timestamp);
+      if (parse_err) {
+        return {{}, parse_err};
+      }
+
+      ts = parsed_ts;
+    } else {
+      ts = Time() + std::chrono::microseconds(entry->GetInfo().latest_record());
+    }
+
+    auto [next, start_err] = entry->BeginRead(ts);
+    if (start_err) {
+      return {{}, start_err};
+    }
+    reader = next;
+  } else {
+    auto [id, parse_err] = ParseUInt(query_id, "id");
+    if (parse_err) {
+      return {{}, parse_err};
+    }
+
+    auto [next, start_err] = entry->Next(id);
+    if (start_err) {
+      return {{}, start_err};
+    } else if (start_err.code == 202) {
+      return {HttpResponse::Default(), start_err};
+    }
+
+    reader = next.reader;
+    last = next.last;
+  }
+
+  assert(reader && "Failed to reach reader");
+  return {
+      HttpResponse{
+          .headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
+                      {"x-reduct-last", std::to_string(static_cast<int>(last))},
+                      {"content-type", "application/octet-stream"}},
+          .content_length = reader->size(),
+          .input_call = [](std::string_view chunk, bool last) { return core::Error::kOk; },
+          .output_call =
+              [reader]() {
+                auto [chunk, err] = reader->Read();
+                return Result<std::string>{std::move(chunk.data), err};
+              },
+      },
+      Error::kOk,
+  };
 }
 
 }  // namespace reduct::api
