@@ -20,8 +20,8 @@ using core::Time;
 
 using proto::api::BucketInfo;
 using proto::api::BucketInfoList;
-using proto::api::ServerInfo;
 using proto::api::FullBucketInfo;
+using proto::api::ServerInfo;
 
 namespace fs = std::filesystem;
 
@@ -110,40 +110,19 @@ class Storage : public IStorage {
     return {bucket_it->second, err};
   }
 
+  Error RemoveBucket(const std::string& bucket_name) override {
+    auto [bucket_it, err] = FindBucket(bucket_name);
+    if (err) {
+      return err;
+    }
 
-  [[nodiscard]] Run<IRemoveBucketCallback::Result> OnRemoveBucket(const IRemoveBucketCallback::Request& req) override {
-    using Callback = IRemoveBucketCallback;
+    err = bucket_it->second->Clean();
+    fs::remove(options_.data_path / bucket_name);
+    buckets_.erase(bucket_it);
 
-    return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      err = bucket_it->second->Clean();
-      fs::remove(options_.data_path / req.bucket_name);
-      buckets_.erase(bucket_it);
-
-      return Callback::Result{{}, err};
-    });
+    return err;
   }
 
-  Run<IUpdateBucketCallback::Result> OnUpdateCallback(const IUpdateBucketCallback::Request& req) override {
-    using Callback = IUpdateBucketCallback;
-    return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      err = bucket_it->second->SetSettings(std::move(req.new_settings));
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      return Callback::Result{{}, Error::kOk};
-    });
-  }
   /**
    * Entry API
    */

@@ -49,6 +49,13 @@ class IStorage : public api::IApiHandler {
   virtual core::Result<IBucket::WPtr> GetBucket(const std::string& bucket_name) const = 0;
 
   /**
+   * Remove a bucket
+   * @param bucket_name
+   * @return
+   */
+  virtual core::Error RemoveBucket(const std::string& bucket_name) = 0;
+
+  /**
    * Build storage
    * @param options
    * @return

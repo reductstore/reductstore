@@ -11,12 +11,8 @@
 using reduct::async::Task;
 using reduct::core::Error;
 
-using reduct::api::IUpdateBucketCallback;
-
 using reduct::proto::api::BucketSettings;
 
-using reduct::OnChangeBucketSettings;
-using reduct::OnRemoveBucket;
 using reduct::OnWriteEntry;
 
 using reduct::MakeDefaultBucketSettings;
@@ -79,60 +75,6 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   }
 }
 
-TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
-  auto data_path = BuildTmpDirectory();
-  auto storage = IStorage::Build({.data_path = data_path});
-
-  REQUIRE(storage->CreateBucket("bucket", MakeDefaultBucketSettings()) == Error::kOk);
-
-  SECTION("should update full settings") {
-    BucketSettings settings;
-    settings.set_max_block_size(10);
-    settings.set_quota_type(BucketSettings::FIFO);
-    settings.set_quota_size(1000);
-    settings.set_max_block_records(500);
-
-    IUpdateBucketCallback::Request change_req{
-        .bucket_name = "bucket",
-        .new_settings = settings,
-    };
-
-    REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
-    auto [info, err] = storage->GetBucket("bucket");
-    REQUIRE(err == Error::kOk);
-    REQUIRE(info.lock()->GetSettings() == change_req.new_settings);
-  }
-
-  SECTION("should update part of settings") {
-    BucketSettings settings;
-    settings.set_quota_type(BucketSettings::FIFO);
-
-    IUpdateBucketCallback::Request change_req{
-        .bucket_name = "bucket",
-        .new_settings = settings,
-    };
-
-    REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
-    auto [info, err] = storage->GetBucket("bucket");
-    REQUIRE(err == Error::kOk);
-
-    settings = info.lock()->GetSettings();
-    REQUIRE(settings.max_block_size() == MakeDefaultBucketSettings().max_block_size());
-    REQUIRE(settings.quota_type() == change_req.new_settings.quota_type());
-  }
-
-  SECTION("settings update should fail if underlying directory has been deleted") {
-    BucketSettings settings;
-    settings.set_quota_size(100);
-
-    IUpdateBucketCallback::Request change_req{.bucket_name = "bucket", .new_settings = settings};
-
-    fs::remove_all(data_path / "bucket");
-    auto result = OnChangeBucketSettings(storage.get(), change_req).Get();
-    REQUIRE(result == Error{.code = 500, .message = "Failed to open file of bucket settings"});
-  }
-}
-
 TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   auto data_path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = data_path});
@@ -141,7 +83,7 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   REQUIRE(err == Error::kOk);
   REQUIRE(fs::exists(data_path / "bucket"));
 
-  err = OnRemoveBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+  err = storage->RemoveBucket("bucket");
   REQUIRE(err == Error::kOk);
   REQUIRE_FALSE(fs::exists(data_path / "bucket"));
 
@@ -149,7 +91,7 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
 
   SECTION("error if bucket is not found") {
-    err = OnRemoveBucket(storage.get(), {.bucket_name = "X"}).Get();
+    err = storage->RemoveBucket("X");
     REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
 }

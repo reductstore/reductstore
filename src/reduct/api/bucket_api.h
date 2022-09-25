@@ -25,6 +25,16 @@ class BucketApi {
    * HEAD /b/:name
    */
   static core::Result<HttpResponse> HeadBucket(const storage::IStorage* storage, std::string_view name);
+
+  /**
+   * PUT /b/:name
+   */
+  static core::Result<HttpResponse> UpdateBucket(const storage::IStorage* storage, std::string_view name);
+
+  /**
+   * DELETE /b/:name
+   */
+  static core::Result<HttpResponse> RemoveBucket(storage::IStorage* storage, std::string_view name);
 };
 
 }  // namespace reduct::api

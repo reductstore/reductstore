@@ -90,18 +90,6 @@ inline core::Result<std::string> ReadOne(const storage::IEntry& entry, core::Tim
   return {read_res.result.data, core::Error::kOk};
 }
 
-inline async::Task<api::IUpdateBucketCallback::Result> OnChangeBucketSettings(storage::IStorage* storage,
-                                                                              api::IUpdateBucketCallback::Request req) {
-  auto result = co_await storage->OnUpdateCallback(std::move(req));
-  co_return result;
-}
-
-inline async::Task<api::IRemoveBucketCallback::Result> OnRemoveBucket(storage::IStorage* storage,
-                                                                      api::IRemoveBucketCallback::Request req) {
-  auto result = co_await storage->OnRemoveBucket(std::move(req));
-  co_return result;
-}
-
 inline async::Task<api::IWriteEntryCallback::Result> OnWriteEntry(storage::IStorage* storage,
                                                                   api::IWriteEntryCallback::Request req) {
   auto result = storage->OnWriteEntry(std::move(req));

@@ -42,4 +42,21 @@ core::Result<HttpResponse> BucketApi::HeadBucket(const storage::IStorage* storag
   return {HttpResponse::Default(), Error::kOk};
 }
 
+core::Result<HttpResponse> BucketApi::UpdateBucket(const storage::IStorage* storage, std::string_view name) {
+  auto [bucket_ptr, err] = storage->GetBucket(std::string(name));
+  if (err) {
+    return {{}, err};
+  }
+
+  return ReceiveJson<BucketSettings>(
+      [bucket = bucket_ptr.lock()](auto settings) { return bucket->SetSettings(settings); });
+}
+core::Result<HttpResponse> BucketApi::RemoveBucket(storage::IStorage* storage, std::string_view name) {
+  if (auto err = storage->RemoveBucket(std::string(name))) {
+    return {{}, err};
+  }
+
+  return {HttpResponse::Default(), Error::kOk};
+}
+
 }  // namespace reduct::api

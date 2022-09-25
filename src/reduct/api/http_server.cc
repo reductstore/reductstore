@@ -89,7 +89,7 @@ class HttpServer : public IHttpServer {
       ctx.res->writeHeader("server", "ReductStorage");
     };
 
-    auto SendError = [ctx, &method, &url, CommonHeaders](core::Error err) {
+    auto SendError = [ctx, &method, &url, CommonHeaders](const core::Error &err) {
       if (err.code >= 500) {
         LOG_ERROR("{} {}: {}", method, url, err.ToString());
       } else {
@@ -218,11 +218,15 @@ class HttpServer : public IHttpServer {
               })
         .put(base_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               UpdateBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return BucketApi::UpdateBucket(storage_.get(), req->getParameter(0));
+               });
              })
         .del(base_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               RemoveBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return BucketApi::RemoveBucket(storage_.get(), req->getParameter(0));
+               });
              })
         // Entry API
         .post(base_path + "b/:bucket_name/:entry_name",
@@ -290,57 +294,6 @@ class HttpServer : public IHttpServer {
                   }
                 })
         .run();
-  }
-
-  /**
-   * PUT /b/:name
-   */
-  template <bool SSL>
-  VoidTask UpdateBucket(HttpContext<SSL> ctx, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IUpdateBucketCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    std::string data;
-    auto err = co_await AsyncHttpReceiver<SSL>(ctx.res, [&data](auto chuck, bool _) {
-      data += chuck;
-      return Error::kOk;
-    });
-
-    if (err) {
-      handler.SendError(err);
-      co_return;
-    }
-
-    BucketSettings settings;
-    auto status = JsonStringToMessage(data, &settings);
-    if (!status.ok()) {
-      handler.SendError(Error{.code = 422, .message = "Failed parse JSON data"});
-      co_return;
-    }
-
-    IUpdateBucketCallback::Request app_request{
-        .bucket_name = name,
-        .new_settings = std::move(settings),
-    };
-    handler.Send(co_await storage_->OnUpdateCallback(app_request));
-    co_return;
-  }
-
-  /**
-   * DELETE /b/:name
-   */
-  template <bool SSL>
-  VoidTask RemoveBucket(HttpContext<SSL> ctx, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IRemoveBucketCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    IRemoveBucketCallback::Request app_request{.bucket_name = name};
-    handler.Send(co_await storage_->OnRemoveBucket(app_request));
-    co_return;
   }
 
   // Entry API

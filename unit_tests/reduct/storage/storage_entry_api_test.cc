@@ -9,8 +9,6 @@
 #include "reduct/storage/storage.h"
 
 using reduct::api::IReadEntryCallback;
-using reduct::api::IRemoveBucketCallback;
-using reduct::api::IUpdateBucketCallback;
 using reduct::api::IWriteEntryCallback;
 
 using reduct::async::Run;
