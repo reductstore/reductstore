@@ -10,6 +10,7 @@
 
 #include "reduct/api/bucket_api.h"
 #include "reduct/api/common.h"
+#include "reduct/api/entry_api.h"
 #include "reduct/api/server_api.h"
 #include "reduct/async/sleep.h"
 #include "reduct/core/logger.h"
@@ -231,8 +232,10 @@ class HttpServer : public IHttpServer {
         // Entry API
         .post(base_path + "b/:bucket_name/:entry_name",
               [this, running](auto *res, auto *req) {
-                WriteEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
-                           std::string(req->getParameter(1)), std::string(req->getQuery("ts")));
+                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                  return EntryApi::Write(storage_.get(), req->getParameter(0), req->getParameter(1),
+                                         req->getQuery("ts"), req->getHeader("content-length"));
+                });
               })
         .get(base_path + "b/:bucket_name/:entry_name",
              [this, running](auto *res, auto *req) {
@@ -294,40 +297,6 @@ class HttpServer : public IHttpServer {
                   }
                 })
         .run();
-  }
-
-  // Entry API
-  /**
-   * POST /b/:bucket/:entry
-   */
-  template <bool SSL>
-  async::VoidTask WriteEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string ts) const {
-    auto handler = BasicApiHandler<SSL, IWriteEntryCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-    IWriteEntryCallback::Request app_req{
-        .bucket_name = bucket,
-        .entry_name = entry,
-        .timestamp = ts,
-        .content_length = ctx.req->getHeader("content-length"),
-    };
-
-    auto [async_writer, err] = storage_->OnWriteEntry(app_req);
-    if (err) {
-      handler.SendError(err);
-      co_return;
-    }
-
-    err = co_await AsyncHttpReceiver<SSL>(
-        ctx.res, [async_writer](auto chunk, bool last) { return async_writer->Write(chunk, last); });
-    if (err) {
-      handler.SendError(err);
-      co_return;
-    }
-
-    handler.SendOk();
-    co_return;
   }
 
   /**

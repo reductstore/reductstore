@@ -123,44 +123,6 @@ class Storage : public IStorage {
     return err;
   }
 
-  /**
-   * Entry API
-   */
-  [[nodiscard]] IWriteEntryCallback::Result OnWriteEntry(const IWriteEntryCallback::Request& req) noexcept override {
-    using Callback = IWriteEntryCallback;
-
-    auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name);
-    if (err) {
-      return Callback::Result{{}, err};
-    }
-
-    auto [ts, parse_err] = ParseTimestamp(req.timestamp);
-    if (parse_err) {
-      return Callback::Result{{}, parse_err};
-    }
-
-    int64_t size;
-    try {
-      size = std::stol(req.content_length.data());
-      if (size < 0) {
-        return {{}, {.code = 411, .message = "negative content-length"}};
-      }
-    } catch (...) {
-      return {{}, {.code = 411, .message = "bad or empty content-length"}};
-    }
-
-    auto [writer, writer_err] = entry->BeginWrite(ts, size);
-    if (!writer_err) {
-      auto [bucket_it, _] = FindBucket(req.bucket_name);
-      auto quota_error = bucket_it->second->KeepQuota();
-      if (quota_error) {
-        LOG_WARNING("Didn't mange to keep quota: {}", quota_error.ToString());
-      }
-    }
-
-    return Callback::Result{std::move(writer), writer_err};
-  }
-
   Run<IReadEntryCallback::Result> OnReadEntry(const IReadEntryCallback::Request& req) override {
     using Callback = IReadEntryCallback;
 

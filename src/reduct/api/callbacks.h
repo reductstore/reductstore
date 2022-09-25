@@ -21,25 +21,6 @@ namespace reduct::api {
 //---------------------
 
 /**
- * Write a new record to the entry
- */
-class IWriteEntryCallback {
- public:
-  using Response = async::IAsyncWriter::SPtr;
-  struct Request {
-    std::string_view bucket_name;
-    std::string_view entry_name;
-    std::string_view timestamp;
-    std::string_view content_length;
-  };
-
-  using Result = core::Result<Response>;
-
-  // NOTICE: Can't be an executor because we can't postpone receiving tasks in the loop
-  virtual Result OnWriteEntry(const Request& req) noexcept = 0;
-};
-
-/**
  * Read a record by its timestamp
  */
 class IReadEntryCallback {
@@ -98,9 +79,6 @@ class INextCallback {
 /**
  * API handler with all the request callbacks
  */
-class IApiHandler : public IWriteEntryCallback,
-                    public IReadEntryCallback,
-                    public IQueryCallback,
-                    public INextCallback {};
+class IApiHandler : public IReadEntryCallback, public IQueryCallback, public INextCallback {};
 }  // namespace reduct::api
 #endif  // REDUCT_STORAGE_CALLBACKS_H

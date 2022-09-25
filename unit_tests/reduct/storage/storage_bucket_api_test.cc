@@ -13,8 +13,6 @@ using reduct::core::Error;
 
 using reduct::proto::api::BucketSettings;
 
-using reduct::OnWriteEntry;
-
 using reduct::MakeDefaultBucketSettings;
 using reduct::storage::IStorage;
 
@@ -40,14 +38,15 @@ TEST_CASE("storage::Storage should create a bucket", "[storage][bucket]") {
 TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   const auto settings = MakeDefaultBucketSettings();
-  REQUIRE(storage->CreateBucket("bucket", settings) == Error::kOk);
 
-  auto [writer, w_err] =
-      OnWriteEntry(storage.get(),
-                   {.bucket_name = "bucket", .entry_name = "entry_1", .timestamp = "100000123", .content_length = "8"})
-          .Get();
-  REQUIRE(w_err == Error::kOk);
-  REQUIRE(writer->Write("someblob") == Error::kOk);
+  {
+    auto [bucket_ptr, err] = storage->GetBucket("bucket");
+    REQUIRE(err == Error::kOk);
+
+    err = reduct::WriteOne(*bucket_ptr.lock()->GetOrCreateEntry("entry_1").result.lock(), "someblob",
+                                  reduct::core::Time() + std::chrono::microseconds(100000123));
+    REQUIRE(err == Error::kOk);
+  }
 
   auto [bucket_ptr, err] = storage->GetBucket("bucket");
   REQUIRE(err == Error::kOk);
