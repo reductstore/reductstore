@@ -6,6 +6,7 @@
 
 #include "reduct/api/callbacks.h"
 #include "reduct/proto/api/server.pb.h"
+#include "reduct/storage/bucket.h"
 
 namespace reduct::storage {
 
@@ -32,8 +33,20 @@ class IStorage : public api::IApiHandler {
    */
   virtual core::Result<proto::api::BucketInfoList> GetList() const = 0;
 
-
+  /**
+   * Creates a new bucket
+   * @param bucket_name
+   * @param settings
+   * @return
+   */
   virtual core::Error CreateBucket(const std::string& bucket_name, const proto::api::BucketSettings& settings) = 0;
+
+  /**
+   * Gets a bucket
+   * @param bucket_name
+   * @return
+   */
+  virtual core::Result<IBucket::WPtr> GetBucket(const std::string& bucket_name) const = 0;
 
   /**
    * Build storage

@@ -14,7 +14,17 @@ class BucketApi {
   /**
    * POST /b/:name
    */
-  static core::Result<HttpResponse> CreateBucket(storage::IStorage* storage, std::string_view bucket);
+  static core::Result<HttpResponse> CreateBucket(storage::IStorage* storage, std::string_view name);
+
+  /**
+   * GET /b/:name
+   */
+  static core::Result<HttpResponse> GetBucket(const storage::IStorage* storage, std::string_view name);
+
+  /**
+   * HEAD /b/:name
+   */
+  static core::Result<HttpResponse> HeadBucket(const storage::IStorage* storage, std::string_view name);
 };
 
 }  // namespace reduct::api

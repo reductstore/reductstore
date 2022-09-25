@@ -10,14 +10,7 @@ using storage::IStorage;
 
 Result<HttpResponse> ServerApi::Alive(const IStorage* storage) {
   return {
-      {
-          {},
-          0,
-          [](std::string_view chunk, bool last) { return Error::kOk; },
-          []() {
-            return Result<std::string>{"", Error::kOk};
-          },
-      },
+      HttpResponse::Default(),
       core::Error::kOk,
   };
 }

@@ -208,11 +208,13 @@ class HttpServer : public IHttpServer {
               })
         .get(base_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               GetBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                [this, req]() { return BucketApi::GetBucket(storage_.get(), req->getParameter(0)); });
              })
         .head(base_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
-                HeadBucket(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)));
+                RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                 [this, req]() { return BucketApi::HeadBucket(storage_.get(), req->getParameter(0)); });
               })
         .put(base_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
@@ -288,37 +290,6 @@ class HttpServer : public IHttpServer {
                   }
                 })
         .run();
-  }
-
-  /**
-   * GET /b/:name
-   */
-  template <bool SSL>
-  VoidTask GetBucket(HttpContext<SSL> ctx, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    IGetBucketCallback::Request app_request{.bucket_name = name};
-    handler.Send(co_await storage_->OnGetBucket(app_request),
-                 [](const IGetBucketCallback::Response &resp) { return PrintToJson(resp); });
-    co_return;
-  }
-
-  /**
-   * HEAD /b/:name
-   */
-  template <bool SSL>
-  VoidTask HeadBucket(HttpContext<SSL> ctx, std::string name) const {
-    auto handler = BasicApiHandler<SSL, IGetBucketCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    IGetBucketCallback::Request app_request{.bucket_name = name};
-    handler.Send(co_await storage_->OnGetBucket(app_request));
-    co_return;
   }
 
   /**

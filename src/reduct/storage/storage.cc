@@ -21,6 +21,7 @@ using core::Time;
 using proto::api::BucketInfo;
 using proto::api::BucketInfoList;
 using proto::api::ServerInfo;
+using proto::api::FullBucketInfo;
 
 namespace fs = std::filesystem;
 
@@ -100,24 +101,15 @@ class Storage : public IStorage {
     return Error::kOk;
   }
 
-  [[nodiscard]] Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) const override {
-    using Callback = IGetBucketCallback;
-    return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
+  core::Result<IBucket::WPtr> GetBucket(const std::string& bucket_name) const override {
+    auto [bucket_it, err] = FindBucket(bucket_name);
+    if (err) {
+      return {{}, err};
+    }
 
-      const auto& bucket = *bucket_it->second;
-      proto::api::FullBucketInfo info;
-      info.mutable_info()->CopyFrom(bucket.GetInfo());
-      info.mutable_settings()->CopyFrom(bucket.GetSettings());
-      for (auto&& entry : bucket.GetEntryList()) {
-        *info.add_entries() = std::move(entry);
-      }
-      return Callback::Result{std::move(info), Error::kOk};
-    });
+    return {bucket_it->second, err};
   }
+
 
   [[nodiscard]] Run<IRemoveBucketCallback::Result> OnRemoveBucket(const IRemoveBucketCallback::Request& req) override {
     using Callback = IRemoveBucketCallback;
@@ -283,7 +275,7 @@ class Storage : public IStorage {
   }
 
  private:
-  using BucketMap = std::map<std::string, std::unique_ptr<IBucket>>;
+  using BucketMap = std::map<std::string, std::shared_ptr<IBucket>>;
 
   [[nodiscard]] std::pair<BucketMap::const_iterator, Error> FindBucket(std::string_view name) const {
     auto it = buckets_.find(std::string{name});

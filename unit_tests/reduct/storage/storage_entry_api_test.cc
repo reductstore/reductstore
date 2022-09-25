@@ -21,7 +21,6 @@ using reduct::proto::api::BucketSettings;
 using reduct::storage::IStorage;
 
 using reduct::MakeDefaultBucketSettings;
-using reduct::OnGetBucket;
 using reduct::OnNextRecord;
 using reduct::OnQuery;
 using reduct::OnReadEntry;
@@ -106,9 +105,9 @@ TEST_CASE("storage::Storage should write and read data", "[storage][entry]") {
         OnReadEntry(storage.get(), {.bucket_name = "bucket", .entry_name = "NOTEXIT", .timestamp = "1000"}).Get();
     REQUIRE(error == Error{.code = 404, .message = "Entry 'NOTEXIT' could not be found"});
 
-    auto bucket_info = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+    auto bucket_info = storage->GetBucket("bucket");
     REQUIRE(bucket_info == Error::kOk);
-    REQUIRE(bucket_info.result.entries_size() == 1);  // we don't create a new one
+    REQUIRE(bucket_info.result.lock()->GetEntryList().size() == 1);  // we don't create a new one
   }
 
   SECTION("error if the record not found") {

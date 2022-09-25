@@ -11,14 +11,11 @@
 using reduct::async::Task;
 using reduct::core::Error;
 
-using reduct::api::ICreateBucketCallback;
-using reduct::api::IGetBucketCallback;
 using reduct::api::IUpdateBucketCallback;
 
 using reduct::proto::api::BucketSettings;
 
 using reduct::OnChangeBucketSettings;
-using reduct::OnGetBucket;
 using reduct::OnRemoveBucket;
 using reduct::OnWriteEntry;
 
@@ -56,26 +53,28 @@ TEST_CASE("storage::Storage should get a bucket", "[storage][bucket]") {
   REQUIRE(w_err == Error::kOk);
   REQUIRE(writer->Write("someblob") == Error::kOk);
 
-  auto [resp, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+  auto [bucket_ptr, err] = storage->GetBucket("bucket");
   REQUIRE(err == Error::kOk);
-  REQUIRE(resp.settings() == settings);
 
-  REQUIRE(resp.info().name() == "bucket");
-  REQUIRE(resp.info().size() == 8);
-  REQUIRE(resp.info().entry_count() == 1);
-  REQUIRE(resp.info().oldest_record() == 100'000'123);
-  REQUIRE(resp.info().latest_record() == 100'000'123);
+  auto bucket = bucket_ptr.lock();
+  REQUIRE(bucket->GetSettings() == settings);
 
-  REQUIRE(resp.entries_size() == 1);
-  REQUIRE(resp.entries(0).name() == "entry_1");
-  REQUIRE(resp.entries(0).size() == 8);
-  REQUIRE(resp.entries(0).block_count() == 1);
-  REQUIRE(resp.entries(0).record_count() == 1);
-  REQUIRE(resp.entries(0).latest_record() == 100'000'123);
-  REQUIRE(resp.entries(0).oldest_record() == 100'000'123);
+  REQUIRE(bucket->GetInfo().name() == "bucket");
+  REQUIRE(bucket->GetInfo().size() == 8);
+  REQUIRE(bucket->GetInfo().entry_count() == 1);
+  REQUIRE(bucket->GetInfo().oldest_record() == 100'000'123);
+  REQUIRE(bucket->GetInfo().latest_record() == 100'000'123);
+
+  REQUIRE(bucket->GetEntryList().size() == 1);
+  REQUIRE(bucket->GetEntryList()[0].name() == "entry_1");
+  REQUIRE(bucket->GetEntryList()[0].size() == 8);
+  REQUIRE(bucket->GetEntryList()[0].block_count() == 1);
+  REQUIRE(bucket->GetEntryList()[0].record_count() == 1);
+  REQUIRE(bucket->GetEntryList()[0].latest_record() == 100'000'123);
+  REQUIRE(bucket->GetEntryList()[0].oldest_record() == 100'000'123);
 
   SECTION("error if not exist") {
-    err = OnGetBucket(storage.get(), {.bucket_name = "X"}).Get();
+    err = storage->GetBucket("X");
     REQUIRE(err == Error{.code = 404, .message = "Bucket 'X' is not found"});
   }
 }
@@ -99,9 +98,9 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
     };
 
     REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
-    auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+    auto [info, err] = storage->GetBucket("bucket");
     REQUIRE(err == Error::kOk);
-    REQUIRE(info.settings() == change_req.new_settings);
+    REQUIRE(info.lock()->GetSettings() == change_req.new_settings);
   }
 
   SECTION("should update part of settings") {
@@ -114,10 +113,12 @@ TEST_CASE("storage::Storage should change settings of bucket", "[stoage]") {
     };
 
     REQUIRE(OnChangeBucketSettings(storage.get(), change_req).Get() == Error::kOk);
-    auto [info, err] = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+    auto [info, err] = storage->GetBucket("bucket");
     REQUIRE(err == Error::kOk);
-    REQUIRE(info.settings().max_block_size() == MakeDefaultBucketSettings().max_block_size());
-    REQUIRE(info.settings().quota_type() == change_req.new_settings.quota_type());
+
+    settings = info.lock()->GetSettings();
+    REQUIRE(settings.max_block_size() == MakeDefaultBucketSettings().max_block_size());
+    REQUIRE(settings.quota_type() == change_req.new_settings.quota_type());
   }
 
   SECTION("settings update should fail if underlying directory has been deleted") {
@@ -144,7 +145,7 @@ TEST_CASE("storage::Storage should remove a bucket", "[storage][bucket]") {
   REQUIRE(err == Error::kOk);
   REQUIRE_FALSE(fs::exists(data_path / "bucket"));
 
-  err = OnGetBucket(storage.get(), {.bucket_name = "bucket"}).Get();
+  err = storage->GetBucket("bucket");
   REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
 
   SECTION("error if bucket is not found") {

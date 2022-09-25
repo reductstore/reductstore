@@ -20,32 +20,8 @@ namespace reduct::api {
 // Bucket API
 //---------------------
 
-/**
- * Create bucket callback
- */
-class ICreateBucketCallback {
- public:
-  struct Response {};
-  struct Request {
-    std::string_view bucket_name;
-    proto::api::BucketSettings bucket_settings;
-  };
-  using Result = core::Result<Response>;
-  virtual async::Run<Result> OnCreateBucket(const Request& req) = 0;
-};
 
-/**
- * Get bucket callback
- */
-class IGetBucketCallback {
- public:
-  using Response = proto::api::FullBucketInfo;
-  struct Request {
-    std::string_view bucket_name;
-  };
-  using Result = core::Result<Response>;
-  virtual async::Run<Result> OnGetBucket(const Request& req) const = 0;
-};
+
 
 /**
  * Remove bucket callback
@@ -156,8 +132,7 @@ class INextCallback {
 /**
  * API handler with all the request callbacks
  */
-class IApiHandler : public IGetBucketCallback,
-                    public IRemoveBucketCallback,
+class IApiHandler : public IRemoveBucketCallback,
                     public IUpdateBucketCallback,
                     public IWriteEntryCallback,
                     public IReadEntryCallback,

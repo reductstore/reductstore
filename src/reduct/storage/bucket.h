@@ -15,6 +15,10 @@ namespace reduct::storage {
  */
 class IBucket {
  public:
+  using WPtr = std::weak_ptr<IBucket>;
+  using SPtr = std::shared_ptr<IBucket>;
+  using UPtr = std::unique_ptr<IBucket>;
+
   /**
    * @brief Tries to get an entry by name
    * If there is no entry with the name, the bucket creates one
@@ -70,14 +74,14 @@ class IBucket {
    * @return
    */
 
-  static std::unique_ptr<IBucket> Build(std::filesystem::path full_path, proto::api::BucketSettings options = {});
+  static IBucket::UPtr Build(std::filesystem::path full_path, proto::api::BucketSettings options = {});
 
   /**
    * @brief Restores a bucket from folder
    * @param full_path
    * @return
    */
-  static std::unique_ptr<IBucket> Restore(std::filesystem::path full_path);
+  static IBucket::UPtr Restore(std::filesystem::path full_path);
 
   /**
    * Gets default settings for a new bucket

@@ -22,6 +22,17 @@ struct HttpResponse {
   size_t content_length;
   std::function<core::Error(std::string_view, bool)> input_call;
   std::function<core::Result<std::string>()> output_call;
+
+  static HttpResponse Default() {
+    return {
+        {},
+        0,
+        [](std::string_view chunk, bool last) { return core::Error::kOk; },
+        []() {
+          return core::Result<std::string>{"", core::Error::kOk};
+        },
+    };
+  }
 };
 
 using HttpResponseHandler = std::function<core::Result<HttpResponse>()>;
