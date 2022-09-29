@@ -22,9 +22,6 @@ using google::protobuf::util::JsonStringToMessage;
 
 using proto::api::BucketSettings;
 
-using uWS::HttpRequest;
-using uWS::HttpResponse;
-
 using asset::IAssetManager;
 using async::Sleep;
 using async::Task;
