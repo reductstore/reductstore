@@ -33,10 +33,11 @@ Result<HttpResponse> Console::UiRequest(const asset::IAssetManager* console, std
       }
     }
 
-    auto [it, _] = cache.insert(
+    auto [inserted_it, _] = cache.insert(
         {std::string(path), std::regex_replace(ret.result, std::regex("/ui/"), fmt::format("{}ui/", base_path))});
-    content = &it->second;
+    content = &inserted_it->second;
   }
+
   return {
       HttpResponse{
           .content_length = content->size(),

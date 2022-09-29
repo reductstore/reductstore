@@ -3,6 +3,9 @@ enable_testing()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 set(SRC_FILES
+        reduct/api/bucket_api_test.cc
+        reduct/api/server_api_test.cc
+
         reduct/asset/asset_manager_test.cc
 
         reduct/async/run_test.cc
@@ -16,8 +19,7 @@ set(SRC_FILES
         reduct/storage/bucket_test.cc
         reduct/storage/entry_test.cc
         reduct/storage/entry_query_test.cc
-        reduct/storage/storage_bucket_api_test.cc
-        reduct/storage/storage_server_api_test.cc
+        reduct/storage/storage_test.cc
         reduct/storage/storage_entry_api_test.cc
         test.cc)
 
