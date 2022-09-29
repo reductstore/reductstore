@@ -25,6 +25,8 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
   using SPtr = std::shared_ptr<IEntry>;
   using WPtr = std::weak_ptr<IEntry>;
 
+  virtual ~IEntry() = default;
+
   /**
    * Options
    */
@@ -34,27 +36,6 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
 
     std::strong_ordering operator<=>(const Options& rhs) const = default;
   };
-
-  /**
-   * Info about a record in a block
-   */
-  struct RecordInfo {
-    core::Time time;  // time when it was created
-    size_t size;      // size in bytes
-
-    std::strong_ordering operator<=>(const RecordInfo& rhs) const = default;
-
-    friend std::ostream& operator<<(std::ostream& os, const RecordInfo& info);
-  };
-
-  /**
-   * @brief List records for the time interval [start, stop)
-   * @param start
-   * @param stop
-   * @return return time stamps and size of records,  empty if no data
-   */
-  [[nodiscard]] virtual core::Result<std::vector<RecordInfo>> List(const core::Time& start,
-                                                                   const core::Time& stop) const = 0;
 
   /**
    * @brief Remove the oldest block from disk
