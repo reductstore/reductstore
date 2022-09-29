@@ -4,7 +4,6 @@
 
 #include <filesystem>
 
-#include "reduct/api/callbacks.h"
 #include "reduct/proto/api/server.pb.h"
 #include "reduct/storage/bucket.h"
 
@@ -13,7 +12,7 @@ namespace reduct::storage {
 /**
  * Data Storage
  */
-class IStorage : public api::IApiHandler {
+class IStorage {
  public:
   struct Options {
     std::filesystem::path data_path;

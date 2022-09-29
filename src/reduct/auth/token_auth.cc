@@ -9,7 +9,6 @@
 
 namespace reduct::auth {
 
-using async::Run;
 using core::Error;
 using proto::api::RefreshTokenResponse;
 using proto::api::Token;

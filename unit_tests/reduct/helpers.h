@@ -90,16 +90,6 @@ inline core::Result<std::string> ReadOne(const storage::IEntry& entry, core::Tim
   return {read_res.result.data, core::Error::kOk};
 }
 
-inline async::Task<api::IQueryCallback::Result> OnQuery(storage::IStorage* storage, api::IQueryCallback::Request req) {
-  auto result = co_await storage->OnQuery(std::move(req));
-  co_return result;
-}
-
-inline async::Task<api::INextCallback::Result> OnNextRecord(storage::IStorage* storage,
-                                                            api::INextCallback::Request req) {
-  auto result = co_await storage->OnNextRecord(std::move(req));
-  co_return result;
-}
 
 }  // namespace reduct
 

@@ -6,7 +6,6 @@
 #include <string>
 #include <string_view>
 
-#include "reduct/api/callbacks.h"
 #include "reduct/core/result.h"
 
 namespace reduct::auth {

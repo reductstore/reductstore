@@ -3,7 +3,7 @@
 #ifndef REDUCT_STORAGE_SERVER_API_H
 #define REDUCT_STORAGE_SERVER_API_H
 
-#include "reduct/api/api.h"
+#include "reduct/api/common.h"
 #include "reduct/storage/storage.h"
 
 namespace reduct::api {

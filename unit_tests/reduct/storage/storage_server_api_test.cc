@@ -5,7 +5,6 @@
 #include "reduct/helpers.h"
 #include "reduct/storage/storage.h"
 
-using reduct::async::Task;
 using reduct::core::Error;
 
 using reduct::storage::IStorage;

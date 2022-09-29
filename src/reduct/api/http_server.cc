@@ -9,7 +9,7 @@
 #include <regex>
 
 #include "reduct/api/bucket_api.h"
-#include "reduct/api/common.h"
+#include "reduct/api/console.h"
 #include "reduct/api/entry_api.h"
 #include "reduct/api/server_api.h"
 #include "reduct/async/sleep.h"
@@ -70,6 +70,47 @@ class HttpServer : public IHttpServer {
   }
 
  private:
+  template <bool SSL>
+  struct AsyncHttpReceiver {
+    using Callback = uWS::MoveOnlyFunction<core::Error(std::string_view, bool)>;
+    explicit AsyncHttpReceiver(uWS::HttpResponse<SSL> *res, Callback callback) : finish_{}, error_{}, res_(res) {
+      res->onData([this, callback = std::move(callback)](std::string_view data, bool last) mutable {
+        LOG_DEBUG("Received chuck {} kB", data.size() / 1024);
+        error_ = callback(data, last);
+        finish_ = last;
+      });
+
+      res->onAborted([this] {
+        LOG_ERROR("Aborted write operation");
+        error_ = core::Error{.code = 400};
+      });
+    }
+
+    [[nodiscard]] bool await_ready() const noexcept { return false; }
+
+    void await_suspend(std::coroutine_handle<> h) const noexcept {
+      if (finish_ || error_) {
+        h.resume();
+      } else {
+        async::ILoop::loop().Defer([this, h] { await_suspend(h); });
+      }
+    }
+
+    [[nodiscard]] core::Error await_resume() noexcept { return error_; }
+
+   private:
+    bool finish_;
+    core::Error error_;
+    uWS::HttpResponse<SSL> *res_;
+  };
+
+  template <bool SSL>
+  struct HttpContext {
+    uWS::HttpResponse<SSL> *res;
+    uWS::HttpRequest *req;
+    bool running;
+  };
+
   template <bool SSL>
   VoidTask RegisterEndpoint(HttpContext<SSL> ctx, HttpResponseHandler &&handler) const {
     std::string method(ctx.req->getMethod());
@@ -247,9 +288,11 @@ class HttpServer : public IHttpServer {
              })
         .get(base_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
-               QueryEntry(HttpContext<SSL>{res, req, running}, std::string(req->getParameter(0)),
-                          std::string(req->getParameter(1)), std::string(req->getQuery("start")),
-                          std::string(req->getQuery("stop")), std::string(req->getQuery("ttl")));
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return EntryApi::Query(storage_.get(), std::string(req->getParameter(0)),
+                                        std::string(req->getParameter(1)), std::string(req->getQuery("start")),
+                                        std::string(req->getQuery("stop")), std::string(req->getQuery("ttl")));
+               });
              })
         .get(base_path,
              [base_path](auto *res, auto *req) {
@@ -265,12 +308,13 @@ class HttpServer : public IHttpServer {
                if (path.empty()) {
                  path = "index.html";
                }
-
-               UiRequest(HttpContext<SSL>{res, req, running}, base_path, path);
+               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                [&]() { return Console::UiRequest(console_.get(), base_path, path); });
              })
         .get(base_path + "ui",
              [this, base_path, running](auto *res, auto *req) {
-               UiRequest(HttpContext<SSL>{res, req, running}, base_path, "index.html");
+               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                [&]() { return Console::UiRequest(console_.get(), base_path, "index.html"); });
              })
         .any("/*",
              [](auto *res, auto *req) {
@@ -299,68 +343,6 @@ class HttpServer : public IHttpServer {
                   }
                 })
         .run();
-  }
-
-  /**
-   * GET /b/:bucket/:entry/query
-   */
-  template <bool SSL = false>
-  async::VoidTask QueryEntry(HttpContext<SSL> ctx, std::string bucket, std::string entry, std::string start_ts,
-                             std::string stop_ts, std::string ttl) const {
-    auto handler = BasicApiHandler<SSL, IQueryCallback>(ctx);
-    if (handler.CheckAuth(auth_.get()) != Error::kOk) {
-      co_return;
-    }
-
-    IQueryCallback::Request data{
-        .bucket_name = bucket,
-        .entry_name = entry,
-        .start_timestamp = start_ts,
-        .stop_timestamp = stop_ts,
-        .ttl = ttl,
-    };
-
-    handler.Send(co_await storage_->OnQuery(data),
-                 [](const IQueryCallback::Response &app_resp) { return PrintToJson(app_resp); });
-    co_return;
-  }
-
-  template <bool SSL = false>
-  async::VoidTask UiRequest(HttpContext<SSL> ctx, std::string_view base_path, std::string path) const {
-    struct Callback {
-      struct [[maybe_unused]] Request {};  // NOLINT
-      using Response = std::string;
-      using Result = core::Result<Response>;
-    };
-
-    auto handler = BasicApiHandler<SSL, Callback>(ctx, "");
-
-    auto replace_base_path = [&base_path](typename Callback::Response resp) {
-      // substitute RS_API_BASE_PATH to make web console work
-      resp = std::regex_replace(resp, std::regex("/ui/"), fmt::format("{}ui/", base_path));
-      return resp;
-    };
-
-    auto ret = console_->Read(path);
-    switch (ret.error.code) {
-      case 200: {
-        auto content = std::regex_replace(ret.result, std::regex("/ui/"), fmt::format("{}ui/", base_path));
-        ctx.res->end(std::move(content));
-        handler.Send(std::move(ret), replace_base_path);
-        break;
-      }
-      case 404: {
-        // It's React.js paths
-        ret = console_->Read("index.html");
-        handler.Send(std::move(ret), replace_base_path);
-        break;
-      }
-      default: {
-        handler.SendError(ret.error);
-      }
-    }
-
-    co_return;
   }
 
   Options options_;

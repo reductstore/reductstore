@@ -2,6 +2,10 @@
 
 #include "reduct/api/entry_api.h"
 
+#include "reduct/core/logger.h"
+#include "reduct/proto/api/entry.pb.h"
+#include "reduct/storage/query/quiery.h"
+
 namespace reduct::api {
 
 using core::Error;
@@ -11,6 +15,9 @@ using core::Time;
 using storage::IBucket;
 using storage::IEntry;
 using storage::IStorage;
+using storage::query::IQuery;
+
+using proto::api::QueryInfo;
 
 inline core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
   auto ts = Time::clock::now();
@@ -169,6 +176,53 @@ Result<HttpResponse> EntryApi::Read(IStorage* storage, std::string_view bucket_n
       },
       Error::kOk,
   };
+}
+
+core::Result<HttpResponse> EntryApi::Query(storage::IStorage* storage, std::string_view bucket_name,
+                                           std::string_view entry_name, std::string_view start_timestamp,
+                                           std::string_view stop_timestamp, std::string_view ttl_interval) {
+  auto [entry, err] = GetOrCreateEntry(storage, std::string(bucket_name), std::string(entry_name), true);
+  if (err) {
+    return {{}, err};
+  }
+
+  std::optional<Time> start_ts;
+  if (!start_timestamp.empty()) {
+    auto [ts, parse_err] = ParseTimestamp(start_timestamp, "start_timestamp");
+    if (parse_err) {
+      return {{}, parse_err};
+    }
+    start_ts = ts;
+  }
+
+  std::optional<Time> stop_ts;
+  if (!stop_timestamp.empty()) {
+    auto [ts, parse_err] = ParseTimestamp(stop_timestamp, "stop_timestamp");
+    if (parse_err) {
+      return {{}, parse_err};
+    }
+    stop_ts = ts;
+  }
+
+  std::chrono::seconds ttl{5};
+  if (!ttl_interval.empty()) {
+    auto [val, parse_err] = ParseUInt(ttl_interval, "ttl");
+    if (parse_err) {
+      return {{}, parse_err};
+    }
+
+    ttl = std::chrono::seconds(val);
+  }
+
+  auto [id, query_err] = entry->Query(start_ts, stop_ts, IQuery::Options{.ttl = ttl});
+  if (query_err) {
+    return {{}, query_err};
+  }
+
+  QueryInfo info;
+  info.set_id(id);
+
+  return SendJson(Result<QueryInfo>{std::move(info), Error::kOk});
 }
 
 }  // namespace reduct::api

@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "reduct/api/callbacks.h"
 #include "reduct/storage/storage.h"
 #include "reduct/asset/asset_manager.h"
 #include "reduct/auth/token_auth.h"
