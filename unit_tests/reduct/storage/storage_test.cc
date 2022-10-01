@@ -117,6 +117,11 @@ TEST_CASE("storage::Storage should create a bucket", "[storage]") {
     auto err = storage->CreateBucket("", MakeDefaultBucketSettings());
     REQUIRE(err == Error{.code = 500, .message = "Internal error: Failed to create bucket"});
   }
+
+  SECTION("wrong name") {
+    auto err = storage->CreateBucket("bucket/sak#", MakeDefaultBucketSettings());
+    REQUIRE(err == Error{.code = 422, .message = "Bucket name can contain only letters, digests and [-,_] symbols"});
+  }
 }
 
 TEST_CASE("storage::Storage should get a bucket", "[storage]") {

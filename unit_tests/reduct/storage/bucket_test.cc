@@ -80,6 +80,11 @@ TEST_CASE("storage::Bucket should create get or create entry", "[bucket][entry]"
     REQUIRE(ref.error == Error::kOk);
     REQUIRE(ref.result.lock()->GetInfo().record_count() == 1);
   }
+
+  SECTION("wrong entry name") {
+    auto [_, err] = bucket->GetOrCreateEntry("entry/sak#");
+    REQUIRE(err == Error{.code = 422, .message = "Entry name can contain only letters, digests and [-,_] symbols"});
+  }
 }
 
 TEST_CASE("storage::Bucket should remove all entries", "[bucket]") {
