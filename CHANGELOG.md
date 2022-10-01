@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
+### Removed:
 
 - GET `/bucketname/entryname/list` endpoint, [PR-164](https://github.com/reduct-storage/reduct-storage/pull/164)
 - POST `/auth/refresh` endpoint, [PR-177](https://github.com/reduct-storage/reduct-storage/pull/177)
+
+### Changed:
+
+- Refactor HTTP API layer, [PR-179](https://github.com/reduct-storage/reduct-storage/pull/179)
 
 ## [0.9.0] - 2022-09-18
 
