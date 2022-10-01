@@ -17,7 +17,7 @@ Bearer <ACCESS_TOKEN>
 An example of a request with CURL:
 
 ```shell
- curl   --header "Authorization: Bearer ${API_TOKEN}" -a http://127.0.0.1:8383/info
+ curl   --header "Authorization: Bearer ${API_TOKEN}" -a http://127.0.0.1:8383/api/v1/info
 ```
 
 {% hint style="info" %}

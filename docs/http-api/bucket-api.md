@@ -15,7 +15,7 @@ For more information, you can read more about buckets in [How does it work?](../
 
 
 
-{% swagger method="get" path=" " baseUrl="/b/:bucket_name " summary="Get information about a bucket" %}
+{% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Get information about a bucket" %}
 {% swagger-description %}
 The method returns the current settings, stats, and entry list of the bucket in JSON format.
 {% endswagger-description %}
@@ -64,7 +64,7 @@ Name of bucket
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="head" path=" " baseUrl="/b/:bucket_name " summary="Check if a bucket exists" %}
+{% swagger method="head" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Check if a bucket exists" %}
 {% swagger-description %}
 
 {% endswagger-description %}
@@ -90,7 +90,7 @@ Name of bucket
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="post" path=" " baseUrl="/b/:bucket_name  " summary="Create a new bucket" %}
+{% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name  " summary="Create a new bucket" %}
 {% swagger-description %}
 To create a bucket, the request should contain a JSON document with some parameters or empty body. The new bucket uses default values if some parameters are empty:
 {% endswagger-description %}
@@ -140,7 +140,7 @@ Size of quota in bytes (default: 0)
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="put" path=" " baseUrl="/b/:bucket_name " summary="Change settings of a bucket" %}
+{% swagger method="put" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Change settings of a bucket" %}
 {% swagger-description %}
 To update settings of a bucket, the request should have a JSON document with all the settings
 {% endswagger-description %}
@@ -190,7 +190,7 @@ Size of quota in bytes
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="delete" path=" " baseUrl="/b/:bucket_name " summary="Remove a bucket" %}
+{% swagger method="delete" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Remove a bucket" %}
 {% swagger-description %}
 Remove a bucket with
 

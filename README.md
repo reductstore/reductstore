@@ -39,17 +39,17 @@ export API_TOKEN=reduct
 curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
   -X POST \
   --header "Authorization: Bearer ${API_TOKEN}"   \
-  -a https://play.reduct-storage.dev/b/my_data
+  -a https://play.reduct-storage.dev/api/v1/b/my_data
 
 # Write some data
 curl -d "some_data" \
   -X POST \
   --header "Authorization: Bearer ${API_TOKEN}"   \
-  -a https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
+  -a https://play.reduct-storage.dev/api/v1/b/my_data/entry_1?ts=10000
 
 # Read the data by using its timestamp
 curl --header "Authorization: Bearer ${API_TOKEN}"   \
-    https://play.reduct-storage.dev/b/my_data/entry_1?ts=10000
+    https://play.reduct-storage.dev/api/v1/b/my_data/entry_1?ts=10000
 ```
 
 ##  Client SDKs
