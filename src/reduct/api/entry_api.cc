@@ -60,7 +60,7 @@ inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std:
 
   assert(bucket && "Failed to reach bucket");
   if (must_exist && !bucket->HasEntry(entry_name)) {
-    return {{}, {.code = 404, .message = fmt::format("Entry '{}' could not be found", entry_name)}};
+    return {{}, {.code = 404, .message = fmt::format("Entry '{}' is not found", entry_name)}};
   }
 
   auto [entry, ref_error] = bucket->GetOrCreateEntry(entry_name);

@@ -21,7 +21,6 @@ set(SRC_FILES
         reduct/storage/entry_test.cc
         reduct/storage/entry_query_test.cc
         reduct/storage/storage_test.cc
-        reduct/storage/storage_entry_api_test.cc
         test.cc)
 
 add_executable(reduct-tests ${SRC_FILES})
