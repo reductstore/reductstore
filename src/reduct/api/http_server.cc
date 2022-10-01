@@ -223,67 +223,69 @@ class HttpServer : public IHttpServer {
     if (!base_path.ends_with('/')) {
       base_path.push_back('/');
     }
+
+    const auto api_path = base_path + "api/v1/";
     // Server API
-    app.head(base_path + "alive",
+    app.head(api_path + "alive",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::Alive(storage_.get()); });
              })
-        .get(base_path + "info",
+        .get(api_path + "info",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::Info(storage_.get()); });
              })
-        .get(base_path + "list",
+        .get(api_path + "list",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::List(storage_.get()); });
              })
         // Bucket API
-        .post(base_path + "b/:bucket_name",
+        .post(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
                 RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
                   return BucketApi::CreateBucket(storage_.get(), req->getParameter(0));
                 });
               })
-        .get(base_path + "b/:bucket_name",
+        .get(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running},
                                 [this, req]() { return BucketApi::GetBucket(storage_.get(), req->getParameter(0)); });
              })
-        .head(base_path + "b/:bucket_name",
+        .head(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
                 RegisterEndpoint(HttpContext<SSL>{res, req, running},
                                  [this, req]() { return BucketApi::HeadBucket(storage_.get(), req->getParameter(0)); });
               })
-        .put(base_path + "b/:bucket_name",
+        .put(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
                  return BucketApi::UpdateBucket(storage_.get(), req->getParameter(0));
                });
              })
-        .del(base_path + "b/:bucket_name",
+        .del(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
                  return BucketApi::RemoveBucket(storage_.get(), req->getParameter(0));
                });
              })
         // Entry API
-        .post(base_path + "b/:bucket_name/:entry_name",
+        .post(api_path + "b/:bucket_name/:entry_name",
               [this, running](auto *res, auto *req) {
                 RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
                   return EntryApi::Write(storage_.get(), req->getParameter(0), req->getParameter(1),
                                          req->getQuery("ts"), req->getHeader("content-length"));
                 });
               })
-        .get(base_path + "b/:bucket_name/:entry_name",
+        .get(api_path + "b/:bucket_name/:entry_name",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
                  return EntryApi::Read(storage_.get(), req->getParameter(0), req->getParameter(1), req->getQuery("ts"),
                                        req->getQuery("q"));
                });
              })
-        .get(base_path + "b/:bucket_name/:entry_name/q",
+        .get(api_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
                  return EntryApi::Query(storage_.get(), std::string(req->getParameter(0)),
