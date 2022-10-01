@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed:
 
 - Refactor HTTP API layer, [PR-179](https://github.com/reduct-storage/reduct-storage/pull/179)
+- Prefix `/api/v1/` for all endpoints, [PR-182](https://github.com/reduct-storage/reduct-storage/pull/182)
 
 ### Security:
 
@@ -24,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added:
 
-- Build a static executable for AMD64 and upload it to release from CI, [PR-171](https://github.com/reduct-storage/reduct-storage/pull/171)
+- Build a static executable for AMD64 and upload it to release from
+  CI, [PR-171](https://github.com/reduct-storage/reduct-storage/pull/171)
 - Build on MacOS, [PR-173](https://github.com/reduct-storage/reduct-storage/pull/173)
 - Build on Windows, [PR-174](https://github.com/reduct-storage/reduct-storage/pull/174)
 
@@ -51,9 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Closing uSocket, [PR-154](https://github.com/reduct-storage/reduct-storage/pull/154)
 - Removing broken block when it keeps quota, [PR-155](https://github.com/reduct-storage/reduct-storage/pull/155)
 - Sending headers twice, [PR-156](https://github.com/reduct-storage/reduct-storage/pull/156)
-- Direction to `cd` into the `build/` directory while building the server locally, [PR-159](https://github.com/reduct-storage/reduct-storage/pull/159)
+- Direction to `cd` into the `build/` directory while building the server
+  locally, [PR-159](https://github.com/reduct-storage/reduct-storage/pull/159)
 
 ### Changed:
+
 - Duplication of timestamps is not allowed, [PR-147](https://github.com/reduct-storage/reduct-storage/pull/147)
 - Update dependencies, [PR-163](https://github.com/reduct-storage/reduct-storage/pull/163)
 
