@@ -240,47 +240,6 @@ class Entry : public IEntry {
                    .path = block_path, .record_index = record_index, .chunk_size = kDefaultMaxReadChunk, .time = time});
   }
 
-  [[nodiscard]] core::Result<std::vector<RecordInfo>> List(const Time& start, const Time& stop) const override {
-    auto start_ts = FromTimePoint(start);
-    auto stop_ts = FromTimePoint(stop);
-    if (auto err = CheckDataForTimeInterval(start_ts, stop_ts)) {
-      return {{}, std::move(err)};
-    }
-
-    // Find block range
-    auto start_block = block_set_.upper_bound(start_ts);
-    if (start_block == block_set_.end()) {
-      start_block = block_set_.begin();
-    } else if (start_block != block_set_.begin()) {
-      start_block = std::prev(start_block);
-    }
-
-    auto stop_block = block_set_.lower_bound(stop_ts);
-
-    std::vector<RecordInfo> records;
-    for (auto block_it = start_block; block_it != stop_block; ++block_it) {
-      auto [block, err] = block_manager_->LoadBlock(*block_it);
-      if (err) {
-        return {{}, err};
-      }
-
-      for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
-        const auto& record = block->records(record_index);
-        if (record.timestamp() >= start_ts && record.timestamp() < stop_ts &&
-            record.state() == proto::Record::kFinished) {
-          records.push_back(RecordInfo{.time = ToTimePoint(record.timestamp()), .size = record.end() - record.begin()});
-        }
-      }
-    }
-
-    if (records.empty()) {
-      return {{}, {.code = 404, .message = "No records for time interval"}};
-    }
-
-    std::ranges::sort(records, {}, &RecordInfo::time);
-    return {records, {}};
-  }
-
   core::Result<uint64_t> Query(const std::optional<Time>& start, const std::optional<Time>& stop,
                                const query::IQuery::Options& options) override {
     static uint64_t query_id = 0;
@@ -477,28 +436,6 @@ class Entry : public IEntry {
     return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
   }
 
-  Error CheckDataForTimeInterval(const Timestamp& start_ts, const Timestamp& stop_ts) const {
-    LOG_DEBUG("List records for interval: ({}, {})", TimeUtil::ToString(start_ts), TimeUtil::ToString(stop_ts));
-    if (start_ts > stop_ts) {
-      return {.code = 422, .message = "Start timestamp cannot be older stop timestamp"};
-    }
-
-    // Check boarders (is it okay if at least one record inside the interval
-    if (block_set_.empty()) {
-      return {.code = 404, .message = "No records in the entry"};
-    }
-
-    if (stop_ts < *block_set_.begin()) {
-      return {.code = 404, .message = "No records for time interval"};
-    }
-
-    if (auto err = CheckLatestRecord(start_ts)) {
-      return {.code = 404, .message = "No records for time interval"};
-    }
-
-    return Error::kOk;
-  }
-
   Error CheckLatestRecord(const Timestamp& proto_ts) const {
     auto [block, err] = block_manager_->LoadBlock(*block_set_.rbegin());
     if (err) {
@@ -546,12 +483,4 @@ IEntry::UPtr IEntry::Build(std::string_view name, const fs::path& path, IEntry::
   return std::make_unique<Entry>(name, path, options);
 }
 
-/**
- * Streams
- */
-
-std::ostream& operator<<(std::ostream& os, const IEntry::RecordInfo& info) {
-  os << fmt::format("<IEntry::RecordInfo time={}, size={}>", info.time.time_since_epoch().count() / 1000, info.size);
-  return os;
-}
 };  // namespace reduct::storage

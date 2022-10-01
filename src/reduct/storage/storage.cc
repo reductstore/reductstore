@@ -1,9 +1,7 @@
 // Copyright 2021-2022 Alexey Timin
 #include "reduct/storage/storage.h"
 
-#include <algorithm>
 #include <filesystem>
-#include <shared_mutex>
 #include <utility>
 
 #include "reduct/config.h"
@@ -13,9 +11,14 @@
 
 namespace reduct::storage {
 
-using async::Run;
 using core::Error;
+using core::Result;
 using core::Time;
+
+using proto::api::BucketInfo;
+using proto::api::BucketInfoList;
+using proto::api::FullBucketInfo;
+using proto::api::ServerInfo;
 
 namespace fs = std::filesystem;
 
@@ -43,261 +46,82 @@ class Storage : public IStorage {
   /**
    * Server API
    */
-  [[nodiscard]] Run<IInfoCallback::Result> OnInfo(const IInfoCallback::Request& res) const override {
-    using Callback = IInfoCallback;
+  [[nodiscard]] core::Result<ServerInfo> GetInfo() const override {
+    using proto::api::BucketSettings;
+    using proto::api::Defaults;
 
-    return Run<Callback::Result>([this] {
-      using proto::api::ServerInfo;
-      using proto::api::Defaults;
-      using proto::api::BucketSettings;
+    size_t usage = 0;
+    uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
+    uint64_t latest_ts = 0;
 
-      size_t usage = 0;
-      uint64_t oldest_ts = std::numeric_limits<uint64_t>::max();
-      uint64_t latest_ts = 0;
+    for (const auto& [_, bucket] : buckets_) {
+      auto info = bucket->GetInfo();
+      usage += info.size();
+      oldest_ts = std::min(oldest_ts, info.oldest_record());
+      latest_ts = std::max(latest_ts, info.latest_record());
+    }
 
-      for (const auto& [_, bucket] : buckets_) {
-        auto info = bucket->GetInfo();
-        usage += info.size();
-        oldest_ts = std::min(oldest_ts, info.oldest_record());
-        latest_ts = std::max(latest_ts, info.latest_record());
-      }
+    ServerInfo info;
+    info.set_version(kVersion);
+    info.set_bucket_count(buckets_.size());
+    info.set_uptime(
+        std::chrono::duration_cast<std::chrono::seconds>(decltype(start_time_)::clock::now() - start_time_).count());
+    info.set_usage(usage);
+    info.set_oldest_record(oldest_ts);
+    info.set_latest_record(latest_ts);
 
-      ServerInfo info;
-      info.set_version(kVersion);
-      info.set_bucket_count(buckets_.size());
-      info.set_uptime(
-          std::chrono::duration_cast<std::chrono::seconds>(decltype(start_time_)::clock::now() - start_time_).count());
-      info.set_usage(usage);
-      info.set_oldest_record(oldest_ts);
-      info.set_latest_record(latest_ts);
-
-      *info.mutable_defaults()->mutable_bucket() = IBucket::GetDefaults();
-      return Callback::Result{std::move(info), Error{}};
-    });
+    *info.mutable_defaults()->mutable_bucket() = IBucket::GetDefaults();
+    return {std::move(info), Error::kOk};
   }
 
-  [[nodiscard]] Run<IListStorageCallback::Result> OnStorageList(
-      const IListStorageCallback::Request& req) const override {
-    using Callback = IListStorageCallback;
-    return Run<Callback::Result>([this] {
-      using proto::api::BucketInfoList;
-      using proto::api::BucketInfo;
-
-      BucketInfoList list;
-      for (const auto& [name, bucket] : buckets_) {
-        *list.add_buckets() = bucket->GetInfo();
-      }
-      return Callback::Result{.result = {.buckets = std::move(list)}, .error = Error::kOk};
-    });
+  [[nodiscard]] core::Result<BucketInfoList> GetList() const override {
+    BucketInfoList list;
+    for (const auto& [name, bucket] : buckets_) {
+      *list.add_buckets() = bucket->GetInfo();
+    }
+    return {std::move(list), Error::kOk};
   }
   /**
    * Bucket API
    */
-  [[nodiscard]] Run<ICreateBucketCallback::Result> OnCreateBucket(const ICreateBucketCallback::Request& req) override {
-    using Callback = ICreateBucketCallback;
-    return Run<Callback::Result>([this, req] {
-      std::string bucket_name{req.bucket_name};
-      if (buckets_.find(bucket_name) != buckets_.end()) {
-        return Callback::Result{
-            {}, Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", req.bucket_name)}};
-      }
+  core::Error CreateBucket(const std::string& bucket_name, const proto::api::BucketSettings& settings) override {
+    if (buckets_.find(bucket_name) != buckets_.end()) {
+      return Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", bucket_name)};
+    }
 
-      auto bucket = IBucket::Build(options_.data_path / bucket_name, req.bucket_settings);
-      if (!bucket) {
-        auto err = Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
-        return Callback::Result{{},
-                                Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")}};
-      }
+    auto bucket = IBucket::Build(options_.data_path / bucket_name, settings);
+    if (!bucket) {
+      return Error{.code = 500, .message = fmt::format("Internal error: Failed to create bucket")};
+    }
 
-      buckets_[bucket_name] = std::move(bucket);
-      return Callback::Result{{}, Error{}};
-    });
+    buckets_[bucket_name] = std::move(bucket);
+    return Error::kOk;
   }
 
-  [[nodiscard]] Run<IGetBucketCallback::Result> OnGetBucket(const IGetBucketCallback::Request& req) const override {
-    using Callback = IGetBucketCallback;
-    return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      const auto& bucket = *bucket_it->second;
-      proto::api::FullBucketInfo info;
-      info.mutable_info()->CopyFrom(bucket.GetInfo());
-      info.mutable_settings()->CopyFrom(bucket.GetSettings());
-      for (auto&& entry : bucket.GetEntryList()) {
-        *info.add_entries() = std::move(entry);
-      }
-      return Callback::Result{std::move(info), Error::kOk};
-    });
-  }
-
-  [[nodiscard]] Run<IRemoveBucketCallback::Result> OnRemoveBucket(const IRemoveBucketCallback::Request& req) override {
-    using Callback = IRemoveBucketCallback;
-
-    return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      err = bucket_it->second->Clean();
-      fs::remove(options_.data_path / req.bucket_name);
-      buckets_.erase(bucket_it);
-
-      return Callback::Result{{}, err};
-    });
-  }
-
-  Run<IUpdateBucketCallback::Result> OnUpdateCallback(const IUpdateBucketCallback::Request& req) override {
-    using Callback = IUpdateBucketCallback;
-    return Run<Callback::Result>([this, req] {
-      auto [bucket_it, err] = FindBucket(req.bucket_name);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      err = bucket_it->second->SetSettings(std::move(req.new_settings));
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      return Callback::Result{{}, Error::kOk};
-    });
-  }
-  /**
-   * Entry API
-   */
-  [[nodiscard]] IWriteEntryCallback::Result OnWriteEntry(const IWriteEntryCallback::Request& req) noexcept override {
-    using Callback = IWriteEntryCallback;
-
-    auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name);
+  core::Result<IBucket::WPtr> GetBucket(const std::string& bucket_name) const override {
+    auto [bucket_it, err] = FindBucket(bucket_name);
     if (err) {
-      return Callback::Result{{}, err};
+      return {{}, err};
     }
 
-    auto [ts, parse_err] = ParseTimestamp(req.timestamp);
-    if (parse_err) {
-      return Callback::Result{{}, parse_err};
-    }
-
-    int64_t size;
-    try {
-      size = std::stol(req.content_length.data());
-      if (size < 0) {
-        return {{}, {.code = 411, .message = "negative content-length"}};
-      }
-    } catch (...) {
-      return {{}, {.code = 411, .message = "bad or empty content-length"}};
-    }
-
-    auto [writer, writer_err] = entry->BeginWrite(ts, size);
-    if (!writer_err) {
-      auto [bucket_it, _] = FindBucket(req.bucket_name);
-      auto quota_error = bucket_it->second->KeepQuota();
-      if (quota_error) {
-        LOG_WARNING("Didn't mange to keep quota: {}", quota_error.ToString());
-      }
-    }
-
-    return Callback::Result{std::move(writer), writer_err};
+    return {bucket_it->second, err};
   }
 
-  Run<IReadEntryCallback::Result> OnReadEntry(const IReadEntryCallback::Request& req) override {
-    using Callback = IReadEntryCallback;
+  Error RemoveBucket(const std::string& bucket_name) override {
+    auto [bucket_it, err] = FindBucket(bucket_name);
+    if (err) {
+      return err;
+    }
 
-    return Run<Callback::Result>([this, req] {
-      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name, true);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
+    err = bucket_it->second->Clean();
+    fs::remove(options_.data_path / bucket_name);
+    buckets_.erase(bucket_it);
 
-      Time ts;
-      if (!req.latest) {
-        auto [parsed_ts, parse_err] = ParseTimestamp(req.timestamp);
-        if (parse_err) {
-          return Callback::Result{{}, parse_err};
-        }
-        ts = parsed_ts;
-      } else {
-        ts = Time() + std::chrono::microseconds(entry->GetInfo().latest_record());
-      }
-
-      return entry->BeginRead(ts);
-    });
-  }
-
-  [[nodiscard]] Run<IQueryCallback::Result> OnQuery(const IQueryCallback::Request& req) const override {
-    using Callback = IQueryCallback;
-
-    return Run<Callback::Result>([this, req] {
-      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name, true);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      std::optional<Time> start_ts;
-      if (!req.start_timestamp.empty()) {
-        auto [ts, parse_err] = ParseTimestamp(req.start_timestamp, "start_timestamp");
-        if (parse_err) {
-          return Callback::Result{{}, parse_err};
-        }
-        start_ts = ts;
-      }
-
-      std::optional<Time> stop_ts;
-      if (!req.stop_timestamp.empty()) {
-        auto [ts, parse_err] = ParseTimestamp(req.stop_timestamp, "stop_timestamp");
-        if (parse_err) {
-          return Callback::Result{{}, parse_err};
-        }
-        stop_ts = ts;
-      }
-
-      std::chrono::seconds ttl{5};
-      if (!req.ttl.empty()) {
-        auto [val, parse_err] = ParseUInt(req.ttl, "ttl");
-        if (parse_err) {
-          return Callback::Result{{}, parse_err};
-        }
-
-        ttl = std::chrono::seconds(val);
-      }
-
-      auto [id, query_err] = entry->Query(start_ts, stop_ts, query::IQuery::Options{.ttl = ttl});
-
-      Callback::Response resp;
-      resp.set_id(id);
-      return Callback::Result{resp, Error::kOk};
-    });
-  }
-
-  [[nodiscard]] Run<INextCallback::Result> OnNextRecord(const INextCallback::Request& req) const override {
-    using Callback = INextCallback;
-
-    return Run<Callback::Result>([this, req]() {
-      auto [entry, err] = GetOrCreateEntry(req.bucket_name, req.entry_name, true);
-      if (err) {
-        return Callback::Result{{}, err};
-      }
-
-      auto [id, parse_err] = ParseUInt(req.id, "id");
-      if (parse_err) {
-        return Callback::Result{{}, parse_err};
-      }
-
-      auto [next, start_err] = entry->Next(id);
-      if (start_err) {
-        return Callback::Result{{}, start_err};
-      }
-
-      return Callback::Result{{next.reader, next.last}, start_err};
-    });
+    return err;
   }
 
  private:
-  using BucketMap = std::map<std::string, std::unique_ptr<IBucket>>;
+  using BucketMap = std::map<std::string, std::shared_ptr<IBucket>>;
 
   [[nodiscard]] std::pair<BucketMap::const_iterator, Error> FindBucket(std::string_view name) const {
     auto it = buckets_.find(std::string{name});
@@ -306,61 +130,6 @@ class Storage : public IStorage {
     }
 
     return {it, Error::kOk};
-  }
-
-  [[nodiscard]] core::Result<IEntry::SPtr> GetOrCreateEntry(std::string_view bucket_name, std::string_view entry_name,
-                                                            bool must_exist = false) const {
-    auto [bucket_it, err] = FindBucket(bucket_name);
-    if (err) {
-      return {{}, err};
-    }
-
-    if (must_exist && !bucket_it->second->HasEntry(entry_name.data())) {
-      return {{}, {.code = 404, .message = fmt::format("Entry '{}' could not be found", entry_name)}};
-    }
-
-    auto [entry, ref_error] = bucket_it->second->GetOrCreateEntry(entry_name.data());
-    if (ref_error) {
-      return {{}, ref_error};
-    }
-
-    auto entry_ptr = entry.lock();
-    if (!entry_ptr) {
-      return {{}, {.code = 500, .message = "Failed to resolve entry"}};
-    }
-
-    return {entry_ptr, Error::kOk};
-  }
-
-  static core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
-    auto ts = Time::clock::now();
-    if (timestamp.empty()) {
-      return {Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
-    }
-    try {
-      ts = Time{} + std::chrono::microseconds(std::stoull(std::string{timestamp}));
-      return {ts, Error::kOk};
-    } catch (...) {
-      return {Time{},
-              Error{.code = 422,
-                    .message = fmt::format("Failed to parse '{}' parameter: {} should unix times in microseconds",
-                                           param_name, std::string{timestamp})}};
-    }
-  }
-
-  static core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_view param_name) {
-    uint64_t val = 0;
-    if (timestamp.empty()) {
-      return {val, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
-    }
-    try {
-      val = std::stoul(std::string{timestamp});
-      return {val, Error::kOk};
-    } catch (...) {
-      return {val, Error{.code = 422,
-                         .message = fmt::format("Failed to parse '{}' parameter: {} should be unsigned integer",
-                                                param_name, std::string{timestamp})}};
-    }
   }
 
   Options options_;

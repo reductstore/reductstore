@@ -3,7 +3,7 @@
 
 #include <csignal>
 
-#include "reduct/api/api_server.h"
+#include "reduct/api/http_server.h"
 #include "reduct/asset/asset_manager.h"
 #include "reduct/async/loop.h"
 #include "reduct/auth/token_auth.h"
@@ -16,7 +16,7 @@
 #include "reduct/console.h"
 #endif
 
-using reduct::api::IApiServer;
+using reduct::api::IHttpServer;
 using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
 using reduct::auth::ITokenAuthentication;
@@ -64,13 +64,13 @@ int main() {
   auto console = IAssetManager::BuildEmpty();
 #endif
 
-  IApiServer::Components components{
+  IHttpServer::Components components{
       .storage = ReductStorage::Build({.data_path = data_path}),
       .auth = ITokenAuthentication::Build(api_token),
       .console = std::move(console),
   };
 
-  auto server = IApiServer::Build(std::move(components), {
+  auto server = IHttpServer::Build(std::move(components), {
                                                              .host = host,
                                                              .port = port,
                                                              .base_path = api_base_path,

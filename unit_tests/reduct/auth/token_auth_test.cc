@@ -3,7 +3,6 @@
 
 #include <catch2/catch.hpp>
 
-using reduct::async::Task;
 using reduct::auth::ITokenAuthentication;
 using reduct::core::Error;
 

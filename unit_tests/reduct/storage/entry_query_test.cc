@@ -4,6 +4,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
+#include <thread>
 
 #include "reduct/helpers.h"
 #include "reduct/storage/entry.h"

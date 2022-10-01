@@ -90,63 +90,6 @@ inline core::Result<std::string> ReadOne(const storage::IEntry& entry, core::Tim
   return {read_res.result.data, core::Error::kOk};
 }
 
-inline async::Task<api::IInfoCallback::Result> OnInfo(storage::IStorage* storage) {
-  auto result = co_await storage->OnInfo({});
-  co_return result;
-}
-
-inline async::Task<api::IListStorageCallback::Result> OnStorageList(storage::IStorage* storage) {
-  auto result = co_await storage->OnStorageList({});
-  co_return result;
-}
-
-inline async::Task<api::ICreateBucketCallback::Result> OnCreateBucket(storage::IStorage* storage,
-                                                                      api::ICreateBucketCallback::Request req) {
-  auto result = co_await storage->OnCreateBucket(req);
-  co_return result;
-}
-
-inline async::Task<api::IGetBucketCallback::Result> OnGetBucket(storage::IStorage* storage,
-                                                                api::IGetBucketCallback::Request req) {
-  auto result = co_await storage->OnGetBucket(req);
-  co_return result;
-}
-
-inline async::Task<api::IUpdateBucketCallback::Result> OnChangeBucketSettings(storage::IStorage* storage,
-                                                                              api::IUpdateBucketCallback::Request req) {
-  auto result = co_await storage->OnUpdateCallback(std::move(req));
-  co_return result;
-}
-
-inline async::Task<api::IRemoveBucketCallback::Result> OnRemoveBucket(storage::IStorage* storage,
-                                                                      api::IRemoveBucketCallback::Request req) {
-  auto result = co_await storage->OnRemoveBucket(std::move(req));
-  co_return result;
-}
-
-inline async::Task<api::IWriteEntryCallback::Result> OnWriteEntry(storage::IStorage* storage,
-                                                                  api::IWriteEntryCallback::Request req) {
-  auto result = storage->OnWriteEntry(std::move(req));
-  co_return result;
-}
-
-inline async::Task<api::IReadEntryCallback::Result> OnReadEntry(storage::IStorage* storage,
-                                                                api::IReadEntryCallback::Request req) {
-  auto result = co_await storage->OnReadEntry(std::move(req));
-  co_return result;
-}
-
-inline async::Task<api::IQueryCallback::Result> OnQuery(storage::IStorage* storage,
-                                                                api::IQueryCallback::Request req) {
-  auto result = co_await storage->OnQuery(std::move(req));
-  co_return result;
-}
-
-inline async::Task<api::INextCallback::Result> OnNextRecord(storage::IStorage* storage,
-                                                        api::INextCallback::Request req) {
-  auto result = co_await storage->OnNextRecord(std::move(req));
-  co_return result;
-}
 
 }  // namespace reduct
 

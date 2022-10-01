@@ -49,6 +49,11 @@ class AsyncWriter : public async::IAsyncWriter {
     }
 
     if (last) {
+      if (writen_size_ < parameters_.size) {
+        update_record_(record, proto::Record::kErrored);
+        return {.code = 413, .message = "Content is smaller than in content-length"};
+      }
+
       update_record_(record, proto::Record::kFinished);
       file_ << std::flush;
     }
