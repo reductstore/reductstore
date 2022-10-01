@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refactor HTTP API layer, [PR-179](https://github.com/reduct-storage/reduct-storage/pull/179)
 
+### Security:
+
+- Check bucket and entry name with regex, [PR-181](https://github.com/reduct-storage/reduct-storage/pull/181)
+
 ## [0.9.0] - 2022-09-18
 
 ### Added:
