@@ -4,7 +4,7 @@ description: Entry API provides methods to write, read and browse the data
 
 # Entry API
 
-{% swagger method="post" path=" " baseUrl="/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
+{% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
 {% swagger-description %}
 The storage creates an entry on the first write operation. The record should be placed in the body of the request. The body can also be empty.
 {% endswagger-description %}
@@ -58,7 +58,7 @@ Content-length is required to start an asynchronous write operation
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="get" path=" " baseUrl="/b/:bucket_name/:entry_name " summary="Get a record from an entry" %}
+{% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name " summary="Get a record from an entry" %}
 {% swagger-description %}
 The method return a content of the requested record in the body of the HTTP response. It also sends additional information in headers:
 
@@ -110,7 +110,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="get" path="" baseUrl="/b/:bucket_name/:entry_name/q " summary="Query records for a time interval" %}
+{% swagger method="get" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/q " summary="Query records for a time interval" %}
 {% swagger-description %}
 The method response with a JSON document with ID which can be used to integrate records with method
 

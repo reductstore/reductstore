@@ -8,7 +8,7 @@ import requests
 
 @pytest.fixture(name="base_url")
 def _base_url() -> str:
-    return f"{os.getenv('STORAGE_URL', 'http://127.0.0.1:8383')}"
+    return f"{os.getenv('STORAGE_URL', 'http://127.0.0.1:8383')}/api/v1"
 
 
 @pytest.fixture(name='bucket_name')
