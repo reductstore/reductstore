@@ -19,7 +19,6 @@ using reduct::storage::IStorage;
 using google::protobuf::util::JsonStringToMessage;
 
 using us = std::chrono::microseconds;
-using fmt::format;
 
 TEST_CASE("EntryApi::Write should write data in chunks") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
@@ -223,7 +222,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id") {
     {
       auto [resp, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
       REQUIRE(err ==
-              Error{.code = 404, .message = format("Query id={} doesn't exist. It expired or was finished", id)});
+              Error{.code = 404, .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id)});
     }
   }
 
