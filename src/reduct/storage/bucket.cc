@@ -6,6 +6,7 @@
 #include <fstream>
 #include <numeric>
 #include <ranges>
+#include <regex>
 
 #include "reduct/config.h"
 #include "reduct/core/logger.h"
@@ -73,6 +74,10 @@ class Bucket : public IBucket {
   core::Result<IEntry::WPtr> GetOrCreateEntry(const std::string& name) override {
     if (name.empty()) {
       return {{}, {.code = 422, .message = "An empty entry name is not allowed"}};
+    }
+
+    if (!std::regex_match(name, std::regex("^[A-Za-z0-9_-]*$"))) {
+      return {{}, Error{.code = 422, .message = "Entry name can contain only letters, digests and [-,_] symbols"}};
     }
 
     auto it = entry_map_.find(name);

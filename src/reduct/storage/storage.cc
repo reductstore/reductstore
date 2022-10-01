@@ -2,6 +2,7 @@
 #include "reduct/storage/storage.h"
 
 #include <filesystem>
+#include <regex>
 #include <utility>
 
 #include "reduct/config.h"
@@ -85,6 +86,12 @@ class Storage : public IStorage {
    * Bucket API
    */
   core::Error CreateBucket(const std::string& bucket_name, const proto::api::BucketSettings& settings) override {
+    if (!std::regex_match(bucket_name, std::regex("^[A-Za-z0-9_-]*$"))) {
+      return Error{
+          .code = 422,
+          .message = "Bucket name can contain only letters, digests and [-,_] symbols"};
+    }
+
     if (buckets_.find(bucket_name) != buckets_.end()) {
       return Error{.code = 409, .message = fmt::format("Bucket '{}' already exists", bucket_name)};
     }
