@@ -71,6 +71,10 @@ class Bucket : public IBucket {
   }
 
   core::Result<IEntry::WPtr> GetOrCreateEntry(const std::string& name) override {
+    if (name.empty()) {
+      return {{}, {.code = 422, .message = "An empty entry name is not allowed"}};
+    }
+
     auto it = entry_map_.find(name);
     if (it != entry_map_.end()) {
       return {it->second, Error::kOk};

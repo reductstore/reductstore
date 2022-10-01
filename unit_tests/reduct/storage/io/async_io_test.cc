@@ -49,9 +49,17 @@ TEST_CASE("AsyncWriter should check size") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
-  auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
-  REQUIRE(writer->Write("123456") == Error::kOk);
-  REQUIRE(writer->Write("123456") == Error{.code = 413, .message = "Content is bigger than in content-length"});
+  SECTION("too long") {
+    auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
+    REQUIRE(writer->Write("123456", false) == Error::kOk);
+    REQUIRE(writer->Write("123456") == Error{.code = 413, .message = "Content is bigger than in content-length"});
+  }
+
+  SECTION("too short") {
+    auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
+    REQUIRE(writer->Write("123456", false) == Error::kOk);
+    REQUIRE(writer->Write("12") == Error{.code = 413, .message = "Content is smaller than in content-length"});
+  }
 }
 
 TEST_CASE("AsyncWriter should mark finished records") {
