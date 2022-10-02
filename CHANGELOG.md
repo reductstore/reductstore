@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactor HTTP API layer, [PR-179](https://github.com/reduct-storage/reduct-storage/pull/179)
 - Prefix `/api/v1/` for all endpoints, [PR-182](https://github.com/reduct-storage/reduct-storage/pull/182)
 
+### Fixed:
+
+- Segfault during overriding a record, [PR-183](https://github.com/reduct-storage/reduct-storage/pull/183)
+
 ### Security:
 
 - Check bucket and entry name with regex, [PR-181](https://github.com/reduct-storage/reduct-storage/pull/181)
