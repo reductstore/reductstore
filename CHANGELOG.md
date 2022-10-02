@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added:
+
+- Web Console v1.0.0. [PR-184](https://github.com/reduct-storage/reduct-storage/pull/184)
+
 ### Removed:
 
 - GET `/bucketname/entryname/list` endpoint, [PR-164](https://github.com/reduct-storage/reduct-storage/pull/164)
