@@ -102,12 +102,14 @@ core::Result<HttpResponse> EntryApi::Write(storage::IStorage* storage, std::stri
   }
 
   auto [writer, writer_err] = entry->BeginWrite(ts, size);
-  if (!writer_err) {
-    auto [bucket, _] = storage->GetBucket(std::string(bucket_name));
-    auto quota_error = bucket.lock()->KeepQuota();
-    if (quota_error) {
-      LOG_WARNING("Didn't mange to keep quota: {}", quota_error.ToString());
-    }
+  if (writer_err) {
+    return {{}, writer_err};
+  }
+
+  auto [bucket, _] = storage->GetBucket(std::string(bucket_name));
+  auto quota_error = bucket.lock()->KeepQuota();
+  if (quota_error) {
+    LOG_WARNING("Didn't mange to keep quota: {}", quota_error.ToString());
   }
 
   auto http_response = HttpResponse::Default();

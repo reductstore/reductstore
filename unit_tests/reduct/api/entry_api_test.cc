@@ -37,14 +37,14 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
 
     auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
     REQUIRE(ReadOne(*entry, reduct::core::Time() + us(1000001)).result == "1234567890");
-  }
 
-  SECTION("bucket doesn't exist") {
-    REQUIRE(EntryApi::Write(storage.get(), "XXX", "entry-1", "1000001", "10").error ==
-            Error{
-                .code = 404,
-                .message = "Bucket 'XXX' is not found",
-            });
+    SECTION("record already exists") {
+      REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10").error ==
+              Error{
+                  .code = 409,
+                  .message = "A record with timestamp 1000001 already exists",
+              });
+    }
   }
 
   SECTION("wrong ts") {
@@ -227,13 +227,19 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id") {
   }
 
   SECTION("id doesnt' exist") {
-    auto [resp, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "2");
-    REQUIRE(err == Error{.code = 404, .message = "Query id=2 doesn't exist. It expired or was finished"});
+    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "2").error ==
+            Error{
+                .code = 404,
+                .message = "Query id=2 doesn't exist. It expired or was finished",
+            });
   }
 
   SECTION("wrong id") {
-    auto [resp, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "XXX2");
-    REQUIRE(err == Error{.code = 422, .message = "Failed to parse 'id' parameter: XXX2 should be unsigned integer"});
+    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "XXX2").error ==
+            Error{
+                .code = 422,
+                .message = "Failed to parse 'id' parameter: XXX2 should be unsigned integer",
+            });
   }
 }
 
