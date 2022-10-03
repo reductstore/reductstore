@@ -106,6 +106,7 @@ class HttpServer : public IHttpServer {
     uWS::HttpResponse<SSL> *res;
     uWS::HttpRequest *req;
     bool running;
+    bool no_auth = false;
   };
 
   template <bool SSL>
@@ -141,9 +142,11 @@ class HttpServer : public IHttpServer {
       ctx.res->end(fmt::format(R"({{"detail":"{}"}})", err.message));
     };
 
-    if (auto err = auth_->Check(authorization)) {
-      SendError(err);
-      co_return;
+    if (!ctx.no_auth) {
+      if (auto err = auth_->Check(authorization)) {
+        SendError(err);
+        co_return;
+      }
     }
 
     auto result = handler();
@@ -307,12 +310,12 @@ class HttpServer : public IHttpServer {
                if (path.empty()) {
                  path = "index.html";
                }
-               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(HttpContext<SSL>{res, req, running, true},
                                 [&]() { return Console::UiRequest(console_.get(), base_path, path); });
              })
         .get(base_path + "ui",
              [this, base_path, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(HttpContext<SSL>{res, req, running, true},
                                 [&]() { return Console::UiRequest(console_.get(), base_path, "index.html"); });
              })
         .any("/*",
