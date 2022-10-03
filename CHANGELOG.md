@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed:
 
 - Segfault during overriding a record, [PR-183](https://github.com/reduct-storage/reduct-storage/pull/183)
+- Access to Web Console when authentication is enabled, [PR-185](https://github.com/reduct-storage/reduct-storage/pull/185)
 
 ### Security:
 
