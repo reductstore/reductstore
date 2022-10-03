@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2022-10-03
+
 ### Added:
 
 - Web Console v1.0.0. [PR-184](https://github.com/reduct-storage/reduct-storage/pull/184)
@@ -254,7 +256,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reduct-storage/reduct-storage/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/reduct-storage/reduct-storage/compare/v1.0.0...HEAD
+
+[1.0.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.9.0...v1.0.0
 
 [0.9.0]: https://github.com/reduct-storage/reduct-storage/compare/v0.8.0...v0.9.0
 
