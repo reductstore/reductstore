@@ -319,9 +319,10 @@ class HttpServer : public IHttpServer {
                                 [&]() { return Console::UiRequest(console_.get(), base_path, "index.html"); });
              })
         .any("/*",
-             [](auto *res, auto *req) {
-               res->writeStatus("404");
-               res->end({});
+             [this, running](auto *res, auto *req) {
+               RegisterEndpoint(HttpContext<SSL>{res, req, running, true}, []() -> Result<HttpResponse> {
+                 return {{}, Error{.code = 404, .message = "Not found"}};
+               });
              })
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {
