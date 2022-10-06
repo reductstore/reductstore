@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Print 404 error to logs in debug mode, [PR-187](https://github.com/reduct-storage/reduct-storage/pull/187)
 
+### Fixed:
+
+- Build MacOs in pipeline, [PR-188](https://github.com/reduct-storage/reduct-storage/pull/188)
+
 ## [1.0.0] - 2022-10-03
 
 ### Added:
