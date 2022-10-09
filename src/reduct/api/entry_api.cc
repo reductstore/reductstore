@@ -25,11 +25,18 @@ inline core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string
     return {Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
   }
   try {
-    ts = Time{} + std::chrono::microseconds(std::stoull(std::string{timestamp}));
+    auto ts_as_umber = std::stoll(timestamp.data());
+    if (ts_as_umber < 0) {
+      return {Time{}, Error{.code = 422,
+                            .message = fmt::format("Failed to parse '{}' parameter: {} must be positive", param_name,
+                                                   std::string{timestamp})}};
+    }
+
+    ts = Time() + std::chrono::microseconds(ts_as_umber);
     return {ts, Error::kOk};
   } catch (...) {
     return {Time{}, Error{.code = 422,
-                          .message = fmt::format("Failed to parse '{}' parameter: {} should unix times in microseconds",
+                          .message = fmt::format("Failed to parse '{}' parameter: {} must unix times in microseconds",
                                                  param_name, std::string{timestamp})}};
   }
 }
@@ -44,8 +51,8 @@ inline core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_
     return {val, Error::kOk};
   } catch (...) {
     return {val, Error{.code = 422,
-                       .message = fmt::format("Failed to parse '{}' parameter: {} should be unsigned integer",
-                                              param_name, std::string{timestamp})}};
+                       .message = fmt::format("Failed to parse '{}' parameter: {} must be unsigned integer", param_name,
+                                              std::string{timestamp})}};
   }
 }
 
