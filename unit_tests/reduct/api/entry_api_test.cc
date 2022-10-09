@@ -51,7 +51,15 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
     REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", "10").error ==
             Error{
                 .code = 422,
-                .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds",
+                .message = "Failed to parse 'ts' parameter: XXXX must unix times in microseconds",
+            });
+  }
+
+  SECTION("negative ts") {
+    REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "-100", "10").error ==
+            Error{
+                .code = 422,
+                .message = "Failed to parse 'ts' parameter: -100 must be positive",
             });
   }
 
@@ -173,7 +181,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with time") {
     REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", {}).error ==
             Error{
                 .code = 422,
-                .message = "Failed to parse 'ts' parameter: XXXX should unix times in microseconds",
+                .message = "Failed to parse 'ts' parameter: XXXX must unix times in microseconds",
             });
   }
 }
@@ -238,7 +246,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id") {
     REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "XXX2").error ==
             Error{
                 .code = 422,
-                .message = "Failed to parse 'id' parameter: XXX2 should be unsigned integer",
+                .message = "Failed to parse 'id' parameter: XXX2 must be unsigned integer",
             });
   }
 }
@@ -323,19 +331,19 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
     REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", "XXX", {}, {}).error ==
             Error{
                 .code = 422,
-                .message = "Failed to parse 'start_timestamp' parameter: XXX should unix times in microseconds",
+                .message = "Failed to parse 'start_timestamp' parameter: XXX must unix times in microseconds",
             });
 
     REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "XXX", {}).error ==
             Error{
                 .code = 422,
-                .message = "Failed to parse 'stop_timestamp' parameter: XXX should unix times in microseconds",
+                .message = "Failed to parse 'stop_timestamp' parameter: XXX must unix times in microseconds",
             });
 
     REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX").error ==
             Error{
                 .code = 422,
-                .message = "Failed to parse 'ttl' parameter: XXX should be unsigned integer",
+                .message = "Failed to parse 'ttl' parameter: XXX must be unsigned integer",
             });
   }
 }
