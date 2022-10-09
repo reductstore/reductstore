@@ -112,7 +112,7 @@ class HttpServer : public IHttpServer {
   template <bool SSL>
   VoidTask RegisterEndpoint(HttpContext<SSL> ctx, HttpResponseHandler &&handler) const {
     std::string method(ctx.req->getMethod());
-    auto url = ctx.req->getUrl();
+    std::string url{ctx.req->getUrl()};
     auto authorization = ctx.req->getHeader("authorization");
     auto origin = ctx.req->getHeader("origin");
 
