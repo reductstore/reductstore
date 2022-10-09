@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed:
 
 - Build MacOs in pipeline, [PR-188](https://github.com/reduct-storage/reduct-storage/pull/188)
+- Fix parsing endpoint url to print it in logs, [PR-190](https://github.com/reduct-storage/reduct-storage/pull/190)
 
 ## [1.0.0] - 2022-10-03
 
