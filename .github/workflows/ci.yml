@@ -85,10 +85,14 @@ jobs:
           path: ${{ github.workspace }}/web-console
       - name: Select Xcode 13.4
         run: sudo xcode-select --switch /Applications/Xcode_13.4.app
-      - name: Install conan dependencies and build
+      - name: Install conan and register in Conan Repo
         run: |
           pip3 install -U pip
           pip3 install conan
+          conan remote add reduct https://reductstorage.jfrog.io/artifactory/api/conan/default-conan-local
+          conan user -p ${{ secrets.CONAN_TOKEN }} -r reduct ${{ secrets.CONAN_USER }}
+      - name: Install conan dependencies and build
+        run: |
           brew install gcc@11
           mkdir build && cd build
           CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console ..
