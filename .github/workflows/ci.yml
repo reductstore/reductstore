@@ -91,6 +91,7 @@ jobs:
           pip3 install conan
           conan remote add reduct https://reductstorage.jfrog.io/artifactory/api/conan/default-conan-local
           conan user -p ${{ secrets.CONAN_TOKEN }} -r reduct ${{ secrets.CONAN_USER }}
+          conan remote disable conancenter
       - name: Install conan dependencies and build
         run: |
           brew install gcc@11
