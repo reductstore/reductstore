@@ -96,6 +96,7 @@ jobs:
         run: |
           brew install gcc@11
           mkdir build && cd build
+          conan profile update settings.compiler.libcxx=libstdc++11
           CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console ..
           cmake --build . -- -j
       - name: Upload artifact
@@ -121,10 +122,15 @@ jobs:
         with:
           name: web_console
           path: ${{ github.workspace }}/web-console
-      - name: Install conan dependencies and build
+      - name: Install conan and register in Conan Repo
         run: |
           pip3 install -U pip
           pip3 install conan
+          conan remote add reduct https://reductstorage.jfrog.io/artifactory/api/conan/default-conan-local
+          conan user -p ${{ secrets.CONAN_TOKEN }} -r reduct ${{ secrets.CONAN_USER }}
+          conan remote disable conancenter
+      - name: Install conan dependencies and build
+        run: |
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION="10.0.19041.0" -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console  ..
           cmake --build . -j --config Release
