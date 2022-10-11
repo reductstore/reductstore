@@ -96,7 +96,7 @@ jobs:
         run: |
           brew install gcc@11
           mkdir build && cd build
-          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DCONAN_PROFILE=./conan/macos_amd64.profile \
+          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DCONAN_PROFILE=macos_amd64.profile \
             -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  \
             -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console ..
           cmake --build . -- -j

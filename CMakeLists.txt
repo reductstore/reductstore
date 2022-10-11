@@ -39,7 +39,7 @@ include(${CMAKE_BINARY_DIR}/conan.cmake)
 if (CONAN_PROFILE)
     conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
             BUILD missing
-            PROFILE ${CONAN_PROFILE})
+            PROFILE ${CMAKE_SOURCE_DIR}/conan/${CONAN_PROFILE})
 else ()
     conan_cmake_autodetect(settings)
     conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
