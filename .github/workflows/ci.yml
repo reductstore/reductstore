@@ -92,6 +92,8 @@ jobs:
           conan remote add reduct https://reductstorage.jfrog.io/artifactory/api/conan/default-conan-local
           conan user -p ${{ secrets.CONAN_TOKEN }} -r reduct ${{ secrets.CONAN_USER }}
           conan remote disable conancenter
+          conan profile new default --detect
+          conan profile update settings.compiler.libcxx=libstdc++11 default
       - name: Install conan dependencies and build
         run: |
           brew install gcc@11
