@@ -50,8 +50,6 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 include_directories(${CMAKE_BINARY_DIR})
 
 message(STATUS "Protobuf exe  ${Protobuf_PROTOC_EXECUTABLE}")
-execute_process(COMMAND chmod +x ${Protobuf_PROTOC_EXECUTABLE})
-
 add_subdirectory(src)
 
 message(STATUS "REDUCT_BUILD_TEST=${REDUCT_BUILD_TEST}")

@@ -93,7 +93,7 @@ jobs:
           conan user -p ${{ secrets.CONAN_TOKEN }} -r reduct ${{ secrets.CONAN_USER }}
           conan remote disable conancenter
           conan profile new default --detect
-          cp conan/linux_amd64.profile ~/.conan/profiles/default
+          cp conan/macos_amd64.profile ~/.conan/profiles/default
       - name: Install conan dependencies and build
         run: |
           brew install gcc@11
