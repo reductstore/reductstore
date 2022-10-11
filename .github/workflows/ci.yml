@@ -93,12 +93,12 @@ jobs:
           conan user -p ${{ secrets.CONAN_TOKEN }} -r reduct ${{ secrets.CONAN_USER }}
           conan remote disable conancenter
           conan profile new default --detect
-          conan profile update settings.compiler.libcxx=libstdc++11 default
+          cp conan/linux_amd64.profile ~/.conan/profiles/default
       - name: Install conan dependencies and build
         run: |
           brew install gcc@11
           mkdir build && cd build
-          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DCONAN_PROFILE=macos_amd64.profile \
+          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release  \
             -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  \
             -DWEB_CONSOLE_PATH=${{ github.workspace }}/web-console ..
           cmake --build . -- -j
