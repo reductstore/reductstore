@@ -9,7 +9,7 @@ set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
 option(REDUCT_BUILD_TEST "Build unit tests" ON)
 option(REDUCT_BUILD_BENCHMARKS "Build unit tests" ON)
 option(FULL_STATIC_BINARY "Link everything static" OFF)
-set(CONAN_PROFILE CACHE STRING "Use conan profile (for CI/CD)")
+
 set(DEFAULT_MAX_BLOCK_SIZE 64000000 CACHE STRING "Default max size for block with data")
 set(DEFAULT_MAX_BLOCK_RECORDS 1024 CACHE STRING "Default max number of records in a block")
 set(DEFAULT_MAX_READ_CHUNK 512000 CACHE STRING "Default max chunk for reading")
@@ -36,17 +36,11 @@ if (NOT EXISTS "${CMAKE_BINARY_DIR}/conan.cmake")
 endif ()
 
 include(${CMAKE_BINARY_DIR}/conan.cmake)
-if (CONAN_PROFILE)
-    conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
-            BUILD missing
-            PROFILE ${CMAKE_SOURCE_DIR}/conan/${CONAN_PROFILE})
-else ()
-    conan_cmake_autodetect(settings)
-    conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
-            BUILD missing
-            SETTINGS ${settings})
-endif ()
 
+conan_cmake_autodetect(settings)
+conan_cmake_install(PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}/conanfile.txt
+        BUILD missing
+        SETTINGS ${settings})
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup()
@@ -56,6 +50,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 include_directories(${CMAKE_BINARY_DIR})
 
 message(STATUS "Protobuf exe  ${Protobuf_PROTOC_EXECUTABLE}")
+execute_process(COMMAND chmod +x ${Protobuf_PROTOC_EXECUTABLE})
 
 add_subdirectory(src)
 
