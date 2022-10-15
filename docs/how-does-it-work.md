@@ -37,7 +37,7 @@ A user can manage bucket with[ Bucket API](http-api/bucket-api.md).
 
 #### Entry
 
-An entry represents a source of data. For example, It might be an image from a camera or the output of an AI model. The entry should have a unique name so that a user can address it with the [Entry API.](http-api/bucket-api.md)
+An entry represents a source of data. For example, It might be an image from a camera or the output of an AI model. The entry should have a unique name so that a user can address it with the [Entry API.](http-api/entry-api.md)
 
 **Block**
 
