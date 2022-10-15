@@ -4,6 +4,11 @@ on:
     branches: [ main, stable ]
     tags:
       - 'v*'
+    paths-ignore:
+      - docs/**
+      - README.md
+      - CHANGELOG.md
+
   pull_request:
     branches: [ main, stable ]
     paths-ignore:
