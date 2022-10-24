@@ -14,6 +14,11 @@
 * [JavaScript Client SDK](https://reduct-js.readthedocs.io/en/latest/)
 * [C++ Client SDK](https://reduct-cpp.readthedocs.io/en/latest/)
 
+## Tools
+
+* [CLI Client](https://reduct-cli.readthedocs.io/en/latest/)
+
+
 ## VERSIONS
 
 * [Latest](https://docs.reduct-storage.dev)
