@@ -139,7 +139,11 @@ class HttpServer : public IHttpServer {
       ctx.res->writeStatus(std::to_string(err.code));
       CommonHeaders();
       ctx.res->writeHeader("content-type", "application/json");
-      ctx.res->end(fmt::format(R"({{"detail":"{}"}})", err.message));
+      if (err.message.empty()) {
+        ctx.res->end({});
+      } else {
+        ctx.res->end(fmt::format(R"({{"detail":"{}"}})", err.message));
+      }
     };
 
     if (!ctx.no_auth) {

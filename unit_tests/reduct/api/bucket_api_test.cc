@@ -87,7 +87,7 @@ TEST_CASE("BucketApi::HeadBucket should get a bucket") {
 
   SECTION("doesn't exist") {
     auto [resp, err] = BucketApi::HeadBucket(storage.get(), "bucket");
-    REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
+    REQUIRE(err == Error{.code = 404, .message = ""});
   }
 }
 

@@ -36,6 +36,7 @@ Result<HttpResponse> BucketApi::GetBucket(const IStorage* storage, std::string_v
 core::Result<HttpResponse> BucketApi::HeadBucket(const storage::IStorage* storage, std::string_view name) {
   auto [bucket_ptr, err] = storage->GetBucket(std::string(name));
   if (err) {
+    err.message = "";
     return {{}, err};
   }
 
