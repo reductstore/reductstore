@@ -10,9 +10,6 @@
 namespace reduct::auth {
 
 using core::Error;
-using proto::api::RefreshTokenResponse;
-using proto::api::Token;
-
 using google::protobuf::util::TimeUtil;
 
 /**
@@ -20,14 +17,16 @@ using google::protobuf::util::TimeUtil;
  */
 class NoAuthentication : public ITokenAuthentication {
  public:
-  Error Check(std::string_view authorization_header) const override { return Error::kOk; }
+  Error Check(std::string_view authorization_header, Roles roles, std::string_view bucket) const override {
+    return Error::kOk;
+  }
 };
 
 class BearerTokenAuthentication : public ITokenAuthentication {
  public:
   explicit BearerTokenAuthentication(std::string_view api_token) { api_token_ = api_token; }
 
-  Error Check(std::string_view authorization_header) const override {
+  Error Check(std::string_view authorization_header, Roles roles, std::string_view bucket) const override {
     if (!authorization_header.starts_with("Bearer ")) {
       return {.code = 401, .message = "No bearer token in request header"};
     }

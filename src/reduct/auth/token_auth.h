@@ -13,8 +13,14 @@ namespace reduct::auth {
 /**
  *  Trivial Token Authentication w/o encoded subject
  */
-class ITokenAuthentication  {
+class ITokenAuthentication {
  public:
+  enum class Roles {
+    kFullAccess = 0,
+    kRead = 1,
+    kWrite = 2,
+  };
+
   struct Options {};
 
   /**
@@ -22,7 +28,8 @@ class ITokenAuthentication  {
    * @param authorization_header The header with token
    * @return 200 if Ok
    */
-  virtual core::Error Check(std::string_view authorization_header) const = 0;
+  virtual core::Error Check(std::string_view authorization_header, Roles roles = Roles::kFullAccess,
+                            std::string_view bucket = "") const = 0;
 
   static std::unique_ptr<ITokenAuthentication> Build(std::string_view api_token, Options options = Options{});
 };
