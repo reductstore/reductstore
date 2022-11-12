@@ -6,6 +6,7 @@
 
 #include <fstream>
 #include <random>
+#include <ranges>
 
 #include "reduct/core/logger.h"
 
@@ -30,6 +31,14 @@ class TokenRepository : public ITokenRepository {
   }
 
   core::Result<std::string> Create(std::string name, TokenPermisssions permissions) override {
+    if (name.empty()) {
+      return {{}, Error{.code = 422, .message = "Token name can't be empty"}};
+    }
+
+    if (HasName(name)) {
+      return {{}, Error{.code = 409, .message = fmt::format("Token '{}' already exists", name)}};
+    }
+
     Token& new_token = *repo_.add_tokens();
     new_token.set_name(std::move(name));
     new_token.mutable_created_at()->CopyFrom(TimeUtil::GetCurrentTime());
@@ -53,14 +62,14 @@ class TokenRepository : public ITokenRepository {
   }
 
   core::Result<TokenList> List() const override {
-      TokenList token_list{};
-      for (auto token : repo_.tokens()) {
-        token.clear_permissions();  // we don't expose permissions and value when we do list
-        token.clear_value();
-        token_list.push_back(std::move(token));
-      }
+    TokenList token_list{};
+    for (auto token : repo_.tokens()) {
+      token.clear_permissions();  // we don't expose permissions and value when we do list
+      token.clear_value();
+      token_list.push_back(std::move(token));
+    }
 
-      return {token_list, Error::kOk};
+    return {token_list, Error::kOk};
   }
 
   core::Result<Token> FindtByName(std::string_view name) const override { return core::Result<Token>(); }
@@ -68,6 +77,10 @@ class TokenRepository : public ITokenRepository {
   core::Error Remove(std::string_view name) override { return core::Error(); }
 
  private:
+  bool HasName(std::string_view name) const {
+    return std::ranges::any_of(repo_.tokens(), [&name](auto token) { return token.name() == name; });
+  }
+
   TokenRepo repo_;
 };
 

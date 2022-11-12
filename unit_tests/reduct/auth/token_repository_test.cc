@@ -30,6 +30,14 @@ TEST_CASE("auth::TokenRepository should create a token") {
     REQUIRE(token_list.size() == 1);
     REQUIRE(token_list[0].name() == "token");
   }
+
+  SECTION("name must be unique") {
+    REQUIRE(repo->Create("token", {}).error == Error{.code = 409, .message = "Token 'token' already exists"});
+  }
+
+  SECTION("name can't be empty") {
+    REQUIRE(repo->Create("", {}).error == Error{.code = 422, .message = "Token name can't be empty"});
+  }
 }
 
 TEST_CASE("auth::TokenRepository should list tokens") {
