@@ -4,12 +4,21 @@ import "google/protobuf/timestamp.proto";
 
 package reduct.proto.api;
 
+// API token
 message Token {
-  google.protobuf.Timestamp expired_at = 1;
+  // Permissions
+  message Permissions {
+    bool full_access = 1;       // if true, allows to manage buckets, tokens, write and read all buckets
+    repeated string read = 2;   // list of buckets for reading
+    repeated string write = 3;  // list of buckets for writing
+  }
+
+  string name = 1;                            // name of topic
+  string value = 2;                           // string which represents token
+  google.protobuf.Timestamp created_at = 3;   // creating time
+  Permissions permissions = 4;                // permissions
 }
 
-message RefreshTokenResponse {
-  string access_token = 1;
-  uint64 expired_at = 2;
+message TokenRepo {
+  repeated Token tokens = 1;    // tokens in repo
 }
-
