@@ -23,6 +23,7 @@ class ITokenAuthentication {
 
   struct Options {};
 
+
   /**
    * @brief Check if the access token is valid
    * @param authorization_header The header with token
