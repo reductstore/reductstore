@@ -14,7 +14,9 @@ set(SRC_FILES
         reduct/async/task_test.cc
 
         reduct/core/env_test.cc
+
         reduct/auth/token_auth_test.cc
+        reduct/auth/token_repository_test.cc
 
         reduct/storage/io/async_io_test.cc
         reduct/storage/bucket_test.cc

@@ -38,7 +38,9 @@ set(SRC_FILES
 
         reduct/asset/asset_manager.cc
         reduct/async/loop.cc
+
         reduct/auth/token_auth.cc
+        reduct/auth/token_repository.cc
 
         reduct/core/env_variable.cc
         reduct/core/logger.cc
