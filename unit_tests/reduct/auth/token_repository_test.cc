@@ -111,6 +111,17 @@ TEST_CASE("auth::TokenRepository should find s token by value") {
   REQUIRE(token.value().empty());
 
   SECTION("404 error") {
-    REQUIRE(repo->FindByValue("WRONG_TOKEN").error == Error{.code=404, .message="Wrong token value"});
+    REQUIRE(repo->FindByValue("WRONG_TOKEN").error == Error{.code = 404, .message = "Wrong token value"});
+  }
+}
+
+TEST_CASE("auth::TokenRepository should remove token by name") {
+  auto repo = MakeRepo();
+
+  REQUIRE(repo->Remove("token-1") == Error::kOk);
+  REQUIRE(repo->FindByValue("token-1").error.code == 404);
+
+  SECTION("404 error") {
+    REQUIRE(repo->Remove("token-XXX") == Error{.code = 404, .message = "Token 'token-XXX' doesn't exist"});
   }
 }

@@ -94,17 +94,22 @@ class TokenRepository : public ITokenRepository {
   }
 
   Result<Token> FindByValue(std::string_view value) const override {
-    for (const auto& token : repo_ | std::views::values) {
-      if (token.value() == value) {
-        Token found_token = token;
-        found_token.clear_value();
-        return {found_token, Error::kOk};
-      }
+    auto v = repo_ | std::views::values | std::views::filter([value](auto t) { return t.value() == value; });
+    if (v.empty()) {
+      return {{}, Error{.code = 404, .message = "Wrong token value"}};
     }
-    return {{}, Error{.code = 404, .message = "Wrong token value"}};
+
+    Token found_token = v.front();
+    found_token.clear_value();
+    return {found_token, Error::kOk};
   }
 
-  Error Remove(std::string_view name) override { return core::Error(); }
+  Error Remove(const std::string& name) override {
+    if (repo_.erase(name) == 0) {
+      return Error{.code = 404, .message = fmt::format("Token '{}' doesn't exist", name)};
+    }
+    return Error::kOk;
+  }
 
  private:
   std::map<std::string, Token> repo_;

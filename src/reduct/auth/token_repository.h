@@ -60,7 +60,7 @@ class ITokenRepository {
    * @param name token name
    * @return 404 if not found
    */
-  virtual core::Error Remove(std::string_view name) = 0;
+  virtual core::Error Remove(const std::string &name) = 0;
 
   struct Options {
     std::filesystem::path data_path;
