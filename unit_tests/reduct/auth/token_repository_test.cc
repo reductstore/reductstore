@@ -9,8 +9,8 @@
 using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 
-static std::unique_ptr<ITokenRepository> MakeRepo() {
-  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+static std::unique_ptr<ITokenRepository> MakeRepo(std::filesystem::path path = BuildTmpDirectory()) {
+  auto repo = ITokenRepository::Build({.data_path = path});
   {
     auto [token_list, err] = repo->List();
 
@@ -29,7 +29,8 @@ static std::unique_ptr<ITokenRepository> MakeRepo() {
 }
 
 TEST_CASE("auth::TokenRepository should create a token") {
-  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+  const auto path = BuildTmpDirectory();
+  auto repo = ITokenRepository::Build({.data_path = path});
 
   ITokenRepository::TokenPermisssions permissions;
   permissions.set_full_access(false);
@@ -56,6 +57,13 @@ TEST_CASE("auth::TokenRepository should create a token") {
 
   SECTION("name can't be empty") {
     REQUIRE(repo->Create("", {}).error == Error{.code = 422, .message = "Token name can't be empty"});
+  }
+
+  SECTION("must be persistent") {
+    auto new_repo = ITokenRepository::Build({.data_path = path});
+    auto [token_list, _] = new_repo->List();
+    REQUIRE(token_list.size() == 1);
+    REQUIRE(token_list[0].name() == "token");
   }
 }
 
@@ -116,12 +124,18 @@ TEST_CASE("auth::TokenRepository should find s token by value") {
 }
 
 TEST_CASE("auth::TokenRepository should remove token by name") {
-  auto repo = MakeRepo();
+  const auto path = BuildTmpDirectory();
+  auto repo = MakeRepo(path);
 
   REQUIRE(repo->Remove("token-1") == Error::kOk);
-  REQUIRE(repo->FindByValue("token-1").error.code == 404);
+  REQUIRE(repo->FindByName("token-1").error.code == 404);
 
   SECTION("404 error") {
     REQUIRE(repo->Remove("token-XXX") == Error{.code = 404, .message = "Token 'token-XXX' doesn't exist"});
+  }
+
+  SECTION("should be persistent") {
+    auto new_repo = ITokenRepository::Build({.data_path = path});
+    REQUIRE(new_repo->FindByName("token-1").error.code == 404);
   }
 }

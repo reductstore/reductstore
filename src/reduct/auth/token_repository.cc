@@ -24,17 +24,17 @@ const std::string_view kTokenRepoFileName = ".auth";
 class TokenRepository : public ITokenRepository {
  public:
   explicit TokenRepository(Options options) : repo_() {
-    const auto token_repo_path = options.data_path / kTokenRepoFileName;
-    std::ifstream file(token_repo_path);
+    config_path_ = options.data_path / kTokenRepoFileName;
+    std::ifstream file(config_path_, std::ios::binary);
     if (file) {
-      TokenRepo probuf_repo;
-      if (probuf_repo.ParseFromIstream(&file)) {
+      TokenRepo proto_repo;
+      if (!proto_repo.ParseFromIstream(&file)) {
         LOG_WARNING("Failed to parse tokens");
         return;
       }
 
-      LOG_DEBUG("Load {} tokens from {}", probuf_repo.tokens().size(), token_repo_path.string());
-      for (const auto& token : probuf_repo.tokens()) {
+      LOG_DEBUG("Load {} tokens from {}", proto_repo.tokens().size(), config_path_.string());
+      for (const auto& token : proto_repo.tokens()) {
         repo_[token.name()] = token;
       }
     }
@@ -67,6 +67,10 @@ class TokenRepository : public ITokenRepository {
       return output;
     };
     new_token.set_value(fmt::format("{}-{}", new_token.name(), random_hex_string(64)));
+
+    if (auto err = SaveRepo()) {
+      return {{}, err};
+    }
 
     return {new_token.value(), Error::kOk};
   }
@@ -108,10 +112,30 @@ class TokenRepository : public ITokenRepository {
     if (repo_.erase(name) == 0) {
       return Error{.code = 404, .message = fmt::format("Token '{}' doesn't exist", name)};
     }
-    return Error::kOk;
+    return SaveRepo();
   }
 
  private:
+  Error SaveRepo() const {
+    TokenRepo protbuf_repo;
+    for (const auto& token : repo_ | std::views::values) {
+      *protbuf_repo.add_tokens() = token;
+    }
+
+    std::ofstream file(config_path_, std::ios::binary);
+    if (!file) {
+      return {.code = 500,
+              .message =
+                  fmt::format("Failed to open file {} for writing: {}", config_path_.string(), std::strerror(errno))};
+    }
+
+    if (!protbuf_repo.SerializePartialToOstream(&file)) {
+      return {.code = 500, .message = "Failed to save tokens"};
+    }
+    return Error::kOk;
+  }
+
+  std::filesystem::path config_path_;
   std::map<std::string, Token> repo_;
 };
 
