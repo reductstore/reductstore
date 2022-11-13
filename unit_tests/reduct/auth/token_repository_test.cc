@@ -9,6 +9,25 @@
 using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 
+static std::unique_ptr<ITokenRepository> MakeRepo() {
+  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+  {
+    auto [token_list, err] = repo->List();
+
+    REQUIRE(err == Error::kOk);
+    REQUIRE(token_list.empty());
+  }
+
+  ITokenRepository::TokenPermisssions permissions;
+  permissions.set_full_access(false);
+  permissions.mutable_read()->Add("bucket_1");
+  permissions.mutable_write()->Add("bucket_2");
+
+  REQUIRE(repo->Create("token-1", permissions) == Error::kOk);
+  REQUIRE(repo->Create("token-2", permissions) == Error::kOk);
+  return repo;
+}
+
 TEST_CASE("auth::TokenRepository should create a token") {
   auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
 
@@ -41,35 +60,35 @@ TEST_CASE("auth::TokenRepository should create a token") {
 }
 
 TEST_CASE("auth::TokenRepository should list tokens") {
-  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
-  {
-    auto [token_list, err] = repo->List();
+  auto repo = MakeRepo();
 
-    REQUIRE(err == Error::kOk);
-    REQUIRE(token_list.empty());
-  }
+  auto [token_list, err] = repo->List();
+  REQUIRE(err == Error::kOk);
+  REQUIRE(token_list.size() == 2);
 
-  ITokenRepository::TokenPermisssions permissions;
-  permissions.set_full_access(false);
-  permissions.mutable_read()->Add("bucket_1");
-  permissions.mutable_write()->Add("bucket_2");
+  REQUIRE(token_list[0].name() == "token-1");
+  REQUIRE(token_list[0].created_at().IsInitialized());
+  REQUIRE(token_list[0].value().empty());
+  REQUIRE_FALSE(token_list[0].has_permissions());
 
-  REQUIRE(repo->Create("token-1", permissions) == Error::kOk);
-  REQUIRE(repo->Create("token-2", permissions) == Error::kOk);
+  REQUIRE(token_list[1].name() == "token-2");
+  REQUIRE(token_list[1].created_at().IsInitialized());
+  REQUIRE(token_list[1].value().empty());
+  REQUIRE_FALSE(token_list[1].has_permissions());
+}
 
-  {
-    auto [token_list, err] = repo->List();
-    REQUIRE(err == Error::kOk);
-    REQUIRE(token_list.size() == 2);
+TEST_CASE("auth::TokenRepository should find s token by name") {
+  auto repo = MakeRepo();
 
-    REQUIRE(token_list[0].name() == "token-1");
-    REQUIRE(token_list[0].created_at().IsInitialized());
-    REQUIRE(token_list[0].value().empty());
-    REQUIRE_FALSE(token_list[0].has_permissions());
+  auto [token, error] = repo->FindByName("token-1");
+  REQUIRE(error == Error::kOk);
+  REQUIRE(token.name() == "token-1");
+  REQUIRE(token.value().empty());
+  REQUIRE_FALSE(token.permissions().full_access());
+  REQUIRE(token.permissions().read().at(0) == "bucket_1");
+  REQUIRE(token.permissions().write().at(0) == "bucket_2");
 
-    REQUIRE(token_list[1].name() == "token-2");
-    REQUIRE(token_list[1].created_at().IsInitialized());
-    REQUIRE(token_list[1].value().empty());
-    REQUIRE_FALSE(token_list[1].has_permissions());
+  SECTION("404 error") {
+    REQUIRE(repo->FindByName("token-XXX").error == Error{.code = 404, .message = "Token 'token-XXX' doesn't exist"});
   }
 }

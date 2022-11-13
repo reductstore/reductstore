@@ -45,7 +45,7 @@ class ITokenRepository {
    * @param name token name
    * @return token without value, 404 if not found
    */
-  virtual core::Result<Token> FindtByName(std::string_view name) const = 0;
+  virtual core::Result<Token> FindByName(const std::string &name) const = 0;
 
   /**
    * Find a token by its value

@@ -5,6 +5,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <fstream>
+#include <map>
 #include <random>
 #include <ranges>
 
@@ -13,6 +14,7 @@
 namespace reduct::auth {
 
 using core::Error;
+using core::Result;
 using proto::api::TokenRepo;
 
 using google::protobuf::util::TimeUtil;
@@ -23,23 +25,31 @@ class TokenRepository : public ITokenRepository {
  public:
   explicit TokenRepository(Options options) : repo_() {
     const auto token_repo_path = options.data_path / kTokenRepoFileName;
-    std::ifstream token_repo(token_repo_path);
-    if (token_repo) {
-      repo_.ParseFromIstream(&token_repo);
-      LOG_DEBUG("Load {} tokens from {}", repo_.tokens().size(), token_repo_path.string());
+    std::ifstream file(token_repo_path);
+    if (file) {
+      TokenRepo probuf_repo;
+      if (probuf_repo.ParseFromIstream(&file)) {
+        LOG_WARNING("Failed to parse tokens");
+        return;
+      }
+
+      LOG_DEBUG("Load {} tokens from {}", probuf_repo.tokens().size(), token_repo_path.string());
+      for (const auto& token : probuf_repo.tokens()) {
+        repo_[token.name()] = token;
+      }
     }
   }
 
-  core::Result<std::string> Create(std::string name, TokenPermisssions permissions) override {
+  Result<std::string> Create(std::string name, TokenPermisssions permissions) override {
     if (name.empty()) {
       return {{}, Error{.code = 422, .message = "Token name can't be empty"}};
     }
 
-    if (HasName(name)) {
+    if (!FindByName(name).error) {
       return {{}, Error{.code = 409, .message = fmt::format("Token '{}' already exists", name)}};
     }
 
-    Token& new_token = *repo_.add_tokens();
+    Token& new_token = repo_[name];
     new_token.set_name(std::move(name));
     new_token.mutable_created_at()->CopyFrom(TimeUtil::GetCurrentTime());
     new_token.mutable_permissions()->CopyFrom(permissions);
@@ -61,9 +71,9 @@ class TokenRepository : public ITokenRepository {
     return {new_token.value(), Error::kOk};
   }
 
-  core::Result<TokenList> List() const override {
+  Result<TokenList> List() const override {
     TokenList token_list{};
-    for (auto token : repo_.tokens()) {
+    for (auto token : repo_ | std::views::values) {
       token.clear_permissions();  // we don't expose permissions and value when we do list
       token.clear_value();
       token_list.push_back(std::move(token));
@@ -72,16 +82,22 @@ class TokenRepository : public ITokenRepository {
     return {token_list, Error::kOk};
   }
 
-  core::Result<Token> FindtByName(std::string_view name) const override { return core::Result<Token>(); }
-  core::Result<Token> FindByValue(std::string_view value) const override { return core::Result<Token>(); }
-  core::Error Remove(std::string_view name) override { return core::Error(); }
+  Result<Token> FindByName(const std::string& name) const override {
+    auto it = repo_.find(name);
+    if (it == repo_.end()) {
+      return {{}, Error{.code = 404, .message = fmt::format("Token '{}' doesn't exist", name)}};
+    }
 
- private:
-  bool HasName(std::string_view name) const {
-    return std::ranges::any_of(repo_.tokens(), [&name](auto token) { return token.name() == name; });
+    Token token = it->second;
+    token.clear_value();
+    return {token, Error::kOk};
   }
 
-  TokenRepo repo_;
+  Result<Token> FindByValue(std::string_view value) const override { return core::Result<Token>(); }
+  Error Remove(std::string_view name) override { return core::Error(); }
+
+ private:
+  std::map<std::string, Token> repo_;
 };
 
 std::unique_ptr<ITokenRepository> ITokenRepository::Build(ITokenRepository::Options options) {
