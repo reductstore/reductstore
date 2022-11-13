@@ -92,3 +92,25 @@ TEST_CASE("auth::TokenRepository should find s token by name") {
     REQUIRE(repo->FindByName("token-XXX").error == Error{.code = 404, .message = "Token 'token-XXX' doesn't exist"});
   }
 }
+
+TEST_CASE("auth::TokenRepository should find s token by value") {
+  auto repo = MakeRepo();
+
+  ITokenRepository::TokenPermisssions permissions;
+  permissions.set_full_access(false);
+  permissions.mutable_read()->Add("bucket_1");
+
+  auto [token_value, err] = repo->Create("token-3", permissions);
+  REQUIRE(err == Error::kOk);
+
+  auto [token, find_err] = repo->FindByValue(token_value);
+  REQUIRE(find_err == Error::kOk);
+  REQUIRE(token.name() == "token-3");
+  REQUIRE(token.created_at().IsInitialized());
+  REQUIRE(token.permissions().read().at(0) == "bucket_1");
+  REQUIRE(token.value().empty());
+
+  SECTION("404 error") {
+    REQUIRE(repo->FindByValue("WRONG_TOKEN").error == Error{.code=404, .message="Wrong token value"});
+  }
+}

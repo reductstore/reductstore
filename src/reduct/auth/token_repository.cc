@@ -93,7 +93,17 @@ class TokenRepository : public ITokenRepository {
     return {token, Error::kOk};
   }
 
-  Result<Token> FindByValue(std::string_view value) const override { return core::Result<Token>(); }
+  Result<Token> FindByValue(std::string_view value) const override {
+    for (const auto& token : repo_ | std::views::values) {
+      if (token.value() == value) {
+        Token found_token = token;
+        found_token.clear_value();
+        return {found_token, Error::kOk};
+      }
+    }
+    return {{}, Error{.code = 404, .message = "Wrong token value"}};
+  }
+
   Error Remove(std::string_view name) override { return core::Error(); }
 
  private:
