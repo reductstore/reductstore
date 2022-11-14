@@ -60,5 +60,5 @@ curl --header "Authorization: Bearer ${API_TOKEN}"   \
 
 ##  Tools
 
-* [CLI Clinet](https://github.com/reduct-storage/reduct-cli)
+* [CLI Client](https://github.com/reduct-storage/reduct-cli)
 * [Web Console](https://github.com/reduct-storage/web-console)
