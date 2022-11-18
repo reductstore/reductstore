@@ -28,12 +28,12 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
     auto [resp, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10");
     REQUIRE(err == Error::kOk);
 
-    auto [headers, len, input, output] = resp;
+
+    REQUIRE(resp("12345", false) == Error::kOk);
+    REQUIRE(resp("67890", true) == Error::kOk);
+
     REQUIRE(headers.empty());
     REQUIRE(len == 0);
-
-    REQUIRE(input("12345", false) == Error::kOk);
-    REQUIRE(input("67890", true) == Error::kOk);
 
     auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
     REQUIRE(ReadOne(*entry, reduct::core::Time() + us(1000001)).result == "1234567890");
@@ -264,7 +264,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
     auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, {});
     REQUIRE(err == Error::kOk);
 
-    auto [out, out_err] = resp.output_call();
+    auto [out, out_err] = resp.SendData();
     REQUIRE(err == Error::kOk);
     JsonStringToMessage(out, &info);
 
@@ -277,7 +277,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
     auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000002", {}, {});
     REQUIRE(err == Error::kOk);
 
-    JsonStringToMessage(resp.output_call().result, &info);
+    JsonStringToMessage(resp.SendData().result, &info);
 
     REQUIRE(entry->Next(info.id()).result.reader->timestamp() == Time() + us(2000001));
     REQUIRE(entry->Next(info.id()).error.code == 404);
@@ -287,7 +287,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
     auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "1000002", {});
     REQUIRE(err == Error::kOk);
 
-    JsonStringToMessage(resp.output_call().result, &info);
+    JsonStringToMessage(resp.SendData().result, &info);
 
     REQUIRE(entry->Next(info.id()).result.reader->timestamp() == Time() + us(1000001));
     REQUIRE(entry->Next(info.id()).error.code == 404);
@@ -297,7 +297,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
     auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000003", "1000004", {});
     REQUIRE(err == Error::kOk);
 
-    JsonStringToMessage(resp.output_call().result, &info);
+    JsonStringToMessage(resp.SendData().result, &info);
 
     REQUIRE(entry->Next(info.id()).error.code == 202);  // no content
     REQUIRE(entry->Next(info.id()).error.code == 404);
@@ -340,7 +340,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
                 .message = "Failed to parse 'stop_timestamp' parameter: XXX must unix times in microseconds",
             });
 
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX").error ==
+    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX")("", true).error ==
             Error{
                 .code = 422,
                 .message = "Failed to parse 'ttl' parameter: XXX must be unsigned integer",

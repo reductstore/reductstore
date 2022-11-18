@@ -35,6 +35,7 @@ set(SRC_FILES
         reduct/api/entry_api.cc
         reduct/api/http_server.cc
         reduct/api/server_api.cc
+        reduct/api/token_api.cc
 
         reduct/asset/asset_manager.cc
         reduct/async/loop.cc

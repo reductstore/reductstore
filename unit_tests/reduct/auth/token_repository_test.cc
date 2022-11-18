@@ -18,7 +18,7 @@ static std::unique_ptr<ITokenRepository> MakeRepo(std::filesystem::path path = B
     REQUIRE(token_list.empty());
   }
 
-  ITokenRepository::TokenPermisssions permissions;
+  ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(false);
   permissions.mutable_read()->Add("bucket_1");
   permissions.mutable_write()->Add("bucket_2");
@@ -32,7 +32,7 @@ TEST_CASE("auth::TokenRepository should create a token") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
-  ITokenRepository::TokenPermisssions permissions;
+  ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(false);
   permissions.mutable_read()->Add("bucket_1");
   permissions.mutable_write()->Add("bucket_2");
@@ -104,7 +104,7 @@ TEST_CASE("auth::TokenRepository should find s token by name") {
 TEST_CASE("auth::TokenRepository should find s token by value") {
   auto repo = MakeRepo();
 
-  ITokenRepository::TokenPermisssions permissions;
+  ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(false);
   permissions.mutable_read()->Add("bucket_1");
 

@@ -110,7 +110,7 @@ class HttpServer : public IHttpServer {
   };
 
   template <bool SSL>
-  VoidTask RegisterEndpoint(HttpContext<SSL> ctx, HttpResponseHandler &&handler) const {
+  VoidTask RegisterEndpoint(HttpContext<SSL> ctx, std::function<Result<HttpRequestReceiver>()> &&callback) const {
     std::string method(ctx.req->getMethod());
     std::string url{ctx.req->getUrl()};
     auto authorization = ctx.req->getHeader("authorization");
@@ -153,24 +153,27 @@ class HttpServer : public IHttpServer {
       }
     }
 
-    auto result = handler();
-    if (result.error) {
-      SendError(result.error);
-      co_return;
-    }
-
-    // Receive data
-    auto [headers, content_length, input_call, output_call] = result.result;
-    auto err = co_await AsyncHttpReceiver<SSL>(
-        ctx.res, [&input_call](auto chunk, bool last) { return input_call(chunk, last); });
+    auto [receiver, err] = callback();
     if (err) {
       SendError(err);
       co_return;
     }
 
-    ctx.res->writeStatus(std::to_string(result.error.code));  // If Ok but not 200
+    HttpResponse response;
+    err = co_await AsyncHttpReceiver<SSL>(ctx.res, [&response, &receiver](auto chunk, bool last) {
+      auto [recv_resp, recv_err] = receiver(chunk, last);
+      response = std::move(recv_resp);
+      return recv_err;
+    });
+
+    if (err) {
+      SendError(err);
+      co_return;
+    }
+
+    ctx.res->writeStatus(std::to_string(err.code));  // If Ok but not 200
     CommonHeaders();
-    for (auto &[key, val] : headers) {
+    for (auto &[key, val] : response.headers) {
       ctx.res->writeHeader(key, val);
     }
 
@@ -191,7 +194,7 @@ class HttpServer : public IHttpServer {
     bool complete = false;
     while (!aborted && !complete) {
       co_await Sleep(async::kTick);  // switch context before start to read
-      auto [chuck, read_err] = output_call();
+      auto [chuck, read_err] = response.SendData();
       if (read_err) {
         SendError(read_err);
         co_return;
@@ -200,7 +203,8 @@ class HttpServer : public IHttpServer {
       const auto offset = ctx.res->getWriteOffset();
       while (!aborted) {
         ready_to_continue = false;
-        auto [ok, responded] = ctx.res->tryEnd(chuck.substr(ctx.res->getWriteOffset() - offset), content_length);
+        auto [ok, responded] =
+            ctx.res->tryEnd(chuck.substr(ctx.res->getWriteOffset() - offset), response.content_length);
         if (ok) {
           complete = responded;
           break;
@@ -215,7 +219,8 @@ class HttpServer : public IHttpServer {
       }
     }
 
-    LOG_DEBUG("Response for {} {} -- {}/{} kB", method, url, ctx.res->getWriteOffset() / 1024, content_length / 1024);
+    LOG_DEBUG("Response for {} {} -- {}/{} kB", method, url, ctx.res->getWriteOffset() / 1024,
+              response.content_length / 1024);
 
     co_return;
   }
@@ -324,8 +329,8 @@ class HttpServer : public IHttpServer {
              })
         .any("/*",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running, true}, []() -> Result<HttpResponse> {
-                 return {{}, Error{.code = 404, .message = "Not found"}};
+               RegisterEndpoint(HttpContext<SSL>{res, req, running, true}, []() -> Result<HttpRequestReceiver> {
+                 return DefaultReceiver(Error{.code = 404, .message = "Not found"});
                });
              })
         .listen(host, port, 0,

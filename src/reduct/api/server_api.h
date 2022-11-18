@@ -13,17 +13,17 @@ class ServerApi {
   /**
    * GET /alive
    */
-  static core::Result<HttpResponse> Alive(const storage::IStorage* storage);
+  static core::Result<HttpRequestReceiver> Alive(const storage::IStorage* storage);
 
   /**
    * GET /info
    */
-  static core::Result<HttpResponse> Info(const storage::IStorage* storage);
+  static core::Result<HttpRequestReceiver> Info(const storage::IStorage* storage);
 
   /**
    * GET /list
    */
-  static core::Result<HttpResponse> List(const storage::IStorage* storage);
+  static core::Result<HttpRequestReceiver> List(const storage::IStorage* storage);
 };
 
 }  // namespace reduct::api

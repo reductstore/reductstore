@@ -17,7 +17,7 @@ TEST_CASE("ServerApi::Alive should return empty body") {
   auto [resp, err] = ServerApi::Alive(storage.get());
 
   REQUIRE(err == Error::kOk);
-  auto output = resp.output_call();
+  auto output = resp.SendData();
 
   REQUIRE(output.error == Error::kOk);
   REQUIRE(output.result.empty());
@@ -29,7 +29,7 @@ TEST_CASE("ServerApi::Info should return JSON") {
   auto [resp, err] = ServerApi::Info(storage.get());
 
   REQUIRE(err == Error::kOk);
-  auto output = resp.output_call();
+  auto output = resp.SendData();
 
   REQUIRE(output.error == Error::kOk);
 
@@ -44,7 +44,7 @@ TEST_CASE("ServerApi::List should return JSON") {
   auto [resp, err] = ServerApi::List(storage.get());
 
   REQUIRE(err == Error::kOk);
-  auto output = resp.output_call();
+  auto output = resp.SendData();
 
   REQUIRE(output.error == Error::kOk);
 

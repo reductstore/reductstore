@@ -40,7 +40,7 @@ class TokenRepository : public ITokenRepository {
     }
   }
 
-  Result<std::string> Create(std::string name, TokenPermisssions permissions) override {
+  Result<std::string> Create(std::string name, TokenPermissions permissions) override {
     if (name.empty()) {
       return {{}, Error{.code = 422, .message = "Token name can't be empty"}};
     }

@@ -10,7 +10,7 @@ namespace reduct::api {
 
 class Console {
  public:
-  static core::Result<HttpResponse> UiRequest(const asset::IAssetManager* console, std::string_view base_path,
+  static core::Result<HttpRequestReceiver> UiRequest(const asset::IAssetManager* console, std::string_view base_path,
                                               std::string_view path);
 };
 

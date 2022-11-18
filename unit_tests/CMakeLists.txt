@@ -6,6 +6,7 @@ set(SRC_FILES
         reduct/api/bucket_api_test.cc
         reduct/api/entry_api_test.cc
         reduct/api/server_api_test.cc
+        reduct/api/token_api_test.cc
 
         reduct/asset/asset_manager_test.cc
 

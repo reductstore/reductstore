@@ -17,18 +17,15 @@ namespace reduct::api {
 
 using StringMap = std::unordered_map<std::string, std::string>;
 
-
 struct HttpResponse {
   StringMap headers;
   size_t content_length;
-  std::function<core::Error(std::string_view, bool)> input_call;
-  std::function<core::Result<std::string>()> output_call;
+  std::function<core::Result<std::string>()> SendData;
 
   static HttpResponse Default() {
     return {
         {},
         0,
-        [](std::string_view chunk, bool last) { return core::Error::kOk; },
         []() {
           return core::Result<std::string>{"", core::Error::kOk};
         },
@@ -36,7 +33,7 @@ struct HttpResponse {
   }
 };
 
-using HttpResponseHandler = std::function<core::Result<HttpResponse>()>;
+using HttpRequestReceiver = std::function<core::Result<HttpResponse>(std::string_view, bool)>;
 
 template <class T>
 std::string PrintToJson(T &&msg) {
@@ -51,56 +48,112 @@ std::string PrintToJson(T &&msg) {
   return data;
 }
 
-template <class T>
-static core::Result<HttpResponse> SendJson(core::Result<T> &&res) {
-  using core::Error;
-  using core::Result;
-
-  auto [data, err] = res;
-  auto json = err ? "" : PrintToJson(std::move(data));
+static core::Result<HttpRequestReceiver> DefaultReceiver(core::Error error = core::Error::kOk) {
   return {
-      HttpResponse{
-          {{"content-type", "application/json"}},
-          json.size(),
-          [](std::string_view chunk, bool last) { return Error::kOk; },
-          [json = std::move(json), err = std::move(err)]() {
-            return Result<std::string>{json, err};
-          },
+      [error = std::move(error)](std::string_view chunk, bool last) -> core::Result<HttpResponse> {
+        return {HttpResponse::Default(), error};
       },
-      Error::kOk,
+      core::Error::kOk,
   };
 }
 
-template <class T>
-static core::Result<HttpResponse> ReceiveJson(std::function<core::Error(T &&)> handler) {
+template <class T = google::protobuf::Message>
+static core::Result<HttpRequestReceiver> SendJson(core::Result<T> &&res) {
+  return core::Result<HttpRequestReceiver>{
+      [data = std::move(res.result)](std::string_view, bool) mutable -> core::Result<HttpResponse> {
+        auto json = PrintToJson(data);
+        return {
+            HttpResponse{
+                .headers = {{"Content-Type", "application/json"}},
+                .content_length = json.size(),
+                .SendData =
+                    [json = std::move(json)]() {
+                      return core::Result<std::string>{json, core::Error::kOk};
+                    },
+            },
+            core::Error::kOk,
+        };
+      },
+      res.error,
+  };
+}
+
+template <class T = google::protobuf::Message>
+static core::Result<HttpRequestReceiver> ReceiveJson(std::function<core::Error(T &&)> handler) {
   using core::Error;
   using core::Result;
   using google::protobuf::util::JsonStringToMessage;
 
   auto buffer = std::make_shared<std::string>();
   buffer->reserve(1024);
-  return {
-      HttpResponse{
-          .headers = {},
-          .content_length = 0,
-          .input_call =
-              [data = std::move(buffer), handler = std::move(handler)](std::string_view chunk, bool last) {
-                data->append(chunk);
-                if (last) {
-                  T proto_message;
-                  if (!data->empty()) {
-                    auto status = JsonStringToMessage(*data, &proto_message);
-                    if (!status.ok()) {
-                      return Error{.code = 422,
-                                   .message = fmt::format("Failed parse JSON buffer: {}", status.message().ToString())};
-                    }
-                  }
+  return Result<HttpRequestReceiver>{
+      [data = std::move(buffer), handler = std::move(handler)](std::string_view chunk,
+                                                               bool last) -> Result<HttpResponse> {
+        data->append(chunk);
+        if (!last) {
+          return Result<HttpResponse>{HttpResponse::Default(), Error{.code = 100, .message = "Continue"}};
+        }
 
-                  return handler(std::move(proto_message));
-                }
-                return Error::kOk;
-              },
-          .output_call = []() { return Result<std::string>{}; },
+        auto response = HttpResponse::Default();
+        T proto_message;
+        if (!data->empty()) {
+          auto status = JsonStringToMessage(*data, &proto_message);
+          if (!status.ok()) {
+            return Result<HttpResponse>{
+                response,
+                Error{.code = 422, .message = fmt::format("Failed parse JSON buffer: {}", status.message().ToString())},
+            };
+          }
+        }
+
+        core::Error err = handler(std::move(proto_message));
+        return Result<HttpResponse>{response, err};
+      },
+      Error::kOk,
+  };
+}
+
+template <typename Rx, typename Tx>
+static core::Result<HttpRequestReceiver> ReceiveAndSendJson(std::function<core::Result<Tx>(Rx &&)> handler) {
+  using core::Error;
+  using core::Result;
+  using google::protobuf::util::JsonStringToMessage;
+
+  auto buffer = std::make_shared<std::string>();
+  buffer->reserve(1024);
+  return Result{
+      [data = std::move(buffer), handler = std::move(handler)](std::string_view chunk,
+                                                               bool last) -> Result<HttpResponse> {
+        data->append(chunk);
+        if (!last) {
+          return {HttpResponse::Default(), {.code = 100, .message = "Continue"}};
+        }
+
+        auto response = HttpResponse::Default();
+        Rx proto_message;
+        if (!data->empty()) {
+          auto status = JsonStringToMessage(*data, &proto_message);
+          if (!status.ok()) {
+            return Result<HttpResponse>{
+                response,
+                Error{.code = 422, .message = fmt::format("Failed parse JSON buffer: {}", status.message().ToString())},
+            };
+          }
+        }
+
+        core::Result<Tx> result = handler(std::move(proto_message));
+        auto json = PrintToJson(result.result);
+        return {
+            HttpResponse{
+                .headers = {},
+                .content_length = json.size(),
+                .SendData =
+                    [json = std::move(json)]() {
+                      return core::Result<std::string>{json, core::Error::kOk};
+                    },
+            },
+            result.error,
+        };
       },
       Error::kOk,
   };

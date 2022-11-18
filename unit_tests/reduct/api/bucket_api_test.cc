@@ -19,7 +19,7 @@ TEST_CASE("BucketApi::CreateBucket should create a bucket") {
     REQUIRE(err == Error::kOk);
     REQUIRE(resp.input_call("", true) == Error::kOk);
 
-    auto output = resp.output_call();
+    auto output = resp.SendData();
     REQUIRE(output.error == Error::kOk);
     REQUIRE(output.result.empty());
 
@@ -62,7 +62,7 @@ TEST_CASE("BucketApi::GetBucket should get a bucket") {
     REQUIRE(err == Error::kOk);
 
     reduct::proto::api::FullBucketInfo info;
-    JsonStringToMessage(resp.output_call().result, &info);
+    JsonStringToMessage(resp.SendData().result, &info);
 
     REQUIRE(info.info().name() == storage->GetBucket("bucket").result.lock()->GetInfo().name());
   }
@@ -82,7 +82,7 @@ TEST_CASE("BucketApi::HeadBucket should get a bucket") {
     auto [resp, err] = BucketApi::HeadBucket(storage.get(), "bucket");
     REQUIRE(err == Error::kOk);
     REQUIRE(resp.content_length == 0);
-    REQUIRE(resp.output_call().result.empty());
+    REQUIRE(resp.SendData().result.empty());
   }
 
   SECTION("doesn't exist") {
@@ -129,7 +129,7 @@ TEST_CASE("BucketApi::RemoveBucket should remove a bucket") {
     auto [resp, err] = BucketApi::RemoveBucket(storage.get(), "bucket");
     REQUIRE(err == Error::kOk);
     REQUIRE(resp.content_length == 0);
-    REQUIRE(resp.output_call().result.empty());
+    REQUIRE(resp.SendData().result.empty());
 
     REQUIRE(storage->GetBucket("bucket") == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
   }
