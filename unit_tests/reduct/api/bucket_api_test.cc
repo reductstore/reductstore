@@ -14,10 +14,11 @@ using reduct::storage::IStorage;
 TEST_CASE("BucketApi::CreateBucket should create a bucket") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   SECTION("default settings") {
-    auto [resp, err] = BucketApi::CreateBucket(storage.get(), "bucket");
-
+    auto [receiver, err] = BucketApi::CreateBucket(storage.get(), "bucket");
     REQUIRE(err == Error::kOk);
-    REQUIRE(resp.input_call("", true) == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
 
     auto output = resp.SendData();
     REQUIRE(output.error == Error::kOk);
@@ -27,10 +28,11 @@ TEST_CASE("BucketApi::CreateBucket should create a bucket") {
   }
 
   SECTION("with settings") {
-    auto [resp, err] = BucketApi::CreateBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::CreateBucket(storage.get(), "bucket");
+    REQUIRE(err == Error::kOk);
 
     REQUIRE(err == Error::kOk);
-    REQUIRE(resp.input_call(R"({"quota_size": 100})", true) == Error::kOk);
+    REQUIRE(receiver(R"({"quota_size": 100})", true) == Error::kOk);
 
     REQUIRE(storage->GetBucket("bucket").result.lock()->GetSettings().quota_size() == 100);
   }
@@ -38,17 +40,17 @@ TEST_CASE("BucketApi::CreateBucket should create a bucket") {
   SECTION("already exists") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-    auto [resp, err] = BucketApi::CreateBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::CreateBucket(storage.get(), "bucket");
 
     REQUIRE(err == Error::kOk);
-    REQUIRE(resp.input_call("", true) == Error{.code = 409, .message = "Bucket 'bucket' already exists"});
+    REQUIRE(receiver("", true) == Error{.code = 409, .message = "Bucket 'bucket' already exists"});
   }
 
   SECTION("bad syntax") {
-    auto [resp, err] = BucketApi::CreateBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::CreateBucket(storage.get(), "bucket");
 
     REQUIRE(err == Error::kOk);
-    REQUIRE(resp.input_call("{", true).code == 422);
+    REQUIRE(receiver("{", true).error.code == 422);
   }
 }
 
@@ -58,8 +60,11 @@ TEST_CASE("BucketApi::GetBucket should get a bucket") {
   SECTION("ok") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-    auto [resp, err] = BucketApi::GetBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::GetBucket(storage.get(), "bucket");
     REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
 
     reduct::proto::api::FullBucketInfo info;
     JsonStringToMessage(resp.SendData().result, &info);
@@ -68,8 +73,10 @@ TEST_CASE("BucketApi::GetBucket should get a bucket") {
   }
 
   SECTION("doesn't exist") {
-    auto [resp, err] = BucketApi::GetBucket(storage.get(), "bucket");
-    REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
+    auto [receiver, err] = BucketApi::GetBucket(storage.get(), "bucket");
+    REQUIRE(err == Error::kOk);
+
+    REQUIRE(receiver("", true).error == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
   }
 }
 
@@ -79,15 +86,20 @@ TEST_CASE("BucketApi::HeadBucket should get a bucket") {
   SECTION("ok") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-    auto [resp, err] = BucketApi::HeadBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::HeadBucket(storage.get(), "bucket");
     REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
     REQUIRE(resp.content_length == 0);
     REQUIRE(resp.SendData().result.empty());
   }
 
   SECTION("doesn't exist") {
-    auto [resp, err] = BucketApi::HeadBucket(storage.get(), "bucket");
-    REQUIRE(err == Error{.code = 404, .message = ""});
+    auto [receiver, err] = BucketApi::HeadBucket(storage.get(), "bucket");
+    REQUIRE(err == Error::kOk);
+
+    REQUIRE(receiver("", true).error == Error{.code = 404, .message = ""});
   }
 }
 
@@ -97,26 +109,28 @@ TEST_CASE("BucketApi::UpdateBucket should update a bucket") {
   SECTION("ok") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-    auto [resp, err] = BucketApi::UpdateBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::UpdateBucket(storage.get(), "bucket");
 
     REQUIRE(err == Error::kOk);
-    REQUIRE(resp.input_call(R"({"quota_size": 100})", true) == Error::kOk);
+    REQUIRE(receiver(R"({"quota_size": 100})", true) == Error::kOk);
 
     REQUIRE(storage->GetBucket("bucket").result.lock()->GetSettings().quota_size() == 100);
   }
 
   SECTION("doesn't exist") {
-    auto [resp, err] = BucketApi::UpdateBucket(storage.get(), "bucket");
-    REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
+    auto [receiver, err] = BucketApi::UpdateBucket(storage.get(), "bucket");
+    REQUIRE(err == Error::kOk);
+
+    REQUIRE(receiver("", true).error == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
   }
 
   SECTION("bad syntax") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-    auto [resp, err] = BucketApi::UpdateBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::UpdateBucket(storage.get(), "bucket");
 
     REQUIRE(err == Error::kOk);
-    REQUIRE(resp.input_call("{", true).code == 422);
+    REQUIRE(receiver("{", true).error.code == 422);
   }
 }
 
@@ -126,8 +140,11 @@ TEST_CASE("BucketApi::RemoveBucket should remove a bucket") {
   SECTION("ok") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-    auto [resp, err] = BucketApi::RemoveBucket(storage.get(), "bucket");
+    auto [receiver, err] = BucketApi::RemoveBucket(storage.get(), "bucket");
     REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
     REQUIRE(resp.content_length == 0);
     REQUIRE(resp.SendData().result.empty());
 
@@ -135,7 +152,9 @@ TEST_CASE("BucketApi::RemoveBucket should remove a bucket") {
   }
 
   SECTION("doesn't exist") {
-    auto [resp, err] = BucketApi::RemoveBucket(storage.get(), "bucket");
-    REQUIRE(err == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
+    auto [receiver, err] = BucketApi::RemoveBucket(storage.get(), "bucket");
+    REQUIRE(err == Error::kOk);
+
+    REQUIRE(receiver("", true) == Error{.code = 404, .message = "Bucket 'bucket' is not found"});
   }
 }

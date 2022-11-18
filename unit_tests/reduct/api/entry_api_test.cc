@@ -25,30 +25,36 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
   SECTION("ok") {
-    auto [resp, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10");
-    REQUIRE(err == Error::kOk);
+    {
+      auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10");
+      REQUIRE(err == Error::kOk);
 
+      REQUIRE(receiver("12345", false).error.code == 100);
 
-    REQUIRE(resp("12345", false) == Error::kOk);
-    REQUIRE(resp("67890", true) == Error::kOk);
+      auto [resp, resp_err] = receiver("67890", true);
+      REQUIRE(resp_err == Error::kOk);
 
-    REQUIRE(headers.empty());
-    REQUIRE(len == 0);
+      REQUIRE(resp.headers.empty());
+      REQUIRE(resp.content_length == 0);
 
-    auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
-    REQUIRE(ReadOne(*entry, reduct::core::Time() + us(1000001)).result == "1234567890");
+      auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
+      REQUIRE(ReadOne(*entry, reduct::core::Time() + us(1000001)).result == "1234567890");
+    }
 
     SECTION("record already exists") {
-      REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10").error ==
-              Error{
-                  .code = 409,
-                  .message = "A record with timestamp 1000001 already exists",
-              });
+      auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10");
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error == Error{
+                                              .code = 409,
+                                              .message = "A record with timestamp 1000001 already exists",
+                                          });
     }
   }
 
   SECTION("wrong ts") {
-    REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", "10").error ==
+    auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", "10");
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error ==
             Error{
                 .code = 422,
                 .message = "Failed to parse 'ts' parameter: XXXX must unix times in microseconds",
@@ -56,61 +62,66 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
   }
 
   SECTION("negative ts") {
-    REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "-100", "10").error ==
-            Error{
-                .code = 422,
-                .message = "Failed to parse 'ts' parameter: -100 must be positive",
-            });
+    auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "-100", "10");
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 422,
+                                            .message = "Failed to parse 'ts' parameter: -100 must be positive",
+                                        });
   }
 
   SECTION("empty entry") {
-    REQUIRE(EntryApi::Write(storage.get(), "bucket", "", "1000001", "10").error ==
-            Error{
-                .code = 422,
-                .message = "An empty entry name is not allowed",
-            });
+    auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "", "1000001", "10");
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 422,
+                                            .message = "An empty entry name is not allowed",
+                                        });
   }
 
   SECTION("wrong content-length") {
     auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
 
     SECTION("empty") {
-      REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "").error ==
-              Error{
-                  .code = 411,
-                  .message = "bad or empty content-length",
-              });
+      auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "");
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error == Error{
+                                              .code = 411,
+                                              .message = "bad or empty content-length",
+                                          });
     }
 
     SECTION("negative") {
-      REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "-1").error ==
-              Error{
-                  .code = 411,
-                  .message = "negative content-length",
-              });
+      auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "-1");
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error == Error{
+                                              .code = 411,
+                                              .message = "negative content-length",
+                                          });
     }
 
     SECTION("no number") {
-      REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "xxxx").error ==
-              Error{
-                  .code = 411,
-                  .message = "bad or empty content-length",
-              });
+      auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "xxxx");
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error == Error{
+                                              .code = 411,
+                                              .message = "bad or empty content-length",
+                                          });
     }
     REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).error.code == 404);
   }
 
   SECTION("wrong input") {
-    auto [resp, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10");
+    auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10");
     REQUIRE(err == Error::kOk);
 
     auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
 
     SECTION("too long") {
-      REQUIRE(resp.input_call("1234567890X", true) == Error{
-                                                          .code = 413,
-                                                          .message = "Content is bigger than in content-length",
-                                                      });
+      REQUIRE(receiver("1234567890X", true).error == Error{
+                                                         .code = 413,
+                                                         .message = "Content is bigger than in content-length",
+                                                     });
       REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).error == Error{
                                                                                 .code = 500,
                                                                                 .message = "Record is broken",
@@ -118,10 +129,10 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
     }
 
     SECTION("too short") {
-      REQUIRE(resp.input_call("1234", true) == Error{
-                                                   .code = 413,
-                                                   .message = "Content is smaller than in content-length",
-                                               });
+      REQUIRE(receiver("1234", true).error == Error{
+                                                  .code = 413,
+                                                  .message = "Content is smaller than in content-length",
+                                              });
       REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).error == Error{
                                                                                 .code = 500,
                                                                                 .message = "Record is broken",
@@ -138,47 +149,55 @@ TEST_CASE("EntryApi::Read should read data in chunks with time") {
   REQUIRE(WriteOne(*entry, "1234567890", Time() + us(1000001)) == Error::kOk);
 
   SECTION("ok") {
-    auto [resp, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {});
+    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {});
     REQUIRE(err == Error::kOk);
 
-    auto [headers, len, input, output] = resp;
-    REQUIRE(headers["content-type"] == "application/octet-stream");
-    REQUIRE(headers["x-reduct-time"] == "1000001");
-    REQUIRE(headers["x-reduct-last"] == "1");
-    REQUIRE(len == 10);
-    REQUIRE(input("", true) == Error::kOk);
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
 
-    auto ret = output();
+    REQUIRE(resp.headers["content-type"] == "application/octet-stream");
+    REQUIRE(resp.headers["x-reduct-time"] == "1000001");
+    REQUIRE(resp.headers["x-reduct-last"] == "1");
+    REQUIRE(resp.content_length == 10);
+
+    auto ret = resp.SendData();
     REQUIRE(ret == Error::kOk);
     REQUIRE(ret.result == "1234567890");
   }
 
   SECTION("bucket doesn't exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "XXX", "entry-1", "1000001", {}).error ==
-            Error{
-                .code = 404,
-                .message = "Bucket 'XXX' is not found",
-            });
+    auto [receiver, err] = EntryApi::Read(storage.get(), "XXX", "entry-1", "1000001", {});
+    REQUIRE(err == Error::kOk);
+
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 404,
+                                            .message = "Bucket 'XXX' is not found",
+                                        });
   }
 
   SECTION("entry doesn't exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "XXX", "1000001", {}).error ==
-            Error{
-                .code = 404,
-                .message = "Entry 'XXX' is not found",
-            });
+    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "XXX", "1000001", {});
+    REQUIRE(err == Error::kOk);
+
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 404,
+                                            .message = "Entry 'XXX' is not found",
+                                        });
   }
 
   SECTION("record doesn't exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", "1234567", {}).error ==
-            Error{
-                .code = 404,
-                .message = "No records for this timestamp",
-            });
+    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1234567", {});
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 404,
+                                            .message = "No records for this timestamp",
+                                        });
   }
 
   SECTION("wrong ts") {
-    REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", {}).error ==
+    auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", {});
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error ==
             Error{
                 .code = 422,
                 .message = "Failed to parse 'ts' parameter: XXXX must unix times in microseconds",
@@ -197,57 +216,63 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id") {
   SECTION("ok") {
     auto id = std::to_string(entry->Query({}, {}, {}).result);
     {
-      auto [resp, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
+      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
       REQUIRE(err == Error::kOk);
 
-      auto [headers, len, input, output] = resp;
-      REQUIRE(headers["content-type"] == "application/octet-stream");
-      REQUIRE(headers["x-reduct-time"] == "1000001");
-      REQUIRE(headers["x-reduct-last"] == "0");
-      REQUIRE(len == 10);
-      REQUIRE(input("", true) == Error::kOk);
+      auto [resp, recv_err] = receiver("", true);
+      REQUIRE(recv_err == Error::kOk);
 
-      auto ret = output();
+      REQUIRE(resp.headers["content-type"] == "application/octet-stream");
+      REQUIRE(resp.headers["x-reduct-time"] == "1000001");
+      REQUIRE(resp.headers["x-reduct-last"] == "0");
+      REQUIRE(resp.content_length == 10);
+
+      auto ret = resp.SendData();
       REQUIRE(ret == Error::kOk);
       REQUIRE(ret.result == "1234567890");
     }
     {
-      auto [resp, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
+      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
       REQUIRE(err == Error::kOk);
 
-      auto [headers, len, input, output] = resp;
-      REQUIRE(headers["content-type"] == "application/octet-stream");
-      REQUIRE(headers["x-reduct-time"] == "2000001");
-      REQUIRE(headers["x-reduct-last"] == "1");
-      REQUIRE(len == 4);
-      REQUIRE(input("", true) == Error::kOk);
+      auto [resp, recv_err] = receiver("", true);
+      REQUIRE(recv_err == Error::kOk);
 
-      auto ret = output();
+      REQUIRE(resp.headers["content-type"] == "application/octet-stream");
+      REQUIRE(resp.headers["x-reduct-time"] == "2000001");
+      REQUIRE(resp.headers["x-reduct-last"] == "1");
+      REQUIRE(resp.content_length == 4);
+
+      auto ret = resp.SendData();
       REQUIRE(ret == Error::kOk);
       REQUIRE(ret.result == "abcd");
     }
 
     {
-      auto [resp, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
-      REQUIRE(err ==
+      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
+      REQUIRE(err == Error::kOk);
+
+      REQUIRE(receiver("", true).error ==
               Error{.code = 404, .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id)});
     }
   }
 
   SECTION("id doesnt' exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "2").error ==
-            Error{
-                .code = 404,
-                .message = "Query id=2 doesn't exist. It expired or was finished",
-            });
+    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "2");
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 404,
+                                            .message = "Query id=2 doesn't exist. It expired or was finished",
+                                        });
   }
 
   SECTION("wrong id") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "XXX2").error ==
-            Error{
-                .code = 422,
-                .message = "Failed to parse 'id' parameter: XXX2 must be unsigned integer",
-            });
+    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "XXX2");
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 422,
+                                            .message = "Failed to parse 'id' parameter: XXX2 must be unsigned integer",
+                                        });
   }
 }
 
@@ -261,11 +286,14 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
 
   QueryInfo info;
   SECTION("ok all") {
-    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, {});
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, {});
     REQUIRE(err == Error::kOk);
 
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
+
     auto [out, out_err] = resp.SendData();
-    REQUIRE(err == Error::kOk);
+    REQUIRE(out_err == Error::kOk);
     JsonStringToMessage(out, &info);
 
     REQUIRE(entry->Next(info.id()).error == Error::kOk);
@@ -274,8 +302,11 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
   }
 
   SECTION("ok start") {
-    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000002", {}, {});
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000002", {}, {});
     REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
 
     JsonStringToMessage(resp.SendData().result, &info);
 
@@ -284,8 +315,11 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
   }
 
   SECTION("ok stop") {
-    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "1000002", {});
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "1000002", {});
     REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
 
     JsonStringToMessage(resp.SendData().result, &info);
 
@@ -294,8 +328,11 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
   }
 
   SECTION("ok timeinterval") {
-    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000003", "1000004", {});
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000003", "1000004", {});
     REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
 
     JsonStringToMessage(resp.SendData().result, &info);
 
@@ -312,38 +349,59 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
   }
 
   SECTION("bucket doesn't exist") {
-    REQUIRE(EntryApi::Query(storage.get(), "XXX", "entry-1", {}, {}, {}).error ==
-            Error{
-                .code = 404,
-                .message = "Bucket 'XXX' is not found",
-            });
+    auto [receiver, err] = EntryApi::Query(storage.get(), "XXX", "entry-1", {}, {}, {});
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 404,
+                                            .message = "Bucket 'XXX' is not found",
+                                        });
   }
 
   SECTION("entry doesn't exist") {
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "XXX", {}, {}, {}).error ==
-            Error{
-                .code = 404,
-                .message = "Entry 'XXX' is not found",
-            });
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "XXX", {}, {}, {});
+    REQUIRE(err == Error::kOk);
+    REQUIRE(receiver("", true).error == Error{
+                                            .code = 404,
+                                            .message = "Entry 'XXX' is not found",
+                                        });
   }
 
   SECTION("wrong parameters") {
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", "XXX", {}, {}).error ==
-            Error{
-                .code = 422,
-                .message = "Failed to parse 'start_timestamp' parameter: XXX must unix times in microseconds",
-            });
-
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "XXX", {}).error ==
-            Error{
-                .code = 422,
-                .message = "Failed to parse 'stop_timestamp' parameter: XXX must unix times in microseconds",
-            });
-
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX")("", true).error ==
-            Error{
-                .code = 422,
-                .message = "Failed to parse 'ttl' parameter: XXX must be unsigned integer",
-            });
+    {
+      auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "XXX", {}, {});
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error ==
+              Error{
+                  .code = 422,
+                  .message = "Failed to parse 'start_timestamp' parameter: XXX must unix times in microseconds",
+              });
+    }
+    {
+      auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "XXX", {});
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error ==
+              Error{
+                  .code = 422,
+                  .message = "Failed to parse 'stop_timestamp' parameter: XXX must unix times in microseconds",
+              });
+    }
+    {
+      auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX");
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error ==
+              Error{
+                  .code = 422,
+                  .message = "Failed to parse 'ttl' parameter: XXX must be unsigned integer",
+              });
+    }
+    {
+      auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX");
+      REQUIRE(err == Error::kOk);
+      REQUIRE(receiver("", true).error ==
+              Error{
+                  .code = 422,
+                  .message = "Failed to parse 'ttl' parameter: XXX must be unsigned integer",
+              });
+    }
   }
 }
