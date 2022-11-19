@@ -164,7 +164,7 @@ static core::Result<HttpRequestReceiver> ReceiveAndSendJson(std::function<core::
         auto json = PrintToJson(result.result);
         return Result<HttpResponse>{
             HttpResponse{
-                .headers = {},
+                .headers = {{"Content-Type", "application/json"}},
                 .content_length = json.size(),
                 .SendData =
                     [json = std::move(json)]() {

@@ -40,7 +40,7 @@ class TokenRepository : public ITokenRepository {
     }
   }
 
-  Result<std::string> Create(std::string name, TokenPermissions permissions) override {
+  Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) override {
     if (name.empty()) {
       return {{}, Error{.code = 422, .message = "Token name can't be empty"}};
     }
@@ -72,7 +72,10 @@ class TokenRepository : public ITokenRepository {
       return {{}, err};
     }
 
-    return {new_token.value(), Error::kOk};
+    TokenCreateResponse response;
+    response.set_value(new_token.value());
+    response.mutable_created_at()->CopyFrom(new_token.created_at());
+    return {response, Error::kOk};
   }
 
   Result<TokenList> List() const override {

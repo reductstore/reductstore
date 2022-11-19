@@ -8,10 +8,11 @@
 #include <memory>
 #include <string>
 
-#include "reduct/storage/storage.h"
 #include "reduct/asset/asset_manager.h"
 #include "reduct/auth/token_auth.h"
+#include "reduct/auth/token_repository.h"
 #include "reduct/core/error.h"
+#include "reduct/storage/storage.h"
 
 namespace reduct::api {
 
@@ -26,6 +27,7 @@ class IHttpServer {
   struct Components {
     std::unique_ptr<storage::IStorage> storage;
     std::unique_ptr<auth::ITokenAuthentication> auth;
+    std::unique_ptr<auth::ITokenRepository> token_repository;
     std::unique_ptr<asset::IAssetManager> console;
   };
 

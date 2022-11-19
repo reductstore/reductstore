@@ -20,12 +20,11 @@ using reduct::api::IHttpServer;
 using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
 using reduct::auth::ITokenAuthentication;
+using reduct::auth::ITokenRepository;
 using reduct::core::EnvVariable;
 using reduct::core::Error;
 using reduct::core::Logger;
 using ReductStorage = reduct::storage::IStorage;
-
-
 
 class Loop : public ILoop {
  public:
@@ -67,15 +66,16 @@ int main() {
   IHttpServer::Components components{
       .storage = ReductStorage::Build({.data_path = data_path}),
       .auth = ITokenAuthentication::Build(api_token),
+      .token_repository = ITokenRepository::Build({.data_path = data_path}),
       .console = std::move(console),
   };
 
   auto server = IHttpServer::Build(std::move(components), {
-                                                             .host = host,
-                                                             .port = port,
-                                                             .base_path = api_base_path,
-                                                             .cert_path = cert_path,
-                                                             .cert_key_path = cert_key_path,
-                                                         });
+                                                              .host = host,
+                                                              .port = port,
+                                                              .base_path = api_base_path,
+                                                              .cert_path = cert_path,
+                                                              .cert_key_path = cert_key_path,
+                                                          });
   return server->Run(running);
 }

@@ -41,8 +41,8 @@ TEST_CASE("auth::TokenRepository should create a token") {
   REQUIRE(err == Error::kOk);
 
   SECTION("check value") {
-    REQUIRE(token.starts_with("token-"));
-    REQUIRE(token.size() == 70);
+    REQUIRE(token.value().starts_with("token-"));
+    REQUIRE(token.value().size() == 70);
   }
 
   SECTION("check if it's added") {
@@ -108,10 +108,10 @@ TEST_CASE("auth::TokenRepository should find s token by value") {
   permissions.set_full_access(false);
   permissions.mutable_read()->Add("bucket_1");
 
-  auto [token_value, err] = repo->Create("token-3", permissions);
+  auto [token_resp, err] = repo->Create("token-3", permissions);
   REQUIRE(err == Error::kOk);
 
-  auto [token, find_err] = repo->FindByValue(token_value);
+  auto [token, find_err] = repo->FindByValue(token_resp.value());
   REQUIRE(find_err == Error::kOk);
   REQUIRE(token.name() == "token-3");
   REQUIRE(token.created_at().IsInitialized());

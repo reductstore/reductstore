@@ -14,11 +14,7 @@ using proto::api::TokenRepo;
 Result<HttpRequestReceiver> TokenApi::CreateToken(ITokenRepository* repository, std::string_view name) {
   return ReceiveAndSendJson<Token_Permissions, TokenCreateResponse>(
       [repository, name = std::string(name)](Token_Permissions&& permissions) -> Result<TokenCreateResponse> {
-        auto [token, err] = repository->Create(name, permissions);
-
-        TokenCreateResponse resp;
-        resp.set_value(token);
-        return Result<TokenCreateResponse>{resp, err};
+        return repository->Create(name, permissions);
       });
 }
 

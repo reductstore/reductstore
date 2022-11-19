@@ -3,16 +3,20 @@
 #include "reduct/api/token_api.h"
 
 #include <catch2/catch.hpp>
+#include <google/protobuf/util/time_util.h>
 
 #include "reduct/auth/token_repository.h"
 #include "reduct/helpers.h"
 
 using google::protobuf::util::JsonStringToMessage;
+using google::protobuf::util::TimeUtil;
+
 using reduct::api::PrintToJson;
 using reduct::api::TokenApi;
 using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::proto::api::Token;
+using reduct::proto::api::TokenCreateResponse;
 using reduct::proto::api::TokenRepo;
 
 TEST_CASE("TokenApi::Create should create a token and return its value") {
@@ -31,8 +35,11 @@ TEST_CASE("TokenApi::Create should create a token and return its value") {
     auto [resp, resp_err] = receiver(PrintToJson(permissions), true);
 
     REQUIRE(resp_err == Error::kOk);
-    REQUIRE(resp.content_length == 86);
-    REQUIRE(resp.SendData().result.starts_with(R"({"value":"new-token-)"));
+
+    TokenCreateResponse message;
+    JsonStringToMessage(resp.SendData().result, &message);
+    REQUIRE(message.value().starts_with("new-token-"));
+    REQUIRE(message.created_at() >= TimeUtil::GetCurrentTime());
 
     REQUIRE(repo->FindByName("new-token").error == Error::kOk);
     REQUIRE(repo->FindByName("new-token").result.permissions().full_access());

@@ -12,6 +12,7 @@
 #include "reduct/api/console.h"
 #include "reduct/api/entry_api.h"
 #include "reduct/api/server_api.h"
+#include "reduct/api/token_api.h"
 #include "reduct/async/sleep.h"
 #include "reduct/core/logger.h"
 
@@ -37,6 +38,7 @@ class HttpServer : public IHttpServer {
   HttpServer(Components components, Options options)
       : storage_(std::move(components.storage)),
         auth_(std::move(components.auth)),
+        token_repository_(std::move(components.token_repository)),
         console_(std::move(components.console)),
         options_(std::move(options)) {}
 
@@ -305,6 +307,30 @@ class HttpServer : public IHttpServer {
                                         std::string(req->getQuery("stop")), std::string(req->getQuery("ttl")));
                });
              })
+        // Token API
+        .get(api_path + "tokens/list",
+             [this, running](auto *res, auto *req) {
+               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+                                [this]() { return TokenApi::ListTokens(token_repository_.get()); });
+             })
+        .get(api_path + "tokens/:token_id",
+             [this, running](auto *res, auto *req) {
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return TokenApi::GetToken(token_repository_.get(), req->getParameter(0));
+               });
+             })
+        .post(api_path + "tokens/:token_id",
+              [this, running](auto *res, auto *req) {
+                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                  return TokenApi::CreateToken(token_repository_.get(), req->getParameter(0));
+                });
+              })
+        .del(api_path + "tokens/:token_id",
+             [this, running](auto *res, auto *req) {
+               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return TokenApi::RemoveToken(token_repository_.get(), req->getParameter(0));
+               });
+             })
         .get(base_path,
              [base_path](auto *res, auto *req) {
                res->writeStatus("301");
@@ -360,6 +386,7 @@ class HttpServer : public IHttpServer {
   Options options_;
   std::unique_ptr<storage::IStorage> storage_;
   std::unique_ptr<ITokenAuthentication> auth_;
+  std::unique_ptr<auth::ITokenRepository> token_repository_;
   std::unique_ptr<IAssetManager> console_;
 };
 

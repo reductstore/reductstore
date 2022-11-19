@@ -22,6 +22,7 @@ class ITokenRepository {
   using TokenPermissions = proto::api::Token::Permissions;
   using Token = proto::api::Token;
   using TokenList = std::vector<Token>;
+  using TokenCreateResponse = proto::api::TokenCreateResponse;
 
   virtual ~ITokenRepository() = default;
   /**
@@ -30,7 +31,7 @@ class ITokenRepository {
    * @param permissions  permissions (see protobuf message)
    * @return generated value of created token, 409 if it already exists
    */
-  virtual core::Result<std::string> Create(std::string name, TokenPermissions permissions) = 0;
+  virtual core::Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) = 0;
 
   /**
    * List tokens
