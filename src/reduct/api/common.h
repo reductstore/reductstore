@@ -84,7 +84,7 @@ static core::Result<T> CollectDataAndParseProtobuf(std::string_view chunk, bool 
 
   buffer->append(chunk);
   if (!last) {
-    return core::Result<T>{T{}, core::Error{.code = 100, .message = "Continue"}};
+    return core::Result<T>{T{}, core::Error::Continue()};
   }
 
   T proto_message;
@@ -131,8 +131,7 @@ static core::Result<HttpRequestReceiver> ReceiveAndSendJson(std::function<core::
   auto buffer = std::make_shared<std::string>();
   buffer->reserve(1024);
   return Result<HttpRequestReceiver>{
-      [data = std::move(buffer), handler](std::string_view chunk,
-                                                               bool last) -> Result<HttpResponse> {
+      [data = std::move(buffer), handler](std::string_view chunk, bool last) -> Result<HttpResponse> {
         auto [proto_message, error] = CollectDataAndParseProtobuf<Rx>(chunk, last, data.get());
         if (error.code != 200) {
           return {HttpResponse::Default(), error};

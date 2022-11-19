@@ -31,6 +31,15 @@ struct [[nodiscard]] Error {  // NOLINT
    * Use Error::kOk to avoid creating an object
    */
   static const Error kOk;
+
+  // HTTP codes 100-200
+  static Error Continue(std::string msg = "Continue") { return Error{100, std::move(msg)}; }
+
+  // HTTP codes 200-300
+  // HTTP codes 300-400
+  // HTTP codes 400-500
+  static Error NotFound(std::string msg = "NotFound") { return Error{404, std::move(msg)}; }
+  static Error Conflict(std::string msg = "Conflict") { return Error{409, std::move(msg)}; }
 };
 
 }  // namespace reduct::core
