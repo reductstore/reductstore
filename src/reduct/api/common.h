@@ -17,6 +17,9 @@ namespace reduct::api {
 
 using StringMap = std::unordered_map<std::string, std::string>;
 
+/**
+ * A result of handling of HTTP request
+ */
 struct HttpResponse {
   StringMap headers;
   size_t content_length;
@@ -33,8 +36,19 @@ struct HttpResponse {
   }
 };
 
+/**
+ * @brief HTTP request receiver
+ * This function is receiver for a chuck of dat from uWS engine. If it receives the last chuck, it returns HttpResponse
+ * with a function HttpResponse::SendData to send the response.
+ */
 using HttpRequestReceiver = std::function<core::Result<HttpResponse>(std::string_view, bool)>;
 
+/**
+ * A helper function to print a protobuf message as JSON
+ * @tparam T
+ * @param msg protobuf message
+ * @return JSON string
+ */
 template <class T>
 std::string PrintToJson(T &&msg) {
   using google::protobuf::util::JsonPrintOptions;
@@ -48,6 +62,11 @@ std::string PrintToJson(T &&msg) {
   return data;
 }
 
+/**
+ * Default receiver which does nothing but generate a response with error code
+ * @param error
+ * @return
+ */
 static core::Result<HttpRequestReceiver> DefaultReceiver(core::Error error = core::Error::kOk) {
   return {
       [error = std::move(error)](std::string_view chunk, bool last) -> core::Result<HttpResponse> {
