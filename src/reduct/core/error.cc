@@ -8,7 +8,7 @@ namespace reduct::core {
 
 const Error Error::kOk = Error{};
 
-Error::operator bool() const { return code >= 300 || code < 200; }
+Error::operator bool() const { return code >= 300 || code < 100; }
 
 std::string Error::ToString() const { return fmt::format("[{}] {}", code, message); }
 

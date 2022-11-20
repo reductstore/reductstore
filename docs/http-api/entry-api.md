@@ -1,12 +1,12 @@
-+---
-description: Entry API provides methods to write, read and browse the data
----
-
 # Entry API
+
+**Entry API**
 
 {% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
 {% swagger-description %}
 The storage creates an entry on the first write operation. The record should be placed in the body of the request. The body can also be empty.
+
+If authenticaion is enabled, the method needs a valid API token with write access to the bucket of the entry.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -29,6 +29,22 @@ Content-length is required to start an asynchronous write operation
 ```javascript
 {
     // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have write access to bucket" %}
+```javascript
+{
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -58,25 +74,29 @@ Content-length is required to start an asynchronous write operation
 {% endswagger-response %}
 {% endswagger %}
 
+
+
 {% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name " summary="Get a record from an entry" %}
 {% swagger-description %}
 The method return a content of the requested record in the body of the HTTP response. It also sends additional information in headers:
 
 **x-reduct-time** - UNIX timestamp of the record in microseconds
 
-**x-reduct-last** - 1 - if a record is the last record in the query&#x20;
+**x-reduct-last** - 1 - if a record is the last record in the query
+
+If authenticaion is enabled, the method needs a valid API token with read access to the bucket of the entry.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
 Name of bucket
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="q" type="Integer" %}
+{% swagger-parameter in="query" name="q" type="Integer" required="false" %}
 A query ID to read the next record in the query. If it is set, the parameter
 
 `ts`
 
- is ignored.
+is ignored.
 {% endswagger-parameter %}
 
 {% swagger-parameter in="path" name=":entry_name" required="true" %}
@@ -90,6 +110,22 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% swagger-response status="200: OK" description="The record is found and returned in body of the response" %}
 ```javascript
 "string"
+```
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have read access to bucket" %}
+```javascript
+{
+    "detail": "error_message"
+}
 ```
 {% endswagger-response %}
 
@@ -110,24 +146,28 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% endswagger-response %}
 {% endswagger %}
 
+
+
 {% swagger method="get" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/q " summary="Query records for a time interval" %}
 {% swagger-description %}
 The method response with a JSON document with ID which can be used to integrate records with method
 
-**GET /b/:bucket_name/:entry_name?q=ID.**
+**GET /b/:bucket\_name/:entry\_name?q=ID.**
 
-  The time interval is [start, stop).
+The time interval is \[start, stop).
+
+If authenticaion is enabled, the method needs a valid API token with read access to the bucket of the entry.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
 Name of bucket
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="start" type="Integer" %}
+{% swagger-parameter in="query" name="start" type="Integer" required="false" %}
 A UNIX timestamp in microseconds. If not set, the query starts from the oldest record in the entry.
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="stop" type="Integer" %}
+{% swagger-parameter in="query" name="stop" type="Integer" required="false" %}
 A UNIX timestamp in microseconds. If not set, the query starts from the latest record in the entry.
 {% endswagger-parameter %}
 
@@ -135,7 +175,7 @@ A UNIX timestamp in microseconds. If not set, the query starts from the latest r
 Name of entry
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="ttl" type="Integer" %}
+{% swagger-parameter in="query" name="ttl" type="Integer" required="false" %}
 Time To Live of the query in seconds. If a client haven't read any record for this time interval, the server removes the query and the query ID becomes invalid. Default value 5 seconds.
 {% endswagger-parameter %}
 
@@ -147,7 +187,23 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn't exist or no records for the time interval" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have read access to bucket" %}
+```javascript
+{
+    // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="404: Not Found" description="The bucket doesn" %}
 ```javascript
 {
    "detail": "string"
@@ -163,3 +219,4 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 {% endswagger %}
+

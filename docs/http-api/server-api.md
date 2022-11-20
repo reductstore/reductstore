@@ -6,7 +6,9 @@ description: Server API provides information about the storage and its state
 
 {% swagger method="get" path=" " baseUrl="/api/v1/info" summary="Get statistical information about the storage" %}
 {% swagger-description %}
-You can use this method to get stats of the storage and check its version.
+You can use this method to get stats of the storage and check its version. If authenticaion is enabled, the method needs a valid API token.
+
+`curl --header "Authorization: Bearer ${API_TOKEN}" http://127.0.0.1:8383/api/v1/info`
 {% endswagger-description %}
 
 {% swagger-response status="200: OK" description="Returns information in JSON format" %}
@@ -28,11 +30,23 @@ You can use this method to get stats of the storage and check its version.
 }
 ```
 {% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="If authentication is enabled and access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
 {% endswagger %}
+
+
 
 {% swagger method="get" path=" " baseUrl="/api/v1/list" summary="Get a list of the buckets with their stats" %}
 {% swagger-description %}
-You can use this method to browse the buckets of the storage.
+You can use this method to browse the buckets of the storage. If authenticaion is enabled, the method needs a valid API token.
+
+`curl --header "Authorization: Bearer ${API_TOKEN}" http://127.0.0.1:8383/api/v1/list`
 {% endswagger-description %}
 
 {% swagger-response status="200: OK" description="" %}
@@ -51,18 +65,31 @@ You can use this method to browse the buckets of the storage.
 }
 ```
 {% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="If authentication is enabled and access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
 {% endswagger %}
+
+
 
 {% swagger method="head" path=" " baseUrl="/api/v1/alive " summary="Check if the storage engine is working" %}
 {% swagger-description %}
-You can use this method for health checks in Docker or Kubernetes environment
+You can use this method for health checks in Docker or Kubernetes environment. The method has anonymous access.
+
+`curl --head http://127.0.0.1:8383/api/v1/alive`
 {% endswagger-description %}
 
 {% swagger-response status="200: OK" description="" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
 {% endswagger %}
+

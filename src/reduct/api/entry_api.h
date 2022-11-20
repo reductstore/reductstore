@@ -14,23 +14,23 @@ class EntryApi {
   /**
    * POST /b/:bucket_name/:entry
    */
-  static core::Result<HttpResponse> Write(storage::IStorage* storage, std::string_view bucket_name,
-                                          std::string_view entry_name, std::string_view timestamp,
-                                          std::string_view content_length);
+  static core::Result<HttpRequestReceiver> Write(storage::IStorage* storage, std::string_view bucket_name,
+                                                 std::string_view entry_name, std::string_view timestamp,
+                                                 std::string_view content_length);
 
   /**
    * GET /b/:bucket_name/:entry
    */
-  static core::Result<HttpResponse> Read(storage::IStorage* storage, std::string_view bucket_name,
-                                         std::string_view entry_name, std::string_view timestamp,
-                                         std::string_view query_id);
+  static core::Result<HttpRequestReceiver> Read(storage::IStorage* storage, std::string_view bucket_name,
+                                                std::string_view entry_name, std::string_view timestamp,
+                                                std::string_view query_id);
 
   /**
    * GET /b/:bucket/:entry/query
    */
-  static core::Result<HttpResponse> Query(storage::IStorage* storage, std::string_view bucket_name,
-                                          std::string_view entry_name, std::string_view start_timestamp,
-                                          std::string_view stop_timestamp, std::string_view ttl_interval);
+  static core::Result<HttpRequestReceiver> Query(storage::IStorage* storage, std::string_view bucket_name,
+                                                 std::string_view entry_name, std::string_view start_timestamp,
+                                                 std::string_view stop_timestamp, std::string_view ttl_interval);
 };
 
 }  // namespace reduct::api

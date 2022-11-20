@@ -5,7 +5,9 @@
 ![Docker Pulls](https://img.shields.io/docker/pulls/reductstorage/engine)
 ![GitHub all releases](https://img.shields.io/github/downloads/reduct-storage/reduct-storage/total)
 
-Reduct Storage is a time series database for big data. It has no limitation on the size of stored objects or the volume of stored data. It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read more [here](https://docs.reduct-storage.dev/).
+Reduct Storage is a time series database for big data. It has no limitation on the size of stored objects or the volume
+of stored data. It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read
+more [here](https://docs.reduct-storage.dev/).
 
 ## Features:
 
@@ -13,7 +15,7 @@ Reduct Storage is a time series database for big data. It has no limitation on t
 * Storing and accessing blobs as time series
 * Optimized for small files
 * Real-time quota for buckets
-* Token authentication
+* Token authorization
 * Embedded Web Console
 * Support Linux, MacOS and Windows on AMD64
 
@@ -29,7 +31,7 @@ or you can use the demo storage: https://play.reduct-storage.dev
 
 ## Usage Example
 
-Reduct Storage porvides a simple HTTP API, so you could use it with `curl`:
+Reduct Storage provides a simple HTTP API, so you could use it with `curl`:
 
 ```shell
 # Take a temporal access token by using the API token
@@ -52,13 +54,13 @@ curl --header "Authorization: Bearer ${API_TOKEN}"   \
     https://play.reduct-storage.dev/api/v1/b/my_data/entry_1?ts=10000
 ```
 
-##  Client SDKs
+## Client SDKs
 
 * [Python Client SDK](https://github.com/reduct-storage/reduct-py)
 * [JavaScript Client SDK](https://github.com/reduct-storage/reduct-js)
 * [C++ Client SDK](https://github.com/reduct-storage/reduct-cpp)
 
-##  Tools
+## Tools
 
 * [CLI Client](https://github.com/reduct-storage/reduct-cli)
 * [Web Console](https://github.com/reduct-storage/web-console)

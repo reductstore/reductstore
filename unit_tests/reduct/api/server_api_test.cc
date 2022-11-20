@@ -14,11 +14,13 @@ using reduct::storage::IStorage;
 TEST_CASE("ServerApi::Alive should return empty body") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  auto [resp, err] = ServerApi::Alive(storage.get());
-
+  auto [receiver, err] = ServerApi::Alive(storage.get());
   REQUIRE(err == Error::kOk);
-  auto output = resp.output_call();
 
+  auto [resp, recv_err] = receiver("", true);
+  REQUIRE(recv_err == Error::kOk);
+
+  auto output = resp.SendData();
   REQUIRE(output.error == Error::kOk);
   REQUIRE(output.result.empty());
 }
@@ -26,11 +28,13 @@ TEST_CASE("ServerApi::Alive should return empty body") {
 TEST_CASE("ServerApi::Info should return JSON") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  auto [resp, err] = ServerApi::Info(storage.get());
-
+  auto [receiver, err] = ServerApi::Info(storage.get());
   REQUIRE(err == Error::kOk);
-  auto output = resp.output_call();
 
+  auto [resp, recv_err] = receiver("", true);
+  REQUIRE(recv_err == Error::kOk);
+
+  auto output = resp.SendData();
   REQUIRE(output.error == Error::kOk);
 
   reduct::proto::api::ServerInfo info;
@@ -41,10 +45,13 @@ TEST_CASE("ServerApi::Info should return JSON") {
 TEST_CASE("ServerApi::List should return JSON") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
-  auto [resp, err] = ServerApi::List(storage.get());
-
+  auto [receiver, err] = ServerApi::List(storage.get());
   REQUIRE(err == Error::kOk);
-  auto output = resp.output_call();
+
+  auto [resp, recv_err] = receiver("", true);
+  REQUIRE(recv_err == Error::kOk);
+
+  auto output = resp.SendData();
 
   REQUIRE(output.error == Error::kOk);
 

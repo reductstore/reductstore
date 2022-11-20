@@ -17,18 +17,18 @@ namespace reduct::api {
 
 using StringMap = std::unordered_map<std::string, std::string>;
 
-
+/**
+ * A result of handling of HTTP request
+ */
 struct HttpResponse {
   StringMap headers;
   size_t content_length;
-  std::function<core::Error(std::string_view, bool)> input_call;
-  std::function<core::Result<std::string>()> output_call;
+  std::function<core::Result<std::string>()> SendData;
 
   static HttpResponse Default() {
     return {
         {},
         0,
-        [](std::string_view chunk, bool last) { return core::Error::kOk; },
         []() {
           return core::Result<std::string>{"", core::Error::kOk};
         },
@@ -36,8 +36,19 @@ struct HttpResponse {
   }
 };
 
-using HttpResponseHandler = std::function<core::Result<HttpResponse>()>;
+/**
+ * @brief HTTP request receiver
+ * This function is receiver for a chuck of dat from uWS engine. If it receives the last chuck, it returns HttpResponse
+ * with a function HttpResponse::SendData to send the response.
+ */
+using HttpRequestReceiver = std::function<core::Result<HttpResponse>(std::string_view, bool)>;
 
+/**
+ * A helper function to print a protobuf message as JSON
+ * @tparam T
+ * @param msg protobuf message
+ * @return JSON string
+ */
 template <class T>
 std::string PrintToJson(T &&msg) {
   using google::protobuf::util::JsonPrintOptions;
@@ -51,56 +62,117 @@ std::string PrintToJson(T &&msg) {
   return data;
 }
 
-template <class T>
-static core::Result<HttpResponse> SendJson(core::Result<T> &&res) {
+/**
+ * Default receiver which does nothing but generate a response with error code
+ * @param error
+ * @return
+ */
+static core::Result<HttpRequestReceiver> DefaultReceiver(core::Error error = core::Error::kOk) {
+  return {
+      [error = std::move(error)](std::string_view chunk, bool last) -> core::Result<HttpResponse> {
+        return {HttpResponse::Default(), error};
+      },
+      core::Error::kOk,
+  };
+}
+
+template <class T = google::protobuf::Message>
+static core::Result<HttpRequestReceiver> SendJson(core::Result<T> &&res) {
+  return core::Result<HttpRequestReceiver>{
+      [data = std::move(res.result)](std::string_view, bool) mutable -> core::Result<HttpResponse> {
+        auto json = PrintToJson(data);
+        return {
+            HttpResponse{
+                .headers = {{"Content-Type", "application/json"}},
+                .content_length = json.size(),
+                .SendData =
+                    [json = std::move(json)]() {
+                      return core::Result<std::string>{json, core::Error::kOk};
+                    },
+            },
+            core::Error::kOk,
+        };
+      },
+      res.error,
+  };
+}
+
+template <class T = google::protobuf::Message>
+static core::Result<T> CollectDataAndParseProtobuf(std::string_view chunk, bool last, std::string *buffer) {
+  using google::protobuf::util::JsonStringToMessage;
+
+  buffer->append(chunk);
+  if (!last) {
+    return core::Result<T>{T{}, core::Error::Continue()};
+  }
+
+  T proto_message;
+  if (!buffer->empty()) {
+    auto status = JsonStringToMessage(*buffer, &proto_message);
+    if (!status.ok()) {
+      return core::Result<T>{
+          T{},
+          core::Error{.code = 422, .message = fmt::format("Failed parse JSON buffer: {}", status.message().ToString())},
+      };
+    }
+  }
+
+  return core::Result<T>{proto_message, core::Error::kOk};
+}
+
+template <class T = google::protobuf::Message>
+static core::Result<HttpRequestReceiver> ReceiveJson(std::function<core::Error(T &&)> handler) {
   using core::Error;
   using core::Result;
 
-  auto [data, err] = res;
-  auto json = err ? "" : PrintToJson(std::move(data));
-  return {
-      HttpResponse{
-          {{"content-type", "application/json"}},
-          json.size(),
-          [](std::string_view chunk, bool last) { return Error::kOk; },
-          [json = std::move(json), err = std::move(err)]() {
-            return Result<std::string>{json, err};
-          },
+  auto buffer = std::make_shared<std::string>();
+  buffer->reserve(1024);
+  return Result<HttpRequestReceiver>{
+      [data = std::move(buffer), handler = std::move(handler)](std::string_view chunk,
+                                                               bool last) -> Result<HttpResponse> {
+        auto [proto_message, error] = CollectDataAndParseProtobuf<T>(chunk, last, data.get());
+        if (error.code != 200) {
+          return {HttpResponse::Default(), error};
+        }
+
+        error = handler(std::move(proto_message));
+        return {HttpResponse::Default(), error};
       },
       Error::kOk,
   };
 }
 
-template <class T>
-static core::Result<HttpResponse> ReceiveJson(std::function<core::Error(T &&)> handler) {
+template <typename Rx = google::protobuf::Message, typename Tx = google::protobuf::Message>
+static core::Result<HttpRequestReceiver> ReceiveAndSendJson(std::function<core::Result<Tx>(Rx &&)> handler) {
   using core::Error;
   using core::Result;
-  using google::protobuf::util::JsonStringToMessage;
 
   auto buffer = std::make_shared<std::string>();
   buffer->reserve(1024);
-  return {
-      HttpResponse{
-          .headers = {},
-          .content_length = 0,
-          .input_call =
-              [data = std::move(buffer), handler = std::move(handler)](std::string_view chunk, bool last) {
-                data->append(chunk);
-                if (last) {
-                  T proto_message;
-                  if (!data->empty()) {
-                    auto status = JsonStringToMessage(*data, &proto_message);
-                    if (!status.ok()) {
-                      return Error{.code = 422,
-                                   .message = fmt::format("Failed parse JSON buffer: {}", status.message().ToString())};
-                    }
-                  }
+  return Result<HttpRequestReceiver>{
+      [data = std::move(buffer), handler](std::string_view chunk, bool last) -> Result<HttpResponse> {
+        auto [proto_message, error] = CollectDataAndParseProtobuf<Rx>(chunk, last, data.get());
+        if (error.code != 200) {
+          return {HttpResponse::Default(), error};
+        }
 
-                  return handler(std::move(proto_message));
-                }
-                return Error::kOk;
-              },
-          .output_call = []() { return Result<std::string>{}; },
+        core::Result<Tx> result = handler(std::move(proto_message));
+        if (result.error) {
+          return Result<HttpResponse>(HttpResponse::Default(), result.error);
+        }
+
+        auto json = PrintToJson(result.result);
+        return Result<HttpResponse>{
+            HttpResponse{
+                .headers = {{"Content-Type", "application/json"}},
+                .content_length = json.size(),
+                .SendData =
+                    [json = std::move(json)]() {
+                      return core::Result<std::string>{json, core::Error::kOk};
+                    },
+            },
+            Error::kOk,
+        };
       },
       Error::kOk,
   };

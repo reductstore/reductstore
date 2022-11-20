@@ -1,7 +1,9 @@
 import json
 
+from conftest import requires_env, auth_headers
 
-def test_get_info(base_url, session):
+
+def test__get_info(base_url, session):
     """Should provide information about the storage"""
     resp = session.get(f'{base_url}/info')
 
@@ -19,7 +21,17 @@ def test_get_info(base_url, session):
     assert resp.headers['Content-Type'] == "application/json"
 
 
-def test_get_list_of_buckets(base_url, session):
+@requires_env("API_TOKEN")
+def test__authorized_info(base_url, session, token_without_permissions):
+    """Needs authenticated token /info with token"""
+    resp = session.get(f'{base_url}/info', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.get(f'{base_url}/info', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 200
+
+
+def test__get_list_of_buckets(base_url, session):
     """Should provide information about the storage"""
     resp = session.get(f'{base_url}/list')
 
@@ -36,7 +48,17 @@ def test_get_list_of_buckets(base_url, session):
     assert resp.headers['Content-Type'] == "application/json"
 
 
-def test_get_wrong_path(base_url, session):
+@requires_env("API_TOKEN")
+def test__authorized_list(base_url, session, token_without_permissions):
+    """Needs authenticated token /list with token"""
+    resp = session.get(f'{base_url}/list', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.get(f'{base_url}/list', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 200
+
+
+def test__get_wrong_path(base_url, session):
     """Should return 404"""
     resp = session.get(f'{base_url}/NOTEXIST')
     assert resp.status_code == 404
@@ -45,7 +67,14 @@ def test_get_wrong_path(base_url, session):
     assert resp.status_code == 404
 
 
-def test_head_alive(base_url, session):
+def test__head_alive(base_url, session):
     """Should provide HEAD /alive method"""
     resp = session.head(f'{base_url}/alive')
+    assert resp.status_code == 200
+
+
+@requires_env("API_TOKEN")
+def test__anonymous_alive(base_url, session):
+    """should access /alive without token"""
+    resp = session.head(f'{base_url}/alive', headers={})
     assert resp.status_code == 200

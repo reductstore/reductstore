@@ -1,9 +1,9 @@
 import json
 
-from conftest import get_detail
+from conftest import get_detail, requires_env, auth_headers
 
 
-def test_create_bucket_ok(base_url, session, bucket_name):
+def test__create_bucket_ok(base_url, session, bucket_name):
     """Should create a bucket with default settings"""
     resp = session.post(f'{base_url}/b/{bucket_name}')
 
@@ -20,7 +20,17 @@ def test_create_bucket_ok(base_url, session, bucket_name):
     assert resp.headers['Content-Type'] == "application/json"
 
 
-def test_create_bucket_bad_format(base_url, session, bucket_name):
+@requires_env("API_TOKEN")
+def test__create_bucket_with_full_access_token(base_url, session, bucket_name, token_without_permissions):
+    """Needs full access token"""
+    resp = session.post(f'{base_url}/b/{bucket_name}', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.post(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 403
+
+
+def test__create_bucket_bad_format(base_url, session, bucket_name):
     """Should not create a bucket if JSON data is invalid """
     resp = session.post(f'{base_url}/b/{bucket_name}', data="xxx")
     assert resp.status_code == 422
@@ -30,7 +40,7 @@ def test_create_bucket_bad_format(base_url, session, bucket_name):
     assert resp.headers['Content-Type'] == "application/json"
 
 
-def test_create_bucket_custom(base_url, session, bucket_name):
+def test__create_bucket_custom(base_url, session, bucket_name):
     """Should create a bucket with some settings"""
     resp = session.post(f'{base_url}/b/{bucket_name}', json={"max_block_size": 500})
     assert resp.status_code == 200
@@ -43,7 +53,7 @@ def test_create_bucket_custom(base_url, session, bucket_name):
                                 "quota_size": "0"}
 
 
-def test_create_twice_bucket(base_url, session, bucket_name):
+def test__create_twice_bucket(base_url, session, bucket_name):
     """Should not create a bucket twice with the same name"""
     session.post(f'{base_url}/b/{bucket_name}')
     resp = session.post(f'{base_url}/b/{bucket_name}')
@@ -52,14 +62,26 @@ def test_create_twice_bucket(base_url, session, bucket_name):
     assert "already exists" in get_detail(resp)
 
 
-def test_get_bucket_not_exist(base_url, session, bucket_name):
+def test__get_bucket_not_exist(base_url, session, bucket_name):
     """Should return error if the bucket is not found"""
     resp = session.get(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 404
     assert "is not found" in get_detail(resp)
 
 
-def test_get_bucket_stats(base_url, session, bucket_name):
+@requires_env("API_TOKEN")
+def test__get_bucket_with_authenticated_token(base_url, session, bucket_name, token_without_permissions):
+    """Needs an authenticated token"""
+    session.post(f'{base_url}/b/{bucket_name}')
+
+    resp = session.get(f'{base_url}/b/{bucket_name}', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.get(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 200
+
+
+def test__get_bucket_stats(base_url, session, bucket_name):
     """Should get stats from bucket"""
     resp = session.post(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 200
@@ -90,7 +112,7 @@ def test_get_bucket_stats(base_url, session, bucket_name):
                                 oldest_record='1000000')
 
 
-def test_update_bucket_ok(base_url, session, bucket_name):
+def test__update_bucket_ok(base_url, session, bucket_name):
     """Should update setting of the bucket"""
     session.post(f'{base_url}/b/{bucket_name}')
 
@@ -107,7 +129,7 @@ def test_update_bucket_ok(base_url, session, bucket_name):
     assert data['settings'] == new_settings
 
 
-def test_update_bucket_bad_format(base_url, session, bucket_name):
+def test__update_bucket_bad_format(base_url, session, bucket_name):
     """Should not update setting if JSON format is bad"""
     session.post(f'{base_url}/b/{bucket_name}')
 
@@ -119,14 +141,33 @@ def test_update_bucket_bad_format(base_url, session, bucket_name):
     assert resp.status_code == 422
 
 
-def test_update_bucket_not_found(base_url, session, bucket_name):
+@requires_env("API_TOKEN")
+def test__update_bucket_with_full_access_token(base_url, session, bucket_name, token_without_permissions,
+                                               token_read_bucket, token_write_bucket):
+    """Needs full access to change bucket"""
+    session.post(f'{base_url}/b/{bucket_name}')
+
+    resp = session.put(f'{base_url}/b/{bucket_name}', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.put(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 403
+
+    resp = session.put(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_read_bucket))
+    assert resp.status_code == 403
+
+    resp = session.put(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_write_bucket))
+    assert resp.status_code == 403
+
+
+def test__update_bucket_not_found(base_url, session, bucket_name):
     """Should not update setting if no bucket is found"""
     resp = session.put(f'{base_url}/b/{bucket_name}',
                        json={"max_block_size": 1000, "quota_type": "FIFO", "quota_size": 500})
     assert resp.status_code == 404
 
 
-def test_remove_bucket_ok(base_url, session, bucket_name):
+def test__remove_bucket_ok(base_url, session, bucket_name):
     """Should remove a bucket"""
     resp = session.post(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 200
@@ -138,14 +179,34 @@ def test_remove_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 404
 
 
-def test_remove_bucket_not_exist(base_url, session, bucket_name):
+def test__remove_bucket_not_exist(base_url, session, bucket_name):
     """Should return an error if  bucket doesn't exist"""
     resp = session.delete(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 404
     assert "is not found" in get_detail(resp)
 
 
-def test_head_bucket_ok(base_url, session, bucket_name):
+@requires_env("API_TOKEN")
+def test__remove_bucket_with_full_access_token(base_url, session, bucket_name, token_without_permissions,
+                                               token_read_bucket, token_write_bucket):
+    """Needs full access to remove bucket"""
+    resp = session.post(f'{base_url}/b/{bucket_name}')
+    assert resp.status_code == 200
+
+    resp = session.delete(f'{base_url}/b/{bucket_name}', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.delete(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 403
+
+    resp = session.delete(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_read_bucket))
+    assert resp.status_code == 403
+
+    resp = session.delete(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_write_bucket))
+    assert resp.status_code == 403
+
+
+def test__head_bucket_ok(base_url, session, bucket_name):
     """Should check if bucket exist"""
     resp = session.post(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 200
@@ -157,3 +218,16 @@ def test_head_bucket_ok(base_url, session, bucket_name):
     resp = session.head(f'{base_url}/b/{bucket_name}_________')
     assert resp.status_code == 404
     assert len(resp.content) == 0
+
+
+@requires_env("API_TOKEN")
+def test__head_bucket_with_full_access_token(base_url, session, bucket_name, token_without_permissions):
+    """Needs authenticated token"""
+    resp = session.post(f'{base_url}/b/{bucket_name}')
+    assert resp.status_code == 200
+
+    resp = session.head(f'{base_url}/b/{bucket_name}', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.head(f'{base_url}/b/{bucket_name}', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 200

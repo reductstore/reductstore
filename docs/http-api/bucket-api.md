@@ -13,11 +13,9 @@ Before starting recording, a user has to create a bucket with the following sett
 
 For more information, you can read more about buckets in [How does it work?](../how-does-it-work.md)
 
-
-
 {% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Get information about a bucket" %}
 {% swagger-description %}
-The method returns the current settings, stats, and entry list of the bucket in JSON format.
+The method returns the current settings, stats, and entry list of the bucket in JSON format. If authenticaion is enabled, the method needs a valid API token.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name="bucket_name" required="true" %}
@@ -55,7 +53,15 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="404: Not Found" description="The bucket does not exist" %}
 ```javascript
 {
     "detail": "string"
@@ -64,9 +70,11 @@ Name of bucket
 {% endswagger-response %}
 {% endswagger %}
 
+
+
 {% swagger method="head" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Check if a bucket exists" %}
 {% swagger-description %}
-
+If authenticaion is enabled, the method needs a valid API token.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name="bucket_name" required="true" %}
@@ -81,7 +89,15 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="404: Not Found" description="The bucket does not exist" %}
 ```javascript
 {
     // Response
@@ -90,9 +106,13 @@ Name of bucket
 {% endswagger-response %}
 {% endswagger %}
 
+
+
 {% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name  " summary="Create a new bucket" %}
 {% swagger-description %}
-To create a bucket, the request should contain a JSON document with some parameters or empty body. The new bucket uses default values if some parameters are empty:
+To create a bucket, the request should contain a JSON document with some parameters or empty body. The new bucket uses default values if some parameters are empty.
+
+If authenticaion is enabled, the method needs a valid API token with full access.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -103,7 +123,7 @@ Name of new bucket
 Maximum size of a data block in bytes (default: 64Mb)
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="max_block_records" type="String/Integer" %}
+{% swagger-parameter in="body" name="max_block_records" type="String/Integer" required="false" %}
 Maximum number of records in a block (default 1024)
 {% endswagger-parameter %}
 
@@ -119,6 +139,22 @@ Size of quota in bytes (default: 0)
 ```javascript
 {
     // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
+```javascript
+{
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -140,9 +176,13 @@ Size of quota in bytes (default: 0)
 {% endswagger-response %}
 {% endswagger %}
 
+
+
 {% swagger method="put" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Change settings of a bucket" %}
 {% swagger-description %}
-To update settings of a bucket, the request should have a JSON document with all the settings
+To update settings of a bucket, the request should have a JSON document with all the settings.
+
+If authenticaion is enabled, the method needs a valid API token with full access.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -153,7 +193,7 @@ Name of bucket
 Maximum content_length of a data block in bytes
 {% endswagger-parameter %}
 
-{% swagger-parameter in="body" name="max_block_records" type="String/Integer" %}
+{% swagger-parameter in="body" name="max_block_records" type="String/Integer" required="false" %}
 Maximum number of records in a block
 {% endswagger-parameter %}
 
@@ -169,6 +209,22 @@ Size of quota in bytes
 ```javascript
 {
     // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    "detail": "error_message"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
+```javascript
+{
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -190,11 +246,13 @@ Size of quota in bytes
 {% endswagger-response %}
 {% endswagger %}
 
+
+
 {% swagger method="delete" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Remove a bucket" %}
 {% swagger-description %}
-Remove a bucket with
+Remove a bucket with **all its entries and stored data.**
 
-**all its entries and stored data**
+If authenticaion is enabled, the method needs a valid API token with full access.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -209,7 +267,23 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="Bucket doesn" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+```javascript
+{
+    // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
+```javascript
+{
+    // Response
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="404: Not Found" description="Bucket does not exists" %}
 ```javascript
 {
     "detail": "string"
@@ -217,3 +291,4 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 {% endswagger %}
+

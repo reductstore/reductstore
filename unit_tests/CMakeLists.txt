@@ -6,6 +6,7 @@ set(SRC_FILES
         reduct/api/bucket_api_test.cc
         reduct/api/entry_api_test.cc
         reduct/api/server_api_test.cc
+        reduct/api/token_api_test.cc
 
         reduct/asset/asset_manager_test.cc
 
@@ -14,7 +15,10 @@ set(SRC_FILES
         reduct/async/task_test.cc
 
         reduct/core/env_test.cc
+
+        reduct/auth/polices_test.cc
         reduct/auth/token_auth_test.cc
+        reduct/auth/token_repository_test.cc
 
         reduct/storage/io/async_io_test.cc
         reduct/storage/bucket_test.cc

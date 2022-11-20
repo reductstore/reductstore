@@ -35,10 +35,14 @@ set(SRC_FILES
         reduct/api/entry_api.cc
         reduct/api/http_server.cc
         reduct/api/server_api.cc
+        reduct/api/token_api.cc
 
         reduct/asset/asset_manager.cc
         reduct/async/loop.cc
+
+        reduct/auth/policies.cc
         reduct/auth/token_auth.cc
+        reduct/auth/token_repository.cc
 
         reduct/core/env_variable.cc
         reduct/core/logger.cc
