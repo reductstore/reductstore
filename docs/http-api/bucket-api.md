@@ -56,7 +56,7 @@ Name of bucket
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -92,7 +92,7 @@ Name of bucket
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -146,7 +146,7 @@ Size of quota in bytes (default: 0)
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -154,7 +154,7 @@ Size of quota in bytes (default: 0)
 {% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -216,7 +216,7 @@ Size of quota in bytes
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -224,7 +224,7 @@ Size of quota in bytes
 {% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}

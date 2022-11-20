@@ -34,7 +34,7 @@ You can use this method to get stats of the storage and check its version. If au
 {% swagger-response status="401: Unauthorized" description="If authentication is enabled and access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -69,7 +69,7 @@ You can use this method to browse the buckets of the storage. If authenticaion i
 {% swagger-response status="401: Unauthorized" description="If authentication is enabled and access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -87,7 +87,7 @@ You can use this method for health checks in Docker or Kubernetes environment. T
 {% swagger-response status="200: OK" description="" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}

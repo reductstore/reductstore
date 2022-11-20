@@ -36,7 +36,7 @@ Content-length is required to start an asynchronous write operation
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -44,7 +44,7 @@ Content-length is required to start an asynchronous write operation
 {% swagger-response status="403: Forbidden" description="Access token doesn't have write access to bucket" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -116,7 +116,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
@@ -124,7 +124,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% swagger-response status="403: Forbidden" description="Access token doesn't have read access to bucket" %}
 ```javascript
 {
-    // Response
+    "detail": "error_message"
 }
 ```
 {% endswagger-response %}
