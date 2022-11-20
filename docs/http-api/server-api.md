@@ -31,7 +31,7 @@ You can use this method to get stats of the storage and check its version. If au
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="If authentication is enabled and the API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="If authentication is enabled and access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -66,7 +66,7 @@ You can use this method to browse the buckets of the storage. If authenticaion i
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="If authentication is enabled and the API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="If authentication is enabled and access token is invalid or empty" %}
 ```javascript
 {
     // Response

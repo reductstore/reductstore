@@ -53,7 +53,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -61,7 +61,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket does not exist" %}
 ```javascript
 {
     "detail": "string"
@@ -69,6 +69,8 @@ Name of bucket
 ```
 {% endswagger-response %}
 {% endswagger %}
+
+
 
 {% swagger method="head" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Check if a bucket exists" %}
 {% swagger-description %}
@@ -87,7 +89,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -95,7 +97,7 @@ Name of bucket
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket does not exist" %}
 ```javascript
 {
     // Response
@@ -103,6 +105,8 @@ Name of bucket
 ```
 {% endswagger-response %}
 {% endswagger %}
+
+
 
 {% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name  " summary="Create a new bucket" %}
 {% swagger-description %}
@@ -139,7 +143,7 @@ Size of quota in bytes (default: 0)
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -147,7 +151,7 @@ Size of quota in bytes (default: 0)
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="API token doesn't have full access" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
 ```javascript
 {
     // Response
@@ -209,7 +213,7 @@ Size of quota in bytes
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -217,7 +221,7 @@ Size of quota in bytes
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="API token doesn't have full access" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
 ```javascript
 {
     // Response
@@ -242,6 +246,8 @@ Size of quota in bytes
 {% endswagger-response %}
 {% endswagger %}
 
+
+
 {% swagger method="delete" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Remove a bucket" %}
 {% swagger-description %}
 Remove a bucket with **all its entries and stored data.**
@@ -261,7 +267,7 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -269,7 +275,7 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="API token doesn't have full access" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
 ```javascript
 {
     // Response
@@ -277,7 +283,7 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="Bucket doesn" %}
+{% swagger-response status="404: Not Found" description="Bucket does not exists" %}
 ```javascript
 {
     "detail": "string"

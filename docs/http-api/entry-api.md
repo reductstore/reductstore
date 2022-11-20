@@ -33,7 +33,7 @@ Content-length is required to start an asynchronous write operation
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -41,7 +41,7 @@ Content-length is required to start an asynchronous write operation
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="API token doesn't have write access to bucket" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have write access to bucket" %}
 ```javascript
 {
     // Response
@@ -113,7 +113,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -121,7 +121,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="API token doesn't have read access to bucket" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have read access to bucket" %}
 ```javascript
 {
     // Response
@@ -145,6 +145,8 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 ```
 {% endswagger-response %}
 {% endswagger %}
+
+
 
 {% swagger method="get" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/q " summary="Query records for a time interval" %}
 {% swagger-description %}
@@ -185,7 +187,7 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="API token is invalid or empty" %}
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
     // Response
@@ -193,7 +195,7 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="API token doesn't have read access to bucket" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have read access to bucket" %}
 ```javascript
 {
     // Response
@@ -217,3 +219,4 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 {% endswagger %}
+
