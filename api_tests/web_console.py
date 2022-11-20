@@ -10,6 +10,6 @@ def _console_url() -> str:
 
 
 def test__web_console(console_url, session):
-    """should access web onsole without token"""
+    """should access web console without token"""
     resp = session.get(f'{console_url}', headers={'Authorization': ''})
     assert resp.status_code == 200

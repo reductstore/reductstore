@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from conftest import get_detail
+from conftest import get_detail, requires_env, auth_headers
 
 
 @pytest.fixture(name='bucket')
@@ -72,6 +72,23 @@ def test_read_bad_no_entry(base_url, session, bucket):
     assert 'entry' in get_detail(resp)
 
 
+@requires_env("API_TOKEN")
+def test__read_with_read_token(base_url, session, bucket, token_without_permissions, token_read_bucket,
+                               token_write_bucket):
+    """Needs read permissions to read"""
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 403
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(token_read_bucket))
+    assert resp.status_code == 404  # no data
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(token_write_bucket))
+    assert resp.status_code == 403
+
+
 def test_write_no_bucket(base_url, session):
     """Should return 404 if no bucket found"""
     resp = session.post(f'{base_url}/b/xxx/entry?ts=100')
@@ -127,6 +144,23 @@ def test_read_write_big_blob(base_url, session, bucket):
     assert resp.status_code == 200
     assert len(resp.text) == len(blob)
     assert resp.text == blob
+
+
+@requires_env("API_TOKEN")
+def test__write_with_write_token(base_url, session, bucket, token_without_permissions, token_read_bucket,
+                                 token_write_bucket):
+    """Needs write permissions to write"""
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 403
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(token_read_bucket))
+    assert resp.status_code == 403
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts=1000', headers=auth_headers(token_write_bucket))
+    assert resp.status_code == 200
 
 
 def test_query_entry_ok(base_url, session, bucket):
@@ -217,9 +251,26 @@ def test_query_entry_no_next(base_url, session, bucket):
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
     assert resp.status_code == 200
 
-    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts+1}&stop={ts + 200}')
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts + 1}&stop={ts + 200}')
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
     resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
     assert resp.status_code == 202
+
+
+@requires_env("API_TOKEN")
+def test__query_with_read_token(base_url, session, bucket, token_without_permissions, token_read_bucket,
+                                token_write_bucket):
+    """Needs read permissions to query"""
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 403
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q', headers=auth_headers(token_read_bucket))
+    assert resp.status_code == 404  # no data
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q', headers=auth_headers(token_write_bucket))
+    assert resp.status_code == 403
