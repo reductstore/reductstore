@@ -1,7 +1,6 @@
 import json
 
-from api_tests.conftest import auth_headers
-from conftest import requires_env
+from conftest import requires_env, auth_headers
 
 
 def test_get_info(base_url, session):

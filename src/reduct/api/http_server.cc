@@ -270,16 +270,16 @@ class HttpServer : public IHttpServer {
         .get(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
                std::string bucket_name(req->getParameter(0));
-               RegisterEndpoint(
-                   ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
-                   [this, req, &bucket_name]() { return BucketApi::GetBucket(storage_.get(), bucket_name); });
+               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req, &bucket_name]() {
+                 return BucketApi::GetBucket(storage_.get(), bucket_name);
+               });
              })
         .head(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
                 std::string bucket_name(req->getParameter(0));
-                RegisterEndpoint(
-                    ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
-                    [this, req, &bucket_name]() { return BucketApi::HeadBucket(storage_.get(), bucket_name); });
+                RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req, &bucket_name]() {
+                  return BucketApi::HeadBucket(storage_.get(), bucket_name);
+                });
               })
         .put(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
