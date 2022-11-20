@@ -27,9 +27,16 @@ using asset::IAssetManager;
 using async::Sleep;
 using async::Task;
 using async::VoidTask;
-using auth::ITokenAuthentication;
+using auth::ITokenAuthorization;
 using core::Error;
 using core::Result;
+
+using auth::Anybody;
+using auth::Authenticated;
+using auth::FullAccess;
+using auth::IAuthorizationPolicy;
+using auth::ReadAccess;
+using auth::WriteAccess;
 
 namespace fs = std::filesystem;
 
@@ -108,11 +115,11 @@ class HttpServer : public IHttpServer {
     uWS::HttpResponse<SSL> *res;
     uWS::HttpRequest *req;
     bool running;
-    bool no_auth = false;
   };
 
   template <bool SSL>
-  VoidTask RegisterEndpoint(HttpContext<SSL> ctx, std::function<Result<HttpRequestReceiver>()> &&callback) const {
+  VoidTask RegisterEndpoint(const auth::IAuthorizationPolicy &policy, HttpContext<SSL> ctx,
+                            std::function<Result<HttpRequestReceiver>()> &&callback) const {
     std::string method(ctx.req->getMethod());
     std::string url{ctx.req->getUrl()};
     auto authorization = ctx.req->getHeader("authorization");
@@ -148,11 +155,9 @@ class HttpServer : public IHttpServer {
       }
     };
 
-    if (!ctx.no_auth) {
-      if (auto err = auth_->Check(authorization)) {
-        SendError(err);
-        co_return;
-      }
+    if (auto err = auth_->Check(authorization, *token_repository_, policy)) {
+      SendError(err);
+      co_return;
     }
 
     auto [receiver, err] = callback();
@@ -242,92 +247,103 @@ class HttpServer : public IHttpServer {
     // Server API
     app.head(api_path + "alive",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::Alive(storage_.get()); });
              })
         .get(api_path + "info",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::Info(storage_.get()); });
              })
         .get(api_path + "list",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::List(storage_.get()); });
              })
         // Bucket API
         .post(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
-                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
                   return BucketApi::CreateBucket(storage_.get(), req->getParameter(0));
                 });
               })
         .get(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running},
-                                [this, req]() { return BucketApi::GetBucket(storage_.get(), req->getParameter(0)); });
+               std::string bucket_name(req->getParameter(0));
+               RegisterEndpoint(
+                   ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+                   [this, req, &bucket_name]() { return BucketApi::GetBucket(storage_.get(), bucket_name); });
              })
         .head(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
-                RegisterEndpoint(HttpContext<SSL>{res, req, running},
-                                 [this, req]() { return BucketApi::HeadBucket(storage_.get(), req->getParameter(0)); });
+                std::string bucket_name(req->getParameter(0));
+                RegisterEndpoint(
+                    ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+                    [this, req, &bucket_name]() { return BucketApi::HeadBucket(storage_.get(), bucket_name); });
               })
         .put(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
                  return BucketApi::UpdateBucket(storage_.get(), req->getParameter(0));
                });
              })
         .del(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
                  return BucketApi::RemoveBucket(storage_.get(), req->getParameter(0));
                });
              })
         // Entry API
         .post(api_path + "b/:bucket_name/:entry_name",
               [this, running](auto *res, auto *req) {
-                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
-                  return EntryApi::Write(storage_.get(), req->getParameter(0), req->getParameter(1),
-                                         req->getQuery("ts"), req->getHeader("content-length"));
-                });
+                std::string bucket_name(req->getParameter(0));
+                RegisterEndpoint(WriteAccess(bucket_name), HttpContext<SSL>{res, req, running},
+                                 [this, req, &bucket_name]() {
+                                   return EntryApi::Write(storage_.get(), bucket_name, req->getParameter(1),
+                                                          req->getQuery("ts"), req->getHeader("content-length"));
+                                 });
               })
         .get(api_path + "b/:bucket_name/:entry_name",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return EntryApi::Read(storage_.get(), req->getParameter(0), req->getParameter(1), req->getQuery("ts"),
-                                       req->getQuery("q"));
-               });
+               std::string bucket_name(req->getParameter(0));
+
+               RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+                                [this, req, &bucket_name]() {
+                                  return EntryApi::Read(storage_.get(), bucket_name, req->getParameter(1),
+                                                        req->getQuery("ts"), req->getQuery("q"));
+                                });
              })
         .get(api_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return EntryApi::Query(storage_.get(), std::string(req->getParameter(0)),
-                                        std::string(req->getParameter(1)), std::string(req->getQuery("start")),
-                                        std::string(req->getQuery("stop")), std::string(req->getQuery("ttl")));
-               });
+               std::string bucket_name(req->getParameter(0));
+               RegisterEndpoint(
+                   ReadAccess(bucket_name), HttpContext<SSL>{res, req, running}, [this, req, bucket_name]() {
+                     return EntryApi::Query(storage_.get(), bucket_name, std::string(req->getParameter(1)),
+                                            std::string(req->getQuery("start")), std::string(req->getQuery("stop")),
+                                            std::string(req->getQuery("ttl")));
+                   });
              })
         // Token API
         .get(api_path + "tokens/list",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running},
                                 [this]() { return TokenApi::ListTokens(token_repository_.get()); });
              })
         .get(api_path + "tokens/:token_id",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
                  return TokenApi::GetToken(token_repository_.get(), req->getParameter(0));
                });
              })
         .post(api_path + "tokens/:token_id",
               [this, running](auto *res, auto *req) {
-                RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
                   return TokenApi::CreateToken(token_repository_.get(), req->getParameter(0));
                 });
               })
         .del(api_path + "tokens/:token_id",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running}, [this, req]() {
+               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
                  return TokenApi::RemoveToken(token_repository_.get(), req->getParameter(0));
                });
              })
@@ -345,19 +361,18 @@ class HttpServer : public IHttpServer {
                if (path.empty()) {
                  path = "index.html";
                }
-               RegisterEndpoint(HttpContext<SSL>{res, req, running, true},
+               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
                                 [&]() { return Console::UiRequest(console_.get(), base_path, path); });
              })
         .get(base_path + "ui",
              [this, base_path, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running, true},
+               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
                                 [&]() { return Console::UiRequest(console_.get(), base_path, "index.html"); });
              })
         .any("/*",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(HttpContext<SSL>{res, req, running, true}, []() -> Result<HttpRequestReceiver> {
-                 return DefaultReceiver(Error{.code = 404, .message = "Not found"});
-               });
+               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
+                                []() -> Result<HttpRequestReceiver> { return DefaultReceiver(Error::NotFound()); });
              })
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {
@@ -385,7 +400,7 @@ class HttpServer : public IHttpServer {
 
   Options options_;
   std::unique_ptr<storage::IStorage> storage_;
-  std::unique_ptr<ITokenAuthentication> auth_;
+  std::unique_ptr<ITokenAuthorization> auth_;
   std::unique_ptr<auth::ITokenRepository> token_repository_;
   std::unique_ptr<IAssetManager> console_;
 };

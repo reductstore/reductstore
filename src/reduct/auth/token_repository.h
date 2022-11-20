@@ -49,12 +49,12 @@ class ITokenRepository {
   virtual core::Result<Token> FindByName(const std::string &name) const = 0;
 
   /**
-   * Find a token by its value
+   * Validate token
    * @note shouldn't expose the value of token, only permissions
    * @param value value of token
    * @return token without value, 404 if not found
    */
-  virtual core::Result<Token> FindByValue(std::string_view value) const = 0;
+  virtual core::Result<Token> ValidateToken(std::string_view value) const = 0;
 
   /**
    * Remove a token by name
@@ -65,6 +65,7 @@ class ITokenRepository {
 
   struct Options {
     std::filesystem::path data_path;
+    std::string_view api_token;
   };
 
   /**

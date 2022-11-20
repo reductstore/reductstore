@@ -26,7 +26,7 @@ class IHttpServer {
    */
   struct Components {
     std::unique_ptr<storage::IStorage> storage;
-    std::unique_ptr<auth::ITokenAuthentication> auth;
+    std::unique_ptr<auth::ITokenAuthorization> auth;
     std::unique_ptr<auth::ITokenRepository> token_repository;
     std::unique_ptr<asset::IAssetManager> console;
   };

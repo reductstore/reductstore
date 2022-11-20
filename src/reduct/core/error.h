@@ -32,14 +32,33 @@ struct [[nodiscard]] Error {  // NOLINT
    */
   static const Error kOk;
 
+  enum Codes {
+    kContinue = 100,
+    kBadRequest = 400,
+    kUnauthorized = 401,
+    kForbidden = 403,
+    kNotFound = 404,
+    kMethodNotAllowed = 405,
+    kConflict = 409,
+    kPreconditionFailed = 412,
+    kInternalError = 500,
+    kNotImplemented = 501,
+    kBadGateway = 502,
+    kServiceUnavailable = 503,
+    kGatewayTimeout = 504,
+  };
+
   // HTTP codes 100-200
-  static Error Continue(std::string msg = "Continue") { return Error{100, std::move(msg)}; }
+  static Error Continue(std::string msg = "Continue") { return Error{Codes::kContinue, std::move(msg)}; }
 
   // HTTP codes 200-300
   // HTTP codes 300-400
   // HTTP codes 400-500
-  static Error NotFound(std::string msg = "NotFound") { return Error{404, std::move(msg)}; }
-  static Error Conflict(std::string msg = "Conflict") { return Error{409, std::move(msg)}; }
+  static Error BadRequest(std::string msg = "Bad Request") { return Error{Codes::kBadRequest, std::move(msg)}; }
+  static Error Unauthorized(std::string msg = "Unauthorized") { return Error{Codes::kUnauthorized, std::move(msg)}; }
+  static Error Forbidden(std::string msg = "Forbidden") { return Error{Codes::kForbidden, std::move(msg)}; }
+  static Error NotFound(std::string msg = "NotFound") { return Error{kNotFound, std::move(msg)}; }
+  static Error Conflict(std::string msg = "Conflict") { return Error{kConflict, std::move(msg)}; }
 };
 
 }  // namespace reduct::core

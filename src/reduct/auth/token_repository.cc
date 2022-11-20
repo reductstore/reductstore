@@ -38,6 +38,28 @@ class TokenRepository : public ITokenRepository {
         repo_[token.name()] = token;
       }
     }
+
+    if (!options.api_token.empty()) {
+      const auto kInitTokenName = "init-token";
+      auto v = repo_ | std::views::values |
+               std::views::filter([&options](auto t) { return t.value() == options.api_token; });
+      if (!v.empty()) {
+        return;
+      }
+
+      LOG_DEBUG("Create '{}' token", kInitTokenName);
+      Token token;
+      token.set_name(kInitTokenName);
+      token.set_value(std::string(options.api_token));
+      token.mutable_created_at()->CopyFrom(TimeUtil::GetCurrentTime());
+
+      token.mutable_permissions()->set_full_access(true);
+      repo_[kInitTokenName] = token;
+
+      if (auto err = SaveRepo()) {
+        LOG_ERROR("Failed to save '{}': {}", kInitTokenName, err);
+      }
+    }
   }
 
   Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) override {
@@ -100,10 +122,10 @@ class TokenRepository : public ITokenRepository {
     return {token, Error::kOk};
   }
 
-  Result<Token> FindByValue(std::string_view value) const override {
+  Result<Token> ValidateToken(std::string_view value) const override {
     auto v = repo_ | std::views::values | std::views::filter([value](auto t) { return t.value() == value; });
     if (v.empty()) {
-      return {{}, Error{.code = 404, .message = "Wrong token value"}};
+      return {{}, Error::Unauthorized("Invalid token")};
     }
 
     Token found_token = v.front();

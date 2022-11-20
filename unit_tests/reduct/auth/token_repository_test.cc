@@ -111,15 +111,15 @@ TEST_CASE("auth::TokenRepository should find s token by value") {
   auto [token_resp, err] = repo->Create("token-3", permissions);
   REQUIRE(err == Error::kOk);
 
-  auto [token, find_err] = repo->FindByValue(token_resp.value());
+  auto [token, find_err] = repo->ValidateToken(token_resp.value());
   REQUIRE(find_err == Error::kOk);
   REQUIRE(token.name() == "token-3");
   REQUIRE(token.created_at().IsInitialized());
   REQUIRE(token.permissions().read().at(0) == "bucket_1");
   REQUIRE(token.value().empty());
 
-  SECTION("404 error") {
-    REQUIRE(repo->FindByValue("WRONG_TOKEN").error == Error{.code = 404, .message = "Wrong token value"});
+  SECTION("invalid token") {
+    REQUIRE(repo->ValidateToken("WRONG_TOKEN").error == Error::Unauthorized("Invalid token"));
   }
 }
 
@@ -138,4 +138,12 @@ TEST_CASE("auth::TokenRepository should remove token by name") {
     auto new_repo = ITokenRepository::Build({.data_path = path});
     REQUIRE(new_repo->FindByName("token-1").error.code == 404);
   }
+}
+
+TEST_CASE("auth::TokenRepository should create an init token") {
+  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory(), .api_token = "INIT_TOKEN"});
+  auto [token, err] = repo->ValidateToken("INIT_TOKEN");
+
+  REQUIRE(err == Error::kOk);
+  REQUIRE(token.name() == "init-token");
 }

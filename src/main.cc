@@ -19,7 +19,7 @@
 using reduct::api::IHttpServer;
 using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
-using reduct::auth::ITokenAuthentication;
+using reduct::auth::ITokenAuthorization;
 using reduct::auth::ITokenRepository;
 using reduct::core::EnvVariable;
 using reduct::core::Error;
@@ -65,8 +65,8 @@ int main() {
 
   IHttpServer::Components components{
       .storage = ReductStorage::Build({.data_path = data_path}),
-      .auth = ITokenAuthentication::Build(api_token),
-      .token_repository = ITokenRepository::Build({.data_path = data_path}),
+      .auth = ITokenAuthorization::Build(api_token),
+      .token_repository = ITokenRepository::Build({.data_path = data_path, .api_token = api_token}),
       .console = std::move(console),
   };
 
