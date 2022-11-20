@@ -59,7 +59,7 @@ struct [[nodiscard]] Error {  // NOLINT
   static Error BadRequest(std::string msg = "Bad Request") { return Error{Codes::kBadRequest, std::move(msg)}; }
   static Error Unauthorized(std::string msg = "Unauthorized") { return Error{Codes::kUnauthorized, std::move(msg)}; }
   static Error Forbidden(std::string msg = "Forbidden") { return Error{Codes::kForbidden, std::move(msg)}; }
-  static Error NotFound(std::string msg = "NotFound") { return Error{kNotFound, std::move(msg)}; }
+  static Error NotFound(std::string msg = "Not Found") { return Error{kNotFound, std::move(msg)}; }
   static Error Conflict(std::string msg = "Conflict") { return Error{kConflict, std::move(msg)}; }
   static Error ContentLengthRequired(std::string msg = "Content Length Required") {
     return Error{kContentLengthRequired, std::move(msg)};

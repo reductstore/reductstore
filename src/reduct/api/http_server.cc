@@ -31,7 +31,7 @@ using auth::ITokenAuthorization;
 using core::Error;
 using core::Result;
 
-using auth::Anybody;
+using auth::Anonymous;
 using auth::Authenticated;
 using auth::FullAccess;
 using auth::IAuthorizationPolicy;
@@ -247,7 +247,7 @@ class HttpServer : public IHttpServer {
     // Server API
     app.head(api_path + "alive",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::Alive(storage_.get()); });
              })
         .get(api_path + "info",
@@ -361,17 +361,17 @@ class HttpServer : public IHttpServer {
                if (path.empty()) {
                  path = "index.html";
                }
-               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
                                 [&]() { return Console::UiRequest(console_.get(), base_path, path); });
              })
         .get(base_path + "ui",
              [this, base_path, running](auto *res, auto *req) {
-               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
                                 [&]() { return Console::UiRequest(console_.get(), base_path, "index.html"); });
              })
         .any("/*",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(Anybody(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
                                 []() -> Result<HttpRequestReceiver> { return DefaultReceiver(Error::NotFound()); });
              })
         .listen(host, port, 0,

@@ -6,65 +6,11 @@
 #include <string>
 #include <string_view>
 
+#include "reduct/auth/policies.h"
+#include "reduct/auth/token_repository.h"
 #include "reduct/core/result.h"
-#include "token_repository.h"
 
 namespace reduct::auth {
-
-class IAuthorizationPolicy {
- public:
-  virtual ~IAuthorizationPolicy() = default;
-
-  /**
-   * Check if token is valid
-   * @param token
-   * @return
-   */
-  virtual core::Error Validate(const ITokenRepository& repository,
-                               const core::Result<ITokenRepository::TokenPermissions>& authentication) const = 0;
-};
-
-class Anybody : public IAuthorizationPolicy {
- public:
-  core::Error Validate(const ITokenRepository& repository,
-                       const core::Result<ITokenRepository::TokenPermissions>& authentication) const override {
-    return core::Error::kOk;
-  }
-};
-
-class Authenticated : public IAuthorizationPolicy {
- public:
-  core::Error Validate(const ITokenRepository& repository,
-                       const core::Result<ITokenRepository::TokenPermissions>& authentication) const override {
-    return authentication.error;
-  }
-};
-
-class FullAccess : public IAuthorizationPolicy {
- public:
-  core::Error Validate(const ITokenRepository& repository,
-                       const core::Result<ITokenRepository::TokenPermissions>& authentication) const override;
-};
-
-class ReadAccess : public IAuthorizationPolicy {
- public:
-  explicit ReadAccess(std::string bucket);
-  core::Error Validate(const ITokenRepository& repository,
-                       const core::Result<ITokenRepository::TokenPermissions>& authentication) const override;
-
- private:
-  std::string bucket_;
-};
-
-class WriteAccess : public IAuthorizationPolicy {
- public:
-  explicit WriteAccess(std::string bucket);
-  core::Error Validate(const ITokenRepository& repository,
-                       const core::Result<ITokenRepository::TokenPermissions>& authentication) const override;
-
- private:
-  std::string bucket_;
-};
 
 /**
  *  Authorization by token
