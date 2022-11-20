@@ -3,7 +3,7 @@ import json
 import pytest
 import secrets
 
-from api_tests.conftest import get_detail
+from conftest import get_detail
 
 
 @pytest.fixture(name="token_name")

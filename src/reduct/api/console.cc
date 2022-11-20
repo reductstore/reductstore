@@ -23,7 +23,7 @@ Result<HttpRequestReceiver> Console::UiRequest(const asset::IAssetManager* conso
     switch (ret.error.code) {
       case 200:
         break;
-      case 404: {
+      case Error::kNotFound: {
         // It's React.js paths
         ret = console->Read("index.html");
         break;

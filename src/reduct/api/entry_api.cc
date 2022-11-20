@@ -22,37 +22,35 @@ using proto::api::QueryInfo;
 inline core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
   auto ts = Time::clock::now();
   if (timestamp.empty()) {
-    return {Time{}, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
+    return {Time{}, Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name))};
   }
   try {
     auto ts_as_umber = std::stoll(timestamp.data());
     if (ts_as_umber < 0) {
-      return {Time{}, Error{.code = 422,
-                            .message = fmt::format("Failed to parse '{}' parameter: {} must be positive", param_name,
-                                                   std::string{timestamp})}};
+      return {Time{}, Error::UnprocessableEntity(fmt::format("Failed to parse '{}' parameter: {} must be positive",
+                                                             param_name, std::string{timestamp}))};
     }
 
     ts = Time() + std::chrono::microseconds(ts_as_umber);
     return {ts, Error::kOk};
   } catch (...) {
-    return {Time{}, Error{.code = 422,
-                          .message = fmt::format("Failed to parse '{}' parameter: {} must unix times in microseconds",
-                                                 param_name, std::string{timestamp})}};
+    return {Time{},
+            Error::UnprocessableEntity(fmt::format("Failed to parse '{}' parameter: {} must unix times in microseconds",
+                                                   param_name, std::string{timestamp}))};
   }
 }
 
 inline core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_view param_name) {
   uint64_t val = 0;
   if (timestamp.empty()) {
-    return {val, Error{.code = 422, .message = fmt::format("'{}' parameter can't be empty", param_name)}};
+    return {val, Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name))};
   }
   try {
     val = std::stoul(std::string{timestamp});
     return {val, Error::kOk};
   } catch (...) {
-    return {val, Error{.code = 422,
-                       .message = fmt::format("Failed to parse '{}' parameter: {} must be unsigned integer", param_name,
-                                              std::string{timestamp})}};
+    return {val, Error::UnprocessableEntity(fmt::format("Failed to parse '{}' parameter: {} must be unsigned integer",
+                                                        param_name, std::string{timestamp}))};
   }
 }
 
@@ -67,7 +65,7 @@ inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std:
 
   assert(bucket && "Failed to reach bucket");
   if (must_exist && !bucket->HasEntry(entry_name)) {
-    return {{}, {.code = 404, .message = fmt::format("Entry '{}' is not found", entry_name)}};
+    return {{}, Error::NotFound(fmt::format("Entry '{}' is not found", entry_name))};
   }
 
   auto [entry, ref_error] = bucket->GetOrCreateEntry(entry_name);
@@ -79,7 +77,7 @@ inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std:
   assert(bucket && "Failed to reach entry");
 
   if (!entry_ptr) {
-    return {{}, {.code = 500, .message = "Failed to resolve entry"}};
+    return {{}, Error::InternalError("Failed to resolve entry")};
   }
 
   return {entry_ptr, Error::kOk};
@@ -102,10 +100,10 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
   try {
     size = std::stol(content_length.data());
     if (size < 0) {
-      return DefaultReceiver(Error{.code = 411, .message = "negative content-length"});
+      return DefaultReceiver(Error::ContentLengthRequired("Negative content-length"));
     }
   } catch (...) {
-    return DefaultReceiver(Error{.code = 411, .message = "bad or empty content-length"});
+    return DefaultReceiver(Error::ContentLengthRequired("Bad or empty content-length"));
   }
 
   auto [writer, writer_err] = entry->BeginWrite(ts, size);
@@ -130,7 +128,7 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
           return Result<HttpResponse>{resp, Error::kOk};
         }
 
-        return Result<HttpResponse>{resp, Error{.code = 100, .message = "Continue"}};
+        return Result<HttpResponse>{resp, Error::Continue()};
       },
       Error::kOk,
   };
@@ -204,8 +202,8 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
 }
 
 core::Result<HttpRequestReceiver> EntryApi::Query(storage::IStorage* storage, std::string_view bucket_name,
-                                           std::string_view entry_name, std::string_view start_timestamp,
-                                           std::string_view stop_timestamp, std::string_view ttl_interval) {
+                                                  std::string_view entry_name, std::string_view start_timestamp,
+                                                  std::string_view stop_timestamp, std::string_view ttl_interval) {
   auto [entry, err] = GetOrCreateEntry(storage, std::string(bucket_name), std::string(entry_name), true);
   if (err) {
     return DefaultReceiver(err);

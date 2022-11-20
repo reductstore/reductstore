@@ -40,6 +40,8 @@ struct [[nodiscard]] Error {  // NOLINT
     kNotFound = 404,
     kMethodNotAllowed = 405,
     kConflict = 409,
+    kContentLengthRequired = 411,
+    kUnprocessableEntity = 422,
     kPreconditionFailed = 412,
     kInternalError = 500,
     kNotImplemented = 501,
@@ -59,6 +61,15 @@ struct [[nodiscard]] Error {  // NOLINT
   static Error Forbidden(std::string msg = "Forbidden") { return Error{Codes::kForbidden, std::move(msg)}; }
   static Error NotFound(std::string msg = "NotFound") { return Error{kNotFound, std::move(msg)}; }
   static Error Conflict(std::string msg = "Conflict") { return Error{kConflict, std::move(msg)}; }
+  static Error ContentLengthRequired(std::string msg = "Content Length Required") {
+    return Error{kContentLengthRequired, std::move(msg)};
+  }
+  static Error UnprocessableEntity(std::string msg = "Unprocessable Entity") {
+    return Error{kUnprocessableEntity, std::move(msg)};
+  }
+
+  // HTTP codes 500-600
+  static Error InternalError(std::string msg = "Internal Error") { return Error{kInternalError, std::move(msg)}; }
 };
 
 }  // namespace reduct::core

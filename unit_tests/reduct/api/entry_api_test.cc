@@ -85,28 +85,19 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
     SECTION("empty") {
       auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "");
       REQUIRE(err == Error::kOk);
-      REQUIRE(receiver("", true).error == Error{
-                                              .code = 411,
-                                              .message = "bad or empty content-length",
-                                          });
+      REQUIRE(receiver("", true).error == Error::ContentLengthRequired("Bad or empty content-length"));
     }
 
     SECTION("negative") {
       auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "-1");
       REQUIRE(err == Error::kOk);
-      REQUIRE(receiver("", true).error == Error{
-                                              .code = 411,
-                                              .message = "negative content-length",
-                                          });
+      REQUIRE(receiver("", true).error == Error::ContentLengthRequired("Negative content-length"));
     }
 
     SECTION("no number") {
       auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "xxxx");
       REQUIRE(err == Error::kOk);
-      REQUIRE(receiver("", true).error == Error{
-                                              .code = 411,
-                                              .message = "bad or empty content-length",
-                                          });
+      REQUIRE(receiver("", true).error == Error::ContentLengthRequired("Bad or empty content-length"));
     }
     REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).error.code == 404);
   }
