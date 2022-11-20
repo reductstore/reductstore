@@ -13,6 +13,11 @@ namespace reduct::core {
  */
 template <typename T>
 struct [[nodiscard]] Result {  // NOLINT
+  Result() = default;
+  Result(T result) : result(std::move(result)), error(Error::kOk) {}
+  Result(Error error) : result(), error(std::move(error)) {}
+  Result(T result, Error error) : result(std::move(result)), error(std::move(error)) {}
+
   T result;
   Error error;  // error code is HTTP status or -1 if it is communication error
 

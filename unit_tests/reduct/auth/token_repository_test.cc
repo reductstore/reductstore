@@ -52,11 +52,11 @@ TEST_CASE("auth::TokenRepository should create a token") {
   }
 
   SECTION("name must be unique") {
-    REQUIRE(repo->Create("token", {}).error == Error{.code = 409, .message = "Token 'token' already exists"});
+    REQUIRE(repo->Create("token", {}).error == Error::Conflict("Token 'token' already exists"));
   }
 
   SECTION("name can't be empty") {
-    REQUIRE(repo->Create("", {}).error == Error{.code = 422, .message = "Token name can't be empty"});
+    REQUIRE(repo->Create("", {}).error == Error::UnprocessableEntity("Token name can't be empty"));
   }
 
   SECTION("must be persistent") {
@@ -97,7 +97,7 @@ TEST_CASE("auth::TokenRepository should find s token by name") {
   REQUIRE(token.permissions().write().at(0) == "bucket_2");
 
   SECTION("404 error") {
-    REQUIRE(repo->FindByName("token-XXX").error == Error{.code = 404, .message = "Token 'token-XXX' doesn't exist"});
+    REQUIRE(repo->FindByName("token-XXX").error == Error::NotFound("Token 'token-XXX' doesn't exist"));
   }
 }
 
@@ -128,15 +128,15 @@ TEST_CASE("auth::TokenRepository should remove token by name") {
   auto repo = MakeRepo(path);
 
   REQUIRE(repo->Remove("token-1") == Error::kOk);
-  REQUIRE(repo->FindByName("token-1").error.code == 404);
+  REQUIRE(repo->FindByName("token-1").error.code == Error::kNotFound);
 
   SECTION("404 error") {
-    REQUIRE(repo->Remove("token-XXX") == Error{.code = 404, .message = "Token 'token-XXX' doesn't exist"});
+    REQUIRE(repo->Remove("token-XXX") == Error::NotFound("Token 'token-XXX' doesn't exist"));
   }
 
   SECTION("should be persistent") {
     auto new_repo = ITokenRepository::Build({.data_path = path});
-    REQUIRE(new_repo->FindByName("token-1").error.code == 404);
+    REQUIRE(new_repo->FindByName("token-1").error.code == Error::kNotFound);
   }
 }
 
