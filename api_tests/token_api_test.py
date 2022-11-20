@@ -1,14 +1,6 @@
 import json
 
-import pytest
-import secrets
-
 from conftest import get_detail
-
-
-@pytest.fixture(name="token_name")
-def _make_random_token() -> str:
-    return "token-" + secrets.token_urlsafe(32)
 
 
 def test_create_token(base_url, session, token_name):

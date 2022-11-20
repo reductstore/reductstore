@@ -1,14 +1,20 @@
 import json
 import os
 import random
+import secrets
 
 import pytest
 import requests
 
 
+@pytest.fixture(name="storage_url")
+def _storage_url():
+    return os.environ.get("STORAGE_URL", 'http://127.0.0.1:8383')
+
+
 @pytest.fixture(name="base_url")
-def _base_url() -> str:
-    return f"{os.getenv('STORAGE_URL', 'http://127.0.0.1:8383')}/api/v1"
+def _base_url(storage_url) -> str:
+    return f"{storage_url}/api/v1"
 
 
 @pytest.fixture(name='bucket_name')
@@ -20,6 +26,19 @@ def get_detail(resp) -> str:
     return json.loads(resp.content)["detail"]
 
 
+def requires_env(key):
+    env = os.environ.get(key)
+
+    return pytest.mark.skipif(
+        env is None or env == "",
+        reason=f"Not suitable environment {key} for current test"
+    )
+
+
+def auth_headers(token):
+    return {'Authorization': f'Bearer {token}'}
+
+
 @pytest.fixture(name="session")
 def _session(base_url):
     session = requests.session()
@@ -27,3 +46,18 @@ def _session(base_url):
     session.trust_env = False
     session.headers['Authorization'] = f'Bearer {os.getenv("API_TOKEN")}'
     return session
+
+
+@pytest.fixture(name="token_name")
+def _make_random_token() -> str:
+    return "token-" + secrets.token_urlsafe(32)
+
+
+@pytest.fixture(name="token_without_permissions")
+def _make_token_permissions(session, base_url, token_name):
+    permissions = {
+        "full_access": False,
+    }
+    resp = session.post(f'{base_url}/tokens/{token_name}', json=permissions)
+    assert resp.status_code == 200
+    return json.loads(resp.content)["value"]

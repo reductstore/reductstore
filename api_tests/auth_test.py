@@ -1,18 +1,5 @@
 """Test authorization"""
-import os
-
-import pytest
-
-from conftest import get_detail
-
-
-def requires_env(key):
-    env = os.environ.get(key)
-
-    return pytest.mark.skipif(
-        env is None or env == "",
-        reason=f"Not suitable environment {key} for current test"
-    )
+from conftest import get_detail, requires_env, auth_headers
 
 
 @requires_env("API_TOKEN")
@@ -25,15 +12,7 @@ def test__compare_api_token(base_url, session):
 @requires_env("API_TOKEN")
 def test__compare_api_token(base_url, session):
     """should compare token"""
-    resp = session.get(f'{base_url}/info', headers={'Authorization': 'Bearer ABCB0001'})
-    assert resp.status_code == 401
-    assert get_detail(resp) == "Invalid token"
-
-
-@requires_env("API_TOKEN")
-def test__bad_api_token(base_url, session):
-    """should decode token"""
-    resp = session.get(f'{base_url}/info', headers={'Authorization': 'Bearer ITISNOTHEX'})
+    resp = session.get(f'{base_url}/info', headers=auth_headers('ABCB0001'))
     assert resp.status_code == 401
     assert get_detail(resp) == "Invalid token"
 
