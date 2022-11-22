@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Link to Entry API in documentation, [PR-194](https://github.com/reduct-storage/reduct-storage/pull/194)
 - No error body for HEAD `/b/:bucket_name`, [PR-196](https://github.com/reduct-storage/reduct-storage/pull/196)
+- Use `GET /tokens` instead of `/tokens/list`, [PR-200](https://github.com/reduct-storage/reduct-storage/pull/200)
 
 ## [1.0.1] - 2022-10-09
 
