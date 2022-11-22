@@ -49,7 +49,7 @@ def test__list_tokens(base_url, session, token_name):
     resp = session.post(f'{base_url}/tokens/{token_name}', json=permissions)
     assert resp.status_code == 200
 
-    resp = session.get(f'{base_url}/tokens/list')
+    resp = session.get(f'{base_url}/tokens')
     assert resp.status_code == 200
     assert resp.headers['content-type'] == "application/json"
     assert token_name in [t["name"] for t in json.loads(resp.content)["tokens"]]
@@ -58,10 +58,10 @@ def test__list_tokens(base_url, session, token_name):
 @requires_env("API_TOKEN")
 def test__list_token_with_full_access(base_url, session, token_without_permissions):
     """Needs full access to list tokens"""
-    resp = session.get(f'{base_url}/tokens/list', headers=auth_headers(''))
+    resp = session.get(f'{base_url}/tokens', headers=auth_headers(''))
     assert resp.status_code == 401
 
-    resp = session.get(f'{base_url}/tokens/list', headers=auth_headers(token_without_permissions))
+    resp = session.get(f'{base_url}/tokens', headers=auth_headers(token_without_permissions))
     assert resp.status_code == 403
     assert get_detail(resp) == "Token doesn't have full access"
 
@@ -117,7 +117,7 @@ def test__delete_token(base_url, session, token_name):
     resp = session.delete(f'{base_url}/tokens/{token_name}')
     assert resp.status_code == 200
 
-    resp = session.get(f'{base_url}/tokens/list')
+    resp = session.get(f'{base_url}/tokens')
     assert resp.status_code == 200
     assert token_name not in [t["name"] for t in json.loads(resp.content)["tokens"]]
 

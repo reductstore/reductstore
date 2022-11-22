@@ -324,7 +324,7 @@ class HttpServer : public IHttpServer {
                    });
              })
         // Token API
-        .get(api_path + "tokens/list",
+        .get(api_path + "tokens",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running},
                                 [this]() { return TokenApi::ListTokens(token_repository_.get()); });
