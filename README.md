@@ -1,9 +1,9 @@
 # Reduct Storage
 
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reduct-storage/reduct-storage)
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/reduct-storage/reduct-storage/ci)
-![Docker Pulls](https://img.shields.io/docker/pulls/reductstorage/engine)
-![GitHub all releases](https://img.shields.io/github/downloads/reduct-storage/reduct-storage/total)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reduct-storage/reduct-storage)](https://github.com/reduct-storage/reduct-storage/releases/latest)
+[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/reduct-storage/reduct-storage/ci)](https://github.com/reduct-storage/reduct-storage/actions)
+[![Docker Pulls](https://img.shields.io/docker/pulls/reductstorage/engine)](https://hub.docker.com/r/reductstorage/engine)
+[![GitHub all releases](https://img.shields.io/github/downloads/reduct-storage/reduct-storage/total)](https://github.com/reduct-storage/reduct-storage/releases/latest)
 
 Reduct Storage is a time series database for big data. It has no limitation on the size of stored objects or the volume
 of stored data. It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read
