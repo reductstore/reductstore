@@ -41,13 +41,7 @@ class TokenRepository : public ITokenRepository {
 
     if (!options.api_token.empty()) {
       const auto kInitTokenName = "init-token";
-      auto v = repo_ | std::views::values |
-               std::views::filter([&options](auto t) { return t.value() == options.api_token; });
-      if (!v.empty()) {
-        return;
-      }
 
-      LOG_DEBUG("Create '{}' token", kInitTokenName);
       Token token;
       token.set_name(kInitTokenName);
       token.set_value(std::string(options.api_token));
@@ -55,10 +49,6 @@ class TokenRepository : public ITokenRepository {
 
       token.mutable_permissions()->set_full_access(true);
       repo_[kInitTokenName] = token;
-
-      if (auto err = SaveRepo()) {
-        LOG_ERROR("Failed to save '{}': {}", kInitTokenName, err);
-      }
     }
   }
 
