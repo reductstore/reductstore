@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Implement Token API, [PR-199](https://github.com/reduct-storage/reduct-storage/pull/199)
 
+### Changed:
+
+- Update Web Console to v1.1.0, [PR-204](https://github.com/reduct-storage/reduct-storage/pull/204)
 ### Fixed:
 
 - Link to Entry API in documentation, [PR-194](https://github.com/reduct-storage/reduct-storage/pull/194)
