@@ -34,7 +34,6 @@ or you can use the demo storage: https://play.reduct-storage.dev
 Reduct Storage provides a simple HTTP API, so you could use it with `curl`:
 
 ```shell
-# Take a temporal access token by using the API token
 export API_TOKEN=reduct
 
 # Create a bucket
