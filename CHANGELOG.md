@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A crush when we handle input chunks after an HTTP
+  error, [PR-206](https://github.com/reduct-storage/reduct-storage/pull/206)
+
 ## [1.1.0] - 2022-11-27
 
 ### Added:
