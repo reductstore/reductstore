@@ -146,6 +146,20 @@ def test_read_write_big_blob(base_url, session, bucket):
     assert resp.text == blob
 
 
+def test_write_big_blob_with_error(base_url, session, bucket):
+    """Should write a big blob with error and don't crush"""
+    blob = np.random.bytes(2 ** 20).hex()
+    ts = 1000
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data=blob)
+    assert resp.status_code == 200
+
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data=blob)
+    assert resp.status_code == 409
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry')
+    assert resp.status_code == 200
+
 @requires_env("API_TOKEN")
 def test__write_with_write_token(base_url, session, bucket, token_without_permissions, token_read_bucket,
                                  token_write_bucket):

@@ -96,6 +96,7 @@ class HttpServer : public IHttpServer {
 
     void await_suspend(std::coroutine_handle<> h) const noexcept {
       if (finish_ || error_) {
+        res_->onData([](auto, bool) {});
         h.resume();
       } else {
         async::ILoop::loop().Defer([this, h] { await_suspend(h); });
