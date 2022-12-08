@@ -27,7 +27,7 @@ class Storage : public IStorage {
  public:
   explicit Storage(Options options) : options_(std::move(options)), buckets_() {
     if (!fs::exists(options_.data_path)) {
-      LOG_INFO("Folder '{}' doesn't exist. CreateToken it.", options_.data_path.string());
+      LOG_INFO("Folder '{}' doesn't exist. Create it.", options_.data_path.string());
       fs::create_directories(options_.data_path);
     }
 

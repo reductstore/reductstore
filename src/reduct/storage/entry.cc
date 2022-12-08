@@ -35,7 +35,7 @@ namespace fs = std::filesystem;
 class Entry : public IEntry {
  public:
   /**
-   * CreateToken a new entry
+   * Create a new entry
    * @param options
    */
   Entry(std::string_view name, std::filesystem::path path, Options options)
@@ -142,7 +142,7 @@ class Entry : public IEntry {
     auto too_many_records = block->records_size() + 1 > options_.max_block_records;
 
     if (type == RecordType::kLatest && (has_no_space || too_many_records || block->invalid())) {
-      LOG_DEBUG("CreateToken a new block");
+      LOG_DEBUG("Create a new block");
       if (auto err = block_manager_->FinishBlock(block)) {
         LOG_WARNING("Failed to finish the current block: {}", err.ToString());
       }
@@ -156,7 +156,7 @@ class Entry : public IEntry {
       block = std::move(ret.result);
     }
 
-    // UpdateToken writing block
+    // Update writing block
     auto record = block->add_records();
     record->set_state(proto::Record::kStarted);
     record->mutable_timestamp()->CopyFrom(proto_ts);
@@ -165,7 +165,7 @@ class Entry : public IEntry {
 
     block->set_size(block->size() + content_size);
 
-    // UpdateToken counters
+    // Update counters
     record_counter_++;
     size_counter_ += content_size;
 

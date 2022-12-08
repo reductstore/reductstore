@@ -339,7 +339,7 @@ class HttpServer : public IHttpServer {
         .post(api_path + "tokens/:token_id",
               [this, running](auto *res, auto *req) {
                 RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                  return TokenApi::CreateToken(token_repository_.get(), req->getParameter(0));
+                  return TokenApi::CreateToken(token_repository_.get(), storage_.get(), req->getParameter(0));
                 });
               })
         .del(api_path + "tokens/:token_id",

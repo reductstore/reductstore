@@ -109,7 +109,7 @@ Name of token to show
 
 
 
-{% swagger method="post" path="/:token_name" baseUrl="/api/v1/tokens" summary="CreateToken a new access token" %}
+{% swagger method="post" path="/:token_name" baseUrl="/api/v1/tokens" summary="Create a new access token" %}
 {% swagger-description %}
 The method creates a new access token with given permissions as a JSON document in the request body . To use this method, you need an access token with full access.
 {% endswagger-description %}
@@ -119,7 +119,7 @@ Name of new token
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="full_access" type="Boolean" %}
-CreateToken a token with full acces. Default: false
+Create a token with full acces. Default: false
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="read" type="String[]" %}

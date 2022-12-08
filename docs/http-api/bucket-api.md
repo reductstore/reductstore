@@ -108,7 +108,7 @@ Name of bucket
 
 
 
-{% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name  " summary="CreateToken a new bucket" %}
+{% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name  " summary="Create a new bucket" %}
 {% swagger-description %}
 To create a bucket, the request should contain a JSON document with some parameters or empty body. The new bucket uses default values if some parameters are empty.
 

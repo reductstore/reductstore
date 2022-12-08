@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed:
 
 - Always override init-token, [PR-201](https://github.com/reduct-storage/reduct-storage/pull/201)
-- UpdateToken Web Console to v1.1.0, [PR-204](https://github.com/reduct-storage/reduct-storage/pull/204)
+- Update Web Console to v1.1.0, [PR-204](https://github.com/reduct-storage/reduct-storage/pull/204)
 
 ## [1.0.1] - 2022-10-09
 
@@ -107,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed:
 
 - Duplication of timestamps is not allowed, [PR-147](https://github.com/reduct-storage/reduct-storage/pull/147)
-- UpdateToken dependencies, [PR-163](https://github.com/reduct-storage/reduct-storage/pull/163)
+- Update dependencies, [PR-163](https://github.com/reduct-storage/reduct-storage/pull/163)
 
 ### Deprecated:
 
@@ -186,7 +186,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GET `/b/:bucket/:entry` to avoid creating an empty
   entry, [PR-95](https://github.com/reduct-storage/reduct-storage/pull/95)
-- UpdateToken of bucket settings, [PR-138](https://github.com/reduct-storage/reduct-storage/pull/138)
+- Update of bucket settings, [PR-138](https://github.com/reduct-storage/reduct-storage/pull/138)
 
 ## [0.5.0] - 2022-05-15
 

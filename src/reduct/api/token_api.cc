@@ -1,6 +1,6 @@
 // Copyright 2022 Alexey Timin
 
-#include "token_api.h"
+#include "reduct/api/token_api.h"
 
 namespace reduct::api {
 
@@ -10,10 +10,28 @@ using core::Result;
 using proto::api::Token_Permissions;
 using proto::api::TokenCreateResponse;
 using proto::api::TokenRepo;
+using storage::IStorage;
 
-Result<HttpRequestReceiver> TokenApi::CreateToken(ITokenRepository* repository, std::string_view name) {
+Result<HttpRequestReceiver> TokenApi::CreateToken(ITokenRepository* repository, const IStorage* storage,
+                                                  std::string_view name) {
   return ReceiveAndSendJson<Token_Permissions, TokenCreateResponse>(
-      [repository, name = std::string(name)](Token_Permissions&& permissions) -> Result<TokenCreateResponse> {
+      [repository, storage, name = std::string(name)](Token_Permissions&& permissions) -> Result<TokenCreateResponse> {
+        auto check_bucket = [storage](const auto& bucket_list) -> Error {
+          for (const auto& bucket : bucket_list) {
+            if (storage->GetBucket(bucket).error.code == Error::kNotFound) {
+              return Error::UnprocessableEntity("Bucket " + bucket + " not found");
+            }
+          }
+        };
+
+        if (auto err = check_bucket(permissions.read())) {
+          return {{}, err};
+        };
+
+        if (auto err = check_bucket(permissions.write())) {
+          return {{}, err};
+        };
+
         return repository->CreateToken(name, permissions);
       });
 }

@@ -36,7 +36,7 @@ Reduct Storage provides a simple HTTP API, so you could use it with `curl`:
 ```shell
 export API_TOKEN=reduct
 
-# CreateToken a bucket
+# Create a bucket
 curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
   -X POST \
   --header "Authorization: Bearer ${API_TOKEN}"   \
