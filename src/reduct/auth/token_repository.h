@@ -34,6 +34,14 @@ class ITokenRepository {
   virtual core::Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) = 0;
 
   /**
+   * Update permissions of a token
+   * @param name
+   * @param permissions
+   * @return
+   */
+  virtual core::Error Update(const std::string &name, TokenPermissions permissions) = 0;
+
+  /**
    * List tokens
    * @note it shouldn't expose the values of the tokens and permissions
    * @return list of tokens

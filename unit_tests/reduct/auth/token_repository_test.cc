@@ -67,6 +67,41 @@ TEST_CASE("auth::TokenRepository should create a token") {
   }
 }
 
+TEST_CASE("auth::TokenRepository should update token") {
+  const auto path = BuildTmpDirectory();
+  auto repo = ITokenRepository::Build({.data_path = path});
+
+  ITokenRepository::TokenPermissions permissions;
+  permissions.set_full_access(false);
+  permissions.mutable_read()->Add("bucket_1");
+  permissions.mutable_write()->Add("bucket_2");
+
+  {
+    auto [_, err] = repo->Create("new-token", std::move(permissions));
+    REQUIRE(err == Error::kOk);
+
+    ITokenRepository::TokenPermissions new_permissions;
+    new_permissions.set_full_access(true);
+
+    REQUIRE(repo->Update("new-token", new_permissions) == Error::kOk);
+  }
+
+  SECTION("check if it's updated") {
+    auto [token, _] = repo->FindByName("new-token");
+    REQUIRE(token.permissions().full_access());
+  }
+
+  SECTION("must be persistent") {
+    auto new_repo = ITokenRepository::Build({.data_path = path});
+    auto [token, _] = new_repo->FindByName("new-token");
+    REQUIRE(token.permissions().full_access());
+  }
+
+  SECTION("can't update non-existing token") {
+    REQUIRE(repo->Update("non-existing-token", {}) == Error::NotFound("Token 'non-existing-token' doesn't exist"));
+  }
+}
+
 TEST_CASE("auth::TokenRepository should list tokens") {
   auto repo = MakeRepo();
 
@@ -130,9 +165,7 @@ TEST_CASE("auth::TokenRepository should remove token by name") {
   REQUIRE(repo->Remove("token-1") == Error::kOk);
   REQUIRE(repo->FindByName("token-1").error.code == Error::kNotFound);
 
-  SECTION("404 error") {
-    REQUIRE(repo->Remove("token-XXX") == Error::NotFound("Token 'token-XXX' doesn't exist"));
-  }
+  SECTION("404 error") { REQUIRE(repo->Remove("token-XXX") == Error::NotFound("Token 'token-XXX' doesn't exist")); }
 
   SECTION("should be persistent") {
     auto new_repo = ITokenRepository::Build({.data_path = path});

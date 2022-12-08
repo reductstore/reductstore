@@ -54,11 +54,11 @@ class TokenRepository : public ITokenRepository {
 
   Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) override {
     if (name.empty()) {
-      return {{}, Error{.code = 422, .message = "Token name can't be empty"}};
+      return {{}, Error::UnprocessableEntity("Token name can't be empty")};
     }
 
     if (!FindByName(name).error) {
-      return {{}, Error{.code = 409, .message = fmt::format("Token '{}' already exists", name)}};
+      return {{}, Error::Conflict(fmt::format("Token '{}' already exists", name))};
     }
 
     Token& new_token = repo_[name];
@@ -88,6 +88,16 @@ class TokenRepository : public ITokenRepository {
     response.set_value(new_token.value());
     response.mutable_created_at()->CopyFrom(new_token.created_at());
     return {response, Error::kOk};
+  }
+
+  Error Update(const std::string& name, TokenPermissions permissions) override {
+    if (auto err = FindByName(name).error) {
+      return err;
+    }
+
+    auto& token = repo_[name];
+    token.mutable_permissions()->CopyFrom(permissions);
+    return SaveRepo();
   }
 
   Result<TokenList> List() const override {
