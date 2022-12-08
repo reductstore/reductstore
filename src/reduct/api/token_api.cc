@@ -14,12 +14,12 @@ using proto::api::TokenRepo;
 Result<HttpRequestReceiver> TokenApi::CreateToken(ITokenRepository* repository, std::string_view name) {
   return ReceiveAndSendJson<Token_Permissions, TokenCreateResponse>(
       [repository, name = std::string(name)](Token_Permissions&& permissions) -> Result<TokenCreateResponse> {
-        return repository->Create(name, permissions);
+        return repository->CreateToken(name, permissions);
       });
 }
 
 Result<HttpRequestReceiver> TokenApi::ListTokens(ITokenRepository* repository) {
-  auto [list, err] = repository->List();
+  auto [list, err] = repository->GetTokenList();
   if (err) {
     return DefaultReceiver(err);
   }
@@ -41,7 +41,7 @@ Result<HttpRequestReceiver> TokenApi::GetToken(auth::ITokenRepository* repositor
   return SendJson<proto::api::Token>({std::move(token), Error::kOk});
 }
 core::Result<HttpRequestReceiver> TokenApi::RemoveToken(auth::ITokenRepository* repository, std::string_view name) {
-  auto err = repository->Remove(std::string(name));
+  auto err = repository->RemoveToken(std::string(name));
   return DefaultReceiver(err);
 }
 }  // namespace reduct::api

@@ -291,7 +291,7 @@ class HttpServer : public IHttpServer {
         .del(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return BucketApi::RemoveBucket(storage_.get(), req->getParameter(0));
+                 return BucketApi::RemoveBucket(storage_.get(), token_repository_.get(), req->getParameter(0));
                });
              })
         // Entry API

@@ -33,7 +33,7 @@ class IAssetManager {
   static std::unique_ptr<IAssetManager> BuildFromZip(std::string_view zipped);
 
   /**
-   * Create an empty asset which returns only 404 error
+   * CreateToken an empty asset which returns only 404 error
    * @return
    */
   static std::unique_ptr<IAssetManager> BuildEmpty();

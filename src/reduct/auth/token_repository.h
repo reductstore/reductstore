@@ -31,7 +31,7 @@ class ITokenRepository {
    * @param permissions  permissions (see protobuf message)
    * @return generated value of created token, 409 if it already exists
    */
-  virtual core::Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) = 0;
+  virtual core::Result<TokenCreateResponse> CreateToken(std::string name, TokenPermissions permissions) = 0;
 
   /**
    * Update permissions of a token
@@ -39,14 +39,14 @@ class ITokenRepository {
    * @param permissions
    * @return
    */
-  virtual core::Error Update(const std::string &name, TokenPermissions permissions) = 0;
+  virtual core::Error UpdateToken(const std::string &name, TokenPermissions permissions) = 0;
 
   /**
    * List tokens
    * @note it shouldn't expose the values of the tokens and permissions
    * @return list of tokens
    */
-  virtual core::Result<TokenList> List() const = 0;
+  virtual core::Result<TokenList> GetTokenList() const = 0;
 
   /**
    * Find a token by its name
@@ -69,7 +69,7 @@ class ITokenRepository {
    * @param name token name
    * @return 404 if not found
    */
-  virtual core::Error Remove(const std::string &name) = 0;
+  virtual core::Error RemoveToken(const std::string &name) = 0;
 
   struct Options {
     std::filesystem::path data_path;

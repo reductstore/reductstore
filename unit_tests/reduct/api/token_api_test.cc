@@ -19,7 +19,7 @@ using reduct::proto::api::Token;
 using reduct::proto::api::TokenCreateResponse;
 using reduct::proto::api::TokenRepo;
 
-TEST_CASE("TokenApi::Create should create a token and return its value") {
+TEST_CASE("TokenApi::CreateToken should create a token and return its value") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
@@ -58,8 +58,8 @@ TEST_CASE("TokenApi::ListTokens should list tokens") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
-  REQUIRE(repo->Create("token-1", {}) == Error::kOk);
-  REQUIRE(repo->Create("token-2", {}) == Error::kOk);
+  REQUIRE(repo->CreateToken("token-1", {}) == Error::kOk);
+  REQUIRE(repo->CreateToken("token-2", {}) == Error::kOk);
 
   auto [receiver, err] = TokenApi::ListTokens(repo.get());
   REQUIRE(err == Error::kOk);
@@ -71,7 +71,7 @@ TEST_CASE("TokenApi::ListTokens should list tokens") {
   TokenRepo proto_message;
   JsonStringToMessage(resp.SendData().result, &proto_message);
 
-  REQUIRE(proto_message.tokens(0) == repo->List().result[0]);
+  REQUIRE(proto_message.tokens(0) == repo->GetTokenList().result[0]);
 }
 
 TEST_CASE("TokenApi::GetToken should show a token") {
@@ -83,7 +83,7 @@ TEST_CASE("TokenApi::GetToken should show a token") {
   permissions.mutable_read()->Add("bucket-1");
   permissions.mutable_write()->Add("bucket-2");
 
-  REQUIRE(repo->Create("token-1", permissions) == Error::kOk);
+  REQUIRE(repo->CreateToken("token-1", permissions) == Error::kOk);
 
   {
     auto [receiver, err] = TokenApi::GetToken(repo.get(), "token-1");
@@ -110,7 +110,7 @@ TEST_CASE("TokenApi::RemoveToken should delete a token") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
-  REQUIRE(repo->Create("token-1", {}).error == Error::kOk);
+  REQUIRE(repo->CreateToken("token-1", {}).error == Error::kOk);
 
   {
     auto [receiver, err] = TokenApi::RemoveToken(repo.get(), "token-1");

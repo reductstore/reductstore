@@ -52,7 +52,7 @@ class TokenRepository : public ITokenRepository {
     }
   }
 
-  Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) override {
+  Result<TokenCreateResponse> CreateToken(std::string name, TokenPermissions permissions) override {
     if (name.empty()) {
       return {{}, Error::UnprocessableEntity("Token name can't be empty")};
     }
@@ -90,7 +90,7 @@ class TokenRepository : public ITokenRepository {
     return {response, Error::kOk};
   }
 
-  Error Update(const std::string& name, TokenPermissions permissions) override {
+  Error UpdateToken(const std::string& name, TokenPermissions permissions) override {
     if (auto err = FindByName(name).error) {
       return err;
     }
@@ -100,7 +100,7 @@ class TokenRepository : public ITokenRepository {
     return SaveRepo();
   }
 
-  Result<TokenList> List() const override {
+  Result<TokenList> GetTokenList() const override {
     TokenList token_list{};
     for (auto token : repo_ | std::views::values) {
       token.clear_permissions();  // we don't expose permissions and value when we do list
@@ -133,7 +133,7 @@ class TokenRepository : public ITokenRepository {
     return {found_token, Error::kOk};
   }
 
-  Error Remove(const std::string& name) override {
+  Error RemoveToken(const std::string& name) override {
     if (repo_.erase(name) == 0) {
       return Error{.code = 404, .message = fmt::format("Token '{}' doesn't exist", name)};
     }

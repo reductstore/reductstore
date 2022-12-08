@@ -52,8 +52,45 @@ core::Result<HttpRequestReceiver> BucketApi::UpdateBucket(const storage::IStorag
   return ReceiveJson<BucketSettings>(
       [bucket = bucket_ptr.lock()](auto settings) { return bucket->SetSettings(settings); });
 }
-core::Result<HttpRequestReceiver> BucketApi::RemoveBucket(storage::IStorage* storage, std::string_view name) {
-  return DefaultReceiver(storage->RemoveBucket(std::string(name)));
+core::Result<HttpRequestReceiver> BucketApi::RemoveBucket(storage::IStorage* storage, auth::ITokenRepository* repo,
+                                                          std::string_view name) {
+  if (auto err = storage->RemoveBucket(std::string(name))) {
+    return DefaultReceiver(err);
+  }
+
+  // Remove bucket from all tokens
+  const auto tokens = repo->GetTokenList();
+  if (tokens.error) {
+    return DefaultReceiver(tokens.error);
+  }
+
+  for (const auto& token : tokens.result) {
+    const auto [token_info, err] = repo->FindByName(token.name());
+    if (err) {
+      return DefaultReceiver(err);
+    }
+
+    proto::api::Token_Permissions permissions;
+    permissions.set_full_access(token_info.permissions().full_access());
+
+    for (const auto& bucket : token_info.permissions().read()) {
+      if (bucket != name) {
+        *permissions.add_read() = bucket;
+      }
+    }
+
+    for (const auto& bucket : token_info.permissions().write()) {
+      if (bucket != name) {
+        *permissions.add_write() = bucket;
+      }
+    }
+
+    if (auto update_err = repo->UpdateToken(token.name(), permissions)) {
+      return DefaultReceiver(update_err);
+    }
+  }
+
+  return DefaultReceiver(Error::kOk);
 }
 
 }  // namespace reduct::api
