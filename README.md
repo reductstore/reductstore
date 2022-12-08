@@ -14,7 +14,7 @@ more [here](https://docs.reduct-storage.dev/).
 * HTTP(S) API
 * Storing and accessing blobs as time series
 * Optimized for small files
-* Real-time quota for buckets
+* Real-time FIFO quota for buckets
 * Token authorization
 * Embedded Web Console
 * Support Linux, MacOS and Windows on AMD64
