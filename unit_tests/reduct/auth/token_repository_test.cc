@@ -165,7 +165,9 @@ TEST_CASE("auth::TokenRepository should remove token by name") {
   REQUIRE(repo->RemoveToken("token-1") == Error::kOk);
   REQUIRE(repo->FindByName("token-1").error.code == Error::kNotFound);
 
-  SECTION("404 error") { REQUIRE(repo->RemoveToken("token-XXX") == Error::NotFound("Token 'token-XXX' doesn't exist")); }
+  SECTION("404 error") {
+    REQUIRE(repo->RemoveToken("token-XXX") == Error::NotFound("Token 'token-XXX' doesn't exist"));
+  }
 
   SECTION("should be persistent") {
     auto new_repo = ITokenRepository::Build({.data_path = path});
