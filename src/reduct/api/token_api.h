@@ -5,6 +5,7 @@
 
 #include "reduct/api/common.h"
 #include "reduct/auth/token_repository.h"
+#include "reduct/storage/storage.h"
 
 namespace reduct::api {
 
@@ -16,7 +17,8 @@ class TokenApi {
    * @param name
    * @return
    */
-  static core::Result<HttpRequestReceiver> CreateToken(auth::ITokenRepository* repository, std::string_view name);
+  static core::Result<HttpRequestReceiver> CreateToken(auth::ITokenRepository* repository,
+                                                       const storage::IStorage* storage, std::string_view name);
 
   /**
    * Token list

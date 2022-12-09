@@ -3,12 +3,15 @@ import json
 from conftest import get_detail, auth_headers, requires_env
 
 
-def test__create_token(base_url, session, token_name):
+def test__create_token(base_url, session, token_name, bucket_name):
     """Should create a token"""
+    resp = session.post(f'{base_url}/b/{bucket_name}')
+    assert resp.status_code == 200
+
     permissions = {
         "full_access": True,
-        "read": ["bucket1", "bucket2"],
-        "write": ["bucket2"],
+        "read": [bucket_name],
+        "write": [bucket_name],
     }
 
     resp = session.post(f'{base_url}/tokens/{token_name}', json=permissions)
@@ -66,12 +69,15 @@ def test__list_token_with_full_access(base_url, session, token_without_permissio
     assert get_detail(resp) == "Token doesn't have full access"
 
 
-def test__get_token(base_url, session, token_name):
+def test__get_token(base_url, session, bucket_name, token_name):
     """Should show a token name and permissions"""
+    resp = session.post(f'{base_url}/b/{bucket_name}')
+    assert resp.status_code == 200
+
     permissions = {
         "full_access": True,
-        "read": ["bucket1", "bucket2"],
-        "write": ["bucket2"],
+        "read": [bucket_name],
+        "write": [bucket_name],
     }
 
     resp = session.post(f'{base_url}/tokens/{token_name}', json=permissions)

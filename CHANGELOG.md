@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed:
+
+- Consistent token and bucket management, [PR-208](https://github.com/reduct-storage/reduct-storage/pull/208)
+
 ## [1.1.1] - 2022-12-08
 
-### Fixed
+### Fixed:
 
 - A crush when we handle input chunks after an HTTP
   error, [PR-206](https://github.com/reduct-storage/reduct-storage/pull/206)

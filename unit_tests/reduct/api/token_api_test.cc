@@ -18,10 +18,15 @@ using reduct::core::Error;
 using reduct::proto::api::Token;
 using reduct::proto::api::TokenCreateResponse;
 using reduct::proto::api::TokenRepo;
+using Storage = reduct::storage::IStorage;  // fix windows build
 
-TEST_CASE("TokenApi::Create should create a token and return its value") {
+TEST_CASE("TokenApi::CreateToken should create a token and return its value") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
+  auto storage = Storage::Build({.data_path = path});
+
+  REQUIRE(storage->CreateBucket("bucket-1", {}) == Error::kOk);
+  REQUIRE(storage->CreateBucket("bucket-2", {}) == Error::kOk);
 
   ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(true);
@@ -29,7 +34,7 @@ TEST_CASE("TokenApi::Create should create a token and return its value") {
   permissions.mutable_write()->Add("bucket-2");
 
   {
-    auto [receiver, err] = TokenApi::CreateToken(repo.get(), "new-token");
+    auto [receiver, err] = TokenApi::CreateToken(repo.get(), storage.get(), "new-token");
     REQUIRE(err == Error::kOk);
 
     auto [resp, resp_err] = receiver(PrintToJson(permissions), true);
@@ -46,11 +51,20 @@ TEST_CASE("TokenApi::Create should create a token and return its value") {
   }
 
   SECTION("already exists") {
-    auto [receiver, err] = TokenApi::CreateToken(repo.get(), "new-token");
+    auto [receiver, err] = TokenApi::CreateToken(repo.get(), storage.get(), "new-token");
     REQUIRE(err == Error::kOk);
 
     auto [resp, resp_err] = receiver(PrintToJson(permissions), true);
     REQUIRE(resp_err == Error::Conflict("Token 'new-token' already exists"));
+  }
+
+  SECTION("check if bucket exists") {
+    permissions.mutable_read()->Add("bucket-3");
+    auto [receiver, err] = TokenApi::CreateToken(repo.get(), storage.get(), "new-token");
+    REQUIRE(err == Error::kOk);
+
+    auto [resp, resp_err] = receiver(PrintToJson(permissions), true);
+    REQUIRE(resp_err == Error::UnprocessableEntity("Bucket 'bucket-3' doesn't exist"));
   }
 }
 
@@ -58,8 +72,8 @@ TEST_CASE("TokenApi::ListTokens should list tokens") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
-  REQUIRE(repo->Create("token-1", {}) == Error::kOk);
-  REQUIRE(repo->Create("token-2", {}) == Error::kOk);
+  REQUIRE(repo->CreateToken("token-1", {}) == Error::kOk);
+  REQUIRE(repo->CreateToken("token-2", {}) == Error::kOk);
 
   auto [receiver, err] = TokenApi::ListTokens(repo.get());
   REQUIRE(err == Error::kOk);
@@ -71,7 +85,7 @@ TEST_CASE("TokenApi::ListTokens should list tokens") {
   TokenRepo proto_message;
   JsonStringToMessage(resp.SendData().result, &proto_message);
 
-  REQUIRE(proto_message.tokens(0) == repo->List().result[0]);
+  REQUIRE(proto_message.tokens(0) == repo->GetTokenList().result[0]);
 }
 
 TEST_CASE("TokenApi::GetToken should show a token") {
@@ -83,7 +97,7 @@ TEST_CASE("TokenApi::GetToken should show a token") {
   permissions.mutable_read()->Add("bucket-1");
   permissions.mutable_write()->Add("bucket-2");
 
-  REQUIRE(repo->Create("token-1", permissions) == Error::kOk);
+  REQUIRE(repo->CreateToken("token-1", permissions) == Error::kOk);
 
   {
     auto [receiver, err] = TokenApi::GetToken(repo.get(), "token-1");
@@ -110,7 +124,7 @@ TEST_CASE("TokenApi::RemoveToken should delete a token") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
-  REQUIRE(repo->Create("token-1", {}).error == Error::kOk);
+  REQUIRE(repo->CreateToken("token-1", {}).error == Error::kOk);
 
   {
     auto [receiver, err] = TokenApi::RemoveToken(repo.get(), "token-1");

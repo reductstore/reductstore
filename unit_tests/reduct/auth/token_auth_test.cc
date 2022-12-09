@@ -23,7 +23,7 @@ TEST_CASE("auth::TokenAuthorization should use API token to check") {
   auto auth = ITokenAuthorization::Build("we have init api token");
 
   auto repo = reduct::auth::ITokenRepository::Build({.data_path = BuildTmpDirectory()});
-  auto [token, err] = repo->Create("token-1", {});
+  auto [token, err] = repo->CreateToken("token-1", {});
   REQUIRE(err == Error::kOk);
 
   REQUIRE(auth->Check("Bearer " + token.value(), *repo, Authenticated()) == Error::kOk);

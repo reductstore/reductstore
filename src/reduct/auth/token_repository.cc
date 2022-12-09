@@ -52,13 +52,13 @@ class TokenRepository : public ITokenRepository {
     }
   }
 
-  Result<TokenCreateResponse> Create(std::string name, TokenPermissions permissions) override {
+  Result<TokenCreateResponse> CreateToken(std::string name, TokenPermissions permissions) override {
     if (name.empty()) {
-      return {{}, Error{.code = 422, .message = "Token name can't be empty"}};
+      return {{}, Error::UnprocessableEntity("Token name can't be empty")};
     }
 
     if (!FindByName(name).error) {
-      return {{}, Error{.code = 409, .message = fmt::format("Token '{}' already exists", name)}};
+      return {{}, Error::Conflict(fmt::format("Token '{}' already exists", name))};
     }
 
     Token& new_token = repo_[name];
@@ -90,7 +90,17 @@ class TokenRepository : public ITokenRepository {
     return {response, Error::kOk};
   }
 
-  Result<TokenList> List() const override {
+  Error UpdateToken(const std::string& name, TokenPermissions permissions) override {
+    if (auto err = FindByName(name).error) {
+      return err;
+    }
+
+    auto& token = repo_[name];
+    token.mutable_permissions()->CopyFrom(permissions);
+    return SaveRepo();
+  }
+
+  Result<TokenList> GetTokenList() const override {
     TokenList token_list{};
     for (auto token : repo_ | std::views::values) {
       token.clear_permissions();  // we don't expose permissions and value when we do list
@@ -123,7 +133,7 @@ class TokenRepository : public ITokenRepository {
     return {found_token, Error::kOk};
   }
 
-  Error Remove(const std::string& name) override {
+  Error RemoveToken(const std::string& name) override {
     if (repo_.erase(name) == 0) {
       return Error{.code = 404, .message = fmt::format("Token '{}' doesn't exist", name)};
     }
