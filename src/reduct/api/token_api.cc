@@ -19,9 +19,10 @@ Result<HttpRequestReceiver> TokenApi::CreateToken(ITokenRepository* repository, 
         auto check_bucket = [storage](const auto& bucket_list) -> Error {
           for (const auto& bucket : bucket_list) {
             if (storage->GetBucket(bucket).error.code == Error::kNotFound) {
-              return Error::UnprocessableEntity("Bucket " + bucket + " not found");
+              return Error::UnprocessableEntity(fmt::format("Bucket '{}' doesn't exist", bucket));
             }
           }
+          return Error::kOk;
         };
 
         if (auto err = check_bucket(permissions.read())) {
