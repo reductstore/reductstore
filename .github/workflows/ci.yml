@@ -21,14 +21,14 @@ jobs:
     name: C++ Linter
     steps:
       - uses: actions/checkout@v2
-      - name: Build cpplint image
-        run: docker build cpplint/ -t cpplint
+      - name: Install cpplint
+        run: pip install cpplint
       - name: Check code in /src
-        run: docker run -v ${PWD}:/app cpplint bash -c "find src/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
+        run: find src/ -name "*.cc" -o -name "*.h"  | xargs cpplint
       - name: Check code in /unit_tests
-        run: docker run -v ${PWD}:/app cpplint bash -c "find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
+        run: find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs cpplint
       - name: Check code in /benchmarks
-        run: docker run -v ${PWD}:/app cpplint bash -c "find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint.py"
+        run: find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint
 
   download_console:
     name: Download Web Console

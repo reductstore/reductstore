@@ -15,6 +15,5 @@ repos:
       name: cpplint
       description: Static code analysis of C/C++ files
       language: python
-      language_version: "2.7"
       files: \.(h\+\+|h|hh|hxx|hpp|cuh|c|cc|cpp|cu|c\+\+|cxx|tpp|txx)$
-      entry: cpplint.py
+      entry: cpplint

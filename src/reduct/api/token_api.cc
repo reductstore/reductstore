@@ -27,11 +27,11 @@ Result<HttpRequestReceiver> TokenApi::CreateToken(ITokenRepository* repository, 
 
         if (auto err = check_bucket(permissions.read())) {
           return {{}, err};
-        };
+        }
 
         if (auto err = check_bucket(permissions.write())) {
           return {{}, err};
-        };
+        }
 
         return repository->CreateToken(name, permissions);
       });
