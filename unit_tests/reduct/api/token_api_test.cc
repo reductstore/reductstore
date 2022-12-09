@@ -18,12 +18,12 @@ using reduct::core::Error;
 using reduct::proto::api::Token;
 using reduct::proto::api::TokenCreateResponse;
 using reduct::proto::api::TokenRepo;
-using reduct::storage::IStorage;
+using Storage = reduct::storage::IStorage;  // fix windows build
 
 TEST_CASE("TokenApi::CreateToken should create a token and return its value") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
-  auto storage = IStorage::Build({.data_path = path});
+  auto storage = Storage::Build({.data_path = path});
 
   REQUIRE(storage->CreateBucket("bucket-1", {}) == Error::kOk);
   REQUIRE(storage->CreateBucket("bucket-2", {}) == Error::kOk);
