@@ -74,6 +74,7 @@ def _make_token_permissions(session, base_url, token_generator):
 
 @pytest.fixture(name="token_read_bucket")
 def _make_token_read_bucket(session, base_url, bucket_name, token_generator):
+    session.post(f'{base_url}/b/{bucket_name}')
     permissions = {
         "full_access": False,
         "read": [bucket_name],
@@ -85,6 +86,8 @@ def _make_token_read_bucket(session, base_url, bucket_name, token_generator):
 
 @pytest.fixture(name="token_write_bucket")
 def _make_token_write_bucket(session, base_url, bucket_name, token_generator):
+    session.post(f'{base_url}/b/{bucket_name}')
+
     permissions = {
         "full_access": False,
         "write": [bucket_name],

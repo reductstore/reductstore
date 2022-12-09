@@ -145,7 +145,6 @@ def test__update_bucket_bad_format(base_url, session, bucket_name):
 def test__update_bucket_with_full_access_token(base_url, session, bucket_name, token_without_permissions,
                                                token_read_bucket, token_write_bucket):
     """Needs full access to change bucket"""
-    session.post(f'{base_url}/b/{bucket_name}')
 
     resp = session.put(f'{base_url}/b/{bucket_name}', headers=auth_headers(''))
     assert resp.status_code == 401
@@ -190,9 +189,6 @@ def test__remove_bucket_not_exist(base_url, session, bucket_name):
 def test__remove_bucket_with_full_access_token(base_url, session, bucket_name, token_without_permissions,
                                                token_read_bucket, token_write_bucket):
     """Needs full access to remove bucket"""
-    resp = session.post(f'{base_url}/b/{bucket_name}')
-    assert resp.status_code == 200
-
     resp = session.delete(f'{base_url}/b/{bucket_name}', headers=auth_headers(''))
     assert resp.status_code == 401
 
