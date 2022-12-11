@@ -8,6 +8,7 @@
 
 using google::protobuf::util::JsonStringToMessage;
 using reduct::api::ServerApi;
+using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::storage::IStorage;
 
@@ -59,4 +60,24 @@ TEST_CASE("ServerApi::List should return JSON") {
   JsonStringToMessage(output.result, &list);
 
   REQUIRE(list.buckets().empty());
+}
+
+TEST_CASE("ServerAPI::Me should return current permissions") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+
+  auto [receiver, err] = ServerApi::Me(storage.get());
+  REQUIRE(err == Error::kOk);
+
+  auto [resp, recv_err] = receiver("", true);
+  REQUIRE(recv_err == Error::kOk);
+
+  auto output = resp.SendData();
+  REQUIRE(output.error == Error::kOk);
+
+  reduct::proto::api::TokenPermissions permissions;
+  JsonStringToMessage(output.result, &permissions);
+
+  REQUIRE(permissions.full_access());
+  REQUIRE(permissions.read().empty());
+  REQUIRE(permissions.write().empty());
 }
