@@ -29,7 +29,7 @@ Result<HttpRequestReceiver> Console::UiRequest(const asset::IAssetManager* conso
         break;
       }
       default: {
-        return DefaultReceiver(ret.error);
+        return ret.error;
       }
     }
 

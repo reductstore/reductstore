@@ -5,6 +5,7 @@
 
 #include "reduct/api/common.h"
 #include "reduct/storage/storage.h"
+#include "reduct/auth/token_repository.h"
 
 namespace reduct::api {
 
@@ -24,6 +25,11 @@ class ServerApi {
    * GET /list
    */
   static core::Result<HttpRequestReceiver> List(const storage::IStorage* storage);
+
+  /**
+   * GET /me
+   */
+  static core::Result<HttpRequestReceiver> Me(const auth::ITokenRepository* token_repo, std::string_view auth_header);
 };
 
 }  // namespace reduct::api

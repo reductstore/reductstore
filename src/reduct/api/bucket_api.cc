@@ -19,7 +19,7 @@ Result<HttpRequestReceiver> BucketApi::CreateBucket(IStorage* storage, std::stri
 Result<HttpRequestReceiver> BucketApi::GetBucket(const IStorage* storage, std::string_view name) {
   auto [bucket_ptr, err] = storage->GetBucket(std::string(name));
   if (err) {
-    return DefaultReceiver(err);
+    return err;
   }
 
   auto bucket = bucket_ptr.lock();
@@ -40,13 +40,18 @@ core::Result<HttpRequestReceiver> BucketApi::HeadBucket(const storage::IStorage*
     err.message = "";
   }
 
-  return DefaultReceiver(err);
+  return {
+      [err = std::move(err)](std::string_view chunk, bool last) -> core::Result<HttpResponse> {
+        return {HttpResponse::Default(), err};
+      },
+      core::Error::kOk,
+  };
 }
 
 core::Result<HttpRequestReceiver> BucketApi::UpdateBucket(const storage::IStorage* storage, std::string_view name) {
   auto [bucket_ptr, err] = storage->GetBucket(std::string(name));
   if (err) {
-    return DefaultReceiver(err);
+    return err;
   }
 
   return ReceiveJson<BucketSettings>(
@@ -55,19 +60,19 @@ core::Result<HttpRequestReceiver> BucketApi::UpdateBucket(const storage::IStorag
 core::Result<HttpRequestReceiver> BucketApi::RemoveBucket(storage::IStorage* storage, auth::ITokenRepository* repo,
                                                           std::string_view name) {
   if (auto err = storage->RemoveBucket(std::string(name))) {
-    return DefaultReceiver(err);
+    return err;
   }
 
   // Remove bucket from all tokens
   const auto tokens = repo->GetTokenList();
   if (tokens.error) {
-    return DefaultReceiver(tokens.error);
+    return tokens.error;
   }
 
   for (const auto& token : tokens.result) {
     const auto [token_info, err] = repo->FindByName(token.name());
     if (err) {
-      return DefaultReceiver(err);
+      return err;
     }
 
     proto::api::Token_Permissions permissions;
@@ -86,11 +91,11 @@ core::Result<HttpRequestReceiver> BucketApi::RemoveBucket(storage::IStorage* sto
     }
 
     if (auto update_err = repo->UpdateToken(token.name(), permissions)) {
-      return DefaultReceiver(update_err);
+      return update_err;
     }
   }
 
-  return DefaultReceiver(Error::kOk);
+  return DefaultReceiver();
 }
 
 }  // namespace reduct::api

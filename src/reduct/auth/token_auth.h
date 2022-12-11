@@ -13,6 +13,13 @@
 namespace reduct::auth {
 
 /**
+ * Parse token from authorization header
+ * @param authorization_header
+ * @return
+ */
+core::Result<std::string> ParseBearerToken(std::string_view authorization_header);
+
+/**
  *  Authorization by token
  */
 class ITokenAuthorization {
@@ -30,6 +37,12 @@ class ITokenAuthorization {
   virtual core::Error Check(std::string_view authorization_header, const ITokenRepository& repository,
                             const IAuthorizationPolicy& policy) const = 0;
 
+  /**
+   * @brief Build authorization instance
+   * @param api_token
+   * @param options
+   * @return
+   */
   static std::unique_ptr<ITokenAuthorization> Build(std::string_view api_token, Options options = Options{});
 };
 }  // namespace reduct::auth

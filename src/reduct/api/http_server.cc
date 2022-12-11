@@ -261,6 +261,12 @@ class HttpServer : public IHttpServer {
                RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::List(storage_.get()); });
              })
+        .get(api_path + "me",
+             [this, running](auto *res, auto *req) {
+               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return ServerApi::Me(token_repository_.get(), req->getHeader("authorization"));
+               });
+             })
         // Bucket API
         .post(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
@@ -373,7 +379,7 @@ class HttpServer : public IHttpServer {
         .any("/*",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
-                                []() -> Result<HttpRequestReceiver> { return DefaultReceiver(Error::NotFound()); });
+                                []() -> Result<HttpRequestReceiver> { return Error::NotFound(); });
              })
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {

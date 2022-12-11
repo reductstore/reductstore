@@ -16,6 +16,16 @@ using core::Error;
 using google::protobuf::util::TimeUtil;
 
 /**
+ * Parse the token from the header
+ */
+core::Result<std::string> ParseBearerToken(std::string_view authorization_header) {
+  if (!authorization_header.starts_with("Bearer ")) {
+    return {{}, Error::Unauthorized("No bearer token in request header")};
+  }
+  auto token_value = authorization_header.substr(7, authorization_header.size() - 7);
+  return {std::string(token_value), Error::kOk};
+}
+/**
  * Does nothing
  */
 class NoAuthentication : public ITokenAuthorization {
@@ -32,11 +42,10 @@ class BearerTokenAuthentication : public ITokenAuthorization {
 
   Error Check(std::string_view authorization_header, const ITokenRepository& repository,
               const IAuthorizationPolicy& policy) const override {
-    if (!authorization_header.starts_with("Bearer ")) {
-      return policy.Validate({{}, Error::Unauthorized("No bearer token in request header")});
+    auto [token_value, parse_err] = ParseBearerToken(authorization_header);
+    if (parse_err) {
+      return parse_err;
     }
-
-    auto token_value = authorization_header.substr(7, authorization_header.size() - 7);
 
     auto [token, error] = repository.ValidateToken(token_value);
     if (error) {

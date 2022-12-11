@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added:
+
+- `GET /api/v1/me` endpoint to get current
+  permissions, [PR-202](https://github.com/reduct-storage/reduct-storage/pull/208)
+
 ### Changed:
 
 - Consistent token and bucket management, [PR-208](https://github.com/reduct-storage/reduct-storage/pull/208)

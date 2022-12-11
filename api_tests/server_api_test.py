@@ -78,3 +78,17 @@ def test__anonymous_alive(base_url, session):
     """should access /alive without token"""
     resp = session.head(f'{base_url}/alive', headers={})
     assert resp.status_code == 200
+
+
+@requires_env("API_TOKEN")
+def test__me(base_url, session, ):
+    """Should provide information about current token"""
+    resp = session.get(f'{base_url}/me')
+
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert data['name'] == 'init-token'
+    assert data['permissions'] == {'full_access': True, 'read': [], 'write': []}
+
+    resp = session.get(f'{base_url}/me', headers=auth_headers(''))
+    assert resp.status_code == 401

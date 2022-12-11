@@ -88,27 +88,27 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
                                                   std::string_view content_length) {
   auto [entry, create_err] = GetOrCreateEntry(storage, std::string(bucket_name), std::string(entry_name));
   if (create_err) {
-    return DefaultReceiver(create_err);
+    return create_err;
   }
 
   auto [ts, parse_err] = ParseTimestamp(timestamp);
   if (parse_err) {
-    return DefaultReceiver(parse_err);
+    return parse_err;
   }
 
   int64_t size;
   try {
     size = std::stol(content_length.data());
     if (size < 0) {
-      return DefaultReceiver(Error::ContentLengthRequired("Negative content-length"));
+      return Error::ContentLengthRequired("Negative content-length");
     }
   } catch (...) {
-    return DefaultReceiver(Error::ContentLengthRequired("Bad or empty content-length"));
+    return Error::ContentLengthRequired("Bad or empty content-length");
   }
 
   auto [writer, writer_err] = entry->BeginWrite(ts, size);
   if (writer_err) {
-    return DefaultReceiver(writer_err);
+    return writer_err;
   }
 
   auto [bucket, _] = storage->GetBucket(std::string(bucket_name));
@@ -138,17 +138,18 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
                                            std::string_view timestamp, std::string_view query_id) {
   auto [entry, create_err] = GetOrCreateEntry(storage, std::string(bucket_name), std::string(entry_name), true);
   if (create_err) {
-    return DefaultReceiver(create_err);
+    return create_err;
   }
 
   bool last = true;
   async::IAsyncReader::SPtr reader;
+  Error error = Error::kOk;
   if (query_id.empty()) {
     Time ts;
     if (!timestamp.empty()) {
       auto [parsed_ts, parse_err] = ParseTimestamp(timestamp);
       if (parse_err) {
-        return DefaultReceiver(parse_err);
+        return parse_err;
       }
 
       ts = parsed_ts;
@@ -158,29 +159,30 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
 
     auto [next, start_err] = entry->BeginRead(ts);
     if (start_err) {
-      return DefaultReceiver(start_err);
+      return start_err;
     }
     reader = next;
   } else {
     auto [id, parse_err] = ParseUInt(query_id, "id");
     if (parse_err) {
-      return DefaultReceiver(parse_err);
+      return parse_err;
     }
 
     auto [next, start_err] = entry->Next(id);
     if (start_err) {
-      return DefaultReceiver(start_err);
+      return start_err;
     } else if (start_err.code == 202) {
-      return DefaultReceiver(start_err);
+      return DefaultReceiver(std::move(start_err));
     }
 
     reader = next.reader;
     last = next.last;
+    error = start_err;
   }
 
   assert(reader && "Failed to reach reader");
   return {
-      [reader, last](std::string_view chunk, bool) -> Result<HttpResponse> {
+      [reader, last, error = std::move(error)](std::string_view chunk, bool) -> Result<HttpResponse> {
         return Result<HttpResponse>{
             HttpResponse{
                 .headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
@@ -197,7 +199,7 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
         };
       },
 
-      Error::kOk,
+      error,
   };
 }
 
@@ -206,14 +208,14 @@ core::Result<HttpRequestReceiver> EntryApi::Query(storage::IStorage* storage, st
                                                   std::string_view stop_timestamp, std::string_view ttl_interval) {
   auto [entry, err] = GetOrCreateEntry(storage, std::string(bucket_name), std::string(entry_name), true);
   if (err) {
-    return DefaultReceiver(err);
+    return err;
   }
 
   std::optional<Time> start_ts;
   if (!start_timestamp.empty()) {
     auto [ts, parse_err] = ParseTimestamp(start_timestamp, "start_timestamp");
     if (parse_err) {
-      return DefaultReceiver(parse_err);
+      return parse_err;
     }
     start_ts = ts;
   }
@@ -222,7 +224,7 @@ core::Result<HttpRequestReceiver> EntryApi::Query(storage::IStorage* storage, st
   if (!stop_timestamp.empty()) {
     auto [ts, parse_err] = ParseTimestamp(stop_timestamp, "stop_timestamp");
     if (parse_err) {
-      return DefaultReceiver(parse_err);
+      return parse_err;
     }
     stop_ts = ts;
   }
@@ -231,7 +233,7 @@ core::Result<HttpRequestReceiver> EntryApi::Query(storage::IStorage* storage, st
   if (!ttl_interval.empty()) {
     auto [val, parse_err] = ParseUInt(ttl_interval, "ttl");
     if (parse_err) {
-      return DefaultReceiver(parse_err);
+      return parse_err;
     }
 
     ttl = std::chrono::seconds(val);
@@ -239,7 +241,7 @@ core::Result<HttpRequestReceiver> EntryApi::Query(storage::IStorage* storage, st
 
   auto [id, query_err] = entry->Query(start_ts, stop_ts, IQuery::Options{.ttl = ttl});
   if (query_err) {
-    return DefaultReceiver(query_err);
+    return query_err;
   }
 
   QueryInfo info;

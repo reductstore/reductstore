@@ -40,8 +40,6 @@ You can use this method to get stats of the storage and check its version. If au
 {% endswagger-response %}
 {% endswagger %}
 
-
-
 {% swagger method="get" path=" " baseUrl="/api/v1/list" summary="Get a list of the buckets with their stats" %}
 {% swagger-description %}
 You can use this method to browse the buckets of the storage. If authenticaion is enabled, the method needs a valid API token.
@@ -75,8 +73,6 @@ You can use this method to browse the buckets of the storage. If authenticaion i
 {% endswagger-response %}
 {% endswagger %}
 
-
-
 {% swagger method="head" path=" " baseUrl="/api/v1/alive " summary="Check if the storage engine is working" %}
 {% swagger-description %}
 You can use this method for health checks in Docker or Kubernetes environment. The method has anonymous access.
@@ -93,3 +89,30 @@ You can use this method for health checks in Docker or Kubernetes environment. T
 {% endswagger-response %}
 {% endswagger %}
 
+{% swagger method="get" path="" baseUrl="/api/v1/me" summary="Get full information about current API token" %}
+{% swagger-description %}
+This method takes a token from the Authentication header and returns its name, permissions and additional information
+{% endswagger-description %}
+
+{% swagger-response status="200: OK" description="Returns JSON document" %}
+```javascript
+{
+    "name": "stirng",            // unique name of topic
+    "created_at": "string"       // creation date as ISO string
+    "permission": {
+        "full_access": "bool",
+        "read": []               // list of bucket names for read access
+        "write": []              // list of bucket names for write access
+    }
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="API token is invalid" %}
+```javascript
+{
+    "detail": "error message"
+}
+```
+{% endswagger-response %}
+{% endswagger %}
