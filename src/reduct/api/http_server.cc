@@ -261,6 +261,12 @@ class HttpServer : public IHttpServer {
                RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::List(storage_.get()); });
              })
+        .get(api_path + "me",
+             [this, running](auto *res, auto *req) {
+               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req]() {
+                 return ServerApi::Me(token_repository_.get(), req->getHeader("authorization"));
+               });
+             })
         // Bucket API
         .post(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
