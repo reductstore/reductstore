@@ -63,9 +63,17 @@ TEST_CASE("ServerApi::List should return JSON") {
 }
 
 TEST_CASE("ServerAPI::Me should return current permissions") {
-  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
 
-  auto [receiver, err] = ServerApi::Me(storage.get());
+  ITokenRepository::TokenPermissions permissions;
+  permissions.set_full_access(true);
+  permissions.mutable_read()->Add("bucket-1");
+  permissions.mutable_write()->Add("bucket-2");
+
+  auto [token_value, creat_err] = repo->CreateToken("token-1", permissions);
+  REQUIRE(creat_err == Error::kOk);
+
+  auto [receiver, err] = ServerApi::Me(repo.get(), fmt::format("Bearer {}", token_value.value()));
   REQUIRE(err == Error::kOk);
 
   auto [resp, recv_err] = receiver("", true);
@@ -74,10 +82,21 @@ TEST_CASE("ServerAPI::Me should return current permissions") {
   auto output = resp.SendData();
   REQUIRE(output.error == Error::kOk);
 
-  reduct::proto::api::TokenPermissions permissions;
-  JsonStringToMessage(output.result, &permissions);
+  ITokenRepository::Token token;
+  JsonStringToMessage(output.result, &token);
 
-  REQUIRE(permissions.full_access());
-  REQUIRE(permissions.read().empty());
-  REQUIRE(permissions.write().empty());
+  REQUIRE(token.name() == "token-1");
+  REQUIRE(token.permissions().full_access());
+  REQUIRE(token.permissions().read().size() == 1);
+  REQUIRE(token.permissions().read(0) == "bucket-1");
+  REQUIRE(token.permissions().write().size() == 1);
+  REQUIRE(token.permissions().write(0) == "bucket-2");
+
+  SECTION("invalid token") {
+    REQUIRE(ServerApi::Me(repo.get(), "Bearer XXXX").error == Error::Unauthorized("Invalid token"));
+  }
+
+  SECTION("no token") {
+    REQUIRE(ServerApi::Me(repo.get(), "").error == Error::Unauthorized("No bearer token in request header"));
+  }
 }

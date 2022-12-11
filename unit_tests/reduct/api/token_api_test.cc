@@ -114,9 +114,7 @@ TEST_CASE("TokenApi::GetToken should show a token") {
   }
 
   SECTION("not found") {
-    auto [receiver, err] = TokenApi::GetToken(repo.get(), "XXXX");
-    REQUIRE(err == Error::kOk);
-    REQUIRE(receiver({}, true).error == Error::NotFound("Token 'XXXX' doesn't exist"));
+    REQUIRE(TokenApi::GetToken(repo.get(), "XXXX").error == Error::NotFound("Token 'XXXX' doesn't exist"));
   }
 }
 
@@ -135,8 +133,6 @@ TEST_CASE("TokenApi::RemoveToken should delete a token") {
   }
 
   SECTION("not found") {
-    auto [receiver, err] = TokenApi::RemoveToken(repo.get(), "XXXX");
-    REQUIRE(err == Error::kOk);
-    REQUIRE(receiver({}, true).error == Error::NotFound("Token 'XXXX' doesn't exist"));
+    REQUIRE(TokenApi::RemoveToken(repo.get(), "XXXX").error == Error::NotFound("Token 'XXXX' doesn't exist"));
   }
 }

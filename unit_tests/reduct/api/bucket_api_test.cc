@@ -74,10 +74,7 @@ TEST_CASE("BucketApi::GetBucket should get a bucket") {
   }
 
   SECTION("doesn't exist") {
-    auto [receiver, err] = BucketApi::GetBucket(storage.get(), "bucket");
-    REQUIRE(err == Error::kOk);
-
-    REQUIRE(receiver("", true).error == Error::NotFound("Bucket 'bucket' is not found"));
+    REQUIRE(BucketApi::GetBucket(storage.get(), "bucket").error == Error::NotFound("Bucket 'bucket' is not found"));
   }
 }
 
@@ -119,10 +116,7 @@ TEST_CASE("BucketApi::UpdateBucket should update a bucket") {
   }
 
   SECTION("doesn't exist") {
-    auto [receiver, err] = BucketApi::UpdateBucket(storage.get(), "bucket");
-    REQUIRE(err == Error::kOk);
-
-    REQUIRE(receiver("", true).error == Error::NotFound("Bucket 'bucket' is not found"));
+    REQUIRE(BucketApi::UpdateBucket(storage.get(), "bucket").error == Error::NotFound("Bucket 'bucket' is not found"));
   }
 
   SECTION("bad syntax") {
@@ -173,9 +167,7 @@ TEST_CASE("BucketApi::RemoveBucket should remove a bucket") {
   }
 
   SECTION("doesn't exist") {
-    auto [receiver, err] = BucketApi::RemoveBucket(storage.get(), repo.get(), "bucket");
-    REQUIRE(err == Error::kOk);
-
-    REQUIRE(receiver("", true) == Error::NotFound("Bucket 'bucket' is not found"));
+    REQUIRE(BucketApi::RemoveBucket(storage.get(), repo.get(), "bucket").error ==
+            Error::NotFound("Bucket 'bucket' is not found"));
   }
 }

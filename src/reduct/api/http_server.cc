@@ -373,7 +373,7 @@ class HttpServer : public IHttpServer {
         .any("/*",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
-                                []() -> Result<HttpRequestReceiver> { return DefaultReceiver(Error::NotFound()); });
+                                []() -> Result<HttpRequestReceiver> { return Error::NotFound(); });
              })
         .listen(host, port, 0,
                 [&](us_listen_socket_t *sock) {

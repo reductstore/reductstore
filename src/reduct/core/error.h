@@ -34,12 +34,14 @@ struct [[nodiscard]] Error {  // NOLINT
 
   enum Codes {
     kContinue = 100,
+    kNoContent = 202,  // 204 is used by HTTP
     kBadRequest = 400,
     kUnauthorized = 401,
     kForbidden = 403,
     kNotFound = 404,
     kMethodNotAllowed = 405,
     kConflict = 409,
+    kPayloadTooLarge = 413,
     kContentLengthRequired = 411,
     kUnprocessableEntity = 422,
     kPreconditionFailed = 412,
@@ -63,6 +65,9 @@ struct [[nodiscard]] Error {  // NOLINT
   static Error Conflict(std::string msg = "Conflict") { return Error{kConflict, std::move(msg)}; }
   static Error ContentLengthRequired(std::string msg = "Content Length Required") {
     return Error{kContentLengthRequired, std::move(msg)};
+  }
+  static Error PayloadTooLarge(std::string msg = "Payload Too Large") {
+    return Error{kPayloadTooLarge, std::move(msg)};
   }
   static Error UnprocessableEntity(std::string msg = "Unprocessable Entity") {
     return Error{kUnprocessableEntity, std::move(msg)};

@@ -63,8 +63,7 @@ std::string PrintToJson(T &&msg) {
 }
 
 /**
- * Default receiver which does nothing but generate a response with error code
- * @param error
+ * Default receiver which does nothing but generate a response
  * @return
  */
 static core::Result<HttpRequestReceiver> DefaultReceiver(core::Error error = core::Error::kOk) {
