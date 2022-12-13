@@ -30,7 +30,7 @@ class AsyncReader : public async::IAsyncReader {
   core::Result<DataChunk> Read() noexcept override {
     DataChunk chunk;
     if (!file_) {
-      return {chunk, {.code = 500, .message = "Bad block"}};
+      return {chunk, Error::InternalError("Bad block")};
     }
 
     chunk.data.resize(std::min(parameters_.chunk_size, size_ - read_bytes_));

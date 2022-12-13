@@ -270,7 +270,7 @@ def test_query_entry_no_next(base_url, session, bucket):
 
     query_id = int(json.loads(resp.content)["id"])
     resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
-    assert resp.status_code == 202
+    assert resp.status_code == 204
 
 
 @requires_env("API_TOKEN")

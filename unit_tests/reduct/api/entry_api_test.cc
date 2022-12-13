@@ -54,6 +54,7 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
 
   SECTION("negative ts") {
     REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "-100", "10").error ==
+
             Error::UnprocessableEntity("Failed to parse 'ts' parameter: -100 must be positive"));
   }
 
@@ -90,18 +91,12 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
     auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
 
     SECTION("too long") {
-      REQUIRE(receiver("1234567890X", true).error == Error{
-                                                         .code = 413,
-                                                         .message = "Content is bigger than in content-length",
-                                                     });
-      REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).error == Error{
-                                                                                .code = 500,
-                                                                                .message = "Record is broken",
-                                                                            });
+      REQUIRE(receiver("1234567890X", true).error == Error::BadRequest("Content is bigger than in content-length"));
+      REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).error == Error::InternalError("Record is broken"));
     }
 
     SECTION("too short") {
-      REQUIRE(receiver("1234", true).error == Error(413, "Content is smaller than in content-length"));
+      REQUIRE(receiver("1234", true).error == Error::BadRequest("Content is smaller than in content-length"));
       REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).error == Error::InternalError("Record is broken"));
     }
   }
@@ -148,6 +143,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with time") {
 
   SECTION("wrong ts") {
     REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", {}).error ==
+
             Error::UnprocessableEntity("Failed to parse 'ts' parameter: XXXX must unix times in microseconds"));
   }
 }

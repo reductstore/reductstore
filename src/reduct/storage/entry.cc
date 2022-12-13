@@ -126,10 +126,8 @@ class Entry : public IEntry {
       auto exist =
           std::ranges::any_of(block->records(), [proto_ts](auto& record) { return record.timestamp() == proto_ts; });
       if (exist) {
-        return {{},
-                {.code = 409,
-                 .message = fmt::format("A record with timestamp {} already exists",
-                                        TimeUtil::TimestampToMicroseconds(proto_ts))}};
+        return Error::Conflict(
+            fmt::format("A record with timestamp {} already exists", TimeUtil::TimestampToMicroseconds(proto_ts)));
       }
     }
 
@@ -150,7 +148,7 @@ class Entry : public IEntry {
       auto ret = start_new_block(proto_ts, content_size);
       if (ret.error) {
         LOG_ERROR("Failed to create a next block");
-        return {{}, ret.error};
+        return ret.error;
       }
 
       block = std::move(ret.result);
@@ -197,7 +195,7 @@ class Entry : public IEntry {
     LOG_DEBUG("Read a record for ts={}", TimeUtil::ToString(proto_ts));
 
     if (block_set_.empty() || proto_ts < *block_set_.begin()) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}};
+      return Error::NotFound("No records for this timestamp");
     }
 
     if (auto err = CheckLatestRecord(proto_ts)) {
@@ -207,7 +205,7 @@ class Entry : public IEntry {
     auto [block, err] = FindBlock(proto_ts);
     if (err) {
       LOG_ERROR("No block in entry '{}' for ts={}", name_, TimeUtil::ToString(proto_ts));
-      return {{}, {.code = 500, .message = "Failed to find the needed block in descriptor"}};
+      return Error::InternalError("Failed to find the needed block in descriptor");
     }
 
     int record_index = -1;
@@ -220,7 +218,7 @@ class Entry : public IEntry {
     }
 
     if (record_index == -1) {
-      return {{}, {.code = 404, .message = "No records for this timestamp"}};
+      return Error::NotFound("No records for this timestamp");
     }
 
     auto block_path = BlockPath(full_path_, *block);
@@ -228,11 +226,11 @@ class Entry : public IEntry {
 
     auto record = block->records(record_index);
     if (record.state() == proto::Record::kStarted) {
-      return {{}, {.code = 425, .message = "Record is still being written"}};
+      return Error::TooEarly("Record is still being written");
     }
 
     if (record.state() == proto::Record::kErrored) {
-      return {{}, {.code = 500, .message = "Record is broken"}};
+      return Error::InternalError("Record is broken");
     }
 
     return block_manager_->BeginRead(
@@ -261,12 +259,11 @@ class Entry : public IEntry {
     RemoveOutDatedQueries();
 
     if (!queries_.contains(query_id)) {
-      return {{},
-              {.code = 404, .message = fmt::format("Query id={} doesn't exist. It expired or was finished", query_id)}};
+      return Error::NotFound(fmt::format("Query id={} doesn't exist. It expired or was finished", query_id));
     }
 
     if (block_set_.empty()) {
-      return {{}, {.code = 202, .message = "No Content"}};
+      return Error::NoContent("No records in the entry");
     }
 
     auto& query_info = queries_[query_id];
@@ -305,7 +302,7 @@ class Entry : public IEntry {
         block = next_block;
       } else {
         queries_.erase(query_id);
-        return {{}, {.code = 202, .message = "No Content"}};
+        return Error::NoContent();
       }
     }
 
@@ -321,7 +318,7 @@ class Entry : public IEntry {
 
     if (records.empty()) {
       queries_.erase(query_id);
-      return {{}, {.code = 202, .message = "No Content"}};
+      return Error::NoContent();
     }
 
     auto get_timestamp = [block](int index) { return block->records(index).timestamp(); };
@@ -357,7 +354,7 @@ class Entry : public IEntry {
                                                                .chunk_size = kDefaultMaxReadChunk,
                                                                .time = ToTimePoint(get_timestamp(record_index))});
     if (reader_err) {
-      return {{}, reader_err};
+      return reader_err;
     }
 
     NextRecord next_record{
@@ -370,7 +367,7 @@ class Entry : public IEntry {
 
   Error RemoveOldestBlock() override {
     if (block_set_.empty()) {
-      return {.code = 500, .message = "Tries to remove a block in empty entry"};
+      return Error::InternalError("Tries to remove a block in empty entry");
     }
 
     auto [first_block, err] = block_manager_->LoadBlock(*block_set_.begin());
@@ -443,7 +440,7 @@ class Entry : public IEntry {
     }
 
     if (block->latest_record_time() < proto_ts) {
-      return {.code = 404, .message = "No records for this timestamp"};
+      return Error::NotFound("No records for this timestamp");
     }
 
     return Error::kOk;

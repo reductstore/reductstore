@@ -34,7 +34,7 @@ struct [[nodiscard]] Error {  // NOLINT
 
   enum Codes {
     kContinue = 100,
-    kNoContent = 202,  // 204 is used by HTTP
+    kNoContent = 204,
     kBadRequest = 400,
     kUnauthorized = 401,
     kForbidden = 403,
@@ -45,6 +45,7 @@ struct [[nodiscard]] Error {  // NOLINT
     kContentLengthRequired = 411,
     kUnprocessableEntity = 422,
     kPreconditionFailed = 412,
+    kTooEarly = 425,
     kInternalError = 500,
     kNotImplemented = 501,
     kBadGateway = 502,
@@ -56,6 +57,7 @@ struct [[nodiscard]] Error {  // NOLINT
   static Error Continue(std::string msg = "Continue") { return Error{Codes::kContinue, std::move(msg)}; }
 
   // HTTP codes 200-300
+  static Error NoContent(std::string msg = "No Content") { return Error{Codes::kNoContent, std::move(msg)}; }
   // HTTP codes 300-400
   // HTTP codes 400-500
   static Error BadRequest(std::string msg = "Bad Request") { return Error{Codes::kBadRequest, std::move(msg)}; }
@@ -72,7 +74,7 @@ struct [[nodiscard]] Error {  // NOLINT
   static Error UnprocessableEntity(std::string msg = "Unprocessable Entity") {
     return Error{kUnprocessableEntity, std::move(msg)};
   }
-
+  static Error TooEarly(std::string msg = "Too Early") { return Error{kTooEarly, std::move(msg)}; }
   // HTTP codes 500-600
   static Error InternalError(std::string msg = "Internal Error") { return Error{kInternalError, std::move(msg)}; }
 };
