@@ -1,5 +1,5 @@
 """Test authorization"""
-from conftest import get_detail, requires_env, auth_headers
+from conftest import requires_env, auth_headers
 
 
 @requires_env("API_TOKEN")
@@ -14,7 +14,7 @@ def test__compare_api_token(base_url, session):
     """should compare token"""
     resp = session.get(f'{base_url}/info', headers=auth_headers('ABCB0001'))
     assert resp.status_code == 401
-    assert get_detail(resp) == "Invalid token"
+    assert resp.headers["-x-reduct-error"] == "Invalid token"
 
 
 @requires_env("API_TOKEN")
@@ -22,4 +22,4 @@ def test__empty_token(base_url, session):
     """should use Bearer token"""
     resp = session.get(f'{base_url}/info', headers={'Authorization': ''})
     assert resp.status_code == 401
-    assert get_detail(resp) == "No bearer token in request header"
+    assert resp.headers["-x-reduct-error"] == "No bearer token in request header"
