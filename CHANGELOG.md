@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Consistent token and bucket management, [PR-208](https://github.com/reduct-storage/reduct-storage/pull/208)
 
+### Fixed:
+
+- HTTP statuses for `GET /api/v1/:bucket/:entry/q` and `POST /api/v1/:bucket/:entry`
+  , [PR-212](https://github.com/reduct-storage/reduct-storage/pull/212)
+
 ## [1.1.1] - 2022-12-08
 
 ### Fixed:
