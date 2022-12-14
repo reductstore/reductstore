@@ -171,7 +171,7 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
     auto [next, start_err] = entry->Next(id);
     if (start_err) {
       return start_err;
-    } else if (start_err.code == 202) {
+    } else if (start_err.code == Error::kNoContent) {
       return DefaultReceiver(std::move(start_err));
     }
 

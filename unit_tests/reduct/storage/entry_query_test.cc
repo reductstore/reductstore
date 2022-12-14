@@ -49,12 +49,12 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
     REQUIRE(q_err == Error::kOk);
 
     auto [record, err] = entry->Next(q_id);
-    REQUIRE(err == Error{.code = 202, .message = "No Content"});
+    REQUIRE(err == Error::NoContent("No records in the entry"));
   }
 
   SECTION("wrong ID") {
     auto [record, err] = entry->Next(10000);
-    REQUIRE(err == Error{.code = 404, .message = "Query id=10000 doesn't exist. It expired or was finished"});
+    REQUIRE(err == Error::NotFound("Query id=10000 doesn't exist. It expired or was finished"));
   }
 
   SECTION("some records in few blocks") {
@@ -80,10 +80,7 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
       REQUIRE(ret.result.reader->Read().result == IAsyncReader::DataChunk{.data = blob, .last = true});
 
       err = entry->Next(id);
-      REQUIRE(err == Error{
-                         .code = 404,
-                         .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id),
-                     });
+      REQUIRE(err == Error::NotFound(fmt::format("Query id={} doesn't exist. It expired or was finished", id)));
     }
 
     SECTION("with overlap and default values") {
@@ -106,7 +103,7 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
       REQUIRE(ret.error == Error::kOk);
       REQUIRE(ret.result.last == true);
 
-      REQUIRE(entry->Next(id).error.code == 404);
+      REQUIRE(entry->Next(id).error.code == Error::kNotFound);
     }
   }
 
@@ -160,13 +157,13 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
     SECTION("request data before first record") {
       auto [id, err] = entry->Query(kTimestamp - seconds(2), kTimestamp - seconds(1), kDefaultOptions);
       REQUIRE(err == Error::kOk);
-      REQUIRE(entry->Next(id).error == Error{.code = 202, .message = "No Content"});
+      REQUIRE(entry->Next(id).error == Error::NoContent());
     }
 
     SECTION("request data after last record") {
       auto [id, err] = entry->Query(kTimestamp + seconds(3), kTimestamp + seconds(4), kDefaultOptions);
       REQUIRE(err == Error::kOk);
-      REQUIRE(entry->Next(id).error == Error{.code = 202, .message = "No Content"});
+      REQUIRE(entry->Next(id).error == Error::NoContent());
     }
 
     SECTION("if there is overlap it is ok") {
@@ -189,7 +186,7 @@ TEST_CASE("storage::Entry should query records", "[entry][query]") {
       REQUIRE(WriteOne(*entry, blob, kTimestamp + seconds(11)) == Error::kOk);
 
       auto id = entry->Query(kTimestamp + seconds(5), kTimestamp + seconds(12), kDefaultOptions).result;
-      REQUIRE(entry->Next(id).error == Error{.code = 202, .message = "No Content"});
+      REQUIRE(entry->Next(id).error == Error::NoContent());
     }
   }
 }
@@ -207,10 +204,7 @@ TEST_CASE("storage::Entry should have TTL", "[entry][query]") {
 
     std::this_thread::sleep_for(kDefaultOptions.ttl);
     err = entry->Next(id);
-    REQUIRE(err == Error{
-                       .code = 404,
-                       .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id),
-                   });
+    REQUIRE(err == Error::NotFound(fmt::format("Query id={} doesn't exist. It expired or was finished", id)));
   }
 
   SECTION("expires in TTL seconds after Next") {
@@ -222,10 +216,7 @@ TEST_CASE("storage::Entry should have TTL", "[entry][query]") {
 
     std::this_thread::sleep_for(kDefaultOptions.ttl);
     err = entry->Next(id);
-    REQUIRE(err == Error{
-                       .code = 404,
-                       .message = fmt::format("Query id={} doesn't exist. It expired or was finished", id),
-                   });
+    REQUIRE(err == Error::NotFound(fmt::format("Query id={} doesn't exist. It expired or was finished", id)));
   }
 }
 
@@ -237,7 +228,7 @@ TEST_CASE("storage::Entry should handle invalid blocks", "[entry][query]") {
   REQUIRE(WriteOne(*entry, data, kTimestamp) == Error::kOk);
   // remove block with data to make write operation invalid
   REQUIRE(fs::remove(path / kName / fmt::format("{}.blk", ToMicroseconds(kTimestamp))));
-  REQUIRE(WriteOne(*entry, data, kTimestamp + seconds(1)) == Error{.code = 500, .message = "Bad block"});
+  REQUIRE(WriteOne(*entry, data, kTimestamp + seconds(1)) == Error::InternalError("Bad block"));
 
   REQUIRE(WriteOne(*entry, data, kTimestamp + seconds(2)) == Error::kOk);
 

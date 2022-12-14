@@ -52,13 +52,13 @@ TEST_CASE("AsyncWriter should check size") {
   SECTION("too long") {
     auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
     REQUIRE(writer->Write("123456", false) == Error::kOk);
-    REQUIRE(writer->Write("123456") == Error{.code = 413, .message = "Content is bigger than in content-length"});
+    REQUIRE(writer->Write("123456") == Error::BadRequest("Content is bigger than in content-length"));
   }
 
   SECTION("too short") {
     auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
     REQUIRE(writer->Write("123456", false) == Error::kOk);
-    REQUIRE(writer->Write("12") == Error{.code = 413, .message = "Content is smaller than in content-length"});
+    REQUIRE(writer->Write("12") == Error::BadRequest("Content is smaller than in content-length"));
   }
 }
 
@@ -69,10 +69,10 @@ TEST_CASE("AsyncWriter should mark finished records") {
   auto [writer, err] = entry->BeginWrite(kTimestamp, 10);
   REQUIRE(writer->Write("123", false) == Error::kOk);
 
-  REQUIRE(ReadOne(*entry, kTimestamp) == Error{.code = 425, .message = "Record is still being written"});
+  REQUIRE(ReadOne(*entry, kTimestamp) == Error::TooEarly("Record is still being written"));
 
   REQUIRE(writer->Write("456789012") != Error::kOk);
-  REQUIRE(ReadOne(*entry, kTimestamp) == Error{.code = 500, .message = "Record is broken"});
+  REQUIRE(ReadOne(*entry, kTimestamp) == Error::InternalError("Record is broken"));
 }
 
 TEST_CASE("AsyncReader should read a big file in two chunks") {

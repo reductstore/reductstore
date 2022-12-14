@@ -34,24 +34,24 @@ class AsyncWriter : public async::IAsyncWriter {
     const auto& record = parameters_.record_index;
     if (!file_) {
       update_record_(record, proto::Record::kInvalid);
-      return {.code = 500, .message = "Bad block"};
+      return Error::InternalError("Bad block");
     }
 
     writen_size_ += chunk.size();
     if (writen_size_ > parameters_.size) {
       update_record_(record, proto::Record::kErrored);
-      return {.code = 413, .message = "Content is bigger than in content-length"};
+      return Error::BadRequest("Content is bigger than in content-length");
     }
 
     if (!file_.write(chunk.data(), chunk.size())) {
       update_record_(record, proto::Record::kInvalid);
-      return {.code = 500, .message = "Failed to write a chunk into a block"};
+      return Error::InternalError("Failed to write a chunk into a block");
     }
 
     if (last) {
       if (writen_size_ < parameters_.size) {
         update_record_(record, proto::Record::kErrored);
-        return {.code = 413, .message = "Content is smaller than in content-length"};
+        return Error::BadRequest("Content is smaller than in content-length");
       }
 
       update_record_(record, proto::Record::kFinished);
