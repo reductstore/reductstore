@@ -4,9 +4,9 @@
 
 {% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
 {% swagger-description %}
-The storage creates an entry on the first write operation. The record should be placed in the body of the request. The body can also be empty.
+The storage engine creates an entry on the first write operation. The record should be placed in the body of the HTTP request. The body can also be empty.
 
-If authenticaion is enabled, the method needs a valid API token with write access to the bucket of the entry.
+The method needs a valid API token with write access to the entry's bucket if authentication is enabled.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -33,6 +33,14 @@ Content-length is required to start an asynchronous write operation
 ```
 {% endswagger-response %}
 
+{% swagger-response status="400: Bad Request" description="Posted content bigger or smaller than content-length" %}
+```javascript
+{
+    // Response
+}
+```
+{% endswagger-response %}
+
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
@@ -41,7 +49,7 @@ Content-length is required to start an asynchronous write operation
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have write access to bucket" %}
+{% swagger-response status="403: Forbidden" description="Access token does not have write permissions" %}
 ```javascript
 {
     "detail": "error_message"
@@ -74,17 +82,15 @@ Content-length is required to start an asynchronous write operation
 {% endswagger-response %}
 {% endswagger %}
 
-
-
 {% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name " summary="Get a record from an entry" %}
 {% swagger-description %}
-The method return a content of the requested record in the body of the HTTP response. It also sends additional information in headers:
+The method finds a record for the given timestamp and sends its content in the HTTP response body. It also sends additional information in headers:
 
 **x-reduct-time** - UNIX timestamp of the record in microseconds
 
 **x-reduct-last** - 1 - if a record is the last record in the query
 
-If authenticaion is enabled, the method needs a valid API token with read access to the bucket of the entry.
+If authentication is enabled, the method needs a valid API token with read access to the entry's bucket.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -121,7 +127,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have read access to bucket" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 ```javascript
 {
     "detail": "error_message"
@@ -146,17 +152,15 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% endswagger-response %}
 {% endswagger %}
 
-
-
 {% swagger method="get" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/q " summary="Query records for a time interval" %}
 {% swagger-description %}
-The method response with a JSON document with ID which can be used to integrate records with method
+The method responds with a JSON document containing an ID which should be used to read records with the following endpoint:
 
 **GET /b/:bucket\_name/:entry\_name?q=ID.**
 
 The time interval is \[start, stop).
 
-If authenticaion is enabled, the method needs a valid API token with read access to the bucket of the entry.
+If authentication is enabled, the method needs a valid API token with read access to the bucket of the entry.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -187,6 +191,14 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 
+{% swagger-response status="204: No Content" description="No records for the time interval" %}
+```javascript
+{
+    // Response
+}
+```
+{% endswagger-response %}
+
 {% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
 ```javascript
 {
@@ -195,7 +207,7 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have read access to bucket" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 ```javascript
 {
     // Response
