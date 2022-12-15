@@ -5,9 +5,8 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/reductstorage/engine)](https://hub.docker.com/r/reductstorage/engine)
 [![GitHub all releases](https://img.shields.io/github/downloads/reduct-storage/reduct-storage/total)](https://github.com/reduct-storage/reduct-storage/releases/latest)
 
-Reduct Storage is a time series database for big data. It has no limitation on the size of stored objects or the volume
-of stored data. It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read
-more [here](https://docs.reduct-storage.dev/).
+Reduct Storage is a time series database designed specifically for storing and managing large amount of blob data. It has high performance for writing and real-time querying, making it suitable for edge computing, computer vision, and IoT applications. Reduct Storage is 100% open source under GNU AGPL v3. 
+It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read more [here](https://docs.reduct-storage.dev/).
 
 ## Features:
 
