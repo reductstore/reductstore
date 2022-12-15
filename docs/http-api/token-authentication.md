@@ -1,24 +1,8 @@
 ---
-description: >-
-  Here you can find how to access to storage with access tokens and use  the
-  Token API to manage them
+description: HTTP methods to manage access tokens.
 ---
 
 # Token API
-
-### Access Token
-
-Reduct Storage uses a simple authentication model with a bearer token. This token should be sent as the`Authorization` header in the following format:
-
-```
-Bearer <ACCESS_TOKEN>
-```
-
-An example of a request with CURL:
-
-```shell
- curl   --header "Authorization: Bearer ${ACCESS_TOKEN}" -a http://127.0.0.1:8383/api/v1/info
-```
 
 {% hint style="info" %}
 The storage engine uses the token authentication when the`RS_API_TOKEN` envirnoment is set. You should use it as a full access token to create other tokens with different permission by using the Token API
@@ -161,7 +145,7 @@ A list of bucket names for write access. Default: []
 ```
 {% endswagger-response %}
 
-{% swagger-response status="422: Unprocessable Entity" description="Speciefied bucket doesn't exist" %}
+{% swagger-response status="422: Unprocessable Entity" description="Speciefied bucket doesn" %}
 ```javascript
 {
     // Response
@@ -169,8 +153,6 @@ A list of bucket names for write access. Default: []
 ```
 {% endswagger-response %}
 {% endswagger %}
-
-
 
 {% swagger method="delete" path="" baseUrl="/api/v1/tokens/:token_name" summary="Remove a  token" %}
 {% swagger-description %}

@@ -1,6 +1,12 @@
+---
+description: HTTP methods to read, write and query entry records
+---
+
 # Entry API
 
-**Entry API**
+The Entry API allows users to write and read data from their buckets, as well as search for specific entries using query operations.
+
+
 
 {% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
 {% swagger-description %}
@@ -231,4 +237,3 @@ Time To Live of the query in seconds. If a client haven't read any record for th
 ```
 {% endswagger-response %}
 {% endswagger %}
-

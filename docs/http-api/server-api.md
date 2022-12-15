@@ -1,8 +1,10 @@
 ---
-description: Server API provides information about the storage and its state
+description: HTTP methods to get information about a Reduct Storage instance
 ---
 
 # Server API
+
+The server API provides HTTP methods for checking the status of the server, listing the available buckets, and retrieving the permissions for the current API token.
 
 {% swagger method="get" path=" " baseUrl="/api/v1/info" summary="Get statistical information about the storage" %}
 {% swagger-description %}
