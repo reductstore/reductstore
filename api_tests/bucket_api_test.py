@@ -1,6 +1,6 @@
 import json
 
-from conftest import get_detail, requires_env, auth_headers
+from conftest import requires_env, auth_headers
 
 
 def test__create_bucket_ok(base_url, session, bucket_name):
@@ -59,14 +59,14 @@ def test__create_twice_bucket(base_url, session, bucket_name):
     resp = session.post(f'{base_url}/b/{bucket_name}')
 
     assert resp.status_code == 409
-    assert "already exists" in get_detail(resp)
+    assert "already exists" in resp.headers["-x-reduct-error"]
 
 
 def test__get_bucket_not_exist(base_url, session, bucket_name):
     """Should return error if the bucket is not found"""
     resp = session.get(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 404
-    assert "is not found" in get_detail(resp)
+    assert "is not found" in resp.headers["-x-reduct-error"]
 
 
 @requires_env("API_TOKEN")
@@ -182,7 +182,7 @@ def test__remove_bucket_not_exist(base_url, session, bucket_name):
     """Should return an error if  bucket doesn't exist"""
     resp = session.delete(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 404
-    assert "is not found" in get_detail(resp)
+    assert "is not found" in resp.headers["-x-reduct-error"]
 
 
 @requires_env("API_TOKEN")

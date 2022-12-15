@@ -23,10 +23,6 @@ def _gen_bucket_name() -> str:
     return f'bucket_{random.randint(0, 1000000)}'
 
 
-def get_detail(resp) -> str:
-    return json.loads(resp.content)["detail"]
-
-
 def requires_env(key):
     env = os.environ.get(key)
 

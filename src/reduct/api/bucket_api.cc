@@ -37,15 +37,10 @@ Result<HttpRequestReceiver> BucketApi::GetBucket(const IStorage* storage, std::s
 core::Result<HttpRequestReceiver> BucketApi::HeadBucket(const storage::IStorage* storage, std::string_view name) {
   auto [bucket_ptr, err] = storage->GetBucket(std::string(name));
   if (err) {
-    err.message = "";
+    return err;
   }
 
-  return {
-      [err = std::move(err)](std::string_view chunk, bool last) -> core::Result<HttpResponse> {
-        return {HttpResponse::Default(), err};
-      },
-      core::Error::kOk,
-  };
+  return DefaultReceiver();
 }
 
 core::Result<HttpRequestReceiver> BucketApi::UpdateBucket(const storage::IStorage* storage, std::string_view name) {

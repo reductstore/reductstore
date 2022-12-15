@@ -1,17 +1,19 @@
 ---
-description: Bucket API provides HTTP methods to create, modify or delete a bucket
+description: HTTP methods to manage buckets with data
 ---
 
 # Bucket API
 
-Before starting recording, a user has to create a bucket with the following settings:
+The Bucket API allows users to create, modify, and delete buckets.
+
+Before starting to record data, a user must first create a bucket and specify settings such as:
 
 * Maximum block size
 * Maximum number of records
 * Quota type
 * Quota size
 
-For more information, you can read more about buckets in [How does it work?](../how-does-it-work.md)
+For more information about buckets, read  [here](../how-does-it-work.md#internal-structure).
 
 {% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Get information about a bucket" %}
 {% swagger-description %}
@@ -70,8 +72,6 @@ Name of bucket
 {% endswagger-response %}
 {% endswagger %}
 
-
-
 {% swagger method="head" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Check if a bucket exists" %}
 {% swagger-description %}
 If authenticaion is enabled, the method needs a valid API token.
@@ -105,8 +105,6 @@ Name of bucket
 ```
 {% endswagger-response %}
 {% endswagger %}
-
-
 
 {% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name  " summary="Create a new bucket" %}
 {% swagger-description %}
@@ -151,7 +149,7 @@ Size of quota in bytes (default: 0)
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 ```javascript
 {
     "detail": "error_message"
@@ -175,8 +173,6 @@ Size of quota in bytes (default: 0)
 ```
 {% endswagger-response %}
 {% endswagger %}
-
-
 
 {% swagger method="put" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Change settings of a bucket" %}
 {% swagger-description %}
@@ -221,7 +217,7 @@ Size of quota in bytes
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 ```javascript
 {
     "detail": "error_message"
@@ -245,8 +241,6 @@ Size of quota in bytes
 ```
 {% endswagger-response %}
 {% endswagger %}
-
-
 
 {% swagger method="delete" path=" " baseUrl="/api/v1/b/:bucket_name " summary="Remove a bucket" %}
 {% swagger-description %}
@@ -275,7 +269,7 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have full access" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 ```javascript
 {
     // Response
@@ -291,4 +285,3 @@ Name of bucket to remove
 ```
 {% endswagger-response %}
 {% endswagger %}
-

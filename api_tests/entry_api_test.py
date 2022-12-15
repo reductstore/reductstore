@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from conftest import get_detail, requires_env, auth_headers
+from conftest import requires_env, auth_headers
 
 
 @pytest.fixture(name='bucket')
@@ -47,7 +47,7 @@ def test_read_no_bucket(base_url, session):
     """Should return 404 if no bucket found"""
     resp = session.get(f'{base_url}/b/xxx/entry?ts=100')
     assert resp.status_code == 404
-    assert 'xxx' in get_detail(resp)
+    assert 'xxx' in resp.headers["-x-reduct-error"]
 
 
 def test_read_no_data(base_url, session, bucket):
@@ -62,14 +62,14 @@ def test_read_bad_ts(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry?ts=XXXX')
 
     assert resp.status_code == 422
-    assert 'XXX' in get_detail(resp)
+    assert 'XXX' in resp.headers["-x-reduct-error"]
 
 
 def test_read_bad_no_entry(base_url, session, bucket):
     """Should return 400 if ts is bad"""
     resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 404
-    assert 'entry' in get_detail(resp)
+    assert 'entry' in resp.headers["-x-reduct-error"]
 
 
 @requires_env("API_TOKEN")
@@ -93,14 +93,14 @@ def test_write_no_bucket(base_url, session):
     """Should return 404 if no bucket found"""
     resp = session.post(f'{base_url}/b/xxx/entry?ts=100')
     assert resp.status_code == 404
-    assert 'xxx' in get_detail(resp)
+    assert 'xxx' in resp.headers["-x-reduct-error"]
 
 
 def test_write_bad_ts(base_url, session, bucket):
     """Should return 422 if ts is bad"""
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts=XXXX')
     assert resp.status_code == 422
-    assert 'XXX' in get_detail(resp)
+    assert 'XXX' in resp.headers["-x-reduct-error"]
 
 
 def test_get_record_ok(base_url, session, bucket):
@@ -159,6 +159,7 @@ def test_write_big_blob_with_error(base_url, session, bucket):
 
     resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 200
+
 
 @requires_env("API_TOKEN")
 def test__write_with_write_token(base_url, session, bucket, token_without_permissions, token_read_bucket,

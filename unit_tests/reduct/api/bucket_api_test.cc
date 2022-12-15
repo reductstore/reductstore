@@ -94,10 +94,7 @@ TEST_CASE("BucketApi::HeadBucket should get a bucket") {
   }
 
   SECTION("doesn't exist") {
-    auto [receiver, err] = BucketApi::HeadBucket(storage.get(), "bucket");
-    REQUIRE(err == Error::kOk);
-
-    REQUIRE(receiver("", true).error == Error::NotFound(""));
+    REQUIRE(BucketApi::HeadBucket(storage.get(), "bucket").error == Error::NotFound("Bucket 'bucket' is not found"));
   }
 }
 

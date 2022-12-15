@@ -1,6 +1,6 @@
 import json
 
-from conftest import get_detail, auth_headers, requires_env
+from conftest import auth_headers, requires_env
 
 
 def test__create_token(base_url, session, token_name, bucket_name):
@@ -28,7 +28,7 @@ def test__create_token_exist(base_url, session, token_name):
     assert resp.status_code == 200
     resp = session.post(f'{base_url}/tokens/{token_name}')
     assert resp.status_code == 409
-    assert get_detail(resp) == f"Token '{token_name}' already exists"
+    assert resp.headers["-x-reduct-error"] == f"Token '{token_name}' already exists"
 
 
 @requires_env("API_TOKEN")
@@ -42,7 +42,7 @@ def test__creat_token_with_full_access(base_url, session, token_name, token_with
     resp = session.post(f'{base_url}/tokens/{token_name}', json=permissions,
                         headers=auth_headers(token_without_permissions))
     assert resp.status_code == 403
-    assert get_detail(resp) == "Token doesn't have full access"
+    assert resp.headers["-x-reduct-error"] == "Token doesn't have full access"
 
 
 def test__list_tokens(base_url, session, token_name):
@@ -66,7 +66,7 @@ def test__list_token_with_full_access(base_url, session, token_without_permissio
 
     resp = session.get(f'{base_url}/tokens', headers=auth_headers(token_without_permissions))
     assert resp.status_code == 403
-    assert get_detail(resp) == "Token doesn't have full access"
+    assert resp.headers["-x-reduct-error"] == "Token doesn't have full access"
 
 
 def test__get_token(base_url, session, bucket_name, token_name):
@@ -99,7 +99,7 @@ def test__get_token_not_found(base_url, session):
     """Should return 404 if a token does not exist"""
     resp = session.get(f'{base_url}/tokens/token-not-found')
     assert resp.status_code == 404
-    assert get_detail(resp) == "Token 'token-not-found' doesn't exist"
+    assert resp.headers["-x-reduct-error"] == "Token 'token-not-found' doesn't exist"
 
 
 @requires_env("API_TOKEN")
@@ -110,7 +110,7 @@ def test__get_token_with_full_access(base_url, session, token_without_permission
 
     resp = session.get(f'{base_url}/tokens/token-name', headers=auth_headers(token_without_permissions))
     assert resp.status_code == 403
-    assert get_detail(resp) == "Token doesn't have full access"
+    assert resp.headers["-x-reduct-error"] == "Token doesn't have full access"
 
 
 def test__delete_token(base_url, session, token_name):
@@ -132,7 +132,7 @@ def test__delete_token_not_found(base_url, session):
     """Should return 404 if a token does not exist"""
     resp = session.delete(f'{base_url}/tokens/token-not-found')
     assert resp.status_code == 404
-    assert get_detail(resp) == "Token 'token-not-found' doesn't exist"
+    assert resp.headers["-x-reduct-error"] == "Token 'token-not-found' doesn't exist"
 
 
 @requires_env("API_TOKEN")
@@ -143,4 +143,4 @@ def test__delete_token_with_full_access(base_url, session, token_without_permiss
 
     resp = session.delete(f'{base_url}/tokens/token-name', headers=auth_headers(token_without_permissions))
     assert resp.status_code == 403
-    assert get_detail(resp) == "Token doesn't have full access"
+    assert resp.headers["-x-reduct-error"] == "Token doesn't have full access"
