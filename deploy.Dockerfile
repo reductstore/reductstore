@@ -20,7 +20,7 @@ FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y curl libatomic1
 
-COPY --from=builder /build/bin/reduct-storage /usr/local/bin/reduct-storage
+COPY --from=builder /build/bin/reductstore /usr/local/bin/reductstore
 RUN mkdir /data
 
 EXPOSE 8383
