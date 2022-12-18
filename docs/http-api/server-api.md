@@ -1,5 +1,5 @@
 ---
-description: HTTP methods to get information about a Reduct Storage instance
+description: HTTP methods to get information about a ReductStore instance
 ---
 
 # Server API

@@ -1,4 +1,4 @@
-// Copyright 2022 Reduct Storage Team
+// Copyright 2022 ReductStore Team
 
 #include "reduct/asset/asset_manager.h"
 

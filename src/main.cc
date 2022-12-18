@@ -38,7 +38,7 @@ int main() {
   std::signal(SIGINT, SignalHandler);
   std::signal(SIGTERM, SignalHandler);
 
-  LOG_INFO("Reduct Storage {}", reduct::kVersion);
+  LOG_INFO("ReductStore {}", reduct::kVersion);
 
   EnvVariable env;
   auto log_level = env.Get<std::string>("RS_LOG_LEVEL", "INFO");
