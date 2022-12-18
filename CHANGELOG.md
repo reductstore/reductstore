@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed:
 
 - Consistent token and bucket management, [PR-208](https://github.com/reduct-storage/reduct-storage/pull/208)
+- Rebranding: update project name, CMakeTargets and docs, [PR-215](https://github.com/reductstore/reductstore/pull/215)
 
 ### Fixed:
 
