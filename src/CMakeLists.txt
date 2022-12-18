@@ -66,7 +66,6 @@ endif ()
 
 configure_file(config.h.in ${CMAKE_BINARY_DIR}/reduct/config.h @ONLY)
 
-add_executable(reduct-storage main.cc)
 
 if (WEB_CONSOLE_PATH)
     message(STATUS "Embedding Console from ${WEB_CONSOLE_PATH}")
@@ -78,4 +77,8 @@ if (WEB_CONSOLE_PATH)
     target_compile_definitions(reduct PUBLIC WITH_CONSOLE)
 endif ()
 
-target_link_libraries(reduct-storage reduct ${CONAN_LIBS})
+add_executable(reduct-storage main.cc)
+target_link_libraries(reduct-storage reduct ${CONAN_LIBS})  # For backward compatibility
+
+add_executable(reductstore main.cc)
+target_link_libraries(reductstore reduct ${CONAN_LIBS})

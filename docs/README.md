@@ -53,7 +53,7 @@ cmake --build . -- -j
 Finally, you can launch the storage:
 
 ```
-RS_DATA_PATH=./data bin/reduct-storage
+RS_DATA_PATH=./data bin/reductstore
 ```
 
 ## Environment Variables

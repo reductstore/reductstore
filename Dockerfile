@@ -23,4 +23,4 @@ COPY --from=builder /tmp /tmp
 COPY --from=builder /data /data
 COPY --from=builder /build/bin/ /usr/local/bin/
 ENV PATH=/usr/local/bin/
-CMD ["reduct-storage"]
+CMD ["reductstore"]
