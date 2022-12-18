@@ -10,13 +10,13 @@
 
 ## SDKs
 
-* [Python Client SDK](https://reduct-py.readthedocs.io)
-* [JavaScript Client SDK](https://reduct-js.readthedocs.io/en/latest/)
-* [C++ Client SDK](https://reduct-cpp.readthedocs.io/en/latest/)
+* [Python Client SDK](https://py.reduct.store)
+* [JavaScript Client SDK](https://js.reduct.store)
+* [C++ Client SDK](https://cpp.reduct.store)
 
 ## Tools
 
-* [CLI Client](https://reduct-cli.readthedocs.io/en/latest/)
+* [CLI Client](https://cli.reduct.store)
 
 ## VERSIONS
 
