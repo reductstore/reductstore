@@ -2,17 +2,17 @@
 
 ## What Is Time Series Storage?
 
-Reduct Storage is a storage engine which aims to solve the problem of storing data when you need to write data intensively and read it occasionally. The storage engine uses an [HTTP API ](http-api/)and stores the data as blobs. This means:
+ReductStore is a storage engine which aims to solve the problem of storing data when you need to write data intensively and read it occasionally. The storage engine uses an [HTTP API ](http-api/)and stores the data as blobs. This means:
 
-* Reduct Storage has no information about the format of the stored data. So, you can write whatever you want, but the storage can't aggregate your data. You have to read the same data, what you have written.
+* ReductStore has no information about the format of the stored data. So, you can write whatever you want, but the storage can't aggregate your data. You have to read the same data, what you have written.
 * The [HTTP API](http-api/) provides a simple and portable way to communicate with the storage engine, but the engine doesn't provide any query language to access the data.
 
-In comparison to other S3-like object storage, Reduct Storage works differently:
+In comparison to other S3-like object storage, ReductStore works differently:
 
 
 * **Access By Time.** Each record in an entry is written with a timestamp and to read it you need to know the entry name and time.
 * **Flat Storage Structure.** It doesn't have a tree-like structure for data. There are only buckets and entries with unique names in them.
-* **Batching Data.** It doesn't store each record as a single file. It batches them into blocks of a fixed size so that it can store small objects more efficiently. You don't waste disk space because of the minimum size of file system blocks. Moreover, Reduct Storage pre-allocate blocks space to increase performance for write operations.&#x20;
+* **Batching Data.** It doesn't store each record as a single file. It batches them into blocks of a fixed size so that it can store small objects more efficiently. You don't waste disk space because of the minimum size of file system blocks. Moreover, ReductStore pre-allocate blocks space to increase performance for write operations.&#x20;
 * **Forward Writing.** The engine records data fastest if it only needs to append records to the current block. It means that, for better performance, you should always write data with the newest timestamps.
 * **Strong FIFO Quota.** When you have intensive write operations, you may run out of disk space quickly. The engine removes the oldest block in a bucket as soon as the amount of the data reaches a specified quota limit.
 
@@ -20,7 +20,7 @@ In comparison to other S3-like object storage, Reduct Storage works differently:
 
 ![](<.gitbook/assets/Untitled Diagram.svg>)
 
-As was mentioned above, Reduct Storage has flat structure:
+As was mentioned above, ReductStore has flat structure:
 
 #### **Bucket**
 

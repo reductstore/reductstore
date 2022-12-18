@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 
 set(MAJOR_VERSION 1)
-set(MINOR_VERSION 1)
-set(PATCH_VERSION 1)
+set(MINOR_VERSION 2)
+set(PATCH_VERSION 0)
 
 set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
 
@@ -15,7 +15,7 @@ set(DEFAULT_MAX_BLOCK_RECORDS 1024 CACHE STRING "Default max number of records i
 set(DEFAULT_MAX_READ_CHUNK 512000 CACHE STRING "Default max chunk for reading")
 set(WEB_CONSOLE_PATH "" CACHE STRING "Path to the built web console")
 
-project(reduct_storage VERSION ${FULL_VERSION})
+project(reductstore VERSION ${FULL_VERSION})
 
 message(STATUS "Version ${FULL_VERSION}")
 

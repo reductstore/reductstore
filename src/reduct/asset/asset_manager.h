@@ -1,4 +1,4 @@
-// Copyright 2022 Reduct Storage Team
+// Copyright 2022 ReductStore Team
 
 #ifndef REDUCT_STORAGE_ASSET_MANAGER_H
 #define REDUCT_STORAGE_ASSET_MANAGER_H

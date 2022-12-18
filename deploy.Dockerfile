@@ -25,4 +25,4 @@ RUN mkdir /data
 
 EXPOSE 8383
 
-CMD ["reduct-storage"]
+CMD ["reductstore"]

@@ -20,4 +20,4 @@
 
 ## VERSIONS
 
-* [Latest](https://docs.reduct-storage.dev)
+* [Latest](https://docs.reduct.store)

@@ -1,6 +1,6 @@
 # ⚙ HTTP API Reference
 
-Reduct Storage provides a simple HTTP API for interacting with the database. In order to use the API, you must first authenticate using a token, which you can be provisioned  one with the `RS_API_TOKEN`[environment variable ](../#environment-variables)or created with [the Token API](token-authentication.md).
+ReductStore provides a simple HTTP API for interacting with the database. In order to use the API, you must first authenticate using a token, which you can be provisioned  one with the `RS_API_TOKEN`[environment variable ](../#environment-variables)or created with [the Token API](token-authentication.md).
 
 Once you have obtained a token, you can use it to authenticate your requests by including it in the `Authorization` header of your HTTP request, like this:
 
@@ -20,7 +20,6 @@ The storage engine uses the token authentication when the`RS_API_TOKEN` envirnom
 
 ## **Handling Errors**
 
-If a request to Reduct Storage fails, the API  returns an HTTP status code indicating the type of error that occurred. For example, a `404 Not Found` status code indicates that the requested resource could not be found.
+If a request to ReductStore fails, the API  returns an HTTP status code indicating the type of error that occurred. For example, a `404 Not Found` status code indicates that the requested resource could not be found.
 
 Since version 1.2.0, the HTTP API also includes an error message in the `-x-reduct-error` header of the response. This error message provides more detailed information about the error, which can be useful for debugging and troubleshooting.
-

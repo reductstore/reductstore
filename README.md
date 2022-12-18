@@ -1,12 +1,15 @@
-# Reduct Storage
+# ReductStore
 
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reduct-storage/reduct-storage)](https://github.com/reduct-storage/reduct-storage/releases/latest)
-[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/reduct-storage/reduct-storage/ci)](https://github.com/reduct-storage/reduct-storage/actions)
-[![Docker Pulls](https://img.shields.io/docker/pulls/reductstorage/engine)](https://hub.docker.com/r/reductstorage/engine)
-[![GitHub all releases](https://img.shields.io/github/downloads/reduct-storage/reduct-storage/total)](https://github.com/reduct-storage/reduct-storage/releases/latest)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reduct-storage/reduct-storage/releases/latest)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reduct-storage/reduct-storage/actions)
+[![Docker Pulls](https://img.shields.io/docker/pulls/reductstore/reductstore)](https://hub.docker.com/r/reductstore/reductstore)
+[![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
 
-Reduct Storage is a time series database designed specifically for storing and managing large amount of blob data. It has high performance for writing and real-time querying, making it suitable for edge computing, computer vision, and IoT applications. Reduct Storage is 100% open source under GNU AGPL v3. 
-It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read more [here](https://docs.reduct-storage.dev/).
+ReductStore is a time series database designed specifically for storing and managing large amount of blob data. It has
+high performance for writing and real-time querying, making it suitable for edge computing, computer vision, and IoT
+applications. ReductStore is 100% open source under GNU AGPL v3.
+It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read
+more [here](https://docs.reduct.store/).
 
 ## Features:
 
@@ -23,14 +26,14 @@ It has a simple HTTP API and provides random access to data via a timestamp or t
 The easiest way to start is to use Docker image:
 
 ```shell
-docker run -p 8383:8383 -v ${PWD}/data:/data reductstorage/engine:latest
+docker run -p 8383:8383 -v ${PWD}/data:/data reductstore/reductstore:latest
 ```
 
-or you can use the demo storage: https://play.reduct-storage.dev
+or you can use the demo storage: https://play.reduct.store/
 
 ## Usage Example
 
-Reduct Storage provides a simple HTTP API, so you could use it with `curl`:
+ReductStore provides a simple HTTP API, so you could use it with `curl`:
 
 ```shell
 export API_TOKEN=reduct
@@ -39,26 +42,26 @@ export API_TOKEN=reduct
 curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
   -X POST \
   --header "Authorization: Bearer ${API_TOKEN}"   \
-  -a https://play.reduct-storage.dev/api/v1/b/my_data
+  -a https://play.reduct.store/api/v1/b/my_data
 
 # Write some data
 curl -d "some_data" \
   -X POST \
   --header "Authorization: Bearer ${API_TOKEN}"   \
-  -a https://play.reduct-storage.dev/api/v1/b/my_data/entry_1?ts=10000
+  -a https://play.reduct.store/api/v1/b/my_data/entry_1?ts=10000
 
 # Read the data by using its timestamp
 curl --header "Authorization: Bearer ${API_TOKEN}"   \
-    https://play.reduct-storage.dev/api/v1/b/my_data/entry_1?ts=10000
+    https://play.reduct.store/api/v1/b/my_data/entry_1?ts=10000
 ```
 
 ## Client SDKs
 
-* [Python Client SDK](https://github.com/reduct-storage/reduct-py)
-* [JavaScript Client SDK](https://github.com/reduct-storage/reduct-js)
-* [C++ Client SDK](https://github.com/reduct-storage/reduct-cpp)
+* [Python Client SDK](https://github.com/reducstore/reduct-py)
+* [JavaScript Client SDK](https://github.com/reducstore/reduct-js)
+* [C++ Client SDK](https://github.com/reducstore/reduct-cpp)
 
 ## Tools
 
-* [CLI Client](https://github.com/reduct-storage/reduct-cli)
-* [Web Console](https://github.com/reduct-storage/web-console)
+* [CLI Client](https://github.com/reducstore/reduct-cli)
+* [Web Console](https://github.com/reducstore/web-console)

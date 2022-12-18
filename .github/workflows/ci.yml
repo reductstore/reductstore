@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download Console
-        run: wget https://github.com/reduct-storage/web-console/releases/download/v1.1.0/web-console.build.tar.gz
+        run: wget https://github.com/reductstore/web-console/releases/download/v1.1.1/web-console.build.tar.gz
       - name: Extract
         run: mkdir web-console && tar xf web-console.build.tar.gz -C ./web-console
       - name: Upload artifact
@@ -273,7 +273,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
         with:
-          images: reductstorage/engine
+          images: reductstore/reductstore
 
       - name: Download Web Console
         uses: actions/download-artifact@v2
@@ -321,16 +321,16 @@ jobs:
           docker load --input /tmp/image_Release.tar
           docker image ls -a
           id=$(docker create ${{github.repository}})
-          docker cp $id:/usr/local/bin/reduct-storage reduct-storage
-          tar -czvf reduct-storage.linux-amd64.tar.gz reduct-storage
+          docker cp $id:/usr/local/bin/reductstore reductstore
+          tar -czvf reductstore.linux-amd64.tar.gz reductstore
       - name: Upload Linux artifact
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: reduct-storage.linux-amd64.tar.gz
-          asset_name: reduct-storage.linux-amd64.tar.gz
+          asset_path: reductstore.linux-amd64.tar.gz
+          asset_name: reductstore.linux-amd64.tar.gz
           asset_content_type: application/gzip
 
       - name: Download Macos artifact
@@ -341,15 +341,15 @@ jobs:
       - name: Archive MacOs binary
         run: |
           cd /tmp
-          tar -czvf reduct-storage.macos-amd64.tar.gz  reduct-storage
+          tar -czvf reductstore.macos-amd64.tar.gz  reductstore
       - name: Upload MacOs artifact
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reduct-storage.macos-amd64.tar.gz
-          asset_name: reduct-storage.macos-amd64.tar.gz
+          asset_path: /tmp/reductstore.macos-amd64.tar.gz
+          asset_name: reductstore.macos-amd64.tar.gz
           asset_content_type: application/gzip
 
       - name: Download Windows artifact
@@ -360,13 +360,13 @@ jobs:
       - name: Archive Windows binary
         run: |
           cd /tmp
-          zip -o reduct-storage.win-amd64.zip  reduct-storage.exe
+          zip -o reductstore.win-amd64.zip  reductstore.exe
       - name: Upload Windows artifact
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reduct-storage.win-amd64.zip
-          asset_name: reduct-storage.win-amd64.zip
+          asset_path: /tmp/reductstore.win-amd64.zip
+          asset_name: reductstore.win-amd64.zip
           asset_content_type: application/zip
