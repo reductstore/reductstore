@@ -5,7 +5,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/reductstore/reductstore)](https://hub.docker.com/r/reductstore/reductstore)
 [![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
 
-ReductStore is a time series database designed specifically for storing and managing large amount of blob data. It has
+ReductStore is a time series database designed specifically for storing and managing large amounts of blob data. It has
 high performance for writing and real-time querying, making it suitable for edge computing, computer vision, and IoT
 applications. ReductStore is 100% open source under GNU AGPL v3.
 It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read
