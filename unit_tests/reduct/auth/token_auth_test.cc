@@ -6,6 +6,7 @@
 #include "reduct/auth/token_repository.h"
 #include "reduct/helpers.h"
 
+using reduct::auth::Anonymous;
 using reduct::auth::Authenticated;
 using reduct::auth::ITokenAuthorization;
 using reduct::core::Error;
@@ -27,4 +28,14 @@ TEST_CASE("auth::TokenAuthorization should use API token to check") {
   REQUIRE(err == Error::kOk);
 
   REQUIRE(auth->Check("Bearer " + token.value(), *repo, Authenticated()) == Error::kOk);
+}
+
+TEST_CASE("auth::TokenAuthorization should allow an invalid token for anonymous access") {
+  auto auth = ITokenAuthorization::Build("we have init api token");
+  REQUIRE(auth->Check("Bearer invalid-token",
+                      *reduct::auth::ITokenRepository::Build({.data_path = BuildTmpDirectory()}),
+                      Anonymous()) == Error::kOk);
+  REQUIRE(auth->Check("",
+                      *reduct::auth::ITokenRepository::Build({.data_path = BuildTmpDirectory()}),
+                      Anonymous()) == Error::kOk);
 }

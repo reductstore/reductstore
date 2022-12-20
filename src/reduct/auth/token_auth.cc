@@ -44,15 +44,15 @@ class BearerTokenAuthentication : public ITokenAuthorization {
               const IAuthorizationPolicy& policy) const override {
     auto [token_value, parse_err] = ParseBearerToken(authorization_header);
     if (parse_err) {
-      return parse_err;
+      return policy.Validate(parse_err);
     }
 
     auto [token, error] = repository.ValidateToken(token_value);
     if (error) {
-      return error;
+      return policy.Validate(error);
     }
 
-    return policy.Validate({token.permissions(), Error::kOk});
+    return policy.Validate(token.permissions());
   }
 };
 
