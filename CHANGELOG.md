@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2022-12-20
+
 ### Fixed
 
 - Fix token validation for anonymous access, [PR-217](https://github.com/reductstore/reductstore/pull/217)
 
-## [1.2.1] - 2021-12-19
+## [1.2.1] - 2022-12-19
 
 ### Fixed
 
@@ -321,7 +323,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.2.2...HEAD
+
+[1.2.2]: https://github.com/reductstore/reductstore/compare/v1.2.1...v1.2.2
 
 [1.2.1]: https://github.com/reductstore/reductstore/compare/v1.2.0...v1.2.1
 
