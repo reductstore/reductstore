@@ -7,7 +7,7 @@
 
 ReductStore is a time series database designed specifically for storing and managing large amounts of blob data. It has
 high performance for writing and real-time querying, making it suitable for edge computing, computer vision, and IoT
-applications. ReductStore is 100% open source under GNU AGPL v3.
+applications. ReductStore is 100% open source under Mozilla Public License v2.0.
 It has a simple HTTP API and provides random access to data via a timestamp or time interval. Read
 more [here](https://docs.reduct.store/).
 
