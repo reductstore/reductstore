@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Project license AGPLv3 to MPL-2.0, [PR-221](https://github.com/reductstore/reductstore/pull/221)
+
 ## [1.2.2] - 2022-12-20
 
 ### Fixed
