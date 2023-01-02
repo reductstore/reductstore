@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Crashing when post request is aborted by client, [PR-223](https://github.com/reductstore/reductstore/pull/223)
+
 ## [1.2.2] - 2022-12-20
 
 ### Fixed
 
-- Fix token validation for anonymous access, [PR-217](https://github.com/reductstore/reductstore/pull/217)
+- Token validation for anonymous access, [PR-217](https://github.com/reductstore/reductstore/pull/217)
 
 ## [1.2.1] - 2022-12-19
 
