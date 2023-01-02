@@ -109,7 +109,7 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
     return Error::ContentLengthRequired("Bad or empty content-length");
   }
 
-  auto [writer, writer_err] = entry->BeginWrite(ts, size);
+  auto [writer, writer_err] = entry->BeginWrite(ts, size, {});
   if (writer_err) {
     return writer_err;
   }

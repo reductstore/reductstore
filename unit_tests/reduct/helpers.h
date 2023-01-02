@@ -64,8 +64,9 @@ static proto::api::BucketSettings MakeDefaultBucketSettings() {
  * @param ts
  * @return
  */
-inline auto WriteOne(storage::IEntry& entry, std::string_view blob, core::Time ts) {  // NOLINT
-  auto [ret, err] = entry.BeginWrite(ts, blob.size());
+inline auto WriteOne(storage::IEntry& entry, std::string_view blob, core::Time ts,  // NOLINT
+                     const storage::IEntry::LabelMap& labels = {}) {
+  auto [ret, err] = entry.BeginWrite(ts, blob.size(), labels);
   if (err) {
     return err;
   }
@@ -91,7 +92,6 @@ inline core::Result<std::string> ReadOne(const storage::IEntry& entry, core::Tim
 
   return {read_res.result.data, core::Error::kOk};
 }
-
 
 }  // namespace reduct
 

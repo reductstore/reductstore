@@ -7,8 +7,8 @@
 
 #include <google/protobuf/util/time_util.h>
 
-#include <fstream>
 #include <algorithm>
+#include <fstream>
 
 #include "reduct/core/logger.h"
 
@@ -46,14 +46,19 @@ class AsyncReader : public async::IAsyncReader {
   }
 
   size_t size() const noexcept override { return size_; }
+
   bool is_done() const noexcept override { return size_ == read_bytes_; }
+
   core::Time timestamp() const noexcept override { return parameters_.time; }
+
+  const std::map<std::string, std::string>& labels() const noexcept override { return labels_; }
 
  private:
   AsyncReaderParameters parameters_;
   size_t size_;
   size_t read_bytes_;
   std::ifstream file_;
+  std::map<std::string, std::string> labels_;
 };
 
 async::IAsyncReader::UPtr BuildAsyncReader(const proto::Block& block, AsyncReaderParameters parameters) {

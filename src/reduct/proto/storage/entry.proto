@@ -18,24 +18,32 @@ message Record {
     kInvalid = 3;     // something wierd happened
   }
 
-  message MetaEntry {
-    string key = 1;
-    string value = 2;
+  message Label {
+    uint64 key = 1;
+    uint64 value = 2;
   }
 
   google.protobuf.Timestamp timestamp = 1;  // timestamp (works as ID)
   uint64 begin = 2;                         // begin position of a blob in a block
   uint64 end = 3;                           // end position of a blob in a block
   State state = 4;                          // state of record
-  repeated MetaEntry meta_data = 5;         // meta information as list of key-values
+  repeated Label labels = 5;                // as list of key-values
 }
 
 // Represents a block of records.
 // The storage engine create a new block if the current one bigger than EntrySettings::max_block_size
 message Block {
+  message KeyValueMap {
+    uint64 key = 1;
+    string value = 2;
+  }
+
   google.protobuf.Timestamp begin_time = 1;           // when the block started being recorded
   google.protobuf.Timestamp latest_record_time = 2;    // the timestamp of the latest record
   uint64 size = 3;                                // size of block in bytes (with protobuf overhead)
   repeated Record records = 4;                    // stored records
   bool invalid = 5;                               // mark block as invalid if some IO happened
+
+  repeated KeyValueMap label_names = 6;           // label names
+  repeated KeyValueMap label_values = 7;          // label values
 }

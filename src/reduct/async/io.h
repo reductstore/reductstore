@@ -7,6 +7,7 @@
 #define REDUCT_STORAGE_IO_H
 
 #include <memory>
+#include <map>
 
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
@@ -44,11 +45,16 @@ class IAsyncReader {
     std::strong_ordering operator<=>(const DataChunk&) const = default;
   };
 
+  /**
+   * @brief Read a chunk of data from the reader
+   * @return
+   */
   virtual core::Result<DataChunk> Read() noexcept = 0;
 
   [[nodiscard]] virtual bool is_done() const noexcept = 0;
   [[nodiscard]] virtual core::Time timestamp() const noexcept = 0;
   [[nodiscard]] virtual size_t size() const noexcept = 0;
+  [[nodiscard]] virtual const std::map<std::string, std::string>& labels() const noexcept = 0;
 };
 
 }  // namespace reduct::async

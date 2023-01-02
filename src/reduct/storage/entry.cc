@@ -78,7 +78,8 @@ class Entry : public IEntry {
     }
   }
 
-  [[nodiscard]] Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t content_size) override {
+  [[nodiscard]] Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t content_size,
+                                                             const LabelMap& labels) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
     RecordType type = RecordType::kLatest;
 
@@ -157,7 +158,7 @@ class Entry : public IEntry {
       block = std::move(ret.result);
     }
 
-    // Update writing block
+    // Finally we have found a proper blog. Update it and write the record
     auto record = block->add_records();
     record->set_state(proto::Record::kStarted);
     record->mutable_timestamp()->CopyFrom(proto_ts);
@@ -165,6 +166,11 @@ class Entry : public IEntry {
     record->set_end(block->size() + content_size);
 
     block->set_size(block->size() + content_size);
+
+    // Find label and value in the blocks dictionaries or add them if not found
+    for (const auto& [label, value] : labels) {
+      block->label_names()
+    }
 
     // Update counters
     record_counter_++;
