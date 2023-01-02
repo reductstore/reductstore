@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2023-01-02
+
 ### Fixed
 
 - Crashing when post request is aborted by client, [PR-223](https://github.com/reductstore/reductstore/pull/223)
@@ -327,7 +329,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.2.3...HEAD
+
+[1.2.3]: https://github.com/reductstore/reductstore/compare/v1.2.2...v1.2.3
 
 [1.2.2]: https://github.com/reductstore/reductstore/compare/v1.2.1...v1.2.2
 
