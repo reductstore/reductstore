@@ -88,7 +88,7 @@ class HttpServer : public IHttpServer {
 
       res->onAborted([this] {
         LOG_ERROR("Aborted write operation");
-        error_ = core::Error{.code = 400};
+        error_ = core::Error::BadRequest("Aborted write operation");
       });
     }
 
@@ -96,7 +96,6 @@ class HttpServer : public IHttpServer {
 
     void await_suspend(std::coroutine_handle<> h) const noexcept {
       if (finish_ || error_) {
-        res_->onData([](auto, bool) {});
         h.resume();
       } else {
         async::ILoop::loop().Defer([this, h] { await_suspend(h); });
@@ -140,7 +139,7 @@ class HttpServer : public IHttpServer {
     };
 
     auto SendError = [ctx, &method, &url, CommonHeaders](const core::Error &err) {
-      if (err.code >= 500) {
+      if (err.code >= Error::kInternalError) {
         LOG_ERROR("{} {}: {}", method, url, err.ToString());
       } else {
         LOG_DEBUG("{} {}: {}", method, url, err.ToString());
