@@ -1,4 +1,4 @@
-// Copyright 2022 ReductStore
+// Copyright 2021-2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -91,7 +91,7 @@ class HttpServer : public IHttpServer {
 
       res->onAborted([this] {
         LOG_ERROR("Aborted write operation");
-        error_ = core::Error{.code = 400};
+        error_ = core::Error::BadRequest("Aborted write operation");
       });
     }
 
@@ -99,7 +99,6 @@ class HttpServer : public IHttpServer {
 
     void await_suspend(std::coroutine_handle<> h) const noexcept {
       if (finish_ || error_) {
-        res_->onData([](auto, bool) {});
         h.resume();
       } else {
         async::ILoop::loop().Defer([this, h] { await_suspend(h); });
@@ -143,7 +142,7 @@ class HttpServer : public IHttpServer {
     };
 
     auto SendError = [ctx, &method, &url, CommonHeaders](const core::Error &err) {
-      if (err.code >= 500) {
+      if (err.code >= Error::kInternalError) {
         LOG_ERROR("{} {}: {}", method, url, err.ToString());
       } else {
         LOG_DEBUG("{} {}: {}", method, url, err.ToString());
