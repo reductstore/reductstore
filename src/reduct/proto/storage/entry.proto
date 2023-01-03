@@ -18,16 +18,10 @@ message Record {
     kInvalid = 3;     // something wierd happened
   }
 
-  message Label {
-    uint64 key = 1;
-    uint64 value = 2;
-  }
-
   google.protobuf.Timestamp timestamp = 1;  // timestamp (works as ID)
   uint64 begin = 2;                         // begin position of a blob in a block
   uint64 end = 3;                           // end position of a blob in a block
   State state = 4;                          // state of record
-  repeated Label labels = 5;                // as list of key-values
 }
 
 // Represents a block of records.
@@ -44,6 +38,4 @@ message Block {
   repeated Record records = 4;                    // stored records
   bool invalid = 5;                               // mark block as invalid if some IO happened
 
-  repeated KeyValueMap label_names = 6;           // label names
-  repeated KeyValueMap label_values = 7;          // label values
 }

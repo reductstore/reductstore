@@ -167,10 +167,6 @@ class Entry : public IEntry {
 
     block->set_size(block->size() + content_size);
 
-    // Find label and value in the blocks dictionaries or add them if not found
-    for (const auto& [label, value] : labels) {
-      block->label_names()
-    }
 
     // Update counters
     record_counter_++;

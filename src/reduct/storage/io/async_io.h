@@ -7,6 +7,7 @@
 #define REDUCT_STORAGE_ASYNC_IO_H
 
 #include <chrono>
+#include <map>
 
 #include "reduct/async/io.h"
 #include "reduct/core/time.h"
