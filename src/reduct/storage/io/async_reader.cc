@@ -26,6 +26,10 @@ class AsyncReader : public async::IAsyncReader {
     const auto& record = block.records(parameters_.record_index);
     file_.seekg(record.begin());
     size_ = record.end() - record.begin();
+
+    for (const auto& label : record.labels()) {
+      labels_.insert({label.name(), label.value()});
+    }
   }
 
   ~AsyncReader() override = default;

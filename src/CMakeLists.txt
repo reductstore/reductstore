@@ -53,7 +53,6 @@ set(SRC_FILES
         reduct/storage/bucket.cc
         reduct/storage/entry.cc
         reduct/storage/storage.cc
-        reduct/storage/label_storage.cc
         reduct/storage/block_manager.cc)
 
 

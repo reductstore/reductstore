@@ -165,6 +165,12 @@ class Entry : public IEntry {
     record->set_begin(block->size());
     record->set_end(block->size() + content_size);
 
+    for (const auto& [key, value] : labels) {
+      auto label = record->add_labels();
+      *label->mutable_name() = key;
+      *label->mutable_value() = value;
+    }
+
     block->set_size(block->size() + content_size);
 
 

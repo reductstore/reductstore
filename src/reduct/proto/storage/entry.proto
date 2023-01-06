@@ -18,10 +18,16 @@ message Record {
     kInvalid = 3;     // something wierd happened
   }
 
+  message Label {
+    string name =1;
+    string value = 2;
+  }
+
   google.protobuf.Timestamp timestamp = 1;  // timestamp (works as ID)
   uint64 begin = 2;                         // begin position of a blob in a block
   uint64 end = 3;                           // end position of a blob in a block
   State state = 4;                          // state of record
+  repeated Label labels = 5;                // labels
 }
 
 // Represents a block of records.
