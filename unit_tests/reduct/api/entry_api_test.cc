@@ -18,6 +18,7 @@ using reduct::api::EntryApi;
 using reduct::core::Error;
 using reduct::core::Time;
 using reduct::proto::api::QueryInfo;
+using reduct::storage::IEntry;
 using reduct::storage::IStorage;
 
 using google::protobuf::util::JsonStringToMessage;
@@ -106,6 +107,30 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
   }
 }
 
+TEST_CASE("EntryAPI::Write should write data with labels") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+  REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
+
+  const IEntry::LabelMap labels = {
+      {"label1", "value1"},
+      {"label2", "value2"},
+  };
+
+  auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10", labels);
+  REQUIRE(err == Error::kOk);
+
+  REQUIRE(receiver("12345", false).error.code == 100);
+
+  auto [resp, resp_err] = receiver("67890", true);
+  REQUIRE(resp_err == Error::kOk);
+
+  REQUIRE(resp.headers.empty());
+  REQUIRE(resp.content_length == 0);
+
+  auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
+  REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).result->labels() == labels);
+}
+
 TEST_CASE("EntryApi::Read should read data in chunks with time") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
@@ -157,7 +182,8 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id") {
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
   auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
-  REQUIRE(WriteOne(*entry, "1234567890", Time() + us(1000001)) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "1234567890", Time() + us(1000001), {{"label1", "value1"}, {"label2", "value2"}}) ==
+          Error::kOk);
   REQUIRE(WriteOne(*entry, "abcd", Time() + us(2000001)) == Error::kOk);
 
   SECTION("ok") {
@@ -172,6 +198,8 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id") {
       REQUIRE(resp.headers["content-type"] == "application/octet-stream");
       REQUIRE(resp.headers["x-reduct-time"] == "1000001");
       REQUIRE(resp.headers["x-reduct-last"] == "0");
+      REQUIRE(resp.headers["x-reduct-label-label1"] == "value1");
+      REQUIRE(resp.headers["x-reduct-label-label2"] == "value2");
       REQUIRE(resp.content_length == 10);
 
       auto ret = resp.SendData();
