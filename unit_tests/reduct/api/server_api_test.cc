@@ -14,7 +14,7 @@ using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::storage::IStorage;
 
-TEST_CASE("ServerApi::Alive should return empty body") {
+TEST_CASE("ServerApi::Alive should return empty body", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   auto [receiver, err] = ServerApi::Alive(storage.get());
@@ -28,7 +28,7 @@ TEST_CASE("ServerApi::Alive should return empty body") {
   REQUIRE(output.result.empty());
 }
 
-TEST_CASE("ServerApi::Info should return JSON") {
+TEST_CASE("ServerApi::Info should return JSON", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   auto [receiver, err] = ServerApi::Info(storage.get());
@@ -45,7 +45,7 @@ TEST_CASE("ServerApi::Info should return JSON") {
   REQUIRE(info.version() == storage->GetInfo().result.version());
 }
 
-TEST_CASE("ServerApi::List should return JSON") {
+TEST_CASE("ServerApi::List should return JSON", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   auto [receiver, err] = ServerApi::List(storage.get());
@@ -64,7 +64,7 @@ TEST_CASE("ServerApi::List should return JSON") {
   REQUIRE(list.buckets().empty());
 }
 
-TEST_CASE("ServerAPI::Me should return current permissions") {
+TEST_CASE("ServerAPI::Me should return current permissions", "[api]") {
   auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
 
   ITokenRepository::TokenPermissions permissions;

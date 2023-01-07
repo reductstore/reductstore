@@ -144,7 +144,6 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
     }
 
     RESULT_OR_RETURN_ERROR(reader, entry->BeginRead(ts));
-
   } else {
     size_t id;
     RESULT_OR_RETURN_ERROR(id, ParseUInt(query_id, "id"));
