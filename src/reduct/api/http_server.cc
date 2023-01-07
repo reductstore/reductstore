@@ -337,7 +337,7 @@ class HttpServer : public IHttpServer {
                    ReadAccess(bucket_name), HttpContext<SSL>{res, req, running}, [this, req, bucket_name]() {
                      return EntryApi::Query(storage_.get(), bucket_name, std::string(req->getParameter(1)),
                                             std::string(req->getQuery("start")), std::string(req->getQuery("stop")),
-                                            std::string(req->getQuery("ttl")));
+                                            {.ttl = req->getQuery("ttl")});
                    });
              })
         // Token API

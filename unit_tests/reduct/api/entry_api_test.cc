@@ -303,7 +303,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
   }
 
   SECTION("ok ttl") {
-    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000003", "1000004", "1");
+    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000003", "1000004", {.ttl = "1"});
     REQUIRE(err == Error::kOk);
 
     std::this_thread::sleep_for(us(1'000'000));
@@ -327,9 +327,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
     REQUIRE(
         EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "XXX", {}).error ==
         Error::UnprocessableEntity("Failed to parse 'stop_timestamp' parameter: XXX must unix times in microseconds"));
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX").error ==
-            Error::UnprocessableEntity("Failed to parse 'ttl' parameter: XXX must be unsigned integer"));
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX").error ==
+    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, {.ttl = "XXX"}).error ==
             Error::UnprocessableEntity("Failed to parse 'ttl' parameter: XXX must be unsigned integer"));
   }
 }
