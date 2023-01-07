@@ -180,6 +180,12 @@ static core::Result<HttpRequestReceiver> ReceiveAndSendJson(std::function<core::
   };
 }
 
+/**
+ * @brief HTTP request handler
+ * This function is called by uWS engine when it receives a request. It returns a function to send a response.
+ */
+std::map<std::string, std::string> ParseQueryString(std::string_view query);
+
 }  // namespace reduct::api
 
 #endif  // REDUCT_STORAGE_COMMON_H

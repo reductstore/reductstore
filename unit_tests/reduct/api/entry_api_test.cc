@@ -25,7 +25,7 @@ using google::protobuf::util::JsonStringToMessage;
 
 using us = std::chrono::microseconds;
 
-TEST_CASE("EntryApi::Write should write data in chunks") {
+TEST_CASE("EntryApi::Write should write data in chunks", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
@@ -107,7 +107,7 @@ TEST_CASE("EntryApi::Write should write data in chunks") {
   }
 }
 
-TEST_CASE("EntryAPI::Write should write data with labels") {
+TEST_CASE("EntryAPI::Write should write data with labels", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
@@ -131,7 +131,7 @@ TEST_CASE("EntryAPI::Write should write data with labels") {
   REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).result->labels() == labels);
 }
 
-TEST_CASE("EntryApi::Read should read data in chunks with time") {
+TEST_CASE("EntryApi::Read should read data in chunks with time", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
@@ -177,7 +177,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with time") {
   }
 }
 
-TEST_CASE("EntryApi::Read should read data in chunks with query id") {
+TEST_CASE("EntryApi::Read should read data in chunks with query id", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
@@ -238,13 +238,13 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id") {
   }
 }
 
-TEST_CASE("EntryApi::Query should query data for time interval") {
+TEST_CASE("EntryApi::Query should query data for time interval", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
   auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
-  REQUIRE(WriteOne(*entry, "1234567890", Time() + us(1000001)) == Error::kOk);
-  REQUIRE(WriteOne(*entry, "abcd", Time() + us(2000001)) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "1234567890", Time() + us(1000001), {{"label1", "value1"}}) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "abcd", Time() + us(2000001), {{"label1", "value2"}}) == Error::kOk);
 
   QueryInfo info;
   SECTION("ok all") {
@@ -303,10 +303,38 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
   }
 
   SECTION("ok ttl") {
-    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000003", "1000004", "1");
+    auto [resp, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "1000003", "1000004", {.ttl = "1"});
     REQUIRE(err == Error::kOk);
 
     std::this_thread::sleep_for(us(1'000'000));
+    REQUIRE(entry->Next(info.id()).error.code == Error::kNotFound);
+  }
+
+  SECTION("ok include") {
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {},
+                                           EntryApi::QueryOptions{.include = {{"label1", "value1"}}});
+    REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
+
+    JsonStringToMessage(resp.SendData().result, &info);
+
+    REQUIRE(entry->Next(info.id()).result.reader->timestamp() == Time() + us(1000001));
+    REQUIRE(entry->Next(info.id()).error.code == Error::kNotFound);
+  }
+
+  SECTION("ok exclude") {
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {},
+                                           EntryApi::QueryOptions{.exclude = {{"label1", "value1"}}});
+    REQUIRE(err == Error::kOk);
+
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
+
+    JsonStringToMessage(resp.SendData().result, &info);
+
+    REQUIRE(entry->Next(info.id()).result.reader->timestamp() == Time() + us(2000001));
     REQUIRE(entry->Next(info.id()).error.code == Error::kNotFound);
   }
 
@@ -327,9 +355,7 @@ TEST_CASE("EntryApi::Query should query data for time interval") {
     REQUIRE(
         EntryApi::Query(storage.get(), "bucket", "entry-1", {}, "XXX", {}).error ==
         Error::UnprocessableEntity("Failed to parse 'stop_timestamp' parameter: XXX must unix times in microseconds"));
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX").error ==
-            Error::UnprocessableEntity("Failed to parse 'ttl' parameter: XXX must be unsigned integer"));
-    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, "XXX").error ==
+    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, {.ttl = "XXX"}).error ==
             Error::UnprocessableEntity("Failed to parse 'ttl' parameter: XXX must be unsigned integer"));
   }
 }

@@ -14,7 +14,7 @@ using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::storage::IStorage;
 
-TEST_CASE("BucketApi::CreateBucket should create a bucket") {
+TEST_CASE("BucketApi::CreateBucket should create a bucket", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   SECTION("default settings") {
     auto [receiver, err] = BucketApi::CreateBucket(storage.get(), "bucket");
@@ -57,7 +57,7 @@ TEST_CASE("BucketApi::CreateBucket should create a bucket") {
   }
 }
 
-TEST_CASE("BucketApi::GetBucket should get a bucket") {
+TEST_CASE("BucketApi::GetBucket should get a bucket", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   SECTION("ok") {
@@ -80,7 +80,7 @@ TEST_CASE("BucketApi::GetBucket should get a bucket") {
   }
 }
 
-TEST_CASE("BucketApi::HeadBucket should get a bucket") {
+TEST_CASE("BucketApi::HeadBucket should get a bucket", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   SECTION("ok") {
@@ -100,7 +100,7 @@ TEST_CASE("BucketApi::HeadBucket should get a bucket") {
   }
 }
 
-TEST_CASE("BucketApi::UpdateBucket should update a bucket") {
+TEST_CASE("BucketApi::UpdateBucket should update a bucket", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
 
   SECTION("ok") {
@@ -128,7 +128,7 @@ TEST_CASE("BucketApi::UpdateBucket should update a bucket") {
   }
 }
 
-TEST_CASE("BucketApi::RemoveBucket should remove a bucket") {
+TEST_CASE("BucketApi::RemoveBucket should remove a bucket", "[api]") {
   const auto path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = path});
   auto repo = ITokenRepository::Build({.data_path = path});

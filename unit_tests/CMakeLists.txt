@@ -4,6 +4,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 set(SRC_FILES
         reduct/api/bucket_api_test.cc
+        reduct/api/common_test.cc
         reduct/api/entry_api_test.cc
         reduct/api/server_api_test.cc
         reduct/api/token_api_test.cc

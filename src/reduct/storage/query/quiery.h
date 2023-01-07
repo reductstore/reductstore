@@ -21,7 +21,9 @@ class IQuery {
    * Query Options
    */
   struct Options {
-    std::chrono::seconds ttl{5};  // TTL of query in entries cache (time from last request)
+    std::chrono::seconds ttl{5};                 // TTL of query in entries cache (time from last request)
+    std::map<std::string, std::string> include;  // include labels with certain values
+    std::map<std::string, std::string> exclude;  // exclude labels with certain values
   };
 
   /**

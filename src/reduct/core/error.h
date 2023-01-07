@@ -82,5 +82,12 @@ struct [[nodiscard]] Error {  // NOLINT
   static Error InternalError(std::string msg = "Internal Error") { return Error{kInternalError, std::move(msg)}; }
 };
 
+#define RETURN_ERROR(err) \
+  {                       \
+    if (err) {            \
+      return err;         \
+    }                     \
+  }
+
 }  // namespace reduct::core
 #endif  // REDUCT_CORE_ERROR_H

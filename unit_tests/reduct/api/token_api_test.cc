@@ -22,7 +22,7 @@ using reduct::proto::api::TokenCreateResponse;
 using reduct::proto::api::TokenRepo;
 using Storage = reduct::storage::IStorage;  // fix windows build
 
-TEST_CASE("TokenApi::CreateToken should create a token and return its value") {
+TEST_CASE("TokenApi::CreateToken should create a token and return its value", "[api]") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
   auto storage = Storage::Build({.data_path = path});
@@ -70,7 +70,7 @@ TEST_CASE("TokenApi::CreateToken should create a token and return its value") {
   }
 }
 
-TEST_CASE("TokenApi::ListTokens should list tokens") {
+TEST_CASE("TokenApi::ListTokens should list tokens", "[api]") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
@@ -90,7 +90,7 @@ TEST_CASE("TokenApi::ListTokens should list tokens") {
   REQUIRE(proto_message.tokens(0) == repo->GetTokenList().result[0]);
 }
 
-TEST_CASE("TokenApi::GetToken should show a token") {
+TEST_CASE("TokenApi::GetToken should show a token", "[api]") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 
@@ -120,7 +120,7 @@ TEST_CASE("TokenApi::GetToken should show a token") {
   }
 }
 
-TEST_CASE("TokenApi::RemoveToken should delete a token") {
+TEST_CASE("TokenApi::RemoveToken should delete a token", "[api]") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path});
 

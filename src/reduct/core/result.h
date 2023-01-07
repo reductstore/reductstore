@@ -38,6 +38,14 @@ struct [[nodiscard]] UPtrResult {  // NOLINT
   operator const Error&() const noexcept { return error; }
 };
 
+#define RESULT_OR_RETURN_ERROR(val, expr) \
+  {                                       \
+    auto result = (expr);                 \
+    if (result.error) {                   \
+      return result.error;                \
+    }                                     \
+    val = std::move(result.result);       \
+  }
 }  // namespace reduct::core
 
 #endif  // REDUCT_CORE_RESULT_H
