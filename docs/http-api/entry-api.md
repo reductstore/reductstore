@@ -6,13 +6,13 @@ description: HTTP methods to read, write and query entry records
 
 The Entry API allows users to write and read data from their buckets, as well as search for specific entries using query operations.
 
-
-
 {% swagger method="post" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name" summary="Write a record to an entry" %}
 {% swagger-description %}
 The storage engine creates an entry on the first write operation. The record should be placed in the body of the HTTP request. The body can also be empty.
 
 The method needs a valid API token with write access to the entry's bucket if authentication is enabled.
+
+Since version 1.3, the database supports labels. You can assign any number of labels to a record by using headers that start with `x-reduct-label-.`
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -29,6 +29,10 @@ A UNIX timestamp in microseconds
 
 {% swagger-parameter in="header" required="true" name="Content-Length" %}
 Content-length is required to start an asynchronous write operation
+{% endswagger-parameter %}
+
+{% swagger-parameter in="header" name="x-reduct-label-<name>" %}
+A value of a label assigned to the record
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="The record is written" %}
@@ -96,7 +100,11 @@ The method finds a record for the given timestamp and sends its content in the H
 
 **x-reduct-last** - 1 - if a record is the last record in the query
 
+**x-reduct-label-\<name>** - a value of the \<name> label
+
 If authentication is enabled, the method needs a valid API token with read access to the entry's bucket.
+
+Since version 1.3, the database supports labels. If a record has some labels, the method sends them as headers that start with `x-reduct-label`.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}

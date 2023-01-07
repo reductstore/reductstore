@@ -108,3 +108,14 @@ TEST_CASE("AsyncReader should not spoil data") {
   REQUIRE(err == Error::kOk);
   REQUIRE(reader->Read().result == IAsyncReader::DataChunk{blob, true});
 }
+
+TEST_CASE("AsyncReader should read labels in the begging of reading") {
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
+  REQUIRE(entry);
+  const IEntry::LabelMap labels{{"label1", "value1"}, {"label2", "value2"}};
+  REQUIRE(WriteOne(*entry, "some_data", kTimestamp, labels) == Error::kOk);
+
+  auto [reader, err] = entry->BeginRead(kTimestamp);
+  REQUIRE(err == Error::kOk);
+  REQUIRE(reader->labels() == labels);
+}

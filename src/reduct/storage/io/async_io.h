@@ -7,6 +7,7 @@
 #define REDUCT_STORAGE_ASYNC_IO_H
 
 #include <chrono>
+#include <map>
 
 #include "reduct/async/io.h"
 #include "reduct/core/time.h"
@@ -15,6 +16,7 @@ namespace reduct::storage::io {
 
 class IAsyncIO {
  public:
+  using LabelMap = std::map<std::string, std::string>;
   /**
    * @brief Write a data with timestamp to corresponding block
    * The method provides the best performance if a new timestamp is always new the stored ones.
@@ -22,7 +24,8 @@ class IAsyncIO {
    * @param time timestamp of the data
    * @return async writer or error
    */
-  [[nodiscard]] virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const core::Time& time, size_t size) = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const core::Time& time, size_t size,
+                                                                           const LabelMap& labels = {}) = 0;
 
   /**
    * @brief Finds the record for the timestamp and read the blob

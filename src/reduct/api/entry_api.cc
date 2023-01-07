@@ -22,38 +22,36 @@ using storage::query::IQuery;
 
 using proto::api::QueryInfo;
 
-inline core::Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
+inline Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
   auto ts = Time::clock::now();
   if (timestamp.empty()) {
-    return {Time{}, Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name))};
+    return Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name));
   }
   try {
     auto ts_as_umber = std::stoll(timestamp.data());
     if (ts_as_umber < 0) {
-      return {Time{}, Error::UnprocessableEntity(fmt::format("Failed to parse '{}' parameter: {} must be positive",
-                                                             param_name, std::string{timestamp}))};
+      return Error::UnprocessableEntity(
+          fmt::format("Failed to parse '{}' parameter: {} must be positive", param_name, std::string{timestamp}));
     }
 
     ts = Time() + std::chrono::microseconds(ts_as_umber);
     return {ts, Error::kOk};
   } catch (...) {
-    return {Time{},
-            Error::UnprocessableEntity(fmt::format("Failed to parse '{}' parameter: {} must unix times in microseconds",
-                                                   param_name, std::string{timestamp}))};
+    return Error::UnprocessableEntity(fmt::format("Failed to parse '{}' parameter: {} must unix times in microseconds",
+                                                  param_name, std::string{timestamp}));
   }
 }
 
 inline core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_view param_name) {
   uint64_t val = 0;
   if (timestamp.empty()) {
-    return {val, Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name))};
+    return Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name));
   }
   try {
-    val = std::stoul(std::string{timestamp});
-    return {val, Error::kOk};
+    return std::stoul(std::string{timestamp});
   } catch (...) {
-    return {val, Error::UnprocessableEntity(fmt::format("Failed to parse '{}' parameter: {} must be unsigned integer",
-                                                        param_name, std::string{timestamp}))};
+    return Error::UnprocessableEntity(
+        fmt::format("Failed to parse '{}' parameter: {} must be unsigned integer", param_name, std::string{timestamp}));
   }
 }
 
@@ -61,34 +59,34 @@ inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std:
                                                    const std::string& entry_name, bool must_exist = false) {
   auto [bucket_it, err] = storage->GetBucket(bucket_name);
   if (err) {
-    return {{}, err};
+    return err;
   }
 
   auto bucket = bucket_it.lock();
 
   assert(bucket && "Failed to reach bucket");
   if (must_exist && !bucket->HasEntry(entry_name)) {
-    return {{}, Error::NotFound(fmt::format("Entry '{}' is not found", entry_name))};
+    return Error::NotFound(fmt::format("Entry '{}' is not found", entry_name));
   }
 
   auto [entry, ref_error] = bucket->GetOrCreateEntry(entry_name);
   if (ref_error) {
-    return {{}, ref_error};
+    return ref_error;
   }
 
   auto entry_ptr = entry.lock();
   assert(bucket && "Failed to reach entry");
 
   if (!entry_ptr) {
-    return {{}, Error::InternalError("Failed to resolve entry")};
+    return Error::InternalError("Failed to resolve entry");
   }
 
-  return {entry_ptr, Error::kOk};
+  return entry_ptr;
 }
 
 core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, std::string_view bucket_name,
                                                   std::string_view entry_name, std::string_view timestamp,
-                                                  std::string_view content_length) {
+                                                  std::string_view content_length, const IEntry::LabelMap& labels) {
   auto [entry, create_err] = GetOrCreateEntry(storage, std::string(bucket_name), std::string(entry_name));
   if (create_err) {
     return create_err;
@@ -109,7 +107,7 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
     return Error::ContentLengthRequired("Bad or empty content-length");
   }
 
-  auto [writer, writer_err] = entry->BeginWrite(ts, size);
+  auto [writer, writer_err] = entry->BeginWrite(ts, size, labels);
   if (writer_err) {
     return writer_err;
   }
@@ -186,11 +184,17 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
   assert(reader && "Failed to reach reader");
   return {
       [reader, last, error = std::move(error)](std::string_view chunk, bool) -> Result<HttpResponse> {
+        StringMap headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
+                             {"x-reduct-last", std::to_string(static_cast<int>(last))},
+                             {"content-type", "application/octet-stream"}};
+
+        for (const auto& [key, value] : reader->labels()) {
+          headers.insert({fmt::format("{}{}", kLabelHeaderPrefix, key), value});
+        }
+
         return Result<HttpResponse>{
             HttpResponse{
-                .headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
-                            {"x-reduct-last", std::to_string(static_cast<int>(last))},
-                            {"content-type", "application/octet-stream"}},
+                .headers = std::move(headers),
                 .content_length = reader->size(),
                 .SendData =
                     [reader]() {
