@@ -18,7 +18,7 @@ more [here](https://docs.reduct.store/).
 * Optimized for small files
 * Real-time FIFO quota for buckets
 * Token authorization
-* Labeling
+* Labeling and searching
 * Embedded Web Console
 * Support Linux, MacOS and Windows on AMD64
 
