@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Labels for  `POST|GET /api/v1/:bucket/:entry` as headers with
+  prefix `x-reduct-label-`, [PR-224](https://github.com/reductstore/reductstore/pull/224)
+
 ### Changed
 
 - Project license AGPLv3 to MPL-2.0, [PR-221](https://github.com/reductstore/reductstore/pull/221)
