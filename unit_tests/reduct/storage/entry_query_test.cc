@@ -241,3 +241,61 @@ TEST_CASE("storage::Entry should handle invalid blocks", "[entry][query]") {
   REQUIRE(record.reader->timestamp() == kTimestamp + seconds(2));
   REQUIRE(record.last);
 }
+
+TEST_CASE("strage::Entry should query records with certain labels", "[entry][query]") {
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp, {{"label1", "value1"}}) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(1), {{"label1", "value2"}}) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2), {{"label1", "value1"}, {"label2", "value1"}}) ==
+          Error::kOk);
+
+  SECTION("query by one label") {
+    IQuery::Options options{
+        .include = {{"label1", "value1"}},
+    };
+
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(3), options);
+    REQUIRE(err == Error::kOk);
+
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp);
+      REQUIRE_FALSE(ret.result.last);
+    }
+
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(2));
+      REQUIRE(ret.result.last);
+    }
+  }
+
+  SECTION("query by two labels") {
+    IQuery::Options options{
+        .include = {{"label1", "value1"}, {"label2", "value1"}},
+    };
+
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(3), options);
+    REQUIRE(err == Error::kOk);
+
+    auto ret = entry->Next(id);
+    REQUIRE(ret.error == Error::kOk);
+    REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(2));
+    REQUIRE(ret.result.last);
+  }
+
+  SECTION("query by two labels with one not matching") {
+    IQuery::Options options{
+        .include = {{"label1", "value1"}, {"label2", "value2"}},
+    };
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(3), options);
+    REQUIRE(err == Error::kOk);
+
+    auto ret = entry->Next(id);
+    REQUIRE(ret.error == Error::NoContent());
+  }
+}

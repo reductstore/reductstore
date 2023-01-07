@@ -173,7 +173,6 @@ class Entry : public IEntry {
 
     block->set_size(block->size() + content_size);
 
-
     // Update counters
     record_counter_++;
     size_counter_ += content_size;
@@ -321,10 +320,23 @@ class Entry : public IEntry {
     records.reserve(block->records_size());
     for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
       const auto& record = block->records(record_index);
-      if (record.timestamp() >= start_ts && record.timestamp() < stop_ts &&
-          record.state() == proto::Record::kFinished) {
-        records.push_back(record_index);
+      bool in_time_interval =
+          record.timestamp() >= start_ts && record.timestamp() < stop_ts && record.state() == proto::Record::kFinished;
+      if (!in_time_interval) continue;
+
+      // check if a record has value of labels that match the query
+      if (!query_info.options.include.empty()) {
+        auto include = query_info.options.include;
+        for (const auto& label : record.labels()) {
+          if (include.contains(label.name()) && label.value() == include[label.name()]) {
+            include.erase(label.name());
+          }
+        }
+
+        if (!include.empty()) continue;
       }
+
+      records.push_back(record_index);
     }
 
     if (records.empty()) {
