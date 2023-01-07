@@ -324,7 +324,7 @@ class Entry : public IEntry {
           record.timestamp() >= start_ts && record.timestamp() < stop_ts && record.state() == proto::Record::kFinished;
       if (!in_time_interval) continue;
 
-      // check if a record has value of labels that match the query
+      // check if a record has value of labels that match include
       if (!query_info.options.include.empty()) {
         auto include = query_info.options.include;
         for (const auto& label : record.labels()) {
@@ -334,6 +334,18 @@ class Entry : public IEntry {
         }
 
         if (!include.empty()) continue;
+      }
+
+      // check if a record has value of labels that does not match exclude
+      if (!query_info.options.exclude.empty()) {
+        auto exclude = query_info.options.exclude;
+        for (const auto& label : record.labels()) {
+          if (exclude.contains(label.name()) && label.value() == exclude[label.name()]) {
+            exclude.erase(label.name());
+          }
+        }
+
+        if (exclude.empty()) continue;
       }
 
       records.push_back(record_index);

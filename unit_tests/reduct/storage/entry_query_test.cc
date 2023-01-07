@@ -242,7 +242,7 @@ TEST_CASE("storage::Entry should handle invalid blocks", "[entry][query]") {
   REQUIRE(record.last);
 }
 
-TEST_CASE("strage::Entry should query records with certain labels", "[entry][query]") {
+TEST_CASE("storage::Entry should query records with certain labels", "[entry][query]") {
   auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
   REQUIRE(entry);
 
@@ -297,5 +297,76 @@ TEST_CASE("strage::Entry should query records with certain labels", "[entry][que
 
     auto ret = entry->Next(id);
     REQUIRE(ret.error == Error::NoContent());
+  }
+}
+
+TEST_CASE("storage::Entry should query excluding records with certain labels", "[entry][query]") {
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp, {{"label1", "value1"}}) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(1), {{"label1", "value2"}}) == Error::kOk);
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2), {{"label1", "value1"}, {"label2", "value1"}}) ==
+          Error::kOk);
+
+  SECTION("exclude by one label") {
+    IQuery::Options options{
+        .include = {},
+        .exclude = {{"label1", "value1"}},
+    };
+
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(3), options);
+    REQUIRE(err == Error::kOk);
+
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(1));
+      REQUIRE(ret.result.last);
+    }
+  }
+
+  SECTION("exclude by two labels") {
+    IQuery::Options options{
+        .exclude = {{"label1", "value1"}, {"label2", "value1"}},
+    };
+
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(3), options);
+    REQUIRE(err == Error::kOk);
+
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp);
+      REQUIRE_FALSE(ret.result.last);
+    }
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(1));
+      REQUIRE(ret.result.last);
+    }
+  }
+
+  SECTION("exclude by two labels with one not matching") {
+    IQuery::Options options{
+        .exclude = {{"label1", "value1"}, {"label2", "value2"}},
+    };
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(3), options);
+    REQUIRE(err == Error::kOk);
+
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp);
+      REQUIRE_FALSE(ret.result.last);
+    }
+
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(1));
+      REQUIRE_FALSE(ret.result.last);
+    }
   }
 }
