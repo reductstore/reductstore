@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 
 #include <filesystem>
+#include <ranges>
 #include <regex>
 
 #include "reduct/api/bucket_api.h"
@@ -333,12 +334,23 @@ class HttpServer : public IHttpServer {
         .get(api_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
                std::string bucket_name(req->getParameter(0));
-               RegisterEndpoint(
-                   ReadAccess(bucket_name), HttpContext<SSL>{res, req, running}, [this, req, bucket_name]() {
-                     return EntryApi::Query(storage_.get(), bucket_name, std::string(req->getParameter(1)),
-                                            std::string(req->getQuery("start")), std::string(req->getQuery("stop")),
-                                            {.ttl = req->getQuery("ttl")});
-                   });
+               RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+                                [this, req, bucket_name]() {
+                                  EntryApi::QueryOptions options{.ttl = req->getQuery("ttl")};
+
+                                  // parse include and exclude labels
+                                  for (auto [key, value] : ParseQueryString(req->getQuery())) {
+                                    if (key.starts_with("include-")) {
+                                      options.include.emplace(key.substr(8), value);
+                                    } else if (key.starts_with("exclude-")) {
+                                      options.exclude.emplace(key.substr(8), value);
+                                    }
+                                  }
+
+                                  return EntryApi::Query(storage_.get(), bucket_name, std::string(req->getParameter(1)),
+                                                         std::string(req->getQuery("start")),
+                                                         std::string(req->getQuery("stop")), options);
+                                });
              })
         // Token API
         .get(api_path + "tokens",

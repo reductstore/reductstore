@@ -31,6 +31,7 @@ add_custom_command(OUTPUT ${PROTOBUF_FILES}
 
 set(SRC_FILES
         reduct/api/bucket_api.cc
+        reduct/api/common.cc
         reduct/api/console.cc
         reduct/api/entry_api.cc
         reduct/api/http_server.cc
