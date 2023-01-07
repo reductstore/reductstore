@@ -307,11 +307,18 @@ class HttpServer : public IHttpServer {
         .post(api_path + "b/:bucket_name/:entry_name",
               [this, running](auto *res, auto *req) {
                 std::string bucket_name(req->getParameter(0));
-                RegisterEndpoint(WriteAccess(bucket_name), HttpContext<SSL>{res, req, running},
-                                 [this, req, &bucket_name]() {
-                                   return EntryApi::Write(storage_.get(), bucket_name, req->getParameter(1),
-                                                          req->getQuery("ts"), req->getHeader("content-length"));
-                                 });
+                RegisterEndpoint(
+                    WriteAccess(bucket_name), HttpContext<SSL>{res, req, running}, [this, req, &bucket_name]() {
+                      storage::IEntry::LabelMap labels;
+                      for (auto header = req->begin(); header != req->end(); ++header) {
+                        const auto [key, value] = *header;
+                        if (key.starts_with(EntryApi::kLabelHeaderPrefix)) {
+                          labels[std::string(key.substr(EntryApi::kLabelHeaderPrefix.size()))] = std::string(value);
+                        }
+                      }
+                      return EntryApi::Write(storage_.get(), bucket_name, req->getParameter(1), req->getQuery("ts"),
+                                             req->getHeader("content-length"), labels);
+                    });
               })
         .get(api_path + "b/:bucket_name/:entry_name",
              [this, running](auto *res, auto *req) {

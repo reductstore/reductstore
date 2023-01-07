@@ -14,6 +14,7 @@ namespace reduct::api {
 
 class EntryApi {
  public:
+  constexpr static std::string_view kLabelHeaderPrefix = "x-reduct-label-";
   /**
    * POST /b/:bucket_name/:entry
    */

@@ -24,6 +24,18 @@ def test_read_write_entries_ok(base_url, session, bucket, data, ts):
     assert resp.content == data
 
 
+def test_read_write_entries_ok_with_labels(base_url, session, bucket):
+    """Should write few entries and read them back with labels"""
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts=1000', data="nomater",
+                        headers={"x-reduct-label-x": "0", "x-reduct-label-y": "1"})
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?ts=1000')
+    assert resp.status_code == 200
+    assert resp.headers['x-reduct-label-x'] == '0'
+    assert resp.headers['x-reduct-label-y'] == '1'
+
+
 def test_read_write_entries_big_blob_ok(base_url, session, bucket):
     """Should write and read files more than max block size"""
     huge_data = b"xaz" * 1024 * 1024

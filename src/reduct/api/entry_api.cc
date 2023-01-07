@@ -189,7 +189,7 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
                              {"content-type", "application/octet-stream"}};
 
         for (const auto& [key, value] : reader->labels()) {
-          headers.insert({fmt::format("x-reduct-label-{}", key), value});
+          headers.insert({fmt::format("{}{}", kLabelHeaderPrefix, key), value});
         }
 
         return Result<HttpResponse>{
