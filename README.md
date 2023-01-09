@@ -58,9 +58,9 @@ curl --header "Authorization: Bearer ${API_TOKEN}"   \
 
 ## Client SDKs
 
-* [Python Client SDK](https://github.com/reducstore/reduct-py)
-* [JavaScript Client SDK](https://github.com/reducstore/reduct-js)
-* [C++ Client SDK](https://github.com/reducstore/reduct-cpp)
+* [Python Client SDK](https://github.com/reductstore/reduct-py)
+* [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
+* [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
 
 ## Tools
 
