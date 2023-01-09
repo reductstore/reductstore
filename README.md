@@ -64,5 +64,5 @@ curl --header "Authorization: Bearer ${API_TOKEN}"   \
 
 ## Tools
 
-* [CLI Client](https://github.com/reducstore/reduct-cli)
-* [Web Console](https://github.com/reducstore/web-console)
+* [CLI Client](https://github.com/reductstore/reduct-cli)
+* [Web Console](https://github.com/reductstore/web-console)
