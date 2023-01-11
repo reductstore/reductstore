@@ -139,7 +139,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with time", "[api]") {
   REQUIRE(WriteOne(*entry, "1234567890", Time() + us(1000001)) == Error::kOk);
 
   SECTION("ok") {
-    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {});
+    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {}, true);;
     REQUIRE(err == Error::kOk);
 
     auto [resp, recv_err] = receiver("", true);
@@ -156,17 +156,17 @@ TEST_CASE("EntryApi::Read should read data in chunks with time", "[api]") {
   }
 
   SECTION("bucket doesn't exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "XXX", "entry-1", "1000001", {}).error ==
+    REQUIRE(EntryApi::Read(storage.get(), "XXX", "entry-1", "1000001", {}, true).error ==
             Error::NotFound("Bucket 'XXX' is not found"));
   }
 
   SECTION("entry doesn't exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "XXX", "1000001", {}).error ==
+    REQUIRE(EntryApi::Read(storage.get(), "bucket", "XXX", "1000001", {}, true).error ==
             Error::NotFound("Entry 'XXX' is not found"));
   }
 
   SECTION("record doesn't exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", "1234567", {}).error ==
+    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", "1234567", {}, true).error ==
             Error::NotFound("No records for this timestamp"));
   }
 
@@ -174,6 +174,31 @@ TEST_CASE("EntryApi::Read should read data in chunks with time", "[api]") {
     REQUIRE(EntryApi::Write(storage.get(), "bucket", "entry-1", "XXXX", {}).error ==
 
             Error::UnprocessableEntity("Failed to parse 'ts' parameter: XXXX must unix times in microseconds"));
+  }
+}
+
+TEST_CASE("EntryApi::Read should NOT read record content when send_record_data=false") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+  REQUIRE(storage -> CreateBucket("testbucket", {}) == Error::kOk);
+
+  auto entry = storage->GetBucket("testbucket").result.lock()->GetOrCreateEntry("testentry").result.lock();
+  REQUIRE(WriteOne(*entry, "random_data", Time() + us(1000001)) == Error::kOk);
+
+  SECTION("ok") {
+    auto [receiver, err] = EntryApi::Read(storage.get(), "testbucket", "testentry", "1000001", {}, false);
+    REQUIRE(err == Error::kOk);
+
+    auto[resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
+
+    REQUIRE(resp.headers["content-type"] == "application/octet-stream");
+    REQUIRE(resp.headers["x-reduct-time"] == "1000001");
+    REQUIRE(resp.headers["x-reduct-last"] == "1");
+    REQUIRE(resp.content_length == 11);
+
+    auto ret = resp.SendData();
+    REQUIRE(ret == Error::kOk);
+    REQUIRE(ret.result.empty());
   }
 }
 
@@ -189,7 +214,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id", "[api]") {
   SECTION("ok") {
     auto id = std::to_string(entry->Query({}, {}, {}).result);
     {
-      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
+      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id, true);;
       REQUIRE(err == Error::kOk);
 
       auto [resp, recv_err] = receiver("", true);
@@ -207,7 +232,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id", "[api]") {
       REQUIRE(ret.result == "1234567890");
     }
     {
-      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id);
+      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id, true);;
       REQUIRE(err == Error::kOk);
 
       auto [resp, recv_err] = receiver("", true);
@@ -223,17 +248,17 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id", "[api]") {
       REQUIRE(ret.result == "abcd");
     }
 
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id).error ==
+    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id, true).error ==
             Error::NotFound(fmt::format("Query id={} doesn't exist. It expired or was finished", id)));
   }
 
   SECTION("id doesnt' exist") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "2").error ==
+    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "2", true).error ==
             Error::NotFound("Query id=2 doesn't exist. It expired or was finished"));
   }
 
   SECTION("wrong id") {
-    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "XXX2").error ==
+    REQUIRE(EntryApi::Read(storage.get(), "bucket", "entry-1", {}, "XXX2", true).error ==
             Error::UnprocessableEntity("Failed to parse 'id' parameter: XXX2 must be unsigned integer"));
   }
 }

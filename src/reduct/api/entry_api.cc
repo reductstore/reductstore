@@ -128,7 +128,7 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
 }
 
 Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view bucket_name, std::string_view entry_name,
-                                           std::string_view timestamp, std::string_view query_id) {
+                                           std::string_view timestamp, std::string_view query_id, const bool send_record_data) {
   IEntry::SPtr entry;
   RESULT_OR_RETURN_ERROR(entry, GetOrCreateEntry(storage, std::string{bucket_name}, std::string{entry_name}, true));
 
@@ -161,7 +161,7 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
 
   assert(reader && "Failed to reach reader");
   return {
-      [reader, last](std::string_view chunk, bool) -> Result<HttpResponse> {
+      [reader, last, send_record_data](std::string_view chunk, bool) -> Result<HttpResponse> {
         StringMap headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
                              {"x-reduct-last", std::to_string(static_cast<int>(last))},
                              {"content-type", "application/octet-stream"}};
@@ -175,12 +175,14 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
                 .headers = std::move(headers),
                 .content_length = reader->size(),
                 .SendData =
-                    [reader]() {
-                      auto [chunk, err] = reader->Read();
-                      return Result<std::string>{std::move(chunk.data), err};
+                    [reader, send_record_data]() {
+                      if (send_record_data) {
+                        auto [chunk, err] = reader->Read();
+                        return Result<std::string>{std::move(chunk.data), err};
+                      }
+                      return Result<std::string>{"", Error::kOk};
                     },
-            },
-            Error::kOk,
+            }, Error::kOk,
         };
       },
       error,

@@ -328,9 +328,19 @@ class HttpServer : public IHttpServer {
                RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
                                 [this, req, &bucket_name]() {
                                   return EntryApi::Read(storage_.get(), bucket_name, req->getParameter(1),
-                                                        req->getQuery("ts"), req->getQuery("q"));
+                                                        req->getQuery("ts"), req->getQuery("q"), true);
                                 });
              })
+        .head(api_path + "b/:bucket_name/:entry_name",
+              [this, running](auto *res, auto *req) {
+                std::string bucket_name(req->getParameter(0));
+                std::string entry_name(req->getParameter(1));
+
+                RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+                                 [this, req, &bucket_name, &entry_name]() {
+                                   return EntryApi::Read(storage_.get(), bucket_name, entry_name, req->getQuery("ts"), req->getQuery("q"), false);
+                                 });
+              })
         .get(api_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
                std::string bucket_name(req->getParameter(0));

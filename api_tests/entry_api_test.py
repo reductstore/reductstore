@@ -327,3 +327,34 @@ def test__query_with_read_token(base_url, session, bucket, token_without_permiss
 
     resp = session.get(f'{base_url}/b/{bucket}/entry/q', headers=auth_headers(token_write_bucket))
     assert resp.status_code == 403
+
+
+def test__head_entry_ok(base_url, session, bucket):
+    ts = 1000
+    entry_name = "testentry"
+    dummy_data = "dummy data"
+    resp = session.post(f'{base_url}/b/{bucket}/{entry_name}?ts={ts}', data=dummy_data)
+    assert resp.status_code == 200
+
+    resp = session.head(f'{base_url}/b/{bucket}/{entry_name}')
+    assert resp.status_code == 200
+    assert len(resp.content) == 0
+    assert resp.headers['Content-Length'] == str(len(dummy_data))
+
+
+@requires_env("API_TOKEN")
+def test__head_entry_with_full_access_token(base_url, session, bucket, token_without_permissions):
+    """Needs authenticated token"""
+    ts = 1000
+    entry_name = "testentry"
+    dummy_data = "dummy data"
+    resp = session.post(f'{base_url}/b/{bucket}/{entry_name}?ts={ts}', data=dummy_data)
+    assert resp.status_code == 200
+
+    resp = session.head(f'{base_url}/b/{bucket}/{entry_name}', headers=auth_headers(''))
+    assert resp.status_code == 401
+
+    resp = session.head(f'{base_url}/b/{bucket}/{entry_name}', headers=auth_headers(token_without_permissions))
+    assert resp.status_code == 200
+    assert len(resp.content) == 0
+    assert resp.headers['Content-Length'] == str(len(dummy_data))
