@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `GET /api/v1/me` endpoint to get current
   permissions, [PR-202](https://github.com/reductstore/reductstore/pull/208)
-- Send error message in `-x-reduct-error`header [PR-213](https://github.com/reductstore/reductstore/pull/213)
+- Send error message in `x-reduct-error`header [PR-213](https://github.com/reductstore/reductstore/pull/213)
 
 ### Changed:
 
