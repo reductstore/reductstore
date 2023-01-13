@@ -152,7 +152,7 @@ class HttpServer : public IHttpServer {
       ctx.res->writeStatus(std::to_string(err.code));
       CommonHeaders();
       ctx.res->writeHeader("content-type", "application/json");
-      ctx.res->writeHeader("-x-reduct-error", err.message);
+      ctx.res->writeHeader("x-reduct-error", err.message);
       if (method == "HEAD") {
         ctx.res->end({});
       } else {

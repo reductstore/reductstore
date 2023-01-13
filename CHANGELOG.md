@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Project license AGPLv3 to MPL-2.0, [PR-221](https://github.com/reductstore/reductstore/pull/221)
+- Rename error header `-x-reduct-error` to `x-reduct-error`, [PR-230](https://github.com/reductstore/reductstore/pull/230)
 
 ## [1.2.3] - 2023-01-02
 
