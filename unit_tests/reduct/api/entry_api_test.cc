@@ -142,6 +142,8 @@ TEST_CASE("EntryAPI::Write should respect the passed in content-type header", "[
 
     auto [resp, resp_err] = receiver(R"({"name": "random"})", true);
     REQUIRE(resp_err == Error::kOk);
+
+    auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
   }
 
   SECTION("check headers after reading") {
