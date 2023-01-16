@@ -344,12 +344,14 @@ def test__head_entry_ok(base_url, session, bucket):
 
 
 @requires_env("API_TOKEN")
-def test__head_entry_with_full_access_token(base_url, session, bucket, token_without_permissions, token_write_bucket, token_read_bucket):
+def test__head_entry_with_full_access_token(base_url, session, bucket, token_without_permissions, token_write_bucket,
+                                            token_read_bucket):
     """Needs authenticated token. Should not return the body, only headers."""
     ts = 1000
     entry_name = "testentry"
     dummy_data = "dummy data"
-    resp = session.post(f'{base_url}/b/{bucket}/{entry_name}?ts={ts}', data=dummy_data, headers=auth_headers(token_write_bucket))
+    resp = session.post(f'{base_url}/b/{bucket}/{entry_name}?ts={ts}', data=dummy_data,
+                        headers=auth_headers(token_write_bucket))
     assert resp.status_code == 200
 
     resp = session.head(f'{base_url}/b/{bucket}/{entry_name}', headers=auth_headers(token_read_bucket))
