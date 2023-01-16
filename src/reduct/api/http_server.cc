@@ -318,7 +318,7 @@ class HttpServer : public IHttpServer {
                         }
                       }
                       return EntryApi::Write(storage_.get(), bucket_name, req->getParameter(1), req->getQuery("ts"),
-                                             req->getHeader("content-length"), labels);
+                                             req->getHeader("content-length"), req->getHeader("content-type"), labels);
                     });
               })
         .get(api_path + "b/:bucket_name/:entry_name",

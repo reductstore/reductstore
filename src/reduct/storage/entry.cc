@@ -79,6 +79,7 @@ class Entry : public IEntry {
   }
 
   [[nodiscard]] Result<async::IAsyncWriter::SPtr> BeginWrite(const Time& time, size_t content_size,
+                                                             const std::string_view& content_type,
                                                              const LabelMap& labels) override {
     enum class RecordType { kLatest, kBelated, kBelatedFirst };
     RecordType type = RecordType::kLatest;
@@ -158,12 +159,13 @@ class Entry : public IEntry {
       block = std::move(ret.result);
     }
 
-    // Finally we have found a proper blog. Update it and write the record
+    // Finally we have found a proper block. Update it and write the record
     auto record = block->add_records();
     record->set_state(proto::Record::kStarted);
     record->mutable_timestamp()->CopyFrom(proto_ts);
     record->set_begin(block->size());
     record->set_end(block->size() + content_size);
+    record->set_content_type(std::string(content_type));
 
     for (const auto& [key, value] : labels) {
       auto label = record->add_labels();

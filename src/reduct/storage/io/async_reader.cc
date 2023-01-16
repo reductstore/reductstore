@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <fstream>
 
+#include "reduct/core/common.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::storage::io {
@@ -29,6 +30,10 @@ class AsyncReader : public async::IAsyncReader {
 
     for (const auto& label : record.labels()) {
       labels_.insert({label.name(), label.value()});
+    }
+    content_type_ = record.content_type();
+    if (content_type_ == "") {
+      content_type_ = core::kContentTypeOctetStream;
     }
   }
 
@@ -57,12 +62,15 @@ class AsyncReader : public async::IAsyncReader {
 
   const std::map<std::string, std::string>& labels() const noexcept override { return labels_; }
 
+  const std::string& content_type() const noexcept override { return content_type_; }
+
  private:
   AsyncReaderParameters parameters_;
   size_t size_;
   size_t read_bytes_;
   std::ifstream file_;
   std::map<std::string, std::string> labels_;
+  std::string content_type_;
 };
 
 async::IAsyncReader::UPtr BuildAsyncReader(const proto::Block& block, AsyncReaderParameters parameters) {

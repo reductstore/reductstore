@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <random>
 
+#include "reduct/core/common.h"
 #include "reduct/proto/api/bucket.pb.h"
 #include "reduct/storage/entry.h"
 #include "reduct/storage/storage.h"
@@ -66,7 +67,7 @@ static proto::api::BucketSettings MakeDefaultBucketSettings() {
  */
 inline auto WriteOne(storage::IEntry& entry, std::string_view blob, core::Time ts,  // NOLINT
                      const storage::IEntry::LabelMap& labels = {}) {
-  auto [ret, err] = entry.BeginWrite(ts, blob.size(), labels);
+  auto [ret, err] = entry.BeginWrite(ts, blob.size(), core::kContentTypeOctetStream, labels);
   if (err) {
     return err;
   }
