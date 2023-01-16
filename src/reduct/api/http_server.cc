@@ -338,7 +338,8 @@ class HttpServer : public IHttpServer {
 
                 RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
                                  [this, req, &bucket_name, &entry_name]() {
-                                   return EntryApi::Read(storage_.get(), bucket_name, entry_name, req->getQuery("ts"), req->getQuery("q"), false);
+                                   return EntryApi::Read(storage_.get(), bucket_name, entry_name, req->getQuery("ts"),
+                                                         req->getQuery("q"), false);
                                  });
               })
         .get(api_path + "b/:bucket_name/:entry_name/q",

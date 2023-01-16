@@ -128,7 +128,8 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
 }
 
 Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view bucket_name, std::string_view entry_name,
-                                           std::string_view timestamp, std::string_view query_id, const bool send_record_data) {
+                                           std::string_view timestamp, std::string_view query_id,
+                                           const bool send_record_data) {
   IEntry::SPtr entry;
   RESULT_OR_RETURN_ERROR(entry, GetOrCreateEntry(storage, std::string{bucket_name}, std::string{entry_name}, true));
 
@@ -182,7 +183,8 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
                       }
                       return Result<std::string>{"", Error::kOk};
                     },
-            }, Error::kOk,
+            },
+            Error::kOk,
         };
       },
       error,

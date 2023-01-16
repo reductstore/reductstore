@@ -179,7 +179,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with time", "[api]") {
 
 TEST_CASE("EntryApi::Read should NOT read record content when send_record_data=false") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
-  REQUIRE(storage -> CreateBucket("testbucket", {}) == Error::kOk);
+  REQUIRE(storage->CreateBucket("testbucket", {}) == Error::kOk);
 
   auto entry = storage->GetBucket("testbucket").result.lock()->GetOrCreateEntry("testentry").result.lock();
   REQUIRE(WriteOne(*entry, "random_data", Time() + us(1000001)) == Error::kOk);
@@ -188,7 +188,7 @@ TEST_CASE("EntryApi::Read should NOT read record content when send_record_data=f
     auto [receiver, err] = EntryApi::Read(storage.get(), "testbucket", "testentry", "1000001", {}, false);
     REQUIRE(err == Error::kOk);
 
-    auto[resp, recv_err] = receiver("", true);
+    auto [resp, recv_err] = receiver("", true);
     REQUIRE(recv_err == Error::kOk);
 
     REQUIRE(resp.headers["content-type"] == "application/octet-stream");
