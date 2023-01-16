@@ -162,7 +162,7 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
 
   assert(reader && "Failed to reach reader");
   return {
-      [reader, last, send_record_data](std::string_view chunk, bool) -> Result<HttpResponse> {
+      [reader, last, send_record_data](std::string_view, bool) -> Result<HttpResponse> {
         StringMap headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
                              {"x-reduct-last", std::to_string(static_cast<int>(last))},
                              {"content-type", "application/octet-stream"}};
@@ -171,21 +171,21 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
           headers.insert({fmt::format("{}{}", kLabelHeaderPrefix, key), value});
         }
 
-        return Result<HttpResponse>{
-            HttpResponse{
-                .headers = std::move(headers),
-                .content_length = reader->size(),
-                .SendData =
-                    [reader, send_record_data]() {
-                      if (send_record_data) {
-                        auto [chunk, err] = reader->Read();
-                        return Result<std::string>{std::move(chunk.data), err};
-                      }
-                      return Result<std::string>{"", Error::kOk};
-                    },
-            },
-            Error::kOk,
+        HttpResponse response = {
+            .headers = std::move(headers),
+            .content_length = reader->size(),
         };
+
+        if (send_record_data) {
+          response.SendData = [&reader]() {
+            auto [chunk, err] = reader->Read();
+            return Result<std::string>{std::move(chunk.data), err};
+          };
+        } else {
+          response.SendData = []() { return Result<std::string>{"", Error::kOk}; };
+        }
+
+        return Result<HttpResponse>{response, Error::kOk};
       },
       error,
   };
