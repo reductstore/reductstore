@@ -214,7 +214,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id", "[api]") {
   SECTION("ok") {
     auto id = std::to_string(entry->Query({}, {}, {}).result);
     {
-      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id, true);;
+      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id, true);
       REQUIRE(err == Error::kOk);
 
       auto [resp, recv_err] = receiver("", true);
@@ -232,7 +232,7 @@ TEST_CASE("EntryApi::Read should read data in chunks with query id", "[api]") {
       REQUIRE(ret.result == "1234567890");
     }
     {
-      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id, true);;
+      auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", {}, id, true);
       REQUIRE(err == Error::kOk);
 
       auto [resp, recv_err] = receiver("", true);
