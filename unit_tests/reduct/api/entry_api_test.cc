@@ -136,12 +136,22 @@ TEST_CASE("EntryAPI::Write should respect the passed in content-type header", "[
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
   REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-  auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "18", "application/json", {});
-  REQUIRE(err == Error::kOk);
+  SECTION("write dummy record") {
+    auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "18", "application/json", {});
+    REQUIRE(err == Error::kOk);
 
-  auto [resp, resp_err] = receiver(R"({"name": "random"})", true);
-  REQUIRE(resp_err == Error::kOk);
-  REQUIRE(resp.headers["content-type"] == "application/json");
+    auto [resp, resp_err] = receiver(R"({"name": "random"})", true);
+    REQUIRE(resp_err == Error::kOk);
+  }
+
+  SECTION("check headers after reading") {
+    auto [receiver, err] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {});
+    REQUIRE(err == Error::kOk);
+
+    auto [resp, resp_err] = receiver("", true);
+    REQUIRE(resp.headers["content-type"] == "application/json");
+    REQUIRE(resp_err == Error::kOk);
+  }
 }
 
 TEST_CASE("EntryApi::Read should read data in chunks with time", "[api]") {
