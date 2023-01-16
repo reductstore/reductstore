@@ -330,6 +330,7 @@ def test__query_with_read_token(base_url, session, bucket, token_without_permiss
 
 
 def test__head_entry_ok(base_url, session, bucket):
+    """Should return only headers and no body because request is of type HEAD."""
     ts = 1000
     entry_name = "testentry"
     dummy_data = "dummy data"
@@ -344,7 +345,7 @@ def test__head_entry_ok(base_url, session, bucket):
 
 @requires_env("API_TOKEN")
 def test__head_entry_with_full_access_token(base_url, session, bucket, token_without_permissions, token_write_bucket, token_read_bucket):
-    """Needs authenticated token"""
+    """Needs authenticated token. Should not return the body, only headers."""
     ts = 1000
     entry_name = "testentry"
     dummy_data = "dummy data"
