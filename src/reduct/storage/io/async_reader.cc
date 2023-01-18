@@ -32,7 +32,7 @@ class AsyncReader : public async::IAsyncReader {
       labels_.insert({label.name(), label.value()});
     }
     content_type_ = record.content_type();
-    if (content_type_ == "") {
+    if (content_type_.empty()) {
       content_type_ = core::kContentTypeOctetStream;
     }
   }

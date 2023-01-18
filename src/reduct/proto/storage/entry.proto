@@ -28,7 +28,7 @@ message Record {
   uint64 end = 3;                           // end position of a blob in a block
   State state = 4;                          // state of record
   repeated Label labels = 5;                // labels
-  optional string content_type = 6;         // Content type of the record
+  string content_type = 6;                  // Content type of the record
 }
 
 // Represents a block of records.
