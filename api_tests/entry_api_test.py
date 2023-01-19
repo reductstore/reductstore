@@ -327,3 +327,19 @@ def test__query_with_read_token(base_url, session, bucket, token_without_permiss
 
     resp = session.get(f'{base_url}/b/{bucket}/entry/q', headers=auth_headers(token_write_bucket))
     assert resp.status_code == 403
+
+
+def test_write_with_content_type_header(base_url, session, bucket):
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={1000}', data='{"data": "some data"}',
+                        headers={'content-type': 'application/json'})
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}')
+    assert resp.status_code == 200
+    query_id = int(json.loads(resp.content)["id"])
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 200
+    assert resp.content == b"{\"data\": \"some data\"}"
+    assert resp.headers['content-type'] == 'application/json'

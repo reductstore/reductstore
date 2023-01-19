@@ -116,7 +116,8 @@ TEST_CASE("EntryAPI::Write should write data with labels", "[api]") {
       {"label2", "value2"},
   };
 
-  auto [receiver, err] = EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10", labels);
+  auto [receiver, err] =
+      EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "10", "application/octet-stream", labels);
   REQUIRE(err == Error::kOk);
 
   REQUIRE(receiver("12345", false).error.code == 100);
@@ -129,6 +130,27 @@ TEST_CASE("EntryAPI::Write should write data with labels", "[api]") {
 
   auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
   REQUIRE(entry->BeginRead(reduct::core::Time() + us(1000001)).result->labels() == labels);
+}
+
+TEST_CASE("EntryAPI::Write should respect the passed in content-type header", "[api]") {
+  auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
+  REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
+
+  auto [writeRecvr, writeErr] =
+      EntryApi::Write(storage.get(), "bucket", "entry-1", "1000001", "18", "application/json", {});
+  REQUIRE(writeErr == Error::kOk);
+
+  auto [_, writeRespErr] = writeRecvr(R"({"name": "random"})", true);
+  REQUIRE(writeRespErr == Error::kOk);
+
+  auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
+
+  auto [readRecvr, readErr] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {});
+  REQUIRE(readErr == Error::kOk);
+
+  auto [readResp, readRespErr] = readRecvr("", true);
+  REQUIRE(readResp.headers["content-type"] == "application/json");
+  REQUIRE(readRespErr == Error::kOk);
 }
 
 TEST_CASE("EntryApi::Read should read data in chunks with time", "[api]") {

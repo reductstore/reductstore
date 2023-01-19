@@ -48,6 +48,7 @@ set(SRC_FILES
         reduct/core/env_variable.cc
         reduct/core/logger.cc
         reduct/core/error.cc
+        reduct/core/common.h
 
         reduct/storage/io/async_reader.cc
         reduct/storage/io/async_writer.cc

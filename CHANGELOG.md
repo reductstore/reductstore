@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefix `x-reduct-label-`, [PR-224](https://github.com/reductstore/reductstore/pull/224)
 - `include-<label>` and `exclude-<label>` query parameters for query endpoint
   `GET /api/v1/:bucket/:entry/q`, [PR-226](https://github.com/reductstore/reductstore/pull/226)
+- Store the `Content-Type` header received for a record while writing it, so that the record may be returned with the same header, [PR-231](https://github.com/reductstore/reductstore/pull/231)
 
 ### Changed
 
