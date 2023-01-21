@@ -54,10 +54,10 @@ curl -d "some_data_2" \
   "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?ts=20000"
 
 # Read all data in the bucket
-curl "http://127.0.0.1:8383/api/v1/b/my_data/entry_1/q?start=0&end=20000&ttl=10000"
+curl "http://127.0.0.1:8383/api/v1/b/my_data/entry_1/q?ttl=10000"
 
 # Take ID from the response and read the data until the end
-curl -v "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?id=<ID_FROM_RESPONSE>"
+curl -v "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?q=<ID_FROM_RESPONSE>"
 ```
 
 ## Client SDKs
