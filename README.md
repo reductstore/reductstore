@@ -30,39 +30,47 @@ The easiest way to start is to use Docker image:
 docker run -p 8383:8383 -v ${PWD}/data:/data reductstore/reductstore:latest
 ```
 
-or you can use the demo storage: https://play.reduct.store/
+or you can use the demo instance https://play.reduct.store/ with API token `reduct`.
 
 ## Usage Example
 
 ReductStore provides a simple HTTP API, so you could use it with `curl`:
 
 ```shell
-export API_TOKEN=reduct
-
 # Create a bucket
 curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
   -X POST \
-  --header "Authorization: Bearer ${API_TOKEN}"   \
-  -a https://play.reduct.store/api/v1/b/my_data
+  "http://127.0.0.1:8383/api/v1/b/my_data"
 
 # Write some data
-curl -d "some_data" \
+curl -d "some_data_1" \
   -X POST \
-  --header "Authorization: Bearer ${API_TOKEN}"   \
-  -a https://play.reduct.store/api/v1/b/my_data/entry_1?ts=10000
+  --header "x-reduct-label-quality: good" \
+  "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?ts=10000"
 
-# Read the data by using its timestamp
-curl --header "Authorization: Bearer ${API_TOKEN}"   \
-    https://play.reduct.store/api/v1/b/my_data/entry_1?ts=10000
+curl -d "some_data_2" \
+  -X POST \
+    --header "x-reduct-label-quality: bad" \
+  "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?ts=20000"
+
+# Read all data in the bucket
+curl "http://127.0.0.1:8383/api/v1/b/my_data/entry_1/q?start=0&end=20000&ttl=10000"
+
+# Take ID from the response and read the data until the end
+curl -v "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?id=<ID_FROM_RESPONSE>"
 ```
 
 ## Client SDKs
+
+If you don't want to use HTTP API directly, you can use one of the client SDKs:
 
 * [Python Client SDK](https://github.com/reductstore/reduct-py)
 * [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
 * [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
 
 ## Tools
+
+You can use the following tools to administrate ReductStore:
 
 * [CLI Client](https://github.com/reductstore/reduct-cli)
 * [Web Console](https://github.com/reductstore/web-console)
