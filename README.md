@@ -31,6 +31,7 @@ docker run -p 8383:8383 -v ${PWD}/data:/data reductstore/reductstore:latest
 ```
 
 or you can use the demo instance https://play.reduct.store/ with API token `reduct`.
+
 See [Getting Started](https://docs.reduct.store/) and [Download](https://www.reduct.store/download) pages for deail.
 
 ## Usage Example
