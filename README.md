@@ -31,6 +31,7 @@ docker run -p 8383:8383 -v ${PWD}/data:/data reductstore/reductstore:latest
 ```
 
 or you can use the demo instance https://play.reduct.store/ with API token `reduct`.
+See [Getting Started](https://docs.reduct.store/) and [Download](https://www.reduct.store/download) pages for deail.
 
 ## Usage Example
 
@@ -42,7 +43,7 @@ curl -d "{\"quota_type\":\"FIFO\", \"quota_size\":10000}" \
   -X POST \
   "http://127.0.0.1:8383/api/v1/b/my_data"
 
-# Write some data
+# Write two records with timestamp 10000 and 20000
 curl -d "some_data_1" \
   -X POST \
   --header "x-reduct-label-quality: good" \
@@ -53,7 +54,7 @@ curl -d "some_data_2" \
     --header "x-reduct-label-quality: bad" \
   "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?ts=20000"
 
-# Read all data in the bucket
+# Query all records in the bucket (TTL of request 10000s, so you don't need to hurry)
 curl "http://127.0.0.1:8383/api/v1/b/my_data/entry_1/q?ttl=10000"
 
 # Take ID from the response and read the data until the end
