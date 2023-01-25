@@ -140,7 +140,7 @@ class HttpServer : public IHttpServer {
       }
 
       ctx.res->writeHeader("connection", ctx.running ? "keep-alive" : "close");
-      ctx.res->writeHeader("server", "ReductStore " + kVersion);
+      ctx.res->writeHeader("server", fmt::format("ReductStore {}", kVersion));
     };
 
     auto SendError = [ctx, &method, &url, CommonHeaders](const core::Error &err) {
