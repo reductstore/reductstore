@@ -13,12 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefix `x-reduct-label-`, [PR-224](https://github.com/reductstore/reductstore/pull/224)
 - `include-<label>` and `exclude-<label>` query parameters for query endpoint
   `GET /api/v1/:bucket/:entry/q`, [PR-226](https://github.com/reductstore/reductstore/pull/226)
-- Store the `Content-Type` header received for a record while writing it, so that the record may be returned with the same header, [PR-231](https://github.com/reductstore/reductstore/pull/231)
+- Store the `Content-Type` header received for a record while writing it, so that the record may be returned with the
+  same header, [PR-231](https://github.com/reductstore/reductstore/pull/231)
 
 ### Changed
 
 - Project license AGPLv3 to MPL-2.0, [PR-221](https://github.com/reductstore/reductstore/pull/221)
-- Rename error header `-x-reduct-error` to `x-reduct-error`, [PR-230](https://github.com/reductstore/reductstore/pull/230)
+- Rename error header `-x-reduct-error`
+  to `x-reduct-error`, [PR-230](https://github.com/reductstore/reductstore/pull/230)
+- Update Web Console to v1.2.0, [PR-232](https://github.com/reductstore/reductstore/pull/232)
 
 ## [1.2.3] - 2023-01-02
 
