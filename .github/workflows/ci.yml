@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download Console
-        run: wget https://github.com/reductstore/web-console/releases/download/v1.1.1/web-console.build.tar.gz
+        run: wget https://github.com/reductstore/web-console/releases/download/v1.2.0/web-console.build.tar.gz
       - name: Extract
         run: mkdir web-console && tar xf web-console.build.tar.gz -C ./web-console
       - name: Upload artifact

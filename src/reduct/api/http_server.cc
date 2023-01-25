@@ -18,6 +18,7 @@
 #include "reduct/api/server_api.h"
 #include "reduct/api/token_api.h"
 #include "reduct/async/sleep.h"
+#include "reduct/config.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api {
@@ -139,7 +140,7 @@ class HttpServer : public IHttpServer {
       }
 
       ctx.res->writeHeader("connection", ctx.running ? "keep-alive" : "close");
-      ctx.res->writeHeader("server", "ReductStorage");
+      ctx.res->writeHeader("server", "ReductStore " + kVersion);
     };
 
     auto SendError = [ctx, &method, &url, CommonHeaders](const core::Error &err) {
