@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2023-01-26
+
 ### Added
 
 - Labels for  `POST|GET /api/v1/:bucket/:entry` as headers with
