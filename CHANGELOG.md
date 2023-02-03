@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2023-02-03
+
 ### Fixed
 
-- Quering when a block doesn't have records for certain
+- Querying when a block doesn't have records for certain
   labels, [PR-235](https://github.com/reductstore/reductstore/pull/235)
 
 ## [1.3.0] - 2023-01-26
@@ -352,7 +354,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.1...HEAD
+
+[1.3.1]: https://github.com/reductstore/reductstore/compare/v1.3.0...v1.3.1
 
 [1.3.0]: https://github.com/reductstore/reductstore/compare/v1.2.3...v1.3.0
 
