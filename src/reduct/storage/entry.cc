@@ -288,70 +288,35 @@ class Entry : public IEntry {
     auto stop_ts = FromTimePoint(query_info.stop);
 
     // Find start block
-    auto start_block = block_set_.upper_bound(start_ts);
-    if (start_block == block_set_.end()) {
-      start_block = std::prev(start_block);
-    } else if (start_block != block_set_.begin()) {
-      start_block = std::prev(start_block);
-    }
-
-    auto [block, err] = block_manager_->LoadBlock(*start_block);
-    if (err) {
-      queries_.erase(query_id);
-      return {{}, err};
-    }
-
-    // Check if it is valid
-    if (block->invalid()) {
-      start_block = std::next(start_block);
-      if (start_block != std::end(block_set_) && *start_block < stop_ts) {
-        const auto [next_block, next_err] = block_manager_->LoadBlock(*start_block);
-        if (next_err) {
-          queries_.erase(query_id);
-          return {{}, next_err};
-        }
-
-        block = next_block;
-      } else {
-        queries_.erase(query_id);
-        return Error::NoContent();
-      }
+    auto start_block_it = block_set_.upper_bound(start_ts);
+    if (start_block_it == block_set_.end()) {
+      start_block_it = std::prev(start_block_it);
+    } else if (start_block_it != block_set_.begin()) {
+      start_block_it = std::prev(start_block_it);
     }
 
     std::vector<int> records;
-    records.reserve(block->records_size());
-    for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
-      const auto& record = block->records(record_index);
-      bool in_time_interval =
-          record.timestamp() >= start_ts && record.timestamp() < stop_ts && record.state() == proto::Record::kFinished;
-      if (!in_time_interval) continue;
-
-      // check if a record has value of labels that match include
-      if (!query_info.options.include.empty()) {
-        auto include = query_info.options.include;
-        for (const auto& label : record.labels()) {
-          if (include.contains(label.name()) && label.value() == include[label.name()]) {
-            include.erase(label.name());
-          }
-        }
-
-        if (!include.empty()) continue;
+    IBlockManager::BlockSPtr block;
+    Error search_err = Error::kOk;
+    for (auto it = start_block_it; it != std::end(block_set_) && *it < stop_ts; it++) {
+      auto ret = block_manager_->LoadBlock(*it);
+      if (ret.error) {
+        search_err = std::move(ret.error);
+        break;
       }
 
-      // check if a record has value of labels that does not match exclude
-      if (!query_info.options.exclude.empty()) {
-        auto exclude = query_info.options.exclude;
-        for (const auto& label : record.labels()) {
-          if (exclude.contains(label.name()) && label.value() == exclude[label.name()]) {
-            exclude.erase(label.name());
-          }
-        }
-
-        if (exclude.empty()) continue;
+      block = ret.result;
+      if (block->invalid()) {
+        continue;
       }
-
-      records.push_back(record_index);
+      // Find records
+      records = QueryRecordsInBlock(block, query_info, start_ts, stop_ts);
+      if (!records.empty() || query_info.options.include.empty()) {
+        break;
+      }
     }
+
+    RETURN_ERROR(search_err);
 
     if (records.empty()) {
       queries_.erase(query_id);
@@ -367,7 +332,7 @@ class Entry : public IEntry {
       query_info.next_record = ToTimePoint(get_timestamp(records[1]));
     } else {
       // Only one record in current block check next one
-      auto next_block_it = std::next(start_block);
+      auto next_block_it = std::next(block_set_.find(block->begin_time()));
       if (next_block_it != std::end(block_set_)) {
         if (*next_block_it < stop_ts) {
           query_info.next_record = ToTimePoint(*next_block_it);
@@ -492,15 +457,6 @@ class Entry : public IEntry {
     });
   }
 
-  std::string name_;
-  Options options_;
-  fs::path full_path_;
-
-  std::set<google::protobuf::Timestamp> block_set_;
-  std::shared_ptr<IBlockManager> block_manager_;
-  size_t size_counter_;
-  size_t record_counter_;
-
   struct QueryInfo {
     Time start;
     Time stop;
@@ -509,6 +465,54 @@ class Entry : public IEntry {
 
     query::IQuery::Options options;
   };
+
+  std::vector<int> QueryRecordsInBlock(const IBlockManager::BlockSPtr& block, const QueryInfo& query_info,
+                                       const Timestamp& start_ts, const Timestamp& stop_ts) const {
+    std::vector<int> records;
+    records.reserve(block->records_size());
+    for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
+      const auto& record = block->records(record_index);
+      bool in_time_interval =
+          record.timestamp() >= start_ts && record.timestamp() < stop_ts && record.state() == proto::Record::kFinished;
+      if (!in_time_interval) continue;
+
+      // check if a record has value of labels that match include
+      if (!query_info.options.include.empty()) {
+        auto include = query_info.options.include;
+        for (const auto& label : record.labels()) {
+          if (include.contains(label.name()) && label.value() == include[label.name()]) {
+            include.erase(label.name());
+          }
+        }
+
+        if (!include.empty()) continue;
+      }
+
+      // check if a record has value of labels that does not match exclude
+      if (!query_info.options.exclude.empty()) {
+        auto exclude = query_info.options.exclude;
+        for (const auto& label : record.labels()) {
+          if (exclude.contains(label.name()) && label.value() == exclude[label.name()]) {
+            exclude.erase(label.name());
+          }
+        }
+
+        if (exclude.empty()) continue;
+      }
+
+      records.push_back(record_index);
+    }
+    return records;
+  }
+
+  std::string name_;
+  Options options_;
+  fs::path full_path_;
+
+  std::set<google::protobuf::Timestamp> block_set_;
+  std::shared_ptr<IBlockManager> block_manager_;
+  size_t size_counter_;
+  size_t record_counter_;
 
   mutable std::unordered_map<uint64_t, QueryInfo> queries_;
 };
