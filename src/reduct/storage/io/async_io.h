@@ -10,6 +10,7 @@
 #include <map>
 
 #include "reduct/async/io.h"
+#include "reduct/core/common.h"
 #include "reduct/core/time.h"
 
 namespace reduct::storage::io {
@@ -24,8 +25,9 @@ class IAsyncIO {
    * @param time timestamp of the data
    * @return async writer or error
    */
-  [[nodiscard]] virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const core::Time& time, size_t size,
-                                                                           const LabelMap& labels = {}) = 0;
+  [[nodiscard]] virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(
+      const core::Time& time, size_t size, const std::string_view& content_type = core::kContentTypeOctetStream,
+      const LabelMap& labels = {}) = 0;
 
   /**
    * @brief Finds the record for the timestamp and read the blob

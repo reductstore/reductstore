@@ -22,4 +22,4 @@ The storage engine uses the token authentication when the`RS_API_TOKEN` envirnom
 
 If a request to ReductStore fails, the API  returns an HTTP status code indicating the type of error that occurred. For example, a `404 Not Found` status code indicates that the requested resource could not be found.
 
-Since version 1.2.0, the HTTP API also includes an error message in the `-x-reduct-error` header of the response. This error message provides more detailed information about the error, which can be useful for debugging and troubleshooting.
+Since version 1.2.0, the HTTP API also includes an error message in the `x-reduct-error` header of the response. This error message provides more detailed information about the error, which can be useful for debugging and troubleshooting.

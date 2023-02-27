@@ -55,6 +55,7 @@ class IAsyncReader {
   [[nodiscard]] virtual core::Time timestamp() const noexcept = 0;
   [[nodiscard]] virtual size_t size() const noexcept = 0;
   [[nodiscard]] virtual const std::map<std::string, std::string>& labels() const noexcept = 0;
+  [[nodiscard]] virtual const std::string& content_type() const noexcept = 0;
 };
 
 }  // namespace reduct::async

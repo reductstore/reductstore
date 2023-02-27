@@ -84,7 +84,8 @@ inline core::Result<IEntry::SPtr> GetOrCreateEntry(IStorage* storage, const std:
 
 core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, std::string_view bucket_name,
                                                   std::string_view entry_name, std::string_view timestamp,
-                                                  std::string_view content_length, const IEntry::LabelMap& labels) {
+                                                  std::string_view content_length, const std::string_view& content_type,
+                                                  const IEntry::LabelMap& labels) {
   IEntry::SPtr entry;
   RESULT_OR_RETURN_ERROR(entry, GetOrCreateEntry(storage, std::string{bucket_name}, std::string{entry_name}));
 
@@ -101,7 +102,7 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
     return Error::ContentLengthRequired("Bad or empty content-length");
   }
 
-  auto [writer, writer_err] = entry->BeginWrite(ts, size, labels);
+  auto [writer, writer_err] = entry->BeginWrite(ts, size, content_type, labels);
   RETURN_ERROR(writer_err);
 
   auto [bucket, _] = storage->GetBucket(std::string(bucket_name));
@@ -165,7 +166,7 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
       [reader, last, send_record_data](std::string_view, bool) -> Result<HttpResponse> {
         StringMap headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
                              {"x-reduct-last", std::to_string(static_cast<int>(last))},
-                             {"content-type", "application/octet-stream"}};
+                             {"content-type", reader->content_type()}};
 
         for (const auto& [key, value] : reader->labels()) {
           headers.insert({fmt::format("{}{}", kLabelHeaderPrefix, key), value});

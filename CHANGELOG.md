@@ -7,16 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2023-02-03
+
+### Fixed
+
+- Querying when a block doesn't have records for certain
+  labels, [PR-235](https://github.com/reductstore/reductstore/pull/235)
+
+## [1.3.0] - 2023-01-26
+
 ### Added
 
 - Labels for  `POST|GET /api/v1/:bucket/:entry` as headers with
   prefix `x-reduct-label-`, [PR-224](https://github.com/reductstore/reductstore/pull/224)
 - `include-<label>` and `exclude-<label>` query parameters for query endpoint
   `GET /api/v1/:bucket/:entry/q`, [PR-226](https://github.com/reductstore/reductstore/pull/226)
+- Store the `Content-Type` header received for a record while writing it, so that the record may be returned with the
+  same header, [PR-231](https://github.com/reductstore/reductstore/pull/231)
 
 ### Changed
 
 - Project license AGPLv3 to MPL-2.0, [PR-221](https://github.com/reductstore/reductstore/pull/221)
+- Rename error header `-x-reduct-error`
+  to `x-reduct-error`, [PR-230](https://github.com/reductstore/reductstore/pull/230)
+- Update Web Console to v1.2.0, [PR-232](https://github.com/reductstore/reductstore/pull/232)
 
 ## [1.2.3] - 2023-01-02
 
@@ -340,7 +354,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.1...HEAD
+
+[1.3.1]: https://github.com/reductstore/reductstore/compare/v1.3.0...v1.3.1
+
+[1.3.0]: https://github.com/reductstore/reductstore/compare/v1.2.3...v1.3.0
 
 [1.2.3]: https://github.com/reductstore/reductstore/compare/v1.2.2...v1.2.3
 

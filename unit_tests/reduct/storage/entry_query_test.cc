@@ -369,4 +369,24 @@ TEST_CASE("storage::Entry should query excluding records with certain labels", "
       REQUIRE_FALSE(ret.result.last);
     }
   }
+
+  SECTION("check include for few blocks") {
+    // finish current block
+    REQUIRE(WriteOne(*entry, std::string(100, 'x'), kTimestamp + seconds(3)) == Error::kOk);
+    REQUIRE(WriteOne(*entry, "blob in next block", kTimestamp + seconds(4), {{"label", "newblock"}}) == Error::kOk);
+
+    IQuery::Options options{
+        .include = {{"label", "newblock"}},
+    };
+
+    auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(5), options);
+    REQUIRE(err == Error::kOk);
+
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(4));
+      REQUIRE(ret.result.last);
+    }
+  }
 }

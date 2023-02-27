@@ -59,7 +59,7 @@ def test_read_no_bucket(base_url, session):
     """Should return 404 if no bucket found"""
     resp = session.get(f'{base_url}/b/xxx/entry?ts=100')
     assert resp.status_code == 404
-    assert 'xxx' in resp.headers["-x-reduct-error"]
+    assert 'xxx' in resp.headers["x-reduct-error"]
 
 
 def test_read_no_data(base_url, session, bucket):
@@ -74,14 +74,14 @@ def test_read_bad_ts(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry?ts=XXXX')
 
     assert resp.status_code == 422
-    assert 'XXX' in resp.headers["-x-reduct-error"]
+    assert 'XXX' in resp.headers["x-reduct-error"]
 
 
 def test_read_bad_no_entry(base_url, session, bucket):
     """Should return 400 if ts is bad"""
     resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 404
-    assert 'entry' in resp.headers["-x-reduct-error"]
+    assert 'entry' in resp.headers["x-reduct-error"]
 
 
 @requires_env("API_TOKEN")
@@ -105,14 +105,14 @@ def test_write_no_bucket(base_url, session):
     """Should return 404 if no bucket found"""
     resp = session.post(f'{base_url}/b/xxx/entry?ts=100')
     assert resp.status_code == 404
-    assert 'xxx' in resp.headers["-x-reduct-error"]
+    assert 'xxx' in resp.headers["x-reduct-error"]
 
 
 def test_write_bad_ts(base_url, session, bucket):
     """Should return 422 if ts is bad"""
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts=XXXX')
     assert resp.status_code == 422
-    assert 'XXX' in resp.headers["-x-reduct-error"]
+    assert 'XXX' in resp.headers["x-reduct-error"]
 
 
 def test_get_record_ok(base_url, session, bucket):
@@ -358,3 +358,19 @@ def test__head_entry_with_full_access_token(base_url, session, bucket, token_wit
     assert resp.status_code == 200
     assert len(resp.content) == 0
     assert resp.headers['Content-Length'] == str(len(dummy_data))
+
+
+def test_write_with_content_type_header(base_url, session, bucket):
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={1000}', data='{"data": "some data"}',
+                        headers={'content-type': 'application/json'})
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}')
+    assert resp.status_code == 200
+    query_id = int(json.loads(resp.content)["id"])
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 200
+    assert resp.content == b"{\"data\": \"some data\"}"
+    assert resp.headers['content-type'] == 'application/json'

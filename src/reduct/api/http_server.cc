@@ -18,6 +18,7 @@
 #include "reduct/api/server_api.h"
 #include "reduct/api/token_api.h"
 #include "reduct/async/sleep.h"
+#include "reduct/config.h"
 #include "reduct/core/logger.h"
 
 namespace reduct::api {
@@ -139,7 +140,7 @@ class HttpServer : public IHttpServer {
       }
 
       ctx.res->writeHeader("connection", ctx.running ? "keep-alive" : "close");
-      ctx.res->writeHeader("server", "ReductStorage");
+      ctx.res->writeHeader("server", fmt::format("ReductStore {}", kVersion));
     };
 
     auto SendError = [ctx, &method, &url, CommonHeaders](const core::Error &err) {
@@ -152,7 +153,7 @@ class HttpServer : public IHttpServer {
       ctx.res->writeStatus(std::to_string(err.code));
       CommonHeaders();
       ctx.res->writeHeader("content-type", "application/json");
-      ctx.res->writeHeader("-x-reduct-error", err.message);
+      ctx.res->writeHeader("x-reduct-error", err.message);
       if (method == "HEAD") {
         ctx.res->end({});
       } else {
@@ -318,7 +319,7 @@ class HttpServer : public IHttpServer {
                         }
                       }
                       return EntryApi::Write(storage_.get(), bucket_name, req->getParameter(1), req->getQuery("ts"),
-                                             req->getHeader("content-length"), labels);
+                                             req->getHeader("content-length"), req->getHeader("content-type"), labels);
                     });
               })
         .get(api_path + "b/:bucket_name/:entry_name",
