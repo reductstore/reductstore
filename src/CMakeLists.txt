@@ -79,8 +79,20 @@ if (WEB_CONSOLE_PATH)
     target_compile_definitions(reduct PUBLIC WITH_CONSOLE)
 endif ()
 
+FetchContent_Declare(
+        uWebSockets
+        GIT_REPOSITORY https://github.com/reductstore/uWebSockets
+        GIT_TAG        a30b4bb75c73ab11df585933a8d681072dcc4bcc
+)
+FetchContent_MakeAvailable(uWebSockets)
+
+
 add_executable(reduct-storage main.cc)
 target_link_libraries(reduct-storage reduct ${CONAN_LIBS})  # For backward compatibility
+target_link_libraries(reduct-storage reduct uWebSockets)
+target_include_directories(reduct-storage PUBLIC ${uWebSockets_SOURCE_DIR}/uWebSockets)
 
 add_executable(reductstore main.cc)
 target_link_libraries(reductstore reduct ${CONAN_LIBS})
+target_link_libraries(reductstore reduct uWebSockets)
+target_include_directories(reductstore PUBLIC ${uWebSockets_SOURCE_DIR}/uWebSockets)

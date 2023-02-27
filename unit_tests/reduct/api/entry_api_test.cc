@@ -145,7 +145,7 @@ TEST_CASE("EntryAPI::Write should respect the passed in content-type header", "[
 
   auto entry = storage->GetBucket("bucket").result.lock()->GetOrCreateEntry("entry-1").result.lock();
 
-  auto [readRecvr, readErr] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {});
+  auto [readRecvr, readErr] = EntryApi::Read(storage.get(), "bucket", "entry-1", "1000001", {}, true);
   REQUIRE(readErr == Error::kOk);
 
   auto [readResp, readRespErr] = readRecvr("", true);
