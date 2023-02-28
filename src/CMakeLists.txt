@@ -84,3 +84,4 @@ target_link_libraries(reduct-storage reduct ${CONAN_LIBS})  # For backward compa
 
 add_executable(reductstore main.cc)
 target_link_libraries(reductstore reduct ${CONAN_LIBS})
+install(TARGETS reductstore DESTINATION bin)
