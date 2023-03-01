@@ -2,7 +2,7 @@ FROM ubuntu:22.04 AS builder
 
 RUN apt update && apt install -y cmake python3-pip zip
 
-RUN pip3 install conan~=1.54.0
+RUN pip3 install conan~=1.58.0
 
 WORKDIR /src
 
