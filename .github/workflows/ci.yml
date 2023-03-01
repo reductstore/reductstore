@@ -288,7 +288,6 @@ jobs:
           asset_path: reductstore.linux-amd64.tar.gz
           asset_name: reductstore.linux-amd64.tar.gz
           asset_content_type: application/gzip
-f
       - name: Download Macos artifact
         uses: actions/download-artifact@v2
         with:
