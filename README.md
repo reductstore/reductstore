@@ -4,6 +4,7 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
 [![Docker Pulls](https://img.shields.io/docker/pulls/reductstore/reductstore)](https://hub.docker.com/r/reductstore/reductstore)
 [![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
+[![reductstore](https://snapcraft.io/reductstore/badge.svg)](https://snapcraft.io/reductstore)
 
 ReductStore is a time series database designed specifically for storing and managing large amounts of blob data. It has
 high performance for writing and real-time querying, making it suitable for edge computing, computer vision, and IoT
