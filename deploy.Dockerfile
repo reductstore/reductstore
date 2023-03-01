@@ -9,7 +9,6 @@ WORKDIR /src
 COPY conanfile.txt .
 COPY src src
 COPY CMakeLists.txt .
-COPY web-console web-console
 
 WORKDIR /build
 

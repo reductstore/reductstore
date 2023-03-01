@@ -30,20 +30,6 @@ jobs:
       - name: Check code in /benchmarks
         run: find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint
 
-  download_console:
-    name: Download Web Console
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Download Console
-        run: wget https://github.com/reductstore/web-console/releases/download/v1.2.0/web-console.build.tar.gz
-      - name: Extract
-        run: mkdir web-console && tar xf web-console.build.tar.gz -C ./web-console
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
-
   build:
     name: Build Linux Docker image
     runs-on: ubuntu-latest
@@ -56,12 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
+        uses: docker/setup-buildx-action@v1f
       - name: Build and export
         uses: docker/build-push-action@v2
         with:
@@ -80,14 +61,8 @@ jobs:
     runs-on: macos-12
     needs:
       - cpplint
-      - download_console
     steps:
       - uses: actions/checkout@v2
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ${{ github.workspace }}/web-console
       - name: Select Xcode 13.4
         run: sudo xcode-select --switch /Applications/Xcode_13.4.app
       - name: Install conan dependencies and build
@@ -109,18 +84,12 @@ jobs:
     runs-on: windows-2019
     needs:
       - cpplint
-      - download_console
     steps:
       - uses: actions/checkout@v2
       - name: Update windows SDK
         uses: fbactions/setup-winsdk@v1
         with:
           winsdk-build-version: 19041
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ${{ github.workspace }}/web-console
       - name: Install conan dependencies and build
         run: |
           pip3 install -U pip
@@ -238,12 +207,6 @@ jobs:
         with:
           images: ghcr.io/${{github.repository}}
 
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
-
       - name: Build and push Docker image to GitHub repo
         uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
         with:
@@ -274,12 +237,6 @@ jobs:
         uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
         with:
           images: reductstore/reductstore
-
-      - name: Download Web Console
-        uses: actions/download-artifact@v2
-        with:
-          name: web_console
-          path: ./web-console
 
       - name: Build and push Docker image to GitHub repo
         uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc

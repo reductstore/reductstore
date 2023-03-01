@@ -7,7 +7,6 @@ COPY src src
 COPY unit_tests unit_tests
 COPY benchmarks benchmarks
 COPY CMakeLists.txt .
-COPY web-console web-console
 
 WORKDIR /build
 
