@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Changed
+
+- Fetch Web Console from cmake, [PR-239](https://github.com/reductstore/reductstore/pull/239)
+
 ## [1.3.1] - 2023-02-03
 
 ### Fixed

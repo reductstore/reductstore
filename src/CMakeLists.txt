@@ -69,10 +69,15 @@ endif ()
 configure_file(config.h.in ${CMAKE_BINARY_DIR}/reduct/config.h @ONLY)
 
 
-if (WEB_CONSOLE_PATH)
-    message(STATUS "Embedding Console from ${WEB_CONSOLE_PATH}")
+if (WITH_WEB_CONSOLE)
+    include(FetchContent)
+    FetchContent_Declare(
+            web_console
+            URL https://github.com/reductstore/web-console/releases/download/v1.2.0/web-console.build.tar.gz
+    )
+    FetchContent_MakeAvailable(web_console)
 
-    file(ARCHIVE_CREATE FORMAT zip OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/console.zip PATHS ${WEB_CONSOLE_PATH})
+    file(ARCHIVE_CREATE FORMAT zip OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/console.zip PATHS ${web_console_SOURCE_DIR}/)
     file(READ ${CMAKE_CURRENT_BINARY_DIR}/console.zip ZIPPED_CONSOLE HEX)
     configure_file(console.h.in ${CMAKE_BINARY_DIR}/reduct/console.h @ONLY)
     execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/cmake/split_string.py ${CMAKE_BINARY_DIR}/reduct/console.h)
