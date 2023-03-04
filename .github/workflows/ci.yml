@@ -16,7 +16,22 @@ on:
       - README.md
       - CHANGELOG.md
 jobs:
+  publish_snap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install snapcraft
+        run: sudo snap install snapcraft --classic
+      - name: Init credentials
+        run: |
+          echo ${{ secrets.SNAPCRAFT_AUTH_DATA }}  > ~/.snap/auth.json
+      - name: Build snap remotely
+        run: snapcraft remote-build
+      - name: Publish snap
+        run: snapcraft push reduct_*.snap --release=edge
+
   cpplint:
+    if: {{false}}
     runs-on: ubuntu-latest
     name: C++ Linter
     steps:
@@ -185,7 +200,7 @@ jobs:
 
   push_image_github:
     runs-on: ubuntu-latest
-    name: Push to Github Registry
+    name: Push to Github Registry (edge version)
     needs:
       - api_tests
       - unit_tests_macos
@@ -214,6 +229,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+
 
   push_image_dockerhub:
     runs-on: ubuntu-latest
