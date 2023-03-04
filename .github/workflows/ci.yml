@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install snapcraft
-        run: snap install snapcraft --classic
+        run: sudo snap install snapcraft --classic
       - name: Init credentials
         run: |
           mkdir -p ~/.snap
