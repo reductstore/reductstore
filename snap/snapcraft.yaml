@@ -40,11 +40,23 @@ parts:
 
     stage-packages:
       - libstdc++6
+  hooks:
+    plugin: dump
+    source: snap/local/hooks
+    organize:
+      bin/: snap/hooks/
+  scripts:
+    plugin: dump
+    source: snap/local/scripts
+
+
 apps:
   reductstore:
-    command: usr/local/bin/reductstore
+    command: bin/wrapper
+    daemon: simple
+    restart-condition: on-failure
     plugs:
       - network
       - network-bind
-      - home
       - removable-media
+      - home
