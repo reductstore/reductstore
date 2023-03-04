@@ -1,0 +1,129 @@
+#!/bin/sh
+
+DEFAULT_HTTP_PORT="8383"
+DEFAULT_HTTP_HOST="0.0.0.0"
+DEFAULT_LOG_LEVEL="INFO"
+DEFAULT_API_BASE_PATH="/"
+DEFAULT_API_TOKEN=""
+DEFAULT_CERT_PATH=""
+DEFAULT_CERT_KEY_PATH=""
+
+data_path()
+{
+        data_path="$(snapctl get data-path)"
+        if [ -z "$data_path" ]; then
+                data_path="$SNAP_COMMON"
+                set_data_path "$data_path"
+        fi
+        echo "$data_path"
+}
+
+set_data_path()
+{
+        snapctl set data-path="$1"
+}
+
+port()
+{
+        port="$(snapctl get port)"
+        if [ -z "$port" ]; then
+                port="$DEFAULT_HTTP_PORT"
+                set_port $port
+        fi
+        echo "$port"
+}
+
+set_port()
+{
+        snapctl set port="$1"
+}
+
+host()
+{
+        host="$(snapctl get host)"
+        if [ -z "$host" ]; then
+                host="$DEFAULT_HTTP_HOST"
+                set_host "$host"
+        fi
+        echo "$host"
+}
+
+set_host()
+{
+        snapctl set host="$1"
+}
+
+log_level()
+{
+          log_level="$(snapctl get log-level)"
+          if [ -z "$log_level" ]; then
+                  log_level="$DEFAULT_LOG_LEVEL"
+                  set_log_level "$log_level"
+          fi
+          echo "$log_level"
+}
+
+set_log_level()
+{
+          snapctl set log-level="$1"
+}
+
+api_base()
+{
+            api_base="$(snapctl get api-base)"
+            if [ -z "$api_base" ]; then
+                    api_base="$DEFAULT_API_BASE_PATH"
+                    set_api_base "$api_base"
+            fi
+            echo "$api_base"
+}
+
+set_api_base()
+{
+          snapctl set api-base="$1"
+}
+
+api_token()
+{
+            api_token="$(snapctl get api-token)"
+            if [ -z "$api_token" ]; then
+                    api_token="$DEFAULT_API_TOKEN"
+                    set_api_token "$api_token"
+            fi
+            echo "$api_token"
+}
+
+set_api_token()
+{
+          snapctl set api-token="$1"
+}
+
+cert_path()
+{
+            cert_path="$(snapctl get cert-path)"
+            if [ -z "$cert_path" ]; then
+                    cert_path="$DEFAULT_CERT_PATH"
+                    set_cert_path "$cert_path"
+            fi
+            echo "$cert_path"
+}
+
+set_cert_path()
+{
+          snapctl set cert-path="$1"
+}
+
+cert_key_path()
+{
+            cert_key_path="$(snapctl get cert-key-path)"
+            if [ -z "$cert_key_path" ]; then
+                    cert_key_path="$DEFAULT_CERT_KEY_PATH"
+                    set_cert_key_path "$cert_key_path"
+            fi
+            echo "$cert_key_path"
+}
+
+set_cert_key_path()
+{
+          snapctl set cert-key-path="$1"
+}
