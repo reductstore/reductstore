@@ -66,7 +66,7 @@ Finally, you can launch the storage:
 RS_DATA_PATH=./data bin/reductstore
 ```
 
-## Confuguration
+## Configuration
 
 ReductStore can be configured with the following environmental variables:
 
