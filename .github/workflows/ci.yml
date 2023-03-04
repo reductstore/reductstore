@@ -27,7 +27,7 @@ jobs:
           mkdir -p ~/.snap
           echo ${{ secrets.SNAPCRAFT_AUTH_DATA }}  > ~/.snap/auth.json
       - name: Build snap remotely
-        run: snapcraft remote-build
+        run: snapcraft remote-build  --launchpad-accept-public-upload
       - name: Publish snap
         run: snapcraft push reduct_*.snap --release=edge
 
