@@ -26,7 +26,7 @@ jobs:
 
         run: |
           mkdir -p ~/.snap
-          echo "::add-mask::${{ secrets.SNAPCRAFT_AUTH_DATA }}  > ~/.snap/auth.json
+          echo "::add-mask::${{ secrets.SNAPCRAFT_AUTH_DATA }}"  > ~/.snap/auth.json
       - name: Build snap remotely
         run: snapcraft remote-build  --launchpad-accept-public-upload
       - name: Publish snap
