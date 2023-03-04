@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 
-set(MAJOR_VERSION 1)
-set(MINOR_VERSION 3)
-set(PATCH_VERSION 1)
-
-set(FULL_VERSION ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION})
+file(READ "VERSION" FULL_VERSION)
 
 option(REDUCT_BUILD_TEST "Build unit tests" ON)
 option(REDUCT_BUILD_BENCHMARKS "Build unit tests" ON)
