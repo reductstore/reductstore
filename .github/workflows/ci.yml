@@ -21,9 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install snapcraft
-        run: sudo snap install snapcraft --classic
+        run: snap install snapcraft --classic
       - name: Init credentials
         run: |
+          mkdir -p ~/.snap
           echo ${{ secrets.SNAPCRAFT_AUTH_DATA }}  > ~/.snap/auth.json
       - name: Build snap remotely
         run: snapcraft remote-build
