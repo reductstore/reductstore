@@ -221,8 +221,6 @@ jobs:
     name: Build snap package
     needs:
       - api_tests
-    outputs:
-      snap-file: ${{ steps.build-snap.outputs.snap }}
     steps:
       - uses: actions/checkout@v3
       - uses: snapcore/action-build@v1
@@ -239,12 +237,15 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: reductstore
-          path: ${{ steps.build-snap.outputs.snap }}
+          path: "*.snap"
 
   publish_snap:
     name: Publish snap package
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     needs:
       - build_snap
       - unit_tests_macos
@@ -254,12 +255,15 @@ jobs:
         with:
           name: reductstore
           path: .
+      - name: Save snap name in envirnoment variable
+        run: |
+          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
       - uses: snapcore/action-publish@v1
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
         with:
-          snap: ${{needs.build_snap.outputs.snap-file}}
-          release: ${{ startsWith(github.ref, 'refs/tags/') && 'candidate' || 'edge'}}
+          snap: ${{env.SNAP_NAME}}
+          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
 
   push_image_dockerhub:
     runs-on: ubuntu-latest
