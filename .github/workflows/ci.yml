@@ -28,7 +28,7 @@ jobs:
           mkdir -p ~/.snap
           echo "::add-mask::${{ secrets.SNAPCRAFT_AUTH_DATA }}"  > ~/.snap/auth.json
       - name: Build snap
-        run: snapcraft
+        run: sudo snapcraft
       - name: Publish snap
         run: snapcraft push reduct_*.snap --release=edge
 
