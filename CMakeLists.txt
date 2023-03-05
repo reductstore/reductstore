@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 
-file(READ "VERSION" FULL_VERSION)
+file(READ "${CMAKE_SOURCE_DIR}/VERSION" FULL_VERSION)
+string(STRIP ${FULL_VERSION} FULL_VERSION)
+message(STATUS "Version ${FULL_VERSION}")
 
 option(REDUCT_BUILD_TEST "Build unit tests" ON)
 option(REDUCT_BUILD_BENCHMARKS "Build unit tests" ON)
@@ -13,7 +15,6 @@ set(DEFAULT_MAX_READ_CHUNK 512000 CACHE STRING "Default max chunk for reading")
 
 project(reductstore VERSION ${FULL_VERSION})
 
-message(STATUS "Version ${FULL_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
