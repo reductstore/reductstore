@@ -7,11 +7,12 @@ COPY src src
 COPY unit_tests unit_tests
 COPY benchmarks benchmarks
 COPY CMakeLists.txt .
+COPY VERSION VERSION
 
 WORKDIR /build
 
 ARG BUILD_TYPE=Release
-RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DFULL_STATIC_BINARY=ON -DWEB_CONSOLE_PATH=/src/web-console /src
+RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DFULL_STATIC_BINARY=ON /src
 RUN make -j4
 
 RUN mkdir /data
