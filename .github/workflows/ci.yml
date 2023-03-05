@@ -258,7 +258,7 @@ jobs:
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
         with:
-          snap: ${{needs.build.outputs.snap-file}}
+          snap: ${{needs.build_snap.outputs.snap-file}}
           release: ${{ startsWith(github.ref, 'refs/tags/') && 'candidate' || 'edge'}}
 
   push_image_dockerhub:
