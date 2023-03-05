@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## Changed
+### Added
+
+- Build and publish snap, [PR-241](https://github.com/reductstore/reductstore/pull/241)
+
+### Changed
 
 - Fetch Web Console from cmake, [PR-239](https://github.com/reductstore/reductstore/pull/239)
 - Install snap as daemon, [PR-240](https://github.com/reductstore/reductstore/pull/240)
+
 
 ## [1.3.1] - 2023-02-03
 
