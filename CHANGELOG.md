@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install snap as daemon, [PR-240](https://github.com/reductstore/reductstore/pull/240)
 
 
+### Fixed
+
+- Begin time 0 is valid for a block, [PR-242](https://github.com/reductstore/reductstore/pull/242)
+
 ## [1.3.1] - 2023-02-03
 
 ### Fixed

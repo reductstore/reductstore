@@ -162,9 +162,7 @@ class BlockManager : public IBlockManager {
           }
 
           blk->mutable_records(index)->set_state(state);
-          if (state == proto::Record::kInvalid) {
-            blk->set_invalid(true);
-          }
+          blk->set_invalid(state == proto::Record::kInvalid);
 
           if (auto err = SaveBlock(blk)) {
             LOG_ERROR("{}", err.ToString());
