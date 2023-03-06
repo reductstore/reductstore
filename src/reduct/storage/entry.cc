@@ -53,7 +53,7 @@ class Entry : public IEntry {
             auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoull(path.stem().c_str()));
             auto [block, err] = block_manager_->LoadBlock(ts);
 
-            if (err || block->begin_time().seconds() == 0 || block->invalid()) {
+            if (err || block->invalid()) {
               LOG_WARNING("Block {} looks broken. Remove it.", path.string());
               std::error_code ec;
               if (!fs::remove(path, ec)) {
