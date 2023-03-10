@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2023-03-10
+
 ### Added
 
 - Build and publish snap, [PR-241](https://github.com/reductstore/reductstore/pull/241)
@@ -14,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Fetch Web Console from cmake, [PR-239](https://github.com/reductstore/reductstore/pull/239)
-- Install snap as daemon, [PR-240](https://github.com/reductstore/reductstore/pull/240)
+- Install snap as a daemon, [PR-240](https://github.com/reductstore/reductstore/pull/240)
 
 
 ### Fixed
@@ -368,7 +370,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.2...HEAD
+
+[1.3.2]: https://github.com/reductstore/reductstore/compare/v1.3.1...v1.3.2
 
 [1.3.1]: https://github.com/reductstore/reductstore/compare/v1.3.0...v1.3.1
 
