@@ -23,12 +23,8 @@ Result<HttpRequestReceiver> ServerApi::List(const IStorage* storage) { return Se
 
 core::Result<HttpRequestReceiver> ServerApi::Me(const auth::ITokenRepository* token_repo,
                                                 std::string_view auth_header) {
-  auto [token_value, error] = ParseBearerToken(auth_header);
-  if (error) {
-    return error;
-  }
-
-  return SendJson(token_repo->ValidateToken(token_value));
+  auto token = ParseBearerToken(auth_header);
+  return SendJson(token_repo->ValidateToken(std::move(token)));
 }
 
 }  // namespace reduct::api

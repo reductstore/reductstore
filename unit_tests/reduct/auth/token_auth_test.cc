@@ -12,11 +12,12 @@
 using reduct::auth::Anonymous;
 using reduct::auth::Authenticated;
 using reduct::auth::ITokenAuthorization;
+using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 
 TEST_CASE("auth::TokenAuthorization should return 401 if head is bad") {
   auto auth = ITokenAuthorization::Build("xxxxxxx");
-  auto repo = reduct::auth::ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory(), .api_token = "init-token"});
 
   REQUIRE(auth->Check("", *repo, Authenticated()) == Error::Unauthorized("No bearer token in request header"));
   REQUIRE(auth->Check("xxx", *repo, Authenticated()) == Error::Unauthorized("No bearer token in request header"));
@@ -26,7 +27,7 @@ TEST_CASE("auth::TokenAuthorization should return 401 if head is bad") {
 TEST_CASE("auth::TokenAuthorization should use API token to check") {
   auto auth = ITokenAuthorization::Build("we have init api token");
 
-  auto repo = reduct::auth::ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory(), .api_token = "init-token"});
   auto [token, err] = repo->CreateToken("token-1", {});
   REQUIRE(err == Error::kOk);
 

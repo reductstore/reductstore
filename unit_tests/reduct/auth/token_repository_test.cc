@@ -12,12 +12,12 @@ using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 
 static std::unique_ptr<ITokenRepository> MakeRepo(std::filesystem::path path = BuildTmpDirectory()) {
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
   {
     auto [token_list, err] = repo->GetTokenList();
 
     REQUIRE(err == Error::kOk);
-    REQUIRE(token_list.empty());
+    REQUIRE(token_list.size() == 0);
   }
 
   ITokenRepository::TokenPermissions permissions;
@@ -32,7 +32,7 @@ static std::unique_ptr<ITokenRepository> MakeRepo(std::filesystem::path path = B
 
 TEST_CASE("auth::TokenRepository should create a token") {
   const auto path = BuildTmpDirectory();
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
   ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(false);
@@ -62,7 +62,7 @@ TEST_CASE("auth::TokenRepository should create a token") {
   }
 
   SECTION("must be persistent") {
-    auto new_repo = ITokenRepository::Build({.data_path = path});
+    auto new_repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
     auto [token_list, _] = new_repo->GetTokenList();
     REQUIRE(token_list.size() == 1);
     REQUIRE(token_list[0].name() == "token");
@@ -71,7 +71,7 @@ TEST_CASE("auth::TokenRepository should create a token") {
 
 TEST_CASE("auth::TokenRepository should update token") {
   const auto path = BuildTmpDirectory();
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
   ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(false);
@@ -94,7 +94,7 @@ TEST_CASE("auth::TokenRepository should update token") {
   }
 
   SECTION("must be persistent") {
-    auto new_repo = ITokenRepository::Build({.data_path = path});
+    auto new_repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
     auto [token, _] = new_repo->FindByName("new-token");
     REQUIRE(token.permissions().full_access());
   }
@@ -156,7 +156,7 @@ TEST_CASE("auth::TokenRepository should find s token by value") {
   REQUIRE(token.value().empty());
 
   SECTION("invalid token") {
-    REQUIRE(repo->ValidateToken("WRONG_TOKEN").error == Error::Unauthorized("Invalid token"));
+    REQUIRE(repo->ValidateToken({"WRONG_TOKEN"}).error == Error::Unauthorized("Invalid token"));
   }
 }
 
@@ -172,14 +172,14 @@ TEST_CASE("auth::TokenRepository should remove token by name") {
   }
 
   SECTION("should be persistent") {
-    auto new_repo = ITokenRepository::Build({.data_path = path});
+    auto new_repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
     REQUIRE(new_repo->FindByName("token-1").error.code == Error::kNotFound);
   }
 }
 
 TEST_CASE("auth::TokenRepository should create an init token") {
   auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory(), .api_token = "INIT_TOKEN"});
-  auto [token, err] = repo->ValidateToken("INIT_TOKEN");
+  auto [token, err] = repo->ValidateToken({"INIT_TOKEN"});
 
   REQUIRE(err == Error::kOk);
   REQUIRE(token.name() == "init-token");
