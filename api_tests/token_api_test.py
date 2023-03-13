@@ -3,6 +3,7 @@ import json
 from conftest import auth_headers, requires_env
 
 
+@requires_env("API_TOKEN")
 def test__create_token(base_url, session, token_name, bucket_name):
     """Should create a token"""
     resp = session.post(f'{base_url}/b/{bucket_name}')
@@ -20,6 +21,7 @@ def test__create_token(base_url, session, token_name, bucket_name):
     assert "token-" in json.loads(resp.content)["value"]
 
 
+@requires_env("API_TOKEN")
 def test__create_token_exist(base_url, session, token_name):
     """Should return 409 if a token already exists"""
     permissions = {}
@@ -45,6 +47,7 @@ def test__creat_token_with_full_access(base_url, session, token_name, token_with
     assert resp.headers["x-reduct-error"] == "Token doesn't have full access"
 
 
+@requires_env("API_TOKEN")
 def test__list_tokens(base_url, session, token_name):
     """Should list all tokens"""
     permissions = {}
@@ -69,6 +72,7 @@ def test__list_token_with_full_access(base_url, session, token_without_permissio
     assert resp.headers["x-reduct-error"] == "Token doesn't have full access"
 
 
+@requires_env("API_TOKEN")
 def test__get_token(base_url, session, bucket_name, token_name):
     """Should show a token name and permissions"""
     resp = session.post(f'{base_url}/b/{bucket_name}')
@@ -95,6 +99,7 @@ def test__get_token(base_url, session, bucket_name, token_name):
     }
 
 
+@requires_env("API_TOKEN")
 def test__get_token_not_found(base_url, session):
     """Should return 404 if a token does not exist"""
     resp = session.get(f'{base_url}/tokens/token-not-found')
@@ -113,6 +118,7 @@ def test__get_token_with_full_access(base_url, session, token_without_permission
     assert resp.headers["x-reduct-error"] == "Token doesn't have full access"
 
 
+@requires_env("API_TOKEN")
 def test__delete_token(base_url, session, token_name):
     """Should delete a token"""
     permissions = {}
@@ -128,6 +134,7 @@ def test__delete_token(base_url, session, token_name):
     assert token_name not in [t["name"] for t in json.loads(resp.content)["tokens"]]
 
 
+@requires_env("API_TOKEN")
 def test__delete_token_not_found(base_url, session):
     """Should return 404 if a token does not exist"""
     resp = session.delete(f'{base_url}/tokens/token-not-found')

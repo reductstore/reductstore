@@ -29,28 +29,31 @@ const std::string_view kTokenRepoFileName = ".auth";
  */
 class NoTokenRepository : public ITokenRepository {
  public:
-  Result<Token> ValidateToken(Result<std::string> value) const override {
-    Token token;
-    token.set_name("AUTHENTICATION-DISABLED");
-    token.mutable_permissions()->set_full_access(true);
-    return token;
+  NoTokenRepository() : placeholder_token_{} {
+    placeholder_token_.set_name("AUTHENTICATION-DISABLED");
+    placeholder_token_.mutable_permissions()->set_full_access(true);
   }
 
+  Result<Token> ValidateToken(Result<std::string> value) const override { return placeholder_token_; }
+
   Result<TokenCreateResponse> CreateToken(std::string name, TokenPermissions permissions) override {
-    return Error::Unauthorized("Authentication is disabled");
+    return Error::BadRequest("Authentication is disabled");
   }
 
   Error UpdateToken(const std::string& name, TokenPermissions permissions) override {
-    return Error::Unauthorized("Authentication is disabled");
+    return Error::BadRequest("Authentication is disabled");
   }
 
-  Result<TokenList> GetTokenList() const override { return Error::Unauthorized("Authentication is disabled"); }
+  Result<TokenList> GetTokenList() const override { return TokenList{}; }
 
   Result<Token> FindByName(const std::string& name) const override {
-    return Error::Unauthorized("Authentication is disabled");
+    return Error::BadRequest("Authentication is disabled");
   }
 
-  Error RemoveToken(const std::string& name) override { return Error::Unauthorized("Authentication is disabled"); }
+  Error RemoveToken(const std::string& name) override { return Error::kOk; }
+
+ private:
+  Token placeholder_token_;
 };
 
 class TokenRepository : public ITokenRepository {
