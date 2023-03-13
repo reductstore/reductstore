@@ -14,16 +14,16 @@ using reduct::auth::WriteAccess;
 using reduct::core::Error;
 using reduct::proto::api::Token;
 
-TEST_CASE("Anonymous should work without token") {
+TEST_CASE("Anonymous should work without token", "[auth]") {
   REQUIRE(Anonymous().Validate({{}, Error::Unauthorized()}) == Error::kOk);
 }
 
-TEST_CASE("Authenticated should work with any valid token") {
+TEST_CASE("Authenticated should work with any valid token", "[auth]") {
   REQUIRE(Authenticated().Validate(Error::Unauthorized("Some error")) == Error::Unauthorized("Some error"));
   REQUIRE(Authenticated().Validate(Error::kOk) == Error::kOk);
 }
 
-TEST_CASE("FullAccess should check full access flag of token") {
+TEST_CASE("FullAccess should check full access flag of token", "[auth]") {
   REQUIRE(Authenticated().Validate(Error::Unauthorized()) == Error::Unauthorized());
   REQUIRE(Authenticated().Validate(Error::kOk) == Error::kOk);
 
@@ -35,7 +35,7 @@ TEST_CASE("FullAccess should check full access flag of token") {
   REQUIRE(FullAccess().Validate(permissions) == Error::Forbidden("Token doesn't have full access"));
 }
 
-TEST_CASE("ReadAccess should work for full access flag and certain bucket") {
+TEST_CASE("ReadAccess should work for full access flag and certain bucket", "[auth]") {
   Token::Permissions permissions;
   permissions.set_full_access(true);
   REQUIRE(ReadAccess("bucket-1").Validate(permissions) == Error::kOk);
@@ -48,7 +48,7 @@ TEST_CASE("ReadAccess should work for full access flag and certain bucket") {
   REQUIRE(ReadAccess("bucket-1").Validate(permissions) == Error::kOk);
 }
 
-TEST_CASE("WriteAccess should work for full access flag and certain bucket") {
+TEST_CASE("WriteAccess should work for full access flag and certain bucket", "[auth]") {
   Token::Permissions permissions;
   permissions.set_full_access(true);
   REQUIRE(WriteAccess("bucket-1").Validate(permissions) == Error::kOk);

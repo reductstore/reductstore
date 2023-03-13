@@ -65,7 +65,7 @@ class ITokenRepository {
    * @param value value of token
    * @return token without value, 404 if not found
    */
-  virtual core::Result<Token> ValidateToken(std::string_view value) const = 0;
+  virtual core::Result<Token> ValidateToken(core::Result<std::string> value) const = 0;
 
   /**
    * Remove a token by name

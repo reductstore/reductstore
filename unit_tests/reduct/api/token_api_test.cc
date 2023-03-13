@@ -24,7 +24,7 @@ using Storage = reduct::storage::IStorage;  // fix windows build
 
 TEST_CASE("TokenApi::CreateToken should create a token and return its value", "[api]") {
   const auto path = BuildTmpDirectory();
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
   auto storage = Storage::Build({.data_path = path});
 
   REQUIRE(storage->CreateBucket("bucket-1", {}) == Error::kOk);
@@ -72,7 +72,7 @@ TEST_CASE("TokenApi::CreateToken should create a token and return its value", "[
 
 TEST_CASE("TokenApi::ListTokens should list tokens", "[api]") {
   const auto path = BuildTmpDirectory();
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
   REQUIRE(repo->CreateToken("token-1", {}) == Error::kOk);
   REQUIRE(repo->CreateToken("token-2", {}) == Error::kOk);
@@ -92,7 +92,7 @@ TEST_CASE("TokenApi::ListTokens should list tokens", "[api]") {
 
 TEST_CASE("TokenApi::GetToken should show a token", "[api]") {
   const auto path = BuildTmpDirectory();
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
   ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(true);
@@ -122,7 +122,7 @@ TEST_CASE("TokenApi::GetToken should show a token", "[api]") {
 
 TEST_CASE("TokenApi::RemoveToken should delete a token", "[api]") {
   const auto path = BuildTmpDirectory();
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
   REQUIRE(repo->CreateToken("token-1", {}).error == Error::kOk);
 

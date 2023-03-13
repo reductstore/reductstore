@@ -24,6 +24,38 @@ using google::protobuf::util::TimeUtil;
 
 const std::string_view kTokenRepoFileName = ".auth";
 
+/**
+ * Does nothing when no API token is provided
+ */
+class NoTokenRepository : public ITokenRepository {
+ public:
+  NoTokenRepository() : placeholder_token_{} {
+    placeholder_token_.set_name("AUTHENTICATION-DISABLED");
+    placeholder_token_.mutable_permissions()->set_full_access(true);
+  }
+
+  Result<Token> ValidateToken(Result<std::string> value) const override { return placeholder_token_; }
+
+  Result<TokenCreateResponse> CreateToken(std::string name, TokenPermissions permissions) override {
+    return Error::BadRequest("Authentication is disabled");
+  }
+
+  Error UpdateToken(const std::string& name, TokenPermissions permissions) override {
+    return Error::BadRequest("Authentication is disabled");
+  }
+
+  Result<TokenList> GetTokenList() const override { return TokenList{}; }
+
+  Result<Token> FindByName(const std::string& name) const override {
+    return Error::BadRequest("Authentication is disabled");
+  }
+
+  Error RemoveToken(const std::string& name) override { return Error::kOk; }
+
+ private:
+  Token placeholder_token_;
+};
+
 class TokenRepository : public ITokenRepository {
  public:
   explicit TokenRepository(Options options) : repo_() {
@@ -42,17 +74,13 @@ class TokenRepository : public ITokenRepository {
       }
     }
 
-    if (!options.api_token.empty()) {
-      const auto kInitTokenName = "init-token";
+    const auto kInitTokenName = "init-token";
 
-      Token token;
-      token.set_name(kInitTokenName);
-      token.set_value(std::string(options.api_token));
-      token.mutable_created_at()->CopyFrom(TimeUtil::GetCurrentTime());
+    token_.set_name(kInitTokenName);
+    token_.set_value(std::string(options.api_token));
+    token_.mutable_created_at()->CopyFrom(TimeUtil::GetCurrentTime());
 
-      token.mutable_permissions()->set_full_access(true);
-      repo_[kInitTokenName] = token;
-    }
+    token_.mutable_permissions()->set_full_access(true);
   }
 
   Result<TokenCreateResponse> CreateToken(std::string name, TokenPermissions permissions) override {
@@ -125,8 +153,15 @@ class TokenRepository : public ITokenRepository {
     return {token, Error::kOk};
   }
 
-  Result<Token> ValidateToken(std::string_view value) const override {
-    auto v = repo_ | std::views::values | std::views::filter([value](auto t) { return t.value() == value; });
+  Result<Token> ValidateToken(Result<std::string> value) const override {
+    RETURN_ERROR(value.error);
+
+    if (value.result == token_.value()) {
+      // check API token first
+      return token_;
+    }
+
+    auto v = repo_ | std::views::values | std::views::filter([value](auto t) { return t.value() == value.result; });
     if (v.empty()) {
       return {{}, Error::Unauthorized("Invalid token")};
     }
@@ -165,9 +200,14 @@ class TokenRepository : public ITokenRepository {
 
   std::filesystem::path config_path_;
   std::map<std::string, Token> repo_;
+  Token token_;
 };
 
 std::unique_ptr<ITokenRepository> ITokenRepository::Build(ITokenRepository::Options options) {
+  if (options.api_token.empty()) {
+    return std::make_unique<NoTokenRepository>();
+  }
+
   return std::make_unique<TokenRepository>(std::move(options));
 }
 

@@ -131,7 +131,7 @@ TEST_CASE("BucketApi::UpdateBucket should update a bucket", "[api]") {
 TEST_CASE("BucketApi::RemoveBucket should remove a bucket", "[api]") {
   const auto path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = path});
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
   SECTION("ok") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);

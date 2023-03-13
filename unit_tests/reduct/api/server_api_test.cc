@@ -65,7 +65,7 @@ TEST_CASE("ServerApi::List should return JSON", "[api]") {
 }
 
 TEST_CASE("ServerAPI::Me should return current permissions", "[api]") {
-  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory(), .api_token = "init-token"});
 
   ITokenRepository::TokenPermissions permissions;
   permissions.set_full_access(true);
@@ -101,4 +101,23 @@ TEST_CASE("ServerAPI::Me should return current permissions", "[api]") {
   SECTION("no token") {
     REQUIRE(ServerApi::Me(repo.get(), "").error == Error::Unauthorized("No bearer token in request header"));
   }
+}
+
+TEST_CASE("ServerAPI::Me should return placeholder always and authentication is disabled", "[api]") {
+  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+
+  auto [receiver, err] = ServerApi::Me(repo.get(), "invalid-token");
+  REQUIRE(err == Error::kOk);
+
+  auto [resp, recv_err] = receiver("", true);
+  REQUIRE(recv_err == Error::kOk);
+
+  auto output = resp.SendData();
+  REQUIRE(output.error == Error::kOk);
+
+  ITokenRepository::Token token;
+  JsonStringToMessage(output.result, &token);
+
+  REQUIRE(token.name() == "AUTHENTICATION-DISABLED");
+  REQUIRE(token.permissions().full_access());
 }

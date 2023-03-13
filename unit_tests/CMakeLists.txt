@@ -17,6 +17,7 @@ set(SRC_FILES
 
         reduct/core/env_test.cc
 
+        reduct/auth/no_token_repository_test.cc
         reduct/auth/polices_test.cc
         reduct/auth/token_auth_test.cc
         reduct/auth/token_repository_test.cc
