@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- GET /api/v1/me endpoint for disabled authentication, [PR-245](https://github.com/reductstore/reductstore/pull/245)
+
 ## [1.3.2] - 2023-03-10
 
 ### Added
@@ -17,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fetch Web Console from cmake, [PR-239](https://github.com/reductstore/reductstore/pull/239)
 - Install snap as a daemon, [PR-240](https://github.com/reductstore/reductstore/pull/240)
-
 
 ### Fixed
 
