@@ -30,7 +30,7 @@ static std::unique_ptr<ITokenRepository> MakeRepo(std::filesystem::path path = B
   return repo;
 }
 
-TEST_CASE("auth::TokenRepository should create a token") {
+TEST_CASE("auth::TokenRepository should create a token", "[auth]") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
@@ -69,7 +69,7 @@ TEST_CASE("auth::TokenRepository should create a token") {
   }
 }
 
-TEST_CASE("auth::TokenRepository should update token") {
+TEST_CASE("auth::TokenRepository should update token", "[auth]") {
   const auto path = BuildTmpDirectory();
   auto repo = ITokenRepository::Build({.data_path = path, .api_token = "init-token"});
 
@@ -104,7 +104,7 @@ TEST_CASE("auth::TokenRepository should update token") {
   }
 }
 
-TEST_CASE("auth::TokenRepository should list tokens") {
+TEST_CASE("auth::TokenRepository should list tokens", "[auth]") {
   auto repo = MakeRepo();
 
   auto [token_list, err] = repo->GetTokenList();
@@ -122,7 +122,7 @@ TEST_CASE("auth::TokenRepository should list tokens") {
   REQUIRE_FALSE(token_list[1].has_permissions());
 }
 
-TEST_CASE("auth::TokenRepository should find s token by name") {
+TEST_CASE("auth::TokenRepository should find s token by name", "[auth]") {
   auto repo = MakeRepo();
 
   auto [token, error] = repo->FindByName("token-1");
@@ -138,7 +138,7 @@ TEST_CASE("auth::TokenRepository should find s token by name") {
   }
 }
 
-TEST_CASE("auth::TokenRepository should find s token by value") {
+TEST_CASE("auth::TokenRepository should find s token by value", "[auth]") {
   auto repo = MakeRepo();
 
   ITokenRepository::TokenPermissions permissions;
@@ -160,7 +160,7 @@ TEST_CASE("auth::TokenRepository should find s token by value") {
   }
 }
 
-TEST_CASE("auth::TokenRepository should remove token by name") {
+TEST_CASE("auth::TokenRepository should remove token by name", "[auth]") {
   const auto path = BuildTmpDirectory();
   auto repo = MakeRepo(path);
 
@@ -177,7 +177,7 @@ TEST_CASE("auth::TokenRepository should remove token by name") {
   }
 }
 
-TEST_CASE("auth::TokenRepository should create an init token") {
+TEST_CASE("auth::TokenRepository should create an init token", "[auth]") {
   auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory(), .api_token = "INIT_TOKEN"});
   auto [token, err] = repo->ValidateToken({"INIT_TOKEN"});
 

@@ -14,14 +14,14 @@ using reduct::auth::ITokenAuthorization;
 using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 
-TEST_CASE("auth::NoTokenRepository should validate any token and error") {
+TEST_CASE("auth::NoTokenRepository should validate any token and error", "[auth]") {
   auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
 
   REQUIRE(repo->ValidateToken({"token-1"}) == Error::kOk);
   REQUIRE(repo->ValidateToken(Error::BadRequest("Any problems")) == Error::kOk);
 }
 
-TEST_CASE("auth::NoTokenRepository should return placeholder with full access") {
+TEST_CASE("auth::NoTokenRepository should return placeholder with full access", "[auth]") {
   auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
 
   auto [token, err] = repo->ValidateToken({""});
