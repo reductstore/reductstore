@@ -53,7 +53,7 @@ curl -d "some_data_1" \
 
 curl -d "some_data_2" \
   -X POST \
-    --header "x-reduct-label-quality: bad" \
+  --header "x-reduct-label-quality: bad" \
   "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?ts=20000"
 
 # Query all records in the bucket (TTL of request 10000s, so you don't need to hurry)
