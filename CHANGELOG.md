@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Changed
+
+- New public Docker repository `reduct/store`, [PR-246](https://github.com/reductstore/reductstore/pull/246)
+
 ### Fixed
 
 - GET /api/v1/me endpoint for disabled authentication, [PR-245](https://github.com/reductstore/reductstore/pull/245)
