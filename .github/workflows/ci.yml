@@ -15,6 +15,12 @@ on:
       - docs/**
       - README.md
       - CHANGELOG.md
+env:
+  # This is workaround for https://github.com/actions/runner/issues/2372
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  DOCKER_USER: ${{ secrets.DOCKER_USER }}
+  DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+
 jobs:
   cpplint:
     runs-on: ubuntu-latest
@@ -244,11 +250,11 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Push to DockerHub Registry
-    env:
-      # This is workaround for https://github.com/actions/runner/issues/2372
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      DOCKER_USER: ${{ secrets.DOCKER_USER }}
-      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    needs:
+      - api_tests
+      - unit_tests_macos
+      - unit_tests_windows
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
         build_type: [ "GitHub", "DockerHub" ]
@@ -264,11 +270,7 @@ jobs:
             username: ${{ env.DOCKER_USER }}
             password: ${{ env.DOCKER_TOKEN }}
             images: reduct/store
-    needs:
-      - api_tests
-      - unit_tests_macos
-      - unit_tests_windows
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+
     steps:
       - uses: actions/checkout@v3
 
