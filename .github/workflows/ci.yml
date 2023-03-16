@@ -62,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: image
-          path: /tmp/image_${{ matrix.build_type }}.tar
+          path: /tmp/image_${{ matrix.arch }}_${{ matrix.build_type }}.tar
 
   build_macos:
     name: Build for MacOS-12
