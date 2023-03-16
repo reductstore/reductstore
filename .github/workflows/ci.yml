@@ -335,8 +335,9 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - make_release
-    matrix:
-      arch: [ "amd64" ]
+    strategy:
+      matrix:
+        arch: [ "amd64" ]
     steps:
       - name: Download Linux artifact
         uses: actions/download-artifact@v2
