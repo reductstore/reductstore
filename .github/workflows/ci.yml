@@ -37,11 +37,12 @@ jobs:
       - cpplint
     strategy:
       matrix:
-        build_type: [ "Debug", "Release" ]
         arch: [ "amd64" ]
-      exclude:
+      include:
         - arch: "arm64"
           build_type: "Debug"
+        - arch: "amd64"
+          build_type: "Release"
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
