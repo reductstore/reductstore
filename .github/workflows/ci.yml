@@ -55,7 +55,7 @@ jobs:
         with:
           context: .
           tags: full_static_image:latest
-          outputs: type=docker,dest=/tmp/image_${{arch}}_${{ matrix.build_type }}.tar
+          outputs: type=docker,dest=/tmp/image_${{matrix.arch}}_${{ matrix.build_type }}.tar
           build-args: BUILD_TYPE=${{ matrix.build_type }}
           platforms: linux/${{ matrix.arch }}
       - name: Upload artifact
@@ -248,17 +248,17 @@ jobs:
       matrix:
         build_type: [ "GitHub", "DockerHub" ]
         arch: [ "amd64" ]
-      include:
-        - build_type: "GitHub"
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          images: ghcr.io/${{github.repository}}
-        - build_type: "DockerHub"
-          registry: docker.io
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-          images: reduct/store
+        include:
+          - build_type: "GitHub"
+            registry: ghcr.io
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
+            images: ghcr.io/${{github.repository}}
+          - build_type: "DockerHub"
+            registry: docker.io
+            username: ${{ secrets.DOCKER_USER }}
+            password: ${{ secrets.DOCKER_TOKEN }}
+            images: reduct/store
     needs:
       - api_tests
       - unit_tests_macos
