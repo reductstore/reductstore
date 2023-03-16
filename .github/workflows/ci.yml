@@ -346,7 +346,7 @@ jobs:
           path: /tmp/
       - name: Load Linux image and get binary
         run: |
-          docker load --input /tmp/image_${{arch}}_Release.tar
+          docker load --input /tmp/image_${{matrix.arch}}_Release.tar
           docker image ls -a
           id=$(docker create ${{github.repository}})
           docker cp $id:/usr/local/bin/reductstore reductstore
