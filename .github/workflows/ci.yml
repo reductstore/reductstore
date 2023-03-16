@@ -244,6 +244,11 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Push to DockerHub Registry
+    env:
+      # This is workaround for https://github.com/actions/runner/issues/2372
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
     strategy:
       matrix:
         build_type: [ "GitHub", "DockerHub" ]
@@ -252,12 +257,12 @@ jobs:
           - build_type: "GitHub"
             registry: ghcr.io
             username: ${{ github.actor }}
-            password: ${{ secrets.GITHUB_TOKEN }}
+            password: ${{ env.GITHUB_TOKEN }}
             images: ghcr.io/${{github.repository}}
           - build_type: "DockerHub"
             registry: docker.io
-            username: ${{ secrets.DOCKER_USER }}
-            password: ${{ secrets.DOCKER_TOKEN }}
+            username: ${{ env.DOCKER_USER }}
+            password: ${{ env.DOCKER_TOKEN }}
             images: reduct/store
     needs:
       - api_tests
