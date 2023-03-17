@@ -38,7 +38,7 @@ jobs:
     strategy:
       matrix:
         build_type: [ "Debug", "Release" ]
-        arch: [ "amd64" ]
+        arch: [ "amd64" , "arm64"]
         exclude:
           - arch: "arm64"
             build_type: "Debug"
@@ -248,7 +248,7 @@ jobs:
     strategy:
       matrix:
         build_type: [ "GitHub", "DockerHub" ]
-        arch: [ "amd64" ]
+        arch: [ "amd64", "arm64" ]
         include:
           - build_type: "GitHub"
             registry: ghcr.io
@@ -337,7 +337,7 @@ jobs:
       - make_release
     strategy:
       matrix:
-        arch: [ "amd64" ]
+        arch: [ "amd64", "arm64" ]
     steps:
       - name: Download Linux artifact
         uses: actions/download-artifact@v2
