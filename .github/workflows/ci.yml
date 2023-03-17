@@ -41,9 +41,9 @@ jobs:
         arch: [ "amd64" , "arm64"]
         include:
           - arch: "amd64"
-            with_test: ON
+            with_tests: ON
           - arch: "arm64"
-            with_test: OFF
+            with_tests: OFF
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
@@ -60,7 +60,7 @@ jobs:
           outputs: type=docker,dest=/tmp/image_${{matrix.arch}}_${{ matrix.build_type }}.tar
           build-args: |
             BUILD_TYPE=${{ matrix.build_type }}
-            WITH_TEST=${{ matrix.with_test }}
+            WITH_TESTS=${{ matrix.with_tests }}
           platforms: linux/${{ matrix.arch }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
