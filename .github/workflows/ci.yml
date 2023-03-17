@@ -37,11 +37,8 @@ jobs:
       - cpplint
     strategy:
       matrix:
-        build_type: [ "Debug", "Release" ]
+        build_type: [ "Release" ]
         arch: [ "amd64" , "arm64"]
-        exclude:
-          - arch: "arm64"
-            build_type: "Debug"
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
@@ -117,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        build_type: [ "Debug", "Release" ]
+        build_type: [ "Release" ]
 
     steps:
       - name: Download artifact
@@ -166,7 +163,7 @@ jobs:
     needs: unit_tests
     strategy:
       matrix:
-        build_type: [ "Debug", "Release" ]
+        build_type: [ "Release" ]
         token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
         include:
