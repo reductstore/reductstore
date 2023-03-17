@@ -58,9 +58,9 @@ jobs:
           context: .
           tags: full_static_image:latest
           outputs: type=docker,dest=/tmp/image_${{matrix.arch}}_${{ matrix.build_type }}.tar
-          build-args:
-            - BUILD_TYPE=${{ matrix.build_type }}
-            - WITH_TEST=${{ matrix.with_test }}
+          build-args: |
+            BUILD_TYPE=${{ matrix.build_type }}
+            WITH_TEST=${{ matrix.with_test }}
           platforms: linux/${{ matrix.arch }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
