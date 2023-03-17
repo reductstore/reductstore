@@ -39,6 +39,11 @@ jobs:
       matrix:
         build_type: [ "Release" ]
         arch: [ "amd64" , "arm64"]
+        include:
+          - arch: "amd64"
+            with_test: ON
+          - arch: "arm64"
+            with_test: OFF
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
@@ -53,7 +58,7 @@ jobs:
           context: .
           tags: full_static_image:latest
           outputs: type=docker,dest=/tmp/image_${{matrix.arch}}_${{ matrix.build_type }}.tar
-          build-args: BUILD_TYPE=${{ matrix.build_type }}
+          build-args: BUILD_TYPE=${{ matrix.build_type }},WITH_TEST=${{ matrix.with_test }}
           platforms: linux/${{ matrix.arch }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
@@ -214,7 +219,8 @@ jobs:
 
   publish_snap:
     name: Publish snap package
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    #if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    if: {{ false }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
