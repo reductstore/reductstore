@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - New public Docker repository `reduct/store`, [PR-246](https://github.com/reductstore/reductstore/pull/246)
+- Build ARM64 Docker image
 
 ### Fixed
 

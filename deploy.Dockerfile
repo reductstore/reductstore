@@ -1,8 +1,5 @@
-FROM ubuntu:22.04 AS builder
+FROM reduct/ubuntu-build-image:main AS  builder
 
-RUN apt update && apt install -y cmake python3-pip zip
-
-RUN pip3 install conan~=1.58.0
 
 WORKDIR /src
 

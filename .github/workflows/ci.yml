@@ -183,39 +183,6 @@ jobs:
       - name: Run API tests
         run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
 
-  push_image_github:
-    runs-on: ubuntu-latest
-    name: Push to Github Registry (edge version)
-    needs:
-      - api_tests
-      - unit_tests_macos
-      - unit_tests_windows
-    if: ${{ (github.ref == 'refs/heads/main') || (startsWith(github.event.ref, 'refs/tags/v')) }}
-    steps:
-      - uses: actions/checkout@v3
-      - name: Log in to the Container registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: ghcr.io/${{github.repository}}
-
-      - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: deploy.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-
   build_snap:
     runs-on: ubuntu-latest
     name: Build snap package
@@ -293,7 +260,6 @@ jobs:
         uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
         with:
           images: reduct/store
-
 
       - name: Build and push Docker image to GitHub repo
         uses: docker/build-push-action@v4

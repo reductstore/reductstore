@@ -1,4 +1,4 @@
-FROM ghcr.io/reductstore/alpine-build-image:main AS builder
+FROM reduct/alpine-build-image:main AS builder
 
 WORKDIR /src
 

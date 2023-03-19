@@ -21,7 +21,7 @@ more [here](https://docs.reduct.store/).
 * Token authorization
 * Labeling and searching
 * Embedded Web Console
-* Support Linux, MacOS and Windows on AMD64
+* Support Linux, MacOS and Windows
 
 ## Get started
 
