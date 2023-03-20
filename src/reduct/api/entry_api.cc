@@ -1,4 +1,4 @@
-// Copyright 2022 ReductStore
+// Copyright 2022-2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -22,6 +22,12 @@ using storage::query::IQuery;
 
 using proto::api::QueryInfo;
 
+/**
+ * @brief Parse UNIX timestamp in microseconds from string
+ * @param timestamp
+ * @param param_name
+ * @return
+ */
 inline Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view param_name = "ts") {
   auto ts = Time::clock::now();
   if (timestamp.empty()) {
@@ -43,8 +49,13 @@ inline Result<Time> ParseTimestamp(std::string_view timestamp, std::string_view 
   }
 }
 
+/**
+ * @brief Parse unsigned integer from string
+ * @param timestamp
+ * @param param_name
+ * @return
+ */
 inline core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_view param_name) {
-  uint64_t val = 0;
   if (timestamp.empty()) {
     return Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name));
   }
@@ -54,6 +65,27 @@ inline core::Result<uint64_t> ParseUInt(std::string_view timestamp, std::string_
   } catch (...) {
     return Error::UnprocessableEntity(
         fmt::format("Failed to parse '{}' parameter: {} must be unsigned integer", param_name, std::string{timestamp}));
+  }
+}
+
+/**
+ * @brief Parse boolean from string
+ * @param timestamp
+ * @param param_name
+ * @return
+ */
+inline core::Result<bool> ParseBool(std::string_view timestamp, std::string_view param_name) {
+  if (timestamp.empty()) {
+    return Error::UnprocessableEntity(fmt::format("'{}' parameter can't be empty", param_name));
+  }
+
+  if (timestamp == "true") {
+    return true;
+  } else if (timestamp == "false") {
+    return false;
+  } else {
+    return Error::UnprocessableEntity(
+        fmt::format("Failed to parse '{}' parameter: {} must be boolean", param_name, std::string{timestamp}));
   }
 }
 
@@ -211,12 +243,18 @@ core::Result<HttpRequestReceiver> EntryApi::Query(storage::IStorage* storage, st
     ttl = std::chrono::seconds(val);
   }
 
+  bool continuous = false;
+  if (!options.continuous.empty()) {
+    RESULT_OR_RETURN_ERROR(continuous, ParseBool(options.continuous, "continuous"));
+  }
+
   size_t id;
   RESULT_OR_RETURN_ERROR(id, entry->Query(start_ts, stop_ts,
                                           IQuery::Options{
                                               .ttl = ttl,
                                               .include = options.include,
                                               .exclude = options.exclude,
+                                              .continuous = continuous,
                                           }));
 
   QueryInfo info;

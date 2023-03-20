@@ -360,6 +360,18 @@ TEST_CASE("EntryApi::Query should query data for time interval", "[api]") {
     REQUIRE(entry->Next(info.id()).error.code == Error::kNotFound);
   }
 
+  SECTION("ok continuous") {
+    auto [receiver, err] = EntryApi::Query(storage.get(), "bucket", "entry-1", "2000002", {},
+                                           EntryApi::QueryOptions{.continuous = "true"});
+    REQUIRE(err == Error::kOk);
+    auto [resp, recv_err] = receiver("", true);
+    REQUIRE(recv_err == Error::kOk);
+
+    JsonStringToMessage(resp.SendData().result, &info);
+    REQUIRE(entry->Next(info.id()).error.code == Error::kNoContent);
+    REQUIRE(entry->Next(info.id()).error.code == Error::kNoContent);  // continuous
+  }
+
   SECTION("bucket doesn't exist") {
     REQUIRE(EntryApi::Query(storage.get(), "XXX", "entry-1", {}, {}, {}).error ==
             Error::NotFound("Bucket 'XXX' is not found"));

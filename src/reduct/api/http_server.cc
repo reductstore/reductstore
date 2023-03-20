@@ -337,7 +337,12 @@ class HttpServer : public IHttpServer {
                std::string bucket_name(req->getParameter(0));
                RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
                                 [this, req, bucket_name]() {
-                                  EntryApi::QueryOptions options{.ttl = req->getQuery("ttl")};
+                                  EntryApi::QueryOptions options{
+                                      .ttl = req->getQuery("ttl"),
+                                      .include = {},
+                                      .exclude = {},
+                                      .continuous = req->getQuery("continuous"),
+                                  };
 
                                   // parse include and exclude labels
                                   for (auto [key, value] : ParseQueryString(req->getQuery())) {
