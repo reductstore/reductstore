@@ -176,6 +176,8 @@ The time interval is \[start, stop).
 
 If authentication is enabled, the method needs a valid API token with read access to the bucket of the entry.
 
+
+
 Since version 1.3, the method also provides the `include-<label>` and `exclude-<label>` query parameters to filter records based on the values of certain labels. For example:
 
 **GET /api/v1/:bucket/:entry/q?include-\<label1>=foo\&exclude-\<label2>=bar**
@@ -187,6 +189,10 @@ A user can specify multiple `include` and `exclude` labels, which will be connec
 GET /api/v1/:bucket/:entry/q?include-\<label1>=foo\&include-\<label2>=bar
 
 This would query records that have both `label1` equal to "foo" and `label2` equal to "bar".
+
+
+
+Since version 1.4, the method has the `continuous query` flag. If it is true, the current query will not be discarded if there are no records. A client can ask them later. The query will not be removed until its TTL has expired. The `stop` parameter is ignored for continuous queries.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -209,12 +215,16 @@ Name of entry
 Time To Live of the query in seconds. If a client haven't read any record for this time interval, the server removes the query and the query ID becomes invalid. Default value 5 seconds.
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="include-<label name>" %}
+{% swagger-parameter in="query" name="include-<label name>" required="false" %}
 Query records that have a certain value of a label.
 {% endswagger-parameter %}
 
-{% swagger-parameter in="query" name="exclude-<label name>" %}
+{% swagger-parameter in="query" name="exclude-<label name>" required="false" %}
 Query records that don't have a certain value of a label.
+{% endswagger-parameter %}
+
+{% swagger-parameter in="query" name="conitnuous" type="Boolean" %}
+Keep query if no records for the request
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="" %}
