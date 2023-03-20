@@ -311,6 +311,26 @@ def test_query_entry_no_next(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
     assert resp.status_code == 204
 
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 404
+
+
+def test_query_continuous(base_url, session, bucket):
+    """Should  request next records continuously even if there is no data"""
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?start={ts + 1}&continuous=true')
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 204
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 204
+
 
 @requires_env("API_TOKEN")
 def test__query_with_read_token(base_url, session, bucket, token_without_permissions, token_read_bucket,

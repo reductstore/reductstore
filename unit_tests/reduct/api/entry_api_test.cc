@@ -391,5 +391,7 @@ TEST_CASE("EntryApi::Query should query data for time interval", "[api]") {
         Error::UnprocessableEntity("Failed to parse 'stop_timestamp' parameter: XXX must unix times in microseconds"));
     REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, {.ttl = "XXX"}).error ==
             Error::UnprocessableEntity("Failed to parse 'ttl' parameter: XXX must be unsigned integer"));
+    REQUIRE(EntryApi::Query(storage.get(), "bucket", "entry-1", {}, {}, {.continuous = "XXX"}).error ==
+            Error::UnprocessableEntity("Failed to parse 'continuous' parameter: XXX must be boolean"));
   }
 }
