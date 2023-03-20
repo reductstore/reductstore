@@ -8,6 +8,7 @@
 #include <google/protobuf/timestamp.pb.h>
 #include <google/protobuf/util/time_util.h>
 
+#include <utility>
 #include <vector>
 
 #include "reduct/config.h"
@@ -83,17 +84,18 @@ std::vector<int> QueryRecordsInBlock(const IBlockManager::BlockSPtr& block, cons
   return records;
 }
 
+/**
+ * @brief Query for records in a given time interval.
+ */
 class HistoricalQuery : public IQuery {
  public:
-  HistoricalQuery(const Time& start, const Time& stop, const Options& options) {
-    info_ = QueryInfo{
-        .start = start,
-        .stop = stop,
-        .next_record = std::nullopt,
-        .last_update = Time::clock::now(),
-        .options = options,
-    };
-  }
+  HistoricalQuery(const Time& start, const Time& stop, const Options& options)
+      : info_{.start = start,
+              .stop = stop,
+              .next_record = std::nullopt,
+              .last_update = Time::clock::now(),
+              .options = options},
+        is_done_(false) {}
 
   Result<NextRecord> Next(const std::set<google::protobuf::Timestamp>& blocks, IBlockManager* block_manager) override {
     info_.last_update = Time::clock::now();
@@ -136,6 +138,7 @@ class HistoricalQuery : public IQuery {
     RETURN_ERROR(search_err);
 
     if (records.empty()) {
+      is_done_ = true;
       return Error::NoContent();
     }
 
@@ -168,6 +171,7 @@ class HistoricalQuery : public IQuery {
                                                               .chunk_size = kDefaultMaxReadChunk,
                                                               .time = ToTimePoint(get_timestamp(record_index))});
     RETURN_ERROR(reader_err)
+    is_done_ = last;
 
     NextRecord next_record{
         .reader = reader,
@@ -182,15 +186,54 @@ class HistoricalQuery : public IQuery {
     return current_time - info_.last_update > info_.options.ttl;
   }
 
+  [[nodiscard]] bool is_done() const override { return is_done_; }
+
  private:
   QueryInfo info_;
+  bool is_done_;
+};
+
+/**
+/ @brief Continuous query for records from start point and until TTL expires.
+*/
+class ContinuousQuery : public IQuery {
+ public:
+  ContinuousQuery(const Time& start, Options options) : options_(std::move(options)) {
+    query_ = std::make_unique<HistoricalQuery>(start, Time::max(), options_);
+  }
+
+  Result<NextRecord> Next(const std::set<google::protobuf::Timestamp>& blocks, IBlockManager* block_manager) override {
+    auto [next_record, status] = query_->Next(blocks, block_manager);
+    RETURN_ERROR(status);
+    if (next_record.last) {
+      // Make new query from last record timestamp + 1 us and remove last flag
+      query_ = std::make_unique<HistoricalQuery>(next_record.reader->timestamp() + std::chrono::microseconds(1),
+                                                 Time::max(), options_);
+      next_record.last = false;
+    }
+
+    return {next_record, status};
+  }
+
+  [[nodiscard]] bool is_outdated() const override { return query_->is_outdated(); }
+
+  [[nodiscard]] bool is_done() const override { return false; }
+
+ private:
+  HistoricalQuery::UPtr query_;
+  Options options_;
 };
 
 Result<IQuery::UPtr> IQuery::Build(const std::optional<core::Time>& start, const std::optional<core::Time>& stop,
                                    const IQuery::Options& options) {
+  if (options.continuous) {
+    return {std::make_unique<ContinuousQuery>(start ? *start : Time::min(), options), Error::kOk};
+  }
+
   return {
       std::make_unique<HistoricalQuery>(start ? *start : Time::min(), stop ? *stop : Time::max(), options),
       Error::kOk,
   };
 }
+
 }  // namespace reduct::storage::query

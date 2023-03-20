@@ -274,7 +274,7 @@ class Entry : public IEntry {
     auto& query = queries_[query_id];
     auto [record, err] = query->Next(block_set_, block_manager_.get());
 
-    if (record.last || err.code == Error::kNoContent) {
+    if (query->is_done() || err) {
       queries_.erase(query_id);
     }
 
@@ -341,10 +341,6 @@ class Entry : public IEntry {
   static google::protobuf::Timestamp FromTimePoint(const Time& time) {
     auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(time.time_since_epoch()).count();
     return TimeUtil::MicrosecondsToTimestamp(microseconds);
-  }
-
-  static Time ToTimePoint(const google::protobuf::Timestamp& time) {
-    return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
   }
 
   Error CheckLatestRecord(const Timestamp& proto_ts) const {

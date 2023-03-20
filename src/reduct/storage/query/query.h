@@ -29,6 +29,7 @@ class IQuery {
     std::chrono::seconds ttl{5};                 // TTL of query in entries cache (time from last request)
     std::map<std::string, std::string> include;  // include labels with certain values
     std::map<std::string, std::string> exclude;  // exclude labels with certain values
+    bool continuous{false};                      // continuous query
   };
 
   /**
@@ -60,7 +61,17 @@ class IQuery {
   [[nodiscard]] virtual core::Result<NextRecord> Next(const std::set<google::protobuf::Timestamp>& blocks,
                                                       IBlockManager* block_manager) = 0;
 
+  /**
+   * @brief Check if query is outdated (TTL is expired)
+   * @return
+   */
   virtual bool is_outdated() const = 0;
+
+  /**
+   * @brief Check if query is done and we can remove it
+   * @return
+   */
+  virtual bool is_done() const = 0;
 };
 
 }  // namespace reduct::storage::query
