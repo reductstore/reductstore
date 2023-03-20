@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Continuous query `GET /api/v1/:bucket/:entry/q?continuous=true|false`,
+  [PR-248](https://github.com/reductstore/reductstore/pull/248)
 
 ### Changed
 

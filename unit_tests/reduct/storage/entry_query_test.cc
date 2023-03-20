@@ -1,4 +1,4 @@
-// Copyright 2022 ReductStore
+// Copyright 2022-2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -387,6 +387,59 @@ TEST_CASE("storage::Entry should query excluding records with certain labels", "
       REQUIRE(ret.error == Error::kOk);
       REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(4));
       REQUIRE(ret.result.last);
+    }
+  }
+}
+
+TEST_CASE("storage::Entry continues query", "[entry][query]") {
+  auto entry = IEntry::Build(kName, BuildTmpDirectory(), MakeDefaultOptions());
+  REQUIRE(entry);
+
+  REQUIRE(WriteOne(*entry, "blob", kTimestamp) == Error::kOk);
+
+  IQuery::Options options{
+      .ttl = seconds(1),
+      .continuous = true,
+  };
+
+  auto [id, err] = entry->Query(kTimestamp, kTimestamp + seconds(3), options);
+  REQUIRE(err == Error::kOk);
+
+  SECTION("continuously wait for a new record") {
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp);
+      REQUIRE_FALSE(ret.result.last);
+    }
+
+    // continue query
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::NoContent());
+      REQUIRE_FALSE(ret.result.last);
+    }
+    // continue query
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::NoContent());
+      REQUIRE_FALSE(ret.result.last);
+    }
+
+    REQUIRE(WriteOne(*entry, "blob", kTimestamp + seconds(2)) == Error::kOk);
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::kOk);
+      REQUIRE(ret.result.reader->timestamp() == kTimestamp + seconds(2));
+      REQUIRE_FALSE(ret.result.last);
+    }
+  }
+
+  SECTION("should expire") {
+    std::this_thread::sleep_for(seconds(2));
+    {
+      auto ret = entry->Next(id);
+      REQUIRE(ret.error == Error::NotFound(fmt::format("Query id={} doesn't exist. It expired or was finished", id)));
     }
   }
 }

@@ -175,6 +175,8 @@ class BlockManager : public IBlockManager {
     return {writer, Error::kOk};
   }
 
+  const std::filesystem::path& parent_path() const override { return parent_; }
+
  private:
   std::vector<std::weak_ptr<async::IAsyncReader>>& RemoveDeadReaders(const BlockSPtr& block) {
     auto& readers = current_readers_[block->begin_time()];

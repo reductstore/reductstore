@@ -1,4 +1,4 @@
-// Copyright 2022 ReductStore
+// Copyright 2022-2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -12,11 +12,16 @@
 #include "reduct/async/io.h"
 #include "reduct/core/result.h"
 #include "reduct/core/time.h"
+#include "reduct/storage/block_manager.h"
 
 namespace reduct::storage::query {
 
 class IQuery {
  public:
+  ~IQuery() = default;
+
+  using UPtr = std::unique_ptr<IQuery>;
+
   /**
    * Query Options
    */
@@ -24,17 +29,19 @@ class IQuery {
     std::chrono::seconds ttl{5};                 // TTL of query in entries cache (time from last request)
     std::map<std::string, std::string> include;  // include labels with certain values
     std::map<std::string, std::string> exclude;  // exclude labels with certain values
+    bool continuous{false};                      // continuous query
   };
 
   /**
-   * @brief Query records for time interval
+   * @brief Create a query
    * @param start start point of time interval. If it is nullopt then first record
    * @param stop stop point of time interval. If it is nullopt then last record
+   * @param block_manager block manager
    * @param options options
    * @return return query Id
    */
-  [[nodiscard]] virtual core::Result<uint64_t> Query(const std::optional<core::Time>& start,
-                                                     const std::optional<core::Time>& stop, const Options& options) = 0;
+  [[nodiscard]] static core::Result<UPtr> Build(const std::optional<core::Time>& start,
+                                                const std::optional<core::Time>& stop, const Options& options);
   /**
    * Information about record
    */
@@ -46,11 +53,25 @@ class IQuery {
   };
 
   /**
-   * @brief Get next
-   * @param query_id
+   * @brief Get next record
+   * @param blocks set of blocks to read
+   * @param block_manager block manager
    * @return information about record to read it
    */
-  [[nodiscard]] virtual core::Result<NextRecord> Next(uint64_t query_id) const = 0;
+  [[nodiscard]] virtual core::Result<NextRecord> Next(const std::set<google::protobuf::Timestamp>& blocks,
+                                                      IBlockManager* block_manager) = 0;
+
+  /**
+   * @brief Check if query is outdated (TTL is expired)
+   * @return
+   */
+  virtual bool is_outdated() const = 0;
+
+  /**
+   * @brief Check if query is done and we can remove it
+   * @return
+   */
+  virtual bool is_done() const = 0;
 };
 
 }  // namespace reduct::storage::query
