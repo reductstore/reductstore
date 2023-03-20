@@ -52,6 +52,7 @@ set(SRC_FILES
 
         reduct/storage/io/async_reader.cc
         reduct/storage/io/async_writer.cc
+        reduct/storage/query/query.cc
         reduct/storage/bucket.cc
         reduct/storage/entry.cc
         reduct/storage/storage.cc

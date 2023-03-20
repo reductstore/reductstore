@@ -7,7 +7,7 @@
 
 #include "reduct/core/logger.h"
 #include "reduct/proto/api/entry.pb.h"
-#include "reduct/storage/query/quiery.h"
+#include "reduct/storage/query/query.h"
 
 namespace reduct::api {
 

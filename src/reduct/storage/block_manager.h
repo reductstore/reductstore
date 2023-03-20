@@ -80,6 +80,8 @@ class IBlockManager {
   virtual core::Result<async::IAsyncWriter::SPtr> BeginWrite(const BlockSPtr& block,
                                                              io::AsyncWriterParameters params) = 0;
 
+  virtual const std::filesystem::path& parent_path() const = 0;
+
   /**
    * Factory method
    * @param parent
