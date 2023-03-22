@@ -49,16 +49,25 @@ class Entry : public IEntry {
         auto path = file.path();
         if (fs::is_regular_file(file) && path.extension() == kMetaExt) {
           try {
+            Error err = Error::kOk;
+
             google::protobuf::Arena arena;
             auto block = google::protobuf::Arena::CreateMessage<proto::Block>(&arena);
 
-            std::ifstream block_descriptor(path);
-            if (!block_descriptor) {
-              LOG_ERROR("Failed to open file {}: {}", path.string(), std::strerror(errno));
-              continue;
+            {
+              std::ifstream block_descriptor(path);
+              if (!block_descriptor) {
+                LOG_ERROR("Failed to open file {}: {}", path.string(), std::strerror(errno));
+                err = Error::InternalError();
+              }
+
+              if (!block->ParseFromIstream(&block_descriptor)) {
+                LOG_ERROR("Failed to parse meta: {}", path.string());
+                err = Error::InternalError();
+              }
             }
 
-            if (!block->ParseFromIstream(&block_descriptor) || !block->has_begin_time() || block->invalid()) {
+            if (err || !block->has_begin_time() || block->invalid()) {
               LOG_WARNING("Block {} looks broken. Remove it.", path.string());
               std::error_code ec;
               if (!fs::remove(path, ec)) {
