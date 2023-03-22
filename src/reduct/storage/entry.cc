@@ -52,7 +52,7 @@ class Entry : public IEntry {
             google::protobuf::Arena arena;
             auto block = google::protobuf::Arena::CreateMessage<proto::Block>(&arena);
 
-            std::ifstream block_descriptor(path, std::ios::binary);
+            std::ifstream block_descriptor(path);
             if (!block_descriptor) {
               LOG_ERROR("Failed to open file {}: {}", path.string(), std::strerror(errno));
               continue;
