@@ -9,6 +9,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
+#include <fstream>
 #include <ranges>
 
 #include "reduct/async/io.h"
@@ -18,7 +19,6 @@
 #include "reduct/proto/storage/entry.pb.h"
 #include "reduct/storage/block_manager.h"
 #include "reduct/storage/io/async_reader.h"
-#include "reduct/storage/io/async_writer.h"
 
 namespace reduct::storage {
 
@@ -31,7 +31,6 @@ using query::IQuery;
 
 using google::protobuf::Timestamp;
 using google::protobuf::util::TimeUtil;
-auto to_time_t = core::Time::clock::to_time_t;
 
 namespace fs = std::filesystem;
 
@@ -50,10 +49,16 @@ class Entry : public IEntry {
         auto path = file.path();
         if (fs::is_regular_file(file) && path.extension() == kMetaExt) {
           try {
-            auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoull(path.stem().c_str()));
-            auto [block, err] = block_manager_->LoadBlock(ts);
+            google::protobuf::Arena arena;
+            auto block = google::protobuf::Arena::CreateMessage<proto::Block>(&arena);
 
-            if (err || !block->has_begin_time() || block->invalid()) {
+            std::ifstream block_descriptor(path, std::ios::binary);
+            if (!block_descriptor) {
+              LOG_ERROR("Failed to open file {}: {}", path.string(), std::strerror(errno));
+              continue;
+            }
+
+            if (!block->ParseFromIstream(&block_descriptor) || !block->has_begin_time() || block->invalid()) {
               LOG_WARNING("Block {} looks broken. Remove it.", path.string());
               std::error_code ec;
               if (!fs::remove(path, ec)) {
@@ -67,7 +72,7 @@ class Entry : public IEntry {
               continue;
             }
 
-            block_set_.insert(ts);
+            block_set_.insert(block->begin_time());
             size_counter_ += block->size();
             record_counter_ += block->records_size();
           } catch (std::exception& err) {
