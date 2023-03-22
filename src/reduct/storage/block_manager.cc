@@ -35,29 +35,22 @@ class BlockManager : public IBlockManager {
 
   core::Result<BlockSPtr> LoadBlock(const Timestamp& proto_ts) override {
     if (latest_loaded_ && latest_loaded_->begin_time() == proto_ts) {
-      return {latest_loaded_, Error::kOk};
+      return latest_loaded_;
     }
 
     auto file_name = parent_ / fmt::format("{}{}", TimeUtil::TimestampToMicroseconds(proto_ts), kMetaExt);
     std::ifstream file(file_name);
     if (!file) {
-      return {
-          nullptr,
-          {
-              .code = 500,
-              .message =
-                  fmt::format("Failed to load a block descriptor {}: {}", file_name.string(), std::strerror(errno)),
-          },
-      };
+      return Error::InternalError(fmt::format("Failed to open file {}: {}", file_name.string(), std::strerror(errno)));
     }
 
     latest_loaded_ = std::make_shared<proto::Block>();
     if (!latest_loaded_->ParseFromIstream(&file)) {
       latest_loaded_ = nullptr;
-      return {nullptr, {.code = 500, .message = fmt::format("Failed to parse meta: {}", file_name.string())}};
+      return Error::InternalError(fmt::format("Failed to parse meta: {}", file_name.string()));
     }
 
-    return {latest_loaded_, Error::kOk};
+    return latest_loaded_;
   }
 
   core::Result<BlockSPtr> StartBlock(const Timestamp& proto_ts, size_t max_block_size) override {
@@ -71,18 +64,14 @@ class BlockManager : public IBlockManager {
       std::error_code ec;
       fs::resize_file(block_path, max_block_size, ec);
       if (ec) {
-        return {{}, {.code = 500, .message = ec.message()}};
+        return Error::InternalError(ec.message());
       }
     } else {
-      return {{}, {.code = 500, .message = strerror(errno)}};
+      return Error::InternalError(strerror(errno));
     }
 
-    auto err = SaveBlock(latest_loaded_);
-    if (err) {
-      return {{}, err};
-    }
-
-    return {latest_loaded_, Error::kOk};
+    RETURN_ERROR(SaveBlock(latest_loaded_));
+    return latest_loaded_;
   }
 
   core::Error SaveBlock(const BlockSPtr& block) const override {
@@ -90,9 +79,9 @@ class BlockManager : public IBlockManager {
     std::ofstream file(block_path);
     if (file) {
       block->SerializeToOstream(&file);
-      return {};
+      return Error::kOk;
     } else {
-      return {.code = 500, .message = "Failed to save a block descriptor"};
+      return Error::InternalError("Failed to save a block descriptor");
     }
   }
 
@@ -101,7 +90,7 @@ class BlockManager : public IBlockManager {
     std::error_code ec;
     fs::resize_file(block_path, block->size(), ec);
     if (ec) {
-      return {.code = 500, .message = ec.message()};
+      return Error::InternalError(ec.message());
     }
 
     return Error::kOk;
@@ -110,18 +99,18 @@ class BlockManager : public IBlockManager {
   Error RemoveBlock(const BlockSPtr& block) override {
     const auto& readers = RemoveDeadReaders(block);
     if (!readers.empty()) {
-      return {.code = 500, .message = "Block has active readers"};
+      return Error::InternalError("Block has active readers");
     }
 
     const auto& writers = RemoveDeadWriters(block);
     if (!writers.empty()) {
-      return {.code = 500, .message = "Block has active writers"};
+      return Error::InternalError("Block has active writers");
     }
 
     std::error_code ec;
     auto path = BlockPath(parent_, *block);
     auto make_error = [&ec, &path] {
-      return Error{.code = 500, .message = fmt::format("Failed to remove block {}: {}", path.string(), ec.message())};
+      return Error::InternalError(fmt::format("Failed to remove block {}: {}", path.string(), ec.message()));
     };
 
     // remove block with data
@@ -149,7 +138,7 @@ class BlockManager : public IBlockManager {
     auto& readers = RemoveDeadReaders(block);
     readers.push_back(reader);
 
-    return {reader, Error::kOk};
+    return reader;
   }
 
   core::Result<async::IAsyncWriter::SPtr> BeginWrite(const BlockSPtr& block, AsyncWriterParameters params) override {
@@ -172,7 +161,7 @@ class BlockManager : public IBlockManager {
     auto& writers = RemoveDeadWriters(block);
     writers.push_back(writer);
 
-    return {writer, Error::kOk};
+    return writer;
   }
 
   const std::filesystem::path& parent_path() const override { return parent_; }
