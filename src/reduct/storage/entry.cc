@@ -19,7 +19,6 @@
 #include "reduct/proto/storage/entry.pb.h"
 #include "reduct/storage/block_manager.h"
 #include "reduct/storage/io/async_reader.h"
-#include "reduct/storage/io/async_writer.h"
 
 namespace reduct::storage {
 

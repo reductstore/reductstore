@@ -22,7 +22,7 @@ using reduct::storage::IEntry;
 
 using google::protobuf::util::TimeUtil;
 
-TEST_CASE("storage::IEntry write operation") {
+TEST_CASE("storage::IEntry benchmarks", "[storage][entry][benchmarks]") {
   auto dir_path = fs::temp_directory_path() / "reduct" / "bucket";
   fs::remove_all(dir_path);
 
@@ -38,5 +38,9 @@ TEST_CASE("storage::IEntry write operation") {
   BENCHMARK("Write forward") {
     auto [writer, err] = entry->BeginWrite(Time::clock::now(), 10, {});
     [[maybe_unused]] auto ret = writer->Write("1234567890");
+  };
+
+  BENCHMARK("Load records") {
+    IBucket::Restore(dir_path);
   };
 }
