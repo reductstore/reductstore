@@ -76,7 +76,6 @@ if (WITH_WEB_CONSOLE)
             web_console
             URL https://github.com/reductstore/web-console/releases/download/v1.2.0/web-console.build.tar.gz
             URL_HASH MD5=5b48f33d8bbd0679e11eca2a1c71c0c9
-            DOWNLOAD_EXTRACT_TIMESTAMP ON
     )
     FetchContent_MakeAvailable(web_console)
 
