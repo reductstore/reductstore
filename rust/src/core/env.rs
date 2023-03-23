@@ -6,6 +6,9 @@ pub struct Env {
     message: String,
 }
 
+/**
+ * Create a new environment in a box for C++ integration.
+ */
 pub fn new_env() -> Box<Env> {
     Box::new(Env::new())
 }

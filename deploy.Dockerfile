@@ -1,10 +1,12 @@
 FROM reduct/ubuntu-build-image:main AS  builder
 
+RUN apt-get update && apt-get install -y rustc cargo
 
 WORKDIR /src
 
 COPY conanfile.txt .
 COPY src src
+COPY rust rust:wq
 COPY CMakeLists.txt .
 COPY VERSION VERSION
 
