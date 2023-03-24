@@ -15,14 +15,23 @@ set(RUST_PART_CXX "${CMAKE_CURRENT_BINARY_DIR}/rust_part.cpp")
 set(RUST_PART_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core.rs"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/core/env.rs")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/core/env.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/core/logger.rs"
+        )
 
 add_library(rust_part STATIC ${RUST_PART_CXX})
+
+if (WIN32)
+    set(RUS_BULD_COMMAND "set CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} & set RUSTFLAGS=" ${RUST_FLAGS} " & ${CARGO_CMD}")
+else ()
+    set(RUS_BULD_COMMAND "CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} RUSTFLAGS= " ${RUST_FLAGS} " ${CARGO_CMD}")
+endif ()
 add_custom_command(
         OUTPUT ${RUST_PART_CXX}
-        COMMAND CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} RUSTFLAGS= "${RUST_FLAGS}" ${CARGO_CMD}
+        COMMAND ${RUS_BULD_COMMAND}
         COMMAND cp ${CMAKE_CURRENT_BINARY_DIR}/cxxbridge/rust_part/src/lib.rs.cc ${RUST_PART_CXX}
         COMMAND cp ${CMAKE_CURRENT_BINARY_DIR}/cxxbridge/rust_part/src/lib.rs.h ${CMAKE_CURRENT_BINARY_DIR}/rust_part.h
+        E
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         DEPENDS ${RUST_PART_SOURCES}
 )
