@@ -12,7 +12,6 @@
 #include "reduct/async/loop.h"
 #include "reduct/auth/token_auth.h"
 #include "reduct/config.h"
-#include "reduct/core/env_variable.h"
 #include "reduct/core/logger.h"
 #include "reduct/storage/storage.h"
 
@@ -26,7 +25,6 @@ using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
 using reduct::auth::ITokenAuthorization;
 using reduct::auth::ITokenRepository;
-using reduct::core::EnvVariable;
 using reduct::core::Error;
 using reduct::core::Logger;
 using ReductStorage = reduct::storage::IStorage;

@@ -14,11 +14,9 @@
 #include <thread>
 
 #include "reduct/async/loop.h"
-#include "reduct/core/env_variable.h"
 #include "reduct/core/logger.h"
 
 using reduct::async::ILoop;
-using reduct::core::EnvVariable;
 using reduct::core::Logger;
 
 class Loop : public ILoop {
@@ -40,10 +38,6 @@ class Loop : public ILoop {
 int main(int argc, char** argv) {
   Loop loop;
   ILoop::set_loop(&loop);
-
-  EnvVariable env;
-  auto log_level = env.Get<std::string>("LOG_LEVEL", "INFO");
-  Logger::set_level(log_level);
 
   int gmockArgC = 1;
   ::testing::InitGoogleMock(&gmockArgC, argv);
