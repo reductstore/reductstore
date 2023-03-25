@@ -53,10 +53,11 @@ int main() {
   auto api_base_path = env->get_string("RS_API_BASE_PATH", "/", false);
   auto data_path = env->get_string("RS_DATA_PATH", "/data", false);
   auto api_token = env->get_string("RS_API_TOKEN", "", true);
-  auto cert_path = env->get_string("RS_CERT_PATH", "",  false);
+  auto cert_path = env->get_string("RS_CERT_PATH", "", false);
   auto cert_key_path = env->get_string("RS_CERT_KEY_PATH", "", false);
 
   Logger::set_level(log_level.c_str());
+  reduct::core::init_log(log_level);  // rust logger
 
   LOG_INFO("Configuration: \n {}", std::string(env->message()));
 
