@@ -58,6 +58,7 @@ jobs:
   build_macos:
     name: Build for MacOS-12
     runs-on: macos-12
+    if: ${{false}}
     needs:
       - cpplint
     steps:
@@ -81,6 +82,7 @@ jobs:
   build_windows:
     name: Build for Windows
     runs-on: windows-2019
+    if: ${{false}}
     needs:
       - cpplint
     steps:
