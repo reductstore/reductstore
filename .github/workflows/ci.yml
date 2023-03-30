@@ -90,6 +90,7 @@ jobs:
         with:
           winsdk-build-version: 19041
       - name: Install conan dependencies and build
+        shell: bash
         run: |
           pip3 install -U pip
           pip3 install conan==1.58
