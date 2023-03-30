@@ -12,11 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Continuous query `GET /api/v1/:bucket/:entry/q?continuous=true|false`,
   [PR-248](https://github.com/reductstore/reductstore/pull/248)
 - Build ARM64 Docker image
--
+- Integration of Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
+
 ### Changed
 
 - New public Docker repository `reduct/store`, [PR-246](https://github.com/reductstore/reductstore/pull/246)
 - Speed up loading entries at start, [PR-250](https://github.com/reductstore/reductstore/pull/250)
+
+### Removed
+
+- Disable Windows and Macos builds because of migration on Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
 
 ### Fixed
 
