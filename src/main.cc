@@ -12,20 +12,19 @@
 #include "reduct/async/loop.h"
 #include "reduct/auth/token_auth.h"
 #include "reduct/config.h"
-#include "reduct/core/env_variable.h"
 #include "reduct/core/logger.h"
 #include "reduct/storage/storage.h"
 
 #ifdef WITH_CONSOLE
 #include "reduct/console.h"
 #endif
+#include "rust/rust_part.h"
 
 using reduct::api::IHttpServer;
 using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
 using reduct::auth::ITokenAuthorization;
 using reduct::auth::ITokenRepository;
-using reduct::core::EnvVariable;
 using reduct::core::Error;
 using reduct::core::Logger;
 using ReductStorage = reduct::storage::IStorage;
@@ -42,21 +41,23 @@ int main() {
   std::signal(SIGINT, SignalHandler);
   std::signal(SIGTERM, SignalHandler);
 
+  auto env = reduct::core::new_env();
+
   LOG_INFO("ReductStore {}", reduct::kVersion);
 
-  EnvVariable env;
-  auto log_level = env.Get<std::string>("RS_LOG_LEVEL", "INFO");
-  auto host = env.Get<std::string>("RS_HOST", "0.0.0.0");
-  auto port = env.Get<int>("RS_PORT", 8383);
-  auto api_base_path = env.Get<std::string>("RS_API_BASE_PATH", "/");
-  auto data_path = env.Get<std::string>("RS_DATA_PATH", "/data");
-  auto api_token = env.Get<std::string>("RS_API_TOKEN", "", true);
-  auto cert_path = env.Get<std::string>("RS_CERT_PATH", "");
-  auto cert_key_path = env.Get<std::string>("RS_CERT_KEY_PATH", "");
+  auto log_level = env->get_string("RS_LOG_LEVEL", "INFO", false);
+  auto host = env->get_string("RS_HOST", "0.0.0.0", false);
+  auto port = env->get_int("RS_PORT", 8383, false);
+  auto api_base_path = env->get_string("RS_API_BASE_PATH", "/", false);
+  auto data_path = env->get_string("RS_DATA_PATH", "/data", false);
+  auto api_token = env->get_string("RS_API_TOKEN", "", true);
+  auto cert_path = env->get_string("RS_CERT_PATH", "", false);
+  auto cert_key_path = env->get_string("RS_CERT_KEY_PATH", "", false);
 
-  Logger::set_level(log_level);
+  Logger::set_level(log_level.c_str());
+  reduct::core::init_log(log_level);  // rust logger
 
-  LOG_INFO("Configuration: \n {}", env.Print());
+  LOG_INFO("Configuration: \n {}", std::string(env->message()));
 
   Loop loop;
   ILoop::set_loop(&loop);
@@ -68,18 +69,18 @@ int main() {
 #endif
 
   IHttpServer::Components components{
-      .storage = ReductStorage::Build({.data_path = data_path}),
-      .auth = ITokenAuthorization::Build(api_token),
-      .token_repository = ITokenRepository::Build({.data_path = data_path, .api_token = api_token}),
+      .storage = ReductStorage::Build({.data_path = data_path.c_str()}),
+      .auth = ITokenAuthorization::Build(api_token.c_str()),
+      .token_repository = ITokenRepository::Build({.data_path = data_path.c_str(), .api_token = api_token.c_str()}),
       .console = std::move(console),
   };
 
   auto server = IHttpServer::Build(std::move(components), {
-                                                              .host = host,
+                                                              .host = host.c_str(),
                                                               .port = port,
-                                                              .base_path = api_base_path,
-                                                              .cert_path = cert_path,
-                                                              .cert_key_path = cert_key_path,
+                                                              .base_path = api_base_path.c_str(),
+                                                              .cert_path = cert_path.c_str(),
+                                                              .cert_key_path = cert_key_path.c_str(),
                                                           });
   return server->Run(running);
 }

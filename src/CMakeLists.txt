@@ -45,7 +45,6 @@ set(SRC_FILES
         reduct/auth/token_auth.cc
         reduct/auth/token_repository.cc
 
-        reduct/core/env_variable.cc
         reduct/core/logger.cc
         reduct/core/error.cc
         reduct/core/common.h
@@ -86,9 +85,7 @@ if (WITH_WEB_CONSOLE)
     target_compile_definitions(reduct PUBLIC WITH_CONSOLE)
 endif ()
 
-add_executable(reduct-storage main.cc)
-target_link_libraries(reduct-storage reduct ${CONAN_LIBS})  # For backward compatibility
 
 add_executable(reductstore main.cc)
-target_link_libraries(reductstore reduct ${CONAN_LIBS})
+target_link_libraries(reductstore reduct ${CONAN_LIBS} rust_part)
 install(TARGETS reductstore DESTINATION bin)

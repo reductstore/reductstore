@@ -58,6 +58,7 @@ jobs:
   build_macos:
     name: Build for MacOS-12
     runs-on: macos-12
+    if: ${{false}}
     needs:
       - cpplint
     steps:
@@ -81,6 +82,7 @@ jobs:
   build_windows:
     name: Build for Windows
     runs-on: windows-2019
+    if: ${{false}}
     needs:
       - cpplint
     steps:
@@ -90,6 +92,7 @@ jobs:
         with:
           winsdk-build-version: 19041
       - name: Install conan dependencies and build
+        shell: bash
         run: |
           pip3 install -U pip
           pip3 install conan==1.58

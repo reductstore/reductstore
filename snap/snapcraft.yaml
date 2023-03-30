@@ -45,6 +45,8 @@ parts:
       - g++
       - make
       - python3-pip
+      - rustc
+      - cargo
 
     stage-packages:
       - libstdc++6
