@@ -3,6 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 pub mod core;
+pub mod asset;
 
 use crate::core::env::{Env, new_env};
 use crate::core::logger::{init_log};
