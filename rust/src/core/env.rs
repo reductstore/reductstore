@@ -84,7 +84,7 @@ impl Env {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{Env, new_env};
+    use crate::core::env::{Env, new_env};
 
     #[test]
     fn make_env() {

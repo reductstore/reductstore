@@ -63,9 +63,9 @@ int main() {
   ILoop::set_loop(&loop);
 
 #if WITH_CONSOLE
-  auto console = IAssetManager::BuildFromZip(reduct::kZippedConsole);
+  auto console = reduct::asset::new_asset_manager(rust::Str(reduct::kZippedConsole.data()));
 #else
-  auto console = IAssetManager::BuildEmpty();
+  auto console = reduct::asset::new_asset_manager(rust::Str(""));
 #endif
 
   IHttpServer::Components components{

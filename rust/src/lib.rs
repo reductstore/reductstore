@@ -7,9 +7,11 @@ pub mod asset;
 
 use crate::core::env::{Env, new_env};
 use crate::core::logger::{init_log};
+use crate::asset::asset_manager::{ZipAssetManager, new_asset_manager};
+use crate::core::status::HTTPError;
 
 #[cxx::bridge(namespace = "reduct::core")]
-mod ffi {
+mod ffi_core {
     extern "Rust" {
         type Env;
         fn new_env() -> Box<Env>;
@@ -20,5 +22,18 @@ mod ffi {
 
     extern "Rust" {
         fn init_log(level: &str);
+    }
+
+    extern "Rust" {
+        type HTTPError;
+    }
+}
+
+#[cxx::bridge(namespace = "reduct::asset")]
+mod ffi_asset {
+    extern "Rust" {
+        type ZipAssetManager;
+        fn new_asset_manager(zipped_content: &str) -> Box<ZipAssetManager>;
+        fn read(&self, path: &str) -> Result<String>;
     }
 }

@@ -397,12 +397,12 @@ class HttpServer : public IHttpServer {
                  path = "index.html";
                }
                RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
-                                [&]() { return Console::UiRequest(console_.get(), base_path, path); });
+                                [&]() { return Console::UiRequest(console_, base_path, path); });
              })
         .get(base_path + "ui",
              [this, base_path, running](auto *res, auto *req) {
                RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
-                                [&]() { return Console::UiRequest(console_.get(), base_path, "index.html"); });
+                                [&]() { return Console::UiRequest(console_, base_path, "index.html"); });
              })
         .any("/*",
              [this, running](auto *res, auto *req) {
@@ -437,7 +437,7 @@ class HttpServer : public IHttpServer {
   std::unique_ptr<storage::IStorage> storage_;
   std::unique_ptr<ITokenAuthorization> auth_;
   std::unique_ptr<auth::ITokenRepository> token_repository_;
-  std::unique_ptr<IAssetManager> console_;
+  rust::Box<asset::ZipAssetManager> console_;
 };
 
 std::unique_ptr<IHttpServer> IHttpServer::Build(Components components, Options options) {

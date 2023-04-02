@@ -12,6 +12,9 @@ cxx = "1.0"
 log = "0.4"
 chrono = "0.4"
 thread-id = "4.0"
+zip = "0.6"
+tempfile = "3.5.0"
+hex = "0.4"
 
 [build-dependencies]
 cxx-build = "1.0"

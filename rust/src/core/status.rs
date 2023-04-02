@@ -3,10 +3,9 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::error::Error;
 use std::fmt::{Display, Formatter, Debug, Error as FmtError};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum HTTPStatus {
     Ok = 200,
     Created = 201,
@@ -52,7 +51,7 @@ pub enum HTTPStatus {
     NetworkAuthenticationRequired = 511,
 }
 
-
+#[derive(PartialEq)]
 pub struct HTTPError {
     pub status: HTTPStatus,
     pub message: String,
@@ -64,10 +63,26 @@ impl Display for HTTPError {
     }
 }
 
+impl From<std::io::Error> for HTTPError {
+    fn from(err: std::io::Error) -> Self {
+        HTTPError {
+            status: HTTPStatus::InternalServerError,
+            message: err.to_string(),
+        }
+    }
+}
+
 impl HTTPError {
     pub fn not_found(msg: &str) -> HTTPError {
-        HTTPError{
+        HTTPError {
             status: HTTPStatus::NotFound,
+            message: msg.to_string(),
+        }
+    }
+
+    pub fn internal_server_error(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::InternalServerError,
             message: msg.to_string(),
         }
     }
