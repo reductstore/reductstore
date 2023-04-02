@@ -9,8 +9,6 @@ set(SRC_FILES
         reduct/api/server_api_test.cc
         reduct/api/token_api_test.cc
 
-        reduct/asset/asset_manager_test.cc
-
         reduct/async/run_test.cc
         reduct/async/sleep_test.cc
         reduct/async/task_test.cc

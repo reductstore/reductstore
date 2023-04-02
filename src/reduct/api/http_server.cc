@@ -28,7 +28,6 @@ using google::protobuf::util::JsonStringToMessage;
 
 using proto::api::BucketSettings;
 
-using asset::IAssetManager;
 using async::Sleep;
 using async::Task;
 using async::VoidTask;

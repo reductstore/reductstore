@@ -49,7 +49,6 @@ impl ZipAssetManager {
 
         trace!("Extracting zip archive to {:?}", temp_dir.path());
 
-
         let mut root = String::new();
         for i in 0..archive.len()
         {
@@ -66,7 +65,6 @@ impl ZipAssetManager {
 
             if file.is_file() {
                 // extract file to temporary directory without root directory
-
                 let path = temp_dir.path().join(file.name()[root.len()..].to_string());
                 debug!("Extracting file to {:?}", path);
                 let mut out = File::create(path).unwrap();
