@@ -9,8 +9,6 @@ set(SRC_FILES
         reduct/api/server_api_test.cc
         reduct/api/token_api_test.cc
 
-        reduct/asset/asset_manager_test.cc
-
         reduct/async/run_test.cc
         reduct/async/sleep_test.cc
         reduct/async/task_test.cc
@@ -28,4 +26,4 @@ set(SRC_FILES
         test.cc)
 
 add_executable(reduct-tests ${SRC_FILES})
-target_link_libraries(reduct-tests reduct ${CONAN_LIBS} rust_part)
+target_link_libraries(reduct-tests reduct)

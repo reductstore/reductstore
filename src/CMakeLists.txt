@@ -38,7 +38,6 @@ set(SRC_FILES
         reduct/api/server_api.cc
         reduct/api/token_api.cc
 
-        reduct/asset/asset_manager.cc
         reduct/async/loop.cc
 
         reduct/auth/policies.cc
@@ -59,6 +58,7 @@ set(SRC_FILES
 
 
 add_library(reduct STATIC ${SRC_FILES} ${PROTOBUF_FILES})
+target_link_libraries(reduct ${CONAN_LIBS} rust_part)
 
 if (MSVC)
     target_compile_options(reduct PUBLIC /Zc:preprocessor)
@@ -87,5 +87,5 @@ endif ()
 
 
 add_executable(reductstore main.cc)
-target_link_libraries(reductstore reduct ${CONAN_LIBS} rust_part)
+target_link_libraries(reductstore reduct)
 install(TARGETS reductstore DESTINATION bin)

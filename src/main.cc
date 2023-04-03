@@ -8,7 +8,6 @@
 #include <csignal>
 
 #include "reduct/api/http_server.h"
-#include "reduct/asset/asset_manager.h"
 #include "reduct/async/loop.h"
 #include "reduct/auth/token_auth.h"
 #include "reduct/config.h"
@@ -21,7 +20,6 @@
 #include "rust/rust_part.h"
 
 using reduct::api::IHttpServer;
-using reduct::asset::IAssetManager;
 using reduct::async::ILoop;
 using reduct::auth::ITokenAuthorization;
 using reduct::auth::ITokenRepository;
@@ -63,9 +61,9 @@ int main() {
   ILoop::set_loop(&loop);
 
 #if WITH_CONSOLE
-  auto console = IAssetManager::BuildFromZip(reduct::kZippedConsole);
+  auto console = reduct::asset::new_asset_manager(rust::Str(reduct::kZippedConsole.data()));
 #else
-  auto console = IAssetManager::BuildEmpty();
+  auto console = reduct::asset::new_asset_manager(rust::Str(""));
 #endif
 
   IHttpServer::Components components{
