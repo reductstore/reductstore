@@ -9,6 +9,7 @@ use thread_id;
 
 static LOGGER: Logger = Logger;
 
+/// Initialize the logger.
 pub struct Logger;
 
 impl Log for Logger {
@@ -32,6 +33,12 @@ impl Log for Logger {
 }
 
 impl Logger {
+
+    /// Initialize the logger.
+    ///
+    /// # Arguments
+    ///
+    /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
     pub fn init(level: &str) {
         log::set_logger(&LOGGER).unwrap();
         match level {
@@ -49,7 +56,7 @@ impl Logger {
     }
 }
 
-// C++ interface
+/// Initialize the logger (C++ wrapper).
 pub fn init_log(level: &str) {
     Logger::init(level);
 }

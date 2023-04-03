@@ -5,6 +5,7 @@
 
 use std::fmt::{Display, Formatter, Debug, Error as FmtError};
 
+/// HTTP status codes.
 #[derive(Debug, PartialEq)]
 pub enum HTTPStatus {
     Ok = 200,
@@ -51,9 +52,13 @@ pub enum HTTPStatus {
     NetworkAuthenticationRequired = 511,
 }
 
+/// An HTTP error, we use it for error handling.
 #[derive(PartialEq)]
 pub struct HTTPError {
+    /// The HTTP status code.
     pub status: HTTPStatus,
+
+    /// The human readable message.
     pub message: String,
 }
 
@@ -65,6 +70,7 @@ impl Display for HTTPError {
 
 impl From<std::io::Error> for HTTPError {
     fn from(err: std::io::Error) -> Self {
+        // An IO error is an internal server error
         HTTPError {
             status: HTTPStatus::InternalServerError,
             message: err.to_string(),
@@ -73,6 +79,7 @@ impl From<std::io::Error> for HTTPError {
 }
 
 impl HTTPError {
+    /// Create a not found error.
     pub fn not_found(msg: &str) -> HTTPError {
         HTTPError {
             status: HTTPStatus::NotFound,
@@ -80,6 +87,7 @@ impl HTTPError {
         }
     }
 
+    /// Create a bad request error.
     pub fn internal_server_error(msg: &str) -> HTTPError {
         HTTPError {
             status: HTTPStatus::InternalServerError,

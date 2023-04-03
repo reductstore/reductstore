@@ -7,35 +7,35 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 
+/// A helper class to read environment variables.
 pub struct Env {
     message: String,
 }
 
-/**
- * Create a new environment in a box for C++ integration.
- */
+/// Create a new environment in a box for C++ integration.
 pub fn new_env() -> Box<Env> {
     Box::new(Env::new())
 }
 
-
-/**
- * Parser for environment variables.
- */
 impl Env {
+    /// Create a new environment.
     fn new() -> Env {
         Env {
             message: String::new(),
         }
     }
-    /**
-     * Get a value from the environment.
-     *
-     * @param key The key to get.
-     * @param default_value The default value to return if the key is not found.
-     * @param masked Whether or not to mask the value in the log.
-     * @return The value.
-     */
+
+    /// Get a value from the environment.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key to get.
+    /// * `default_value` - The default value to return if the key is not found.
+    /// * `masked` - Whether or not to mask the value in the log.
+    ///
+    /// # Returns
+    ///
+    /// The value of the environment variable.
     fn get<T: FromStr + Display + Default + PartialEq>(&mut self, key: &str, default_value: T, masked: bool) -> T {
         let mut additional = String::new();
         let value: T = match std::env::var(key) {
@@ -67,16 +67,18 @@ impl Env {
         return value;
     }
 
+    /// Get a string from the environment. (See `get` for details)
     pub fn get_string(&mut self, key: &str, default_value: &str, masked: bool) -> String {
         self.get(key, String::from(default_value), masked)
     }
 
+    /// Get an int from the environment. (See `get` for details)
     pub fn get_int(&mut self, key: &str, default_value: i32, masked: bool) -> i32 {
         self.get(key, default_value, masked)
     }
-    /**
-     * Get built message
-     */
+
+
+    /// Get pretty printed message.
     pub fn message(&self) -> &String {
         &self.message
     }

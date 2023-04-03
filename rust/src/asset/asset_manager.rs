@@ -13,28 +13,30 @@ use hex;
 use crate::core::status::{HTTPError};
 
 
-/**
- * Asset manager that reads files from a zip archive as hex string and returns them as string
- */
+/// Asset manager that reads files from a zip archive as hex string and returns them as string
 pub struct ZipAssetManager {
     path: Option<TempDir>,
 }
 
 impl ZipAssetManager {
-    /**
-     * Create a new zip asset manager.
-     *
-     * @param zipped_content The zip archive as hex string.
-     * @return The asset manager.
-     */
+    /// Create a new zip asset manager.
+    ///
+    /// # Arguments
+    ///
+    /// * `zipped_content` - The zip archive as hex string. If the string is empty, the asset manager
+    /// will not support any files and return 404 for all requests.
+    ///
+    /// # Returns
+    ///
+    /// The asset manager.
     pub fn new(zipped_content: &str) -> ZipAssetManager {
         if zipped_content.len() == 0 {
             return ZipAssetManager {
                 path: None,
             };
         }
-        // Convert hex string to binary and extract zip archive into a temporary directory
 
+        // Convert hex string to binary and extract zip archive into a temporary directory
         if zipped_content.len() % 2 != 0 {
             panic!("Hex string must have even length");
         }
@@ -77,10 +79,15 @@ impl ZipAssetManager {
         }
     }
 
-    /**
-     * Read a file from extracted zip archive
-     * @param relative_path relative path to file
-     */
+    /// Read a file from the zip archive.
+    ///
+    /// # Arguments
+    ///
+    /// * `relative_path` - The relative path to the file.
+    ///
+    /// # Returns
+    ///
+    /// The file content as string.
     pub fn read(&self, relative_path: &str) -> Result<String, HTTPError> {
         if self.path.is_none() {
             return Err(HTTPError::not_found("No static files supported"));
@@ -103,8 +110,7 @@ impl ZipAssetManager {
     }
 }
 
-// C++ integration
-
+/// Create a new asset manager. (C++ wrapper)
 pub fn new_asset_manager(zipped_content: &str) -> Box<ZipAssetManager> {
     Box::new(ZipAssetManager::new(zipped_content))
 }
