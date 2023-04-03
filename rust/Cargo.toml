@@ -3,7 +3,7 @@ name = "rust_part"
 version = "0.1.0"
 authors = ["Alexey Timin <atimin@reduct.store>"]
 edition = "2021"
-
+rust-version = "1.60.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,6 +15,7 @@ thread-id = "4.0"
 zip = "0.6"
 tempfile = "3.5.0"
 hex = "0.4"
+time = "=0.3.17"    # to keep 1.60.0 compatibility
 
 [build-dependencies]
 cxx-build = "1.0"
