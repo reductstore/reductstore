@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 pub mod core;
 pub mod asset;
+pub mod auth;
 
 use crate::core::env::{Env, new_env};
 use crate::core::logger::{init_log};

@@ -90,6 +90,7 @@ impl ZipAssetManager {
     /// The file content as string.
     pub fn read(&self, relative_path: &str) -> Result<String, HTTPError> {
         if self.path.is_none() {
+            // TODO: When C++ is gone, use trait and emtpy implementation
             return Err(HTTPError::not_found("No static files supported"));
         }
 

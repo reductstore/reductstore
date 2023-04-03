@@ -16,9 +16,12 @@ zip = "0.6"
 tempfile = "3.5.0"
 hex = "0.4"
 time = "=0.3.17"    # to keep 1.60.0 compatibility
+prost = "0.11"
+prost-types = "0.11"
 
 [build-dependencies]
 cxx-build = "1.0"
+prost-build = "0.11"
 
 [lib]
 crate-type = ["staticlib"]
