@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New public Docker repository `reduct/store`, [PR-246](https://github.com/reductstore/reductstore/pull/246)
 - Speed up loading entries at start, [PR-250](https://github.com/reductstore/reductstore/pull/250)
+- Rewrite static asset management in Rust, [PR-252](https://github.com/reductstore/reductstore/pull/252)
 
 ### Removed
 
