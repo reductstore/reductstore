@@ -60,7 +60,7 @@ impl TokenRepository {
             None => {
                 // No API token, no authentication
                 // TODO: After C++ is removed, this should use traits and an empty implementation
-                debug!("API token is not set, no authentication is required")
+                debug!("API token is not set, no authentication is required");
                 None
             }
         };
