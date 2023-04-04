@@ -8,7 +8,6 @@ use std::fmt::{Display, Formatter, Debug, Error as FmtError};
 /// HTTP status codes.
 #[derive(Debug, PartialEq)]
 pub enum HTTPStatus {
-    Ok = 200,
     Created = 201,
     Accepted = 202,
     NoContent = 204,
@@ -53,7 +52,7 @@ pub enum HTTPStatus {
 }
 
 /// An HTTP error, we use it for error handling.
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub struct HTTPError {
     /// The HTTP status code.
     pub status: HTTPStatus,
@@ -91,6 +90,22 @@ impl HTTPError {
     pub fn internal_server_error(msg: &str) -> HTTPError {
         HTTPError {
             status: HTTPStatus::InternalServerError,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create a conflict error.
+    pub fn conflict(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::Conflict,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create an unprocessable entity error.
+    pub fn unprocessable_entity(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::UnprocessableEntity,
             message: msg.to_string(),
         }
     }

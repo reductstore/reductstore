@@ -13,6 +13,8 @@ set(RUST_PART_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/asset.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/asset/asset_manager.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/auth.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/auth/token_repository.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/env.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/logger.rs"
@@ -21,6 +23,7 @@ set(RUST_PART_SOURCES
 add_library(rust_part STATIC ${RUST_PART_CXX})
 
 set(RUST_BUILD_COMMAND PROTOC=${Protobuf_PROTOC_EXECUTABLE} CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} ${CARGO_CMD})
+set(RUST_TEST_COMMAND PROTOC=${Protobuf_PROTOC_EXECUTABLE} CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} cargo test --verbose)
 
 add_custom_command(
         OUTPUT ${RUST_PART_CXX}

@@ -18,6 +18,7 @@ hex = "0.4"
 time = "=0.3.17"    # to keep 1.60.0 compatibility
 prost = "0.11"
 prost-types = "0.11"
+rand="0.8"
 
 [build-dependencies]
 cxx-build = "1.0"
