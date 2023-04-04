@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use rand::Rng;
 
 use bytes::Bytes;
+use log::debug;
 use prost::{bytes, Message};
 
 use crate::core::status::HTTPError;
@@ -42,6 +43,7 @@ impl TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
 
+
         let init_token = match api_token {
             Some(value) => {
                 Some(proto::Token {
@@ -58,6 +60,7 @@ impl TokenRepository {
             None => {
                 // No API token, no authentication
                 // TODO: After C++ is removed, this should use traits and an empty implementation
+                debug!("API token is not set, no authentication is required")
                 None
             }
         };
@@ -71,6 +74,7 @@ impl TokenRepository {
 
         match std::fs::read(&token_repository.config_path) {
             Ok(data) => {
+                debug!("Loading token repository from {}", token_repository.config_path.as_path().display());
                 let toke_repository = proto::TokenRepo::decode(&mut Bytes::from(data))
                     .expect("Could not decode token repository");
                 for token in toke_repository.tokens {
@@ -78,7 +82,7 @@ impl TokenRepository {
                 }
             }
             Err(_) => {
-                // Create a new token repository
+                debug!("Creating a new token repository {}", token_repository.config_path.as_path().display());
                 token_repository.save_repo().expect("Failed to create a new token repository");
             }
         };
@@ -86,8 +90,20 @@ impl TokenRepository {
         token_repository
     }
 
+    /// Create a new token
+    ///
+    /// # Arguments
+    ///
+    /// `name` - The name of the token
+    /// `permissions` - The permissions of the token
+    ///
+    /// # Returns
+    ///
+    /// token value and creation time
     pub fn create_token(&mut self, name: &str, permissions: proto::token::Permissions) -> Result<proto::TokenCreateResponse, HTTPError> {
         // Check if the token isn't empty
+        debug!("Creating token '{}'", name);
+
         if name.is_empty() {
             return Err(HTTPError::unprocessable_entity("Token name can't be empty"));
         }
