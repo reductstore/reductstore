@@ -194,6 +194,61 @@ impl TokenRepository {
         }
     }
 
+    /// Get token list
+    ///
+    /// # Returns
+    /// The token list, it the authentication is disabled, it returns an empty list
+    pub fn get_token_list(&self) -> Result<Vec<proto::Token>, HTTPError> {
+        if self.init_token.is_none() {
+            return Ok(vec![]);
+        }
+
+        Ok(self.repo.values().map(|token| proto::Token {
+            name: token.name.clone(),
+            value: "".to_string(),
+            created_at: token.created_at.clone(),
+            permissions: token.permissions.clone(),
+        }).collect())
+    }
+
+
+    /// Validate a token
+    ///
+    /// # Arguments
+    /// `value` - The token value
+    ///
+    /// # Returns
+    ///
+    /// Token with given value
+    pub fn validate_token(&self, value: &str) -> Result<proto::Token, HTTPError> {
+        if self.init_token.is_none() {
+            // Return placeholder
+            return Ok(proto::Token {
+                name: "AUTHENTICATION-DISABLED".to_string(),
+                value: "".to_string(),
+                created_at: None,
+                permissions: Some(proto::token::Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                }),
+            });
+        }
+
+        match self.repo.values().find(|token| token.value == value) {
+            Some(token) => {
+                // for security reasons, we don't return the value
+                Ok(proto::Token {
+                    name: token.name.clone(),
+                    value: "".to_string(),
+                    created_at: token.created_at.clone(),
+                    permissions: token.permissions.clone(),
+                })
+            }
+            None => Err(HTTPError::unauthorized("Invalid token")),
+        }
+    }
+
     /// Save the token repository to the file system
     fn save_repo(&mut self) -> Result<(), HTTPError> {
         let repo = proto::TokenRepo {
@@ -342,6 +397,9 @@ mod tests {
         assert_eq!(token, Err(HTTPError::bad_request("Authentication is disabled")));
     }
 
+    //----------------
+    // find_by_name tests
+    //----------------
     #[test]
     pub fn test_find_by_name() {
         let mut repo = setup();
@@ -356,7 +414,86 @@ mod tests {
         assert_eq!(token.name, "test");
         assert_eq!(token.value, "");
     }
-    
+
+    #[test]
+    pub fn test_find_by_name_not_found() {
+        let repo = setup();
+        let token = repo.find_by_name("test");
+
+        assert_eq!(token, Err(HTTPError::not_found("Token 'test' doesn't exist")));
+    }
+
+    #[test]
+    pub fn test_find_by_name_no_init_token() {
+        let repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let token = repo.find_by_name("test");
+
+        assert_eq!(token, Err(HTTPError::bad_request("Authentication is disabled")));
+    }
+
+    //------------
+    // get_token_list tests
+    //------------
+    #[test]
+    pub fn test_get_token_list() {
+        let mut repo = setup();
+        repo.create_token("test", Permissions {
+            full_access: true,
+            read: vec![],
+            write: vec![],
+        }).unwrap();
+
+        let token_list = repo.get_token_list().unwrap();
+
+        assert_eq!(token_list.len(), 1);
+        assert_eq!(token_list[0].name, "test");
+        assert_eq!(token_list[0].value, "");
+    }
+
+    #[test]
+    pub fn test_get_token_list_no_init_token() {
+        let repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let token_list = repo.get_token_list().unwrap();
+
+        assert_eq!(token_list, vec![]);
+    }
+
+    //------------
+    // validate_token tests
+    //------------
+    #[test]
+    pub fn test_validate_token() {
+        let mut repo = setup();
+        let value = repo.create_token("test", Permissions {
+            full_access: true,
+            read: vec![],
+            write: vec![],
+        }).unwrap().value;
+
+        let token = repo.validate_token(&value).unwrap();
+
+        assert_eq!(token.name, "test");
+        assert_eq!(token.value, "");
+    }
+
+    #[test]
+    pub fn test_validate_token_not_found() {
+        let repo = setup();
+        let token = repo.validate_token("invalid-value");
+
+        assert_eq!(token, Err(HTTPError::unauthorized("Invalid token")));
+    }
+
+    #[test]
+    pub fn test_validate_token_no_init_token() {
+        let repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let placeholder = repo.validate_token("invalid-value").unwrap();
+
+        assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
+        assert_eq!(placeholder.value, "");
+        assert_eq!(placeholder.permissions.unwrap().full_access, true);
+    }
+
     fn setup() -> TokenRepository {
         TokenRepository::new(tempdir().unwrap().into_path(), Some("test".to_string()))
     }

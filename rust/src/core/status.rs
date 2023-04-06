@@ -102,6 +102,14 @@ impl HTTPError {
         }
     }
 
+    /// Create an unauthorized error.
+    pub fn unauthorized(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::Unauthorized,
+            message: msg.to_string(),
+        }
+    }
+
     /// Create an unprocessable entity error.
     pub fn unprocessable_entity(msg: &str) -> HTTPError {
         HTTPError {
