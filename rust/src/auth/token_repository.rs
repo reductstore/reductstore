@@ -101,9 +101,13 @@ impl TokenRepository {
     ///
     /// token value and creation time
     pub fn create_token(&mut self, name: &str, permissions: proto::token::Permissions) -> Result<proto::TokenCreateResponse, HTTPError> {
-        // Check if the token isn't empty
+        if self.init_token.is_none() {
+            return Err(HTTPError::bad_request("Authentication is disabled"));
+        }
+
         debug!("Creating token '{}'", name);
 
+        // Check if the token isn't empty
         if name.is_empty() {
             return Err(HTTPError::unprocessable_entity("Token name can't be empty"));
         }
@@ -137,6 +141,24 @@ impl TokenRepository {
         })
     }
 
+    /// Update a token
+    ///
+    /// # Arguments
+    ///
+    /// `name` - The name of the token
+    /// `permissions` - The permissions of the token
+    pub fn update_token(&self, name: &str, permissions: proto::token::Permissions) -> Result<(), HTTPError> {
+        if self.init_token.is_none() {
+            return Err(HTTPError::bad_request("Authentication is disabled"));
+        }
+
+        debug!("Updating token '{}'", name);
+
+        // Check if the token exists
+        if self.repo.c
+
+    }
+
     /// Save the token repository to the file system
     fn save_repo(&mut self) -> Result<(), HTTPError> {
         let repo = proto::TokenRepo {
@@ -151,6 +173,7 @@ impl TokenRepository {
 
         Ok(())
     }
+
 }
 
 #[cfg(test)]
@@ -215,6 +238,18 @@ mod tests {
 
         let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
         assert!(repo.repo.contains_key("test"));
+    }
+
+    #[test]
+    pub fn test_create_token_no_init_token() {
+        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let token = repo.create_token("test", Permissions {
+            full_access: true,
+            read: vec![],
+            write: vec![],
+        });
+
+        assert_eq!(token, Err(HTTPError::bad_request("Authentication is disabled")));
     }
 
     fn setup() -> TokenRepository {

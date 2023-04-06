@@ -86,14 +86,6 @@ impl HTTPError {
         }
     }
 
-    /// Create a bad request error.
-    pub fn internal_server_error(msg: &str) -> HTTPError {
-        HTTPError {
-            status: HTTPStatus::InternalServerError,
-            message: msg.to_string(),
-        }
-    }
-
     /// Create a conflict error.
     pub fn conflict(msg: &str) -> HTTPError {
         HTTPError {
@@ -102,10 +94,26 @@ impl HTTPError {
         }
     }
 
+    /// Create a bad request error.
+    pub fn bad_request(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::BadRequest,
+            message: msg.to_string(),
+        }
+    }
+
     /// Create an unprocessable entity error.
     pub fn unprocessable_entity(msg: &str) -> HTTPError {
         HTTPError {
             status: HTTPStatus::UnprocessableEntity,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create a bad request error.
+    pub fn internal_server_error(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::InternalServerError,
             message: msg.to_string(),
         }
     }
