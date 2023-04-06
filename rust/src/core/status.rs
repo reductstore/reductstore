@@ -110,6 +110,14 @@ impl HTTPError {
         }
     }
 
+    /// Create a forbidden error.
+    pub fn forbidden(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::Forbidden,
+            message: msg.to_string(),
+        }
+    }
+
     /// Create an unprocessable entity error.
     pub fn unprocessable_entity(msg: &str) -> HTTPError {
         HTTPError {

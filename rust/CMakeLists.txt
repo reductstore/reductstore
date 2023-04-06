@@ -15,6 +15,7 @@ set(RUST_PART_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/asset/asset_manager.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/auth.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/auth/token_repository.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/auth/policy.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/env.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/logger.rs"
