@@ -249,6 +249,27 @@ impl TokenRepository {
         }
     }
 
+    /// Remove a token
+    ///
+    /// # Arguments
+    /// `name` - The name of the token
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the token was removed successfully
+    pub fn remove_token(&mut self, name: &str) -> Result<(), HTTPError> {
+        if self.init_token.is_none() {
+            return Ok(());
+        }
+
+        if  self.repo.remove(name).is_none() {
+            Err(HTTPError::not_found(format!("Token '{}' doesn't exist", name).as_str()))
+        } else {
+            self.save_repo()?;
+            Ok(())
+        }
+    }
+
     /// Save the token repository to the file system
     fn save_repo(&mut self) -> Result<(), HTTPError> {
         let repo = proto::TokenRepo {
@@ -386,6 +407,32 @@ mod tests {
     }
 
     #[test]
+    pub fn test_update_token_persistent() {
+        let path = tempdir().unwrap().into_path();
+        let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        repo.create_token("test", Permissions {
+            full_access: true,
+            read: vec![],
+            write: vec![],
+        }).unwrap();
+
+        repo.update_token("test", Permissions {
+            full_access: false,
+            read: vec!["test".to_string()],
+            write: vec![],
+        }).unwrap();
+
+        let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let token = repo.find_by_name("test").unwrap();
+
+        assert_eq!(token.name, "test");
+
+        let permissions = token.permissions.unwrap();
+        assert_eq!(permissions.full_access, false);
+        assert_eq!(permissions.read, vec!["test".to_string()]);
+    }
+
+    #[test]
     pub fn test_update_token_no_init_token() {
         let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
         let token = repo.update_token("test", Permissions {
@@ -493,6 +540,58 @@ mod tests {
         assert_eq!(placeholder.value, "");
         assert_eq!(placeholder.permissions.unwrap().full_access, true);
     }
+
+    //------------
+    // remove_token tests
+    //------------
+    #[test]
+    pub fn test_remove_token() {
+        let mut repo = setup();
+        repo.create_token("test", Permissions {
+            full_access: true,
+            read: vec![],
+            write: vec![],
+        }).unwrap();
+
+        let token = repo.remove_token("test").unwrap();
+
+        assert_eq!(token, ());
+    }
+
+    #[test]
+    pub fn test_remove_token_not_found() {
+        let mut repo = setup();
+        let token = repo.remove_token("test");
+
+        assert_eq!(token, Err(HTTPError::not_found("Token 'test' doesn't exist")));
+    }
+
+    #[test]
+    pub fn test_remove_token_persistent() {
+        let path = tempdir().unwrap().into_path();
+        let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        repo.create_token("test", Permissions {
+            full_access: true,
+            read: vec![],
+            write: vec![],
+        }).unwrap();
+
+        repo.remove_token("test").unwrap();
+
+        let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let token = repo.find_by_name("test");
+
+        assert_eq!(token, Err(HTTPError::not_found("Token 'test' doesn't exist")));
+    }
+
+    #[test]
+    pub fn test_remove_token_no_init_token() {
+        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let token = repo.remove_token("test");
+
+        assert_eq!(token, Ok(()));
+    }
+
 
     fn setup() -> TokenRepository {
         TokenRepository::new(tempdir().unwrap().into_path(), Some("test".to_string()))
