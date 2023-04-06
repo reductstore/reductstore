@@ -12,11 +12,9 @@ use bytes::Bytes;
 use log::debug;
 use prost::{bytes, Message};
 
+use crate::auth::proto::{Token, TokenRepo, TokenCreateResponse};
+use crate::auth::proto::token::Permissions;
 use crate::core::status::HTTPError;
-
-mod proto {
-    include!(concat!(env!("OUT_DIR"), "/reduct.proto.api.rs"));
-}
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
 const INIT_TOKEN_NAME: &str = "init-token";
@@ -24,9 +22,9 @@ const INIT_TOKEN_NAME: &str = "init-token";
 /// The TokenRepository trait is used to store and retrieve tokens.
 pub struct TokenRepository {
     config_path: PathBuf,
-    init_token: Option<proto::Token>,
+    init_token: Option<Token>,
     // TODO: Make it non-optional after C++ is removed
-    repo: HashMap<String, proto::Token>,
+    repo: HashMap<String, Token>,
 }
 
 impl TokenRepository {
@@ -47,11 +45,11 @@ impl TokenRepository {
 
         let init_token = match api_token {
             Some(value) => {
-                Some(proto::Token {
+                Some(Token {
                     name: INIT_TOKEN_NAME.to_string(),
                     value,
                     created_at: ::prost_types::Timestamp::try_from(SystemTime::now()).ok(),
-                    permissions: Some(proto::token::Permissions {
+                    permissions: Some(Permissions {
                         full_access: true,
                         read: vec![],
                         write: vec![],
@@ -76,7 +74,7 @@ impl TokenRepository {
         match std::fs::read(&token_repository.config_path) {
             Ok(data) => {
                 debug!("Loading token repository from {}", token_repository.config_path.as_path().display());
-                let toke_repository = proto::TokenRepo::decode(&mut Bytes::from(data))
+                let toke_repository = TokenRepo::decode(&mut Bytes::from(data))
                     .expect("Could not decode token repository");
                 for token in toke_repository.tokens {
                     token_repository.repo.insert(token.name.clone(), token);
@@ -101,7 +99,7 @@ impl TokenRepository {
     /// # Returns
     ///
     /// token value and creation time
-    pub fn create_token(&mut self, name: &str, permissions: proto::token::Permissions) -> Result<proto::TokenCreateResponse, HTTPError> {
+    pub fn create_token(&mut self, name: &str, permissions: Permissions) -> Result<TokenCreateResponse, HTTPError> {
         if self.init_token.is_none() {
             return Err(HTTPError::bad_request("Authentication is disabled"));
         }
@@ -126,7 +124,7 @@ impl TokenRepository {
             .map(|_| format!("{:x}", rng.gen_range(0..16)))
             .collect();
         let value = format!("{}-{}", name, value);
-        let token = proto::Token {
+        let token = Token {
             name: name.to_string(),
             value: value.clone(),
             created_at: created_at.clone(),
@@ -136,7 +134,7 @@ impl TokenRepository {
         self.repo.insert(name.to_string(), token);
         self.save_repo()?;
 
-        Ok(proto::TokenCreateResponse {
+        Ok(TokenCreateResponse {
             value,
             created_at,
         })
@@ -148,7 +146,7 @@ impl TokenRepository {
     ///
     /// `name` - The name of the token
     /// `permissions` - The permissions of the token
-    pub fn update_token(&mut self, name: &str, permissions: proto::token::Permissions) -> Result<(), HTTPError> {
+    pub fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), HTTPError> {
         if self.init_token.is_none() {
             return Err(HTTPError::bad_request("Authentication is disabled"));
         }
@@ -176,14 +174,14 @@ impl TokenRepository {
     ///
     /// # Returns
     /// The token without value
-    pub fn find_by_name(&self, name: &str) -> Result<proto::Token, HTTPError> {
+    pub fn find_by_name(&self, name: &str) -> Result<Token, HTTPError> {
         if self.init_token.is_none() {
             return Err(HTTPError::bad_request("Authentication is disabled"));
         }
 
         match self.repo.get(name) {
             Some(token) => {
-                Ok(proto::Token {
+                Ok(Token {
                     name: token.name.clone(),
                     value: "".to_string(),
                     created_at: token.created_at.clone(),
@@ -198,12 +196,12 @@ impl TokenRepository {
     ///
     /// # Returns
     /// The token list, it the authentication is disabled, it returns an empty list
-    pub fn get_token_list(&self) -> Result<Vec<proto::Token>, HTTPError> {
+    pub fn get_token_list(&self) -> Result<Vec<Token>, HTTPError> {
         if self.init_token.is_none() {
             return Ok(vec![]);
         }
 
-        Ok(self.repo.values().map(|token| proto::Token {
+        Ok(self.repo.values().map(|token| Token {
             name: token.name.clone(),
             value: "".to_string(),
             created_at: token.created_at.clone(),
@@ -220,14 +218,14 @@ impl TokenRepository {
     /// # Returns
     ///
     /// Token with given value
-    pub fn validate_token(&self, value: &str) -> Result<proto::Token, HTTPError> {
+    pub fn validate_token(&self, value: &str) -> Result<Token, HTTPError> {
         if self.init_token.is_none() {
             // Return placeholder
-            return Ok(proto::Token {
+            return Ok(Token {
                 name: "AUTHENTICATION-DISABLED".to_string(),
                 value: "".to_string(),
                 created_at: None,
-                permissions: Some(proto::token::Permissions {
+                permissions: Some(Permissions {
                     full_access: true,
                     read: vec![],
                     write: vec![],
@@ -235,10 +233,22 @@ impl TokenRepository {
             });
         }
 
+        // Check init token first
+        if let Some(init_token) = &self.init_token {
+            if init_token.value == value {
+                return Ok(Token {
+                    name: init_token.name.clone(),
+                    value: "".to_string(),
+                    created_at: init_token.created_at.clone(),
+                    permissions: init_token.permissions.clone(),
+                });
+            }
+        }
+
         match self.repo.values().find(|token| token.value == value) {
             Some(token) => {
                 // for security reasons, we don't return the value
-                Ok(proto::Token {
+                Ok(Token {
                     name: token.name.clone(),
                     value: "".to_string(),
                     created_at: token.created_at.clone(),
@@ -262,7 +272,7 @@ impl TokenRepository {
             return Ok(());
         }
 
-        if  self.repo.remove(name).is_none() {
+        if self.repo.remove(name).is_none() {
             Err(HTTPError::not_found(format!("Token '{}' doesn't exist", name).as_str()))
         } else {
             self.save_repo()?;
@@ -272,7 +282,7 @@ impl TokenRepository {
 
     /// Save the token repository to the file system
     fn save_repo(&mut self) -> Result<(), HTTPError> {
-        let repo = proto::TokenRepo {
+        let repo = TokenRepo {
             tokens: self.repo.values().cloned().collect(),
         };
         let mut buf = Vec::new();
@@ -289,8 +299,16 @@ impl TokenRepository {
 #[cfg(test)]
 mod tests {
     use tempfile::{tempdir};
-    use proto::token::Permissions;
     use super::*;
+
+    #[test]
+    pub fn test_init_token() {
+        let repo = setup();
+
+        let token = repo.validate_token("test").unwrap();
+        assert_eq!(token.name, "init-token");
+        assert_eq!(token.value, "");
+    }
 
     //------------
     // create_token tests

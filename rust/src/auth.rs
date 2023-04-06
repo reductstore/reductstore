@@ -5,3 +5,5 @@
 
 pub mod token_repository;
 pub mod policy;
+pub mod token_auth;
+pub mod proto;
