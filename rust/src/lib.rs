@@ -11,7 +11,7 @@ use serde_json;
 
 use crate::core::env::{Env, new_env};
 use crate::core::logger::{init_log};
-use crate::core::status::{HTTPStatus, HTTPError};
+use crate::core::status::{HTTPError};
 
 use crate::asset::asset_manager::{ZipAssetManager, new_asset_manager};
 use crate::auth::policy::{AnonymousPolicy, AuthenticatedPolicy, FullAccessPolicy, Policy, ReadAccessPolicy, WriteAccessPolicy};
@@ -53,6 +53,7 @@ mod ffi_core {
         type TokenCreateResponse;
         fn new_token_create_response() -> Box<TokenCreateResponse>;
         fn token_create_response_to_json(resp: &TokenCreateResponse) -> String;
+        fn json_to_token_create_response(json: &str, resp: &mut TokenCreateResponse) -> Box<HTTPError>;
     }
 
     extern "Rust" {
@@ -88,7 +89,8 @@ mod ffi_core {
         type DynPolicy;
 
         fn auth_check(auth: &TokenAuthorization, header: &str, repo: &TokenRepository, policy: &DynPolicy) -> Box<HTTPError>;
-        fn new_anonymous_policy() ->Box<DynPolicy>;
+        fn new_token_authorization(api_token: &str) -> Box<TokenAuthorization>;
+        fn new_anonymous_policy() -> Box<DynPolicy>;
         fn new_authenticated_policy() -> Box<DynPolicy>;
         fn new_full_access_policy() -> Box<DynPolicy>;
         fn new_read_policy(bucket: &str) -> Box<DynPolicy>;
@@ -183,6 +185,17 @@ pub fn token_create_response_to_json(resp: &TokenCreateResponse) -> String {
     serde_json::to_string(resp).unwrap()
 }
 
+pub fn json_to_token_create_response(json: &str, resp: &mut TokenCreateResponse) -> Box<HTTPError> {
+    let err = match serde_json::from_str(json) {
+        Ok(r) => {
+            *resp = r;
+            HTTPError::ok()
+        }
+        Err(err) => HTTPError::unprocessable_entity(err.to_string().as_str()),
+    };
+    Box::new(err)
+}
+
 pub fn new_token() -> Box<Token> {
     Box::new(Token::default())
 }
@@ -201,7 +214,7 @@ pub fn json_to_token_permissions(json: &str, permissions: &mut Permissions) -> B
             *permissions = p;
             HTTPError::ok()
         }
-        Err(err) => HTTPError::new(HTTPStatus::BadRequest, err.to_string().as_str()),
+        Err(err) => HTTPError::unprocessable_entity(err.to_string().as_str()),
     };
     Box::new(err)
 }
@@ -218,6 +231,10 @@ pub fn token_permissions_write(permissions: &Permissions) -> Vec<String> {
     permissions.write.clone()
 }
 
+pub fn new_token_authorization(api_token: &str) -> Box<TokenAuthorization> {
+    Box::new(TokenAuthorization::new(api_token))
+}
+
 pub fn auth_check(auth: &TokenAuthorization, header: &str, repo: &TokenRepository, policy: &DynPolicy) -> Box<HTTPError> {
     let err = match auth.check(header, repo, policy.as_ref()) {
         Ok(_) => HTTPError::ok(),
@@ -228,25 +245,25 @@ pub fn auth_check(auth: &TokenAuthorization, header: &str, repo: &TokenRepositor
 
 
 pub fn new_anonymous_policy() -> Box<DynPolicy> {
-    Box::new(Box::new(AnonymousPolicy{}))
+    Box::new(Box::new(AnonymousPolicy {}))
 }
 
 pub fn new_authenticated_policy() -> Box<DynPolicy> {
-    Box::new(Box::new(AuthenticatedPolicy{}))
+    Box::new(Box::new(AuthenticatedPolicy {}))
 }
 
 pub fn new_full_access_policy() -> Box<DynPolicy> {
-    Box::new(Box::new(FullAccessPolicy{}))
+    Box::new(Box::new(FullAccessPolicy {}))
 }
 
 pub fn new_read_policy(bucket: &str) -> Box<DynPolicy> {
-    Box::new(Box::new(ReadAccessPolicy{
+    Box::new(Box::new(ReadAccessPolicy {
         bucket: bucket.to_string(),
     }))
 }
 
 pub fn new_write_policy(bucket: &str) -> Box<DynPolicy> {
-    Box::new(Box::new(WriteAccessPolicy{
+    Box::new(Box::new(WriteAccessPolicy {
         bucket: bucket.to_string(),
     }))
 }

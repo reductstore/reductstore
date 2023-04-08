@@ -5,7 +5,6 @@
 use crate::core::status::HTTPError;
 
 use crate::auth::proto::Token;
-use crate::auth::proto::token::Permissions;
 
 /// Policy is a trait that defines the interface for a policy.
 /// A policy is a set of rules that are applied to a token to determine
