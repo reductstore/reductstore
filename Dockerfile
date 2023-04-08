@@ -14,7 +14,8 @@ COPY VERSION VERSION
 
 WORKDIR /build
 
-RUN cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON /src
+ARG BUILD_TYPE=Release
+RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON /src
 RUN make -j4
 
 
@@ -23,3 +24,5 @@ FROM ubuntu:22.04
 RUN mkdir /data
 COPY --from=builder /build/bin/ /usr/local/bin/
 ENV PATH=/usr/local/bin/
+
+CMD ["reductstore"]
