@@ -123,8 +123,6 @@ impl TokenRepository {
             return Err(HTTPError::bad_request("Authentication is disabled"));
         }
 
-        debug!("Creating token '{}'", name);
-
         // Check if the token isn't empty
         if name.is_empty() {
             return Err(HTTPError::unprocessable_entity("Token name can't be empty"));

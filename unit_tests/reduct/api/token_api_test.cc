@@ -99,13 +99,13 @@ TEST_CASE("TokenApi::ListTokens should list tokens", "[api]") {
 
   auto [resp, resp_err] = receiver({}, true);
   REQUIRE(resp_err == Error::kOk);
-  REQUIRE(resp.content_length == 305);
+  REQUIRE(resp.content_length == 316);
 
   auto json = nlohmann::json::parse(resp.SendData().result);
 
-  REQUIRE(json.size() == 2);
-  REQUIRE(json[0]["name"] == "token-1");
-  REQUIRE(json[1]["name"] == "token-2");
+  REQUIRE(json["tokens"].size() == 2);
+  REQUIRE(json["tokens"][0]["name"] == "token-1");
+  REQUIRE(json["tokens"][1]["name"] == "token-2");
 }
 
 TEST_CASE("TokenApi::GetToken should show a token", "[api]") {

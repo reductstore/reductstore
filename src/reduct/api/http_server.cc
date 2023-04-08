@@ -152,9 +152,10 @@ class HttpServer : public IHttpServer {
       }
     };
 
-    auto auth_err = rust_part::auth_check(*auth_, authorization.data(), *token_repository_, policy);
+    auto auth_err = rust_part::auth_check(*auth_, std::string(authorization.data(), authorization.size()),
+                                          *token_repository_, policy);
     if (auth_err->status() != Error::kOk.code) {
-      SendError(Error(auth_err->status(), auth_err->message().data()));
+      SendError(Error::FromRust(*auth_err));
       co_return;
     }
 

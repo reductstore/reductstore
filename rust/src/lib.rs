@@ -20,7 +20,7 @@ use crate::auth::policy::{
 };
 
 use crate::auth::proto::token::Permissions;
-use crate::auth::proto::{Token, TokenCreateResponse};
+use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
 use crate::auth::token_auth::*;
 use crate::auth::token_repository::*;
 
@@ -160,8 +160,6 @@ pub fn token_repo_create_token(
 ) -> Box<HTTPError> {
     let err = match repo.create_token(name, permissions.clone()) {
         Ok(token) => {
-            eprintln!("{:?}", ::serde_json::to_string(&permissions));
-
             *resp = token;
             HTTPError::ok()
         }
@@ -188,7 +186,6 @@ pub fn token_repo_validate_token(
 ) -> Box<HTTPError> {
     let err = match repo.validate_token(value) {
         Ok(token) => {
-            eprintln!("{:?}", ::serde_json::to_string(&token));
             *resp = token;
             HTTPError::ok()
         }
@@ -262,7 +259,10 @@ pub fn token_to_json(token: &Token) -> String {
 }
 
 pub fn token_list_to_json(tokens: &Vec<Token>) -> String {
-    serde_json::to_string(tokens).unwrap()
+    let repo = TokenRepo {
+        tokens: tokens.clone(),
+    };
+    serde_json::to_string(&repo).unwrap()
 }
 
 pub fn json_to_token_permissions(json: &str, permissions: &mut Permissions) -> Box<HTTPError> {

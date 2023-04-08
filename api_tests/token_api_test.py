@@ -28,7 +28,7 @@ def test__create_token_exist(base_url, session, token_name):
 
     resp = session.post(f'{base_url}/tokens/{token_name}', json=permissions)
     assert resp.status_code == 200
-    resp = session.post(f'{base_url}/tokens/{token_name}')
+    resp = session.post(f'{base_url}/tokens/{token_name}', json={})
     assert resp.status_code == 409
     assert resp.headers["x-reduct-error"] == f"Token '{token_name}' already exists"
 

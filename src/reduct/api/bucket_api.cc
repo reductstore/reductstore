@@ -63,7 +63,7 @@ core::Result<HttpRequestReceiver> BucketApi::RemoveBucket(storage::IStorage* sto
   }
 
   // Remove bucket from all tokens
-  auto err = reduct::rust_part::token_repo_remove_bucket_from_tokens(repo, name.data());
+  auto err = reduct::rust_part::token_repo_remove_bucket_from_tokens(repo, rust::Str(name.data(), name.size()));
   if (err->status() != Error::kOk.code) {
     return Error(err->status(), err->message().data());
   }

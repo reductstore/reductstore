@@ -42,7 +42,8 @@ Result<HttpRequestReceiver> TokenApi::CreateToken(rust_part::TokenRepository& re
 
         auto token = rust_part::new_token_create_response();
 
-        auto err = rust_part::token_repo_create_token(repository, name.data(), *permissions, *token);
+        auto err =
+            rust_part::token_repo_create_token(repository, std::string(name.data(), name.size()), *permissions, *token);
         if (err->status() != Error::kOk.code) {
           return Error::FromRust(*err);
         }
@@ -63,7 +64,7 @@ Result<HttpRequestReceiver> TokenApi::ListTokens(rust_part::TokenRepository& rep
 
 Result<HttpRequestReceiver> TokenApi::GetToken(rust_part::TokenRepository& repository, std::string_view name) {
   auto token = rust_part::new_token();
-  auto err = rust_part::token_repo_get_token(repository, name.data(), *token);
+  auto err = rust_part::token_repo_get_token(repository, std::string(name.data(), name.size()), *token);
   if (err->status() != Error::kOk.code) {
     return Error::FromRust(*err);
   }
@@ -72,7 +73,7 @@ Result<HttpRequestReceiver> TokenApi::GetToken(rust_part::TokenRepository& repos
 }
 
 core::Result<HttpRequestReceiver> TokenApi::RemoveToken(rust_part::TokenRepository& repository, std::string_view name) {
-  auto err = rust_part::token_repo_remove_token(repository, name.data());
+  auto err = rust_part::token_repo_remove_token(repository, std::string(name.data(), name.size()));
   if (err->status() != Error::kOk.code) {
     return Error::FromRust(*err);
   }

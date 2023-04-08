@@ -214,7 +214,7 @@ static core::Result<HttpRequestReceiver> ReceiveAndSendJson(
           return {HttpResponse::Default(), Error::Continue()};
         }
 
-        auto [resp, err] = handler(std::move(rust::String(data->data(), data->size())));
+        auto [resp, err] = handler(rust::String(data->data(), data->size()));
         RETURN_ERROR(err);
 
         return Result<HttpResponse>{
