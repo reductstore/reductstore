@@ -6,7 +6,7 @@ WORKDIR /src
 
 COPY conanfile.txt .
 COPY src src
-COPY rust rust:wq
+COPY rust rust
 COPY CMakeLists.txt .
 COPY VERSION VERSION
 

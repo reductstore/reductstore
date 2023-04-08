@@ -97,7 +97,9 @@ struct VoidTask {
     }
 
     void return_void() noexcept { LOG_TRACE("return_void"); }
-    void unhandled_exception() { LOG_ERROR("Unhandled exception in coroutine"); }
+    void unhandled_exception() {
+      LOG_ERROR("Unhandled exception in coroutine");
+    }
   };
 
   VoidTask() = default;

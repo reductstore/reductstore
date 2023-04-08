@@ -6,7 +6,6 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-
 /// A helper class to read environment variables.
 pub struct Env {
     message: String,
@@ -36,18 +35,21 @@ impl Env {
     /// # Returns
     ///
     /// The value of the environment variable.
-    fn get<T: FromStr + Display + Default + PartialEq>(&mut self, key: &str, default_value: T, masked: bool) -> T {
+    fn get<T: FromStr + Display + Default + PartialEq>(
+        &mut self,
+        key: &str,
+        default_value: T,
+        masked: bool,
+    ) -> T {
         let mut additional = String::new();
         let value: T = match std::env::var(key) {
-            Ok(value) => {
-                match value.parse() {
-                    Ok(value) => value,
-                    Err(_) => {
-                        additional.push_str("(invalid)");
-                        default_value
-                    }
+            Ok(value) => match value.parse() {
+                Ok(value) => value,
+                Err(_) => {
+                    additional.push_str("(invalid)");
+                    default_value
                 }
-            }
+            },
             Err(_) => {
                 additional.push_str("(default)");
                 default_value
@@ -57,11 +59,15 @@ impl Env {
         if value != T::default() {
             // Add to the message
             if masked {
-                self.message.push_str(&format!("\t{} = {} {}\n",
-                                               key, "*".repeat(value.to_string().len()), additional));
+                self.message.push_str(&format!(
+                    "\t{} = {} {}\n",
+                    key,
+                    "*".repeat(value.to_string().len()),
+                    additional
+                ));
             } else {
-                self.message.push_str(&format!("\t{} = {} {}\n",
-                                               key, value, additional));
+                self.message
+                    .push_str(&format!("\t{} = {} {}\n", key, value, additional));
             }
         }
         return value;
@@ -77,7 +83,6 @@ impl Env {
         self.get(key, default_value, masked)
     }
 
-
     /// Get pretty printed message.
     pub fn message(&self) -> &String {
         &self.message
@@ -86,7 +91,7 @@ impl Env {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::env::{Env, new_env};
+    use crate::core::env::{new_env, Env};
 
     #[test]
     fn make_env() {

@@ -30,11 +30,22 @@ jobs:
       - name: Check code in /benchmarks
         run: find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint
 
+  rustfmt:
+    runs-on: ubuntu-latest
+    name: Rust Linter
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+      - name: Check code in /rust
+        run: find rust/ -name "*.rs" | xargs rustfmt --check
+
   build:
     name: Build Linux Docker image
     runs-on: ubuntu-latest
     needs:
       - cpplint
+      - rustfmt
     strategy:
       matrix:
         build_type: [ "Debug", "Release" ]

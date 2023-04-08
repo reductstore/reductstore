@@ -55,42 +55,17 @@ core::Result<HttpRequestReceiver> BucketApi::UpdateBucket(const storage::IStorag
   return ReceiveJson<BucketSettings>(
       [bucket = bucket_ptr.lock()](auto settings) { return bucket->SetSettings(settings); });
 }
-core::Result<HttpRequestReceiver> BucketApi::RemoveBucket(storage::IStorage* storage, auth::ITokenRepository* repo,
+core::Result<HttpRequestReceiver> BucketApi::RemoveBucket(storage::IStorage* storage,
+                                                          reduct::rust_part::TokenRepository& repo,
                                                           std::string_view name) {
   if (auto err = storage->RemoveBucket(std::string(name))) {
     return err;
   }
 
   // Remove bucket from all tokens
-  const auto tokens = repo->GetTokenList();
-  if (tokens.error) {
-    return tokens.error;
-  }
-
-  for (const auto& token : tokens.result) {
-    const auto [token_info, err] = repo->FindByName(token.name());
-    if (err) {
-      return err;
-    }
-
-    proto::api::Token_Permissions permissions;
-    permissions.set_full_access(token_info.permissions().full_access());
-
-    for (const auto& bucket : token_info.permissions().read()) {
-      if (bucket != name) {
-        *permissions.add_read() = bucket;
-      }
-    }
-
-    for (const auto& bucket : token_info.permissions().write()) {
-      if (bucket != name) {
-        *permissions.add_write() = bucket;
-      }
-    }
-
-    if (auto update_err = repo->UpdateToken(token.name(), permissions)) {
-      return update_err;
-    }
+  auto err = reduct::rust_part::token_repo_remove_bucket_from_tokens(repo, rust::Str(name.data(), name.size()));
+  if (err->status() != Error::kOk.code) {
+    return Error(err->status(), err->message().data());
   }
 
   return DefaultReceiver();

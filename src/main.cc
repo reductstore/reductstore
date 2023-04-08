@@ -9,7 +9,6 @@
 
 #include "reduct/api/http_server.h"
 #include "reduct/async/loop.h"
-#include "reduct/auth/token_auth.h"
 #include "reduct/config.h"
 #include "reduct/core/logger.h"
 #include "reduct/storage/storage.h"
@@ -21,11 +20,11 @@
 
 using reduct::api::IHttpServer;
 using reduct::async::ILoop;
-using reduct::auth::ITokenAuthorization;
-using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::core::Logger;
 using ReductStorage = reduct::storage::IStorage;
+
+namespace rs = reduct::rust_part;
 
 class Loop : public ILoop {
  public:
@@ -39,7 +38,7 @@ int main() {
   std::signal(SIGINT, SignalHandler);
   std::signal(SIGTERM, SignalHandler);
 
-  auto env = reduct::core::new_env();
+  auto env = rs::new_env();
 
   LOG_INFO("ReductStore {}", reduct::kVersion);
 
@@ -53,7 +52,7 @@ int main() {
   auto cert_key_path = env->get_string("RS_CERT_KEY_PATH", "", false);
 
   Logger::set_level(log_level.c_str());
-  reduct::core::init_log(log_level);  // rust logger
+  rs::init_log(log_level);  // rust logger
 
   LOG_INFO("Configuration: \n {}", std::string(env->message()));
 
@@ -61,24 +60,25 @@ int main() {
   ILoop::set_loop(&loop);
 
 #if WITH_CONSOLE
-  auto console = reduct::asset::new_asset_manager(rust::Str(reduct::kZippedConsole.data()));
+  auto console = rs::new_asset_manager(rust::Str(reduct::kZippedConsole.data()));
 #else
-  auto console = reduct::asset::new_asset_manager(rust::Str(""));
+  auto console = reduct::rust_part::new_asset_manager(rust::Str(""));
 #endif
 
   IHttpServer::Components components{
       .storage = ReductStorage::Build({.data_path = data_path.c_str()}),
-      .auth = ITokenAuthorization::Build(api_token.c_str()),
-      .token_repository = ITokenRepository::Build({.data_path = data_path.c_str(), .api_token = api_token.c_str()}),
+      .auth = rs::new_token_authorization(api_token),
+      .token_repository = rs::new_token_repo(data_path, api_token),
       .console = std::move(console),
   };
 
-  auto server = IHttpServer::Build(std::move(components), {
-                                                              .host = host.c_str(),
-                                                              .port = port,
-                                                              .base_path = api_base_path.c_str(),
-                                                              .cert_path = cert_path.c_str(),
-                                                              .cert_key_path = cert_key_path.c_str(),
-                                                          });
+  auto server = IHttpServer::Build(std::move(components),
+                                   {
+                                       .host = std::string(host.data(), host.size()),
+                                       .port = port,
+                                       .base_path = std::string{api_base_path.data(), api_base_path.size()},
+                                       .cert_path = std::string{cert_path.data(), cert_path.size()},
+                                       .cert_key_path = std::string{cert_key_path.data(), cert_key_path.size()},
+                                   });
   return server->Run(running);
 }

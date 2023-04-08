@@ -3,8 +3,8 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use log::{Record, Level, Metadata, Log, info};
 use chrono::prelude::{DateTime, Utc};
+use log::{info, Level, Log, Metadata, Record};
 use thread_id;
 
 static LOGGER: Logger = Logger;
@@ -24,8 +24,15 @@ impl Log for Logger {
             //                 << std::endl;
 
             let now: DateTime<Utc> = Utc::now();
-            println!("{} ({:>5}) [{}] -- {:}:{:} {:?}", now.format("%Y-%m-%d %H:%M:%S.%3f"),
-                     thread_id::get() % 100000, record.level(), record.file().unwrap(), record.line().unwrap(), record.args());
+            println!(
+                "{} ({:>5}) [{}] -- {:}:{:} {:?}",
+                now.format("%Y-%m-%d %H:%M:%S.%3f"),
+                thread_id::get() % 100000,
+                record.level(),
+                record.file().unwrap(),
+                record.line().unwrap(),
+                record.args()
+            );
         }
     }
 
@@ -33,7 +40,6 @@ impl Log for Logger {
 }
 
 impl Logger {
-
     /// Initialize the logger.
     ///
     /// # Arguments
@@ -47,11 +53,10 @@ impl Logger {
             "INFO" => log::set_max_level(Level::Info.to_level_filter()),
             "WARN" => log::set_max_level(Level::Warn.to_level_filter()),
             "ERROR" => log::set_max_level(Level::Error.to_level_filter()),
-            _ =>
-                {
-                    log::set_max_level(Level::Info.to_level_filter());
-                    info!("Invalid log level: {}, defaulting to INFO", level);
-                }
+            _ => {
+                log::set_max_level(Level::Info.to_level_filter());
+                info!("Invalid log level: {}, defaulting to INFO", level);
+            }
         }
     }
 }
@@ -60,7 +65,6 @@ impl Logger {
 pub fn init_log(level: &str) {
     Logger::init(level);
 }
-
 
 #[cfg(test)]
 mod tests {

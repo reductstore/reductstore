@@ -1,6 +1,6 @@
-FROM reduct/alpine-build-image:main AS builder
+FROM reduct/ubuntu-build-image:main AS  builder
 
-RUN apk add --no-cache rust cargo
+RUN apt-get update && apt-get install -y rustc cargo
 
 WORKDIR /src
 
@@ -15,15 +15,14 @@ COPY VERSION VERSION
 WORKDIR /build
 
 ARG BUILD_TYPE=Release
-RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DFULL_STATIC_BINARY=ON /src
+RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON /src
 RUN make -j4
 
+
+FROM ubuntu:22.04
+
 RUN mkdir /data
-
-FROM scratch
-
-COPY --from=builder /tmp /tmp
-COPY --from=builder /data /data
 COPY --from=builder /build/bin/ /usr/local/bin/
 ENV PATH=/usr/local/bin/
+
 CMD ["reductstore"]

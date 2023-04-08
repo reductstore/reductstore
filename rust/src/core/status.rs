@@ -3,12 +3,13 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt::{Display, Formatter, Debug, Error as FmtError};
+use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 
 /// HTTP status codes.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum HTTPStatus {
-    Ok = 200,
+    OK = 200,
+    Continue = 100,
     Created = 201,
     Accepted = 202,
     NoContent = 204,
@@ -53,7 +54,7 @@ pub enum HTTPStatus {
 }
 
 /// An HTTP error, we use it for error handling.
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub struct HTTPError {
     /// The HTTP status code.
     pub status: HTTPStatus,
@@ -79,10 +80,72 @@ impl From<std::io::Error> for HTTPError {
 }
 
 impl HTTPError {
+    pub fn new(status: HTTPStatus, message: &str) -> Self {
+        HTTPError {
+            status,
+            message: message.to_string(),
+        }
+    }
+
+    pub fn status(&self) -> i32 {
+        self.status as i32
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn ok() -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::OK,
+            message: "".to_string(),
+        }
+    }
+
     /// Create a not found error.
     pub fn not_found(msg: &str) -> HTTPError {
         HTTPError {
             status: HTTPStatus::NotFound,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create a conflict error.
+    pub fn conflict(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::Conflict,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create a bad request error.
+    pub fn bad_request(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::BadRequest,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create an unauthorized error.
+    pub fn unauthorized(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::Unauthorized,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create a forbidden error.
+    pub fn forbidden(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::Forbidden,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create an unprocessable entity error.
+    pub fn unprocessable_entity(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::UnprocessableEntity,
             message: msg.to_string(),
         }
     }

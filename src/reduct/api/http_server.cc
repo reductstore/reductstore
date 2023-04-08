@@ -31,16 +31,8 @@ using proto::api::BucketSettings;
 using async::Sleep;
 using async::Task;
 using async::VoidTask;
-using auth::ITokenAuthorization;
 using core::Error;
 using core::Result;
-
-using auth::Anonymous;
-using auth::Authenticated;
-using auth::FullAccess;
-using auth::IAuthorizationPolicy;
-using auth::ReadAccess;
-using auth::WriteAccess;
 
 namespace fs = std::filesystem;
 
@@ -53,7 +45,7 @@ class HttpServer : public IHttpServer {
         console_(std::move(components.console)),
         options_(std::move(options)) {}
 
-  [[nodiscard]] int Run(const bool &running) const override {
+  [[nodiscard]] int Run(const bool &running) override {
     if (options_.cert_path.empty()) {
       RegisterEndpointsAndRun(uWS::App(), running);
     } else {
@@ -122,7 +114,7 @@ class HttpServer : public IHttpServer {
   };
 
   template <bool SSL>
-  VoidTask RegisterEndpoint(const auth::IAuthorizationPolicy &policy, HttpContext<SSL> ctx,
+  VoidTask RegisterEndpoint(const rust_part::DynPolicy &policy, HttpContext<SSL> ctx,
                             std::function<Result<HttpRequestReceiver>()> &&callback) const {
     std::string method(ctx.req->getMethod());
     std::string url{ctx.req->getUrl()};
@@ -160,8 +152,10 @@ class HttpServer : public IHttpServer {
       }
     };
 
-    if (auto err = auth_->Check(authorization, *token_repository_, policy)) {
-      SendError(err);
+    auto auth_err = rust_part::auth_check(*auth_, std::string(authorization.data(), authorization.size()),
+                                          *token_repository_, policy);
+    if (auth_err->status() != Error::kOk.code) {
+      SendError(Error::FromRust(*auth_err));
       co_return;
     }
 
@@ -238,7 +232,7 @@ class HttpServer : public IHttpServer {
   }
 
   template <bool SSL>
-  void RegisterEndpointsAndRun(uWS::TemplatedApp<SSL> &&app, const bool &running) const {
+  void RegisterEndpointsAndRun(uWS::TemplatedApp<SSL> &&app, const bool &running) {
     auto [host, port, base_path, cert_path, cert_key_path] = options_;
 
     if (!base_path.starts_with('/')) {
@@ -252,64 +246,66 @@ class HttpServer : public IHttpServer {
     // Server API
     app.head(api_path + "alive",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_anonymous_policy(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::Alive(storage_.get()); });
              })
         .get(api_path + "info",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_authenticated_policy(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::Info(storage_.get()); });
              })
         .get(api_path + "list",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_authenticated_policy(), HttpContext<SSL>{res, req, running},
                                 [this]() { return ServerApi::List(storage_.get()); });
              })
         .get(api_path + "me",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return ServerApi::Me(token_repository_.get(), req->getHeader("authorization"));
-               });
+               RegisterEndpoint(
+                   *rust_part::new_authenticated_policy(), HttpContext<SSL>{res, req, running},
+                   [this, req]() { return ServerApi::Me(*token_repository_, req->getHeader("authorization")); });
              })
         // Bucket API
         .post(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
-                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                  return BucketApi::CreateBucket(storage_.get(), req->getParameter(0));
-                });
+                RegisterEndpoint(
+                    *rust_part::new_full_access_policy(), HttpContext<SSL>{res, req, running},
+                    [this, req]() { return BucketApi::CreateBucket(storage_.get(), req->getParameter(0)); });
               })
         .get(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
                std::string bucket_name(req->getParameter(0));
-               RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req, &bucket_name]() {
-                 return BucketApi::GetBucket(storage_.get(), bucket_name);
-               });
+               RegisterEndpoint(
+                   *rust_part::new_authenticated_policy(), HttpContext<SSL>{res, req, running},
+                   [this, req, &bucket_name]() { return BucketApi::GetBucket(storage_.get(), bucket_name); });
              })
         .head(api_path + "b/:bucket_name",
               [this, running](auto *res, auto *req) {
                 std::string bucket_name(req->getParameter(0));
-                RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req, &bucket_name]() {
-                  return BucketApi::HeadBucket(storage_.get(), bucket_name);
-                });
+                RegisterEndpoint(
+                    *rust_part::new_authenticated_policy(), HttpContext<SSL>{res, req, running},
+                    [this, req, &bucket_name]() { return BucketApi::HeadBucket(storage_.get(), bucket_name); });
               })
         .put(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return BucketApi::UpdateBucket(storage_.get(), req->getParameter(0));
-               });
+               RegisterEndpoint(
+                   *rust_part::new_full_access_policy(), HttpContext<SSL>{res, req, running},
+                   [this, req]() { return BucketApi::UpdateBucket(storage_.get(), req->getParameter(0)); });
              })
         .del(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return BucketApi::RemoveBucket(storage_.get(), token_repository_.get(), req->getParameter(0));
-               });
+               RegisterEndpoint(
+                   *rust_part::new_full_access_policy(), HttpContext<SSL>{res, req, running}, [this, req]() {
+                     return BucketApi::RemoveBucket(storage_.get(), *token_repository_, req->getParameter(0));
+                   });
              })
         // Entry API
         .post(api_path + "b/:bucket_name/:entry_name",
               [this, running](auto *res, auto *req) {
                 std::string bucket_name(req->getParameter(0));
                 RegisterEndpoint(
-                    WriteAccess(bucket_name), HttpContext<SSL>{res, req, running}, [this, req, &bucket_name]() {
+                    *rust_part::new_write_policy(bucket_name), HttpContext<SSL>{res, req, running},
+                    [this, req, &bucket_name]() {
                       storage::IEntry::LabelMap labels;
                       for (auto header = req->begin(); header != req->end(); ++header) {
                         const auto [key, value] = *header;
@@ -325,7 +321,7 @@ class HttpServer : public IHttpServer {
              [this, running](auto *res, auto *req) {
                std::string bucket_name(req->getParameter(0));
 
-               RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_read_policy(bucket_name), HttpContext<SSL>{res, req, running},
                                 [this, req, &bucket_name]() {
                                   return EntryApi::Read(storage_.get(), bucket_name, req->getParameter(1),
                                                         req->getQuery("ts"), req->getQuery("q"));
@@ -334,7 +330,7 @@ class HttpServer : public IHttpServer {
         .get(api_path + "b/:bucket_name/:entry_name/q",
              [this, running](auto *res, auto *req) {
                std::string bucket_name(req->getParameter(0));
-               RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_read_policy(bucket_name), HttpContext<SSL>{res, req, running},
                                 [this, req, bucket_name]() {
                                   EntryApi::QueryOptions options{
                                       .ttl = req->getQuery("ttl"),
@@ -360,26 +356,26 @@ class HttpServer : public IHttpServer {
         // Token API
         .get(api_path + "tokens",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running},
-                                [this]() { return TokenApi::ListTokens(token_repository_.get()); });
+               RegisterEndpoint(*rust_part::new_full_access_policy(), HttpContext<SSL>{res, req, running},
+                                [this]() { return TokenApi::ListTokens(*token_repository_); });
              })
         .get(api_path + "tokens/:token_id",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return TokenApi::GetToken(token_repository_.get(), req->getParameter(0));
-               });
+               RegisterEndpoint(*rust_part::new_full_access_policy(), HttpContext<SSL>{res, req, running},
+                                [this, req]() { return TokenApi::GetToken(*token_repository_, req->getParameter(0)); });
              })
         .post(api_path + "tokens/:token_id",
               [this, running](auto *res, auto *req) {
-                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                  return TokenApi::CreateToken(token_repository_.get(), storage_.get(), req->getParameter(0));
-                });
+                RegisterEndpoint(
+                    *rust_part::new_full_access_policy(), HttpContext<SSL>{res, req, running}, [this, req]() {
+                      return TokenApi::CreateToken(*token_repository_, storage_.get(), req->getParameter(0));
+                    });
               })
         .del(api_path + "tokens/:token_id",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return TokenApi::RemoveToken(token_repository_.get(), req->getParameter(0));
-               });
+               RegisterEndpoint(
+                   *rust_part::new_full_access_policy(), HttpContext<SSL>{res, req, running},
+                   [this, req]() { return TokenApi::RemoveToken(*token_repository_, req->getParameter(0)); });
              })
         .get(base_path,
              [base_path](auto *res, auto *req) {
@@ -395,17 +391,17 @@ class HttpServer : public IHttpServer {
                if (path.empty()) {
                  path = "index.html";
                }
-               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_anonymous_policy(), HttpContext<SSL>{res, req, running},
                                 [&]() { return Console::UiRequest(console_, base_path, path); });
              })
         .get(base_path + "ui",
              [this, base_path, running](auto *res, auto *req) {
-               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_anonymous_policy(), HttpContext<SSL>{res, req, running},
                                 [&]() { return Console::UiRequest(console_, base_path, "index.html"); });
              })
         .any("/*",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(Anonymous(), HttpContext<SSL>{res, req, running},
+               RegisterEndpoint(*rust_part::new_anonymous_policy(), HttpContext<SSL>{res, req, running},
                                 []() -> Result<HttpRequestReceiver> { return Error::NotFound(); });
              })
         .listen(host, port, 0,
@@ -434,9 +430,9 @@ class HttpServer : public IHttpServer {
 
   Options options_;
   std::unique_ptr<storage::IStorage> storage_;
-  std::unique_ptr<ITokenAuthorization> auth_;
-  std::unique_ptr<auth::ITokenRepository> token_repository_;
-  rust::Box<asset::ZipAssetManager> console_;
+  rust::Box<rust_part::TokenAuthorization> auth_;
+  rust::Box<rust_part::TokenRepository> token_repository_;
+  rust::Box<rust_part::ZipAssetManager> console_;
 };
 
 std::unique_ptr<IHttpServer> IHttpServer::Build(Components components, Options options) {

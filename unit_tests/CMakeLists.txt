@@ -13,11 +13,6 @@ set(SRC_FILES
         reduct/async/sleep_test.cc
         reduct/async/task_test.cc
 
-        reduct/auth/no_token_repository_test.cc
-        reduct/auth/polices_test.cc
-        reduct/auth/token_auth_test.cc
-        reduct/auth/token_repository_test.cc
-
         reduct/storage/io/async_io_test.cc
         reduct/storage/bucket_test.cc
         reduct/storage/entry_test.cc
