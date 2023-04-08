@@ -2,7 +2,6 @@ set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Generate protoc files
 set(PROTOBUF_SPEC_FILES
-        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/auth.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/bucket.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/server.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/entry.proto
@@ -10,7 +9,6 @@ set(PROTOBUF_SPEC_FILES
         )
 
 set(PROTOBUF_FILES
-        ${CMAKE_BINARY_DIR}/reduct/proto/api/auth.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/bucket.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/server.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/entry.pb.cc

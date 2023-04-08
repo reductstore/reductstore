@@ -9,7 +9,6 @@
 
 #include "reduct/api/http_server.h"
 #include "reduct/async/loop.h"
-#include "reduct/auth/token_auth.h"
 #include "reduct/config.h"
 #include "reduct/core/logger.h"
 #include "reduct/storage/storage.h"

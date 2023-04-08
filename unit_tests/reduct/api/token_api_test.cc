@@ -7,7 +7,6 @@
 #include <catch2/catch.hpp>
 #include <google/protobuf/util/time_util.h>
 
-#include "reduct/auth/token_repository.h"
 #include "reduct/helpers.h"
 
 using google::protobuf::util::JsonStringToMessage;
@@ -15,11 +14,7 @@ using google::protobuf::util::TimeUtil;
 
 using reduct::api::PrintToJson;
 using reduct::api::TokenApi;
-using reduct::auth::ITokenRepository;
 using reduct::core::Error;
-using reduct::proto::api::Token;
-using reduct::proto::api::TokenCreateResponse;
-using reduct::proto::api::TokenRepo;
 using Storage = reduct::storage::IStorage;  // fix windows build
 
 TEST_CASE("TokenApi::CreateToken should create a token and return its value", "[api]") {

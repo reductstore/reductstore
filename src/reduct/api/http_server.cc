@@ -31,16 +31,8 @@ using proto::api::BucketSettings;
 using async::Sleep;
 using async::Task;
 using async::VoidTask;
-using auth::ITokenAuthorization;
 using core::Error;
 using core::Result;
-
-using auth::Anonymous;
-using auth::Authenticated;
-using auth::FullAccess;
-using auth::IAuthorizationPolicy;
-using auth::ReadAccess;
-using auth::WriteAccess;
 
 namespace fs = std::filesystem;
 

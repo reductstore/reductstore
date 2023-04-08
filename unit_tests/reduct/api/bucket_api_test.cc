@@ -11,7 +11,6 @@
 
 using google::protobuf::util::JsonStringToMessage;
 using reduct::api::BucketApi;
-using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::storage::IStorage;
 namespace rs = reduct::rust_part;

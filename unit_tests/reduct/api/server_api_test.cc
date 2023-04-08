@@ -10,7 +10,6 @@
 
 using google::protobuf::util::JsonStringToMessage;
 using reduct::api::ServerApi;
-using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::storage::IStorage;
 

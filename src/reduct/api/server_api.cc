@@ -5,15 +5,20 @@
 
 #include "reduct/api/server_api.h"
 
-#include "reduct/auth/token_auth.h"
-
 namespace reduct::api {
 
-using auth::ITokenRepository;
-using auth::ParseBearerToken;
 using core::Error;
 using core::Result;
 using storage::IStorage;
+
+core::Result<std::string> ParseBearerToken(std::string_view authorization_header) {
+  if (!authorization_header.starts_with("Bearer ")) {
+    return {{}, Error::Unauthorized("No bearer token in request header")};
+  }
+  auto token_value = authorization_header.substr(7, authorization_header.size() - 7);
+  return {std::string(token_value), Error::kOk};
+}
+
 
 Result<HttpRequestReceiver> ServerApi::Alive(const IStorage* storage) { return DefaultReceiver(); }
 
