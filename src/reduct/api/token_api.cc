@@ -7,65 +7,69 @@
 
 namespace reduct::api {
 
-using auth::ITokenRepository;
 using core::Error;
 using core::Result;
-using proto::api::Token_Permissions;
-using proto::api::TokenCreateResponse;
-using proto::api::TokenRepo;
 using storage::IStorage;
 
-Result<HttpRequestReceiver> TokenApi::CreateToken(ITokenRepository* repository, const IStorage* storage,
+Result<HttpRequestReceiver> TokenApi::CreateToken(rust_part::TokenRepository& repository, const IStorage* storage,
                                                   std::string_view name) {
-  return ReceiveAndSendJson<Token_Permissions, TokenCreateResponse>(
-      [repository, storage, name = std::string(name)](Token_Permissions&& permissions) -> Result<TokenCreateResponse> {
-        auto check_bucket = [storage](const auto& bucket_list) -> Error {
+  return ReceiveAndSendJson(
+      [&repository, storage, name = std::string(name)](rust::String&& data) -> Result<rust::String> {
+        auto check_bucket = [storage](const rust::Vec<rust::String>& bucket_list) -> Error {
           for (const auto& bucket : bucket_list) {
-            if (storage->GetBucket(bucket).error.code == Error::kNotFound) {
-              return Error::UnprocessableEntity(fmt::format("Bucket '{}' doesn't exist", bucket));
+            if (storage->GetBucket(bucket.data()).error.code == Error::kNotFound) {
+              return Error::UnprocessableEntity(fmt::format("Bucket '{}' doesn't exist", bucket.data()));
             }
           }
           return Error::kOk;
         };
 
-        if (auto err = check_bucket(permissions.read())) {
+        auto permissions = rust_part::new_token_permissions(false, {}, {});
+        auto parsing_err = rust_part::json_to_token_permissions(data, *permissions);
+
+        if (auto err = check_bucket(rust_part::token_permissions_read(*permissions))) {
           return {{}, err};
         }
 
-        if (auto err = check_bucket(permissions.write())) {
+        if (auto err = check_bucket(rust_part::token_permissions_write(*permissions))) {
           return {{}, err};
         }
 
-        return repository->CreateToken(name, permissions);
+        auto token = rust_part::new_token_create_response();
+
+        auto err = rust_part::token_repo_create_token(repository, name.data(), *permissions, *token);
+        if (err->status() != Error::kOk.code) {
+          return Error(err->status(), err->message().data());
+        }
+
+        return rust_part::token_create_response_to_json(*token);
       });
 }
 
-Result<HttpRequestReceiver> TokenApi::ListTokens(ITokenRepository* repository) {
-  auto [list, err] = repository->GetTokenList();
-  if (err) {
-    return err;
+Result<HttpRequestReceiver> TokenApi::ListTokens(rust_part::TokenRepository& repository) {
+  rust::Vec<rust_part::Token> list;
+  auto err = rust_part::token_repo_get_token_list(repository, list);
+  if (err->status() != Error::kOk.code) {
+    return Error(err->status(), err->message().data());
   }
 
-  proto::api::TokenRepo response;
-  for (auto& token : list) {
-    *response.add_tokens() = std::move(token);
-  }
-
-  return SendJson<TokenRepo>({std::move(response), Error::kOk});
+  return SendJson(rust_part::token_list_to_json(list));
 }
 
-Result<HttpRequestReceiver> TokenApi::GetToken(auth::ITokenRepository* repository, std::string_view name) {
-  auto [token, err] = repository->FindByName(std::string(name));
-  if (err) {
-    return err;
+Result<HttpRequestReceiver> TokenApi::GetToken(rust_part::TokenRepository& repository, std::string_view name) {
+  auto token = rust_part::new_token();
+  auto err = rust_part::token_repo_get_token(repository, name.data(), *token);
+  if (err->status() != Error::kOk.code) {
+    return Error(err->status(), err->message().data());
   }
 
-  return SendJson<proto::api::Token>({std::move(token), Error::kOk});
+  return SendJson(rust_part::token_to_json(*token));
 }
-core::Result<HttpRequestReceiver> TokenApi::RemoveToken(auth::ITokenRepository* repository, std::string_view name) {
-  auto err = repository->RemoveToken(std::string(name));
-  if (err) {
-    return err;
+
+core::Result<HttpRequestReceiver> TokenApi::RemoveToken(rust_part::TokenRepository& repository, std::string_view name) {
+  auto err = rust_part::token_repo_remove_token(repository, name.data());
+  if (err->status() != Error::kOk.code) {
+    return Error(err->status(), err->message().data());
   }
   return DefaultReceiver();
 }

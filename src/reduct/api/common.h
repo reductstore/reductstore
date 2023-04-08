@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 
+#include "../../../cmake-build-release/rust/rust_part.h"
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
 
@@ -99,6 +100,25 @@ static core::Result<HttpRequestReceiver> SendJson(core::Result<T> &&res) {
   };
 }
 
+static core::Result<HttpRequestReceiver> SendJson(core::Result<rust::String> &&res) {
+  return core::Result<HttpRequestReceiver>{
+      [data = std::move(res.result)](std::string_view, bool) mutable -> core::Result<HttpResponse> {
+        return {
+            HttpResponse{
+                .headers = {{"Content-Type", "application/json"}},
+                .content_length = data.size(),
+                .SendData =
+                    [json = std::move(data)]() {
+                      return core::Result<std::string>{std::string(json.data(), json.size()), core::Error::kOk};
+                    },
+            },
+            core::Error::kOk,
+        };
+      },
+      res.error,
+  };
+}
+
 template <class T = google::protobuf::Message>
 static core::Result<T> CollectDataAndParseProtobuf(std::string_view chunk, bool last, std::string *buffer) {
   using google::protobuf::util::JsonStringToMessage;
@@ -172,6 +192,36 @@ static core::Result<HttpRequestReceiver> ReceiveAndSendJson(std::function<core::
                     [json = std::move(json)]() {
                       return core::Result<std::string>{json, core::Error::kOk};
                     },
+            },
+            Error::kOk,
+        };
+      },
+      Error::kOk,
+  };
+}
+
+static core::Result<HttpRequestReceiver> ReceiveAndSendJson(
+    std::function<core::Result<rust::String>(rust::String &&)> handler) {
+  using core::Error;
+  using core::Result;
+
+  auto buffer = std::make_shared<std::string>();
+  buffer->reserve(1024);
+  return Result<HttpRequestReceiver>{
+      [data = std::move(buffer), handler](std::string_view chunk, bool last) -> Result<HttpResponse> {
+        data->append(chunk);
+        if (!last) {
+          return {HttpResponse::Default(), Error::Continue()};
+        }
+
+        auto [resp, err] = handler(std::move(rust::String(data->data(), data->size())));
+        RETURN_ERROR(err);
+
+        return Result<HttpResponse>{
+            HttpResponse{
+                .headers = {{"Content-Type", "application/json"}},
+                .content_length = resp.size(),
+                .SendData = [json = std::move(resp)]() { return std::string(json.data(), json.size()); },
             },
             Error::kOk,
         };

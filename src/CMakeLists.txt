@@ -40,10 +40,6 @@ set(SRC_FILES
 
         reduct/async/loop.cc
 
-        reduct/auth/policies.cc
-        reduct/auth/token_auth.cc
-        reduct/auth/token_repository.cc
-
         reduct/core/logger.cc
         reduct/core/error.cc
         reduct/core/common.h

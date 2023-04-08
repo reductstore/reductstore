@@ -30,8 +30,8 @@ class IHttpServer {
   struct Components {
     std::unique_ptr<storage::IStorage> storage;
     std::unique_ptr<auth::ITokenAuthorization> auth;
-    std::unique_ptr<auth::ITokenRepository> token_repository;
-    rust::Box<reduct::asset::ZipAssetManager> console;
+    rust::Box<reduct::rust_part::TokenRepository> token_repository;
+    rust::Box<reduct::rust_part::ZipAssetManager> console;
   };
 
   struct Options {
@@ -53,7 +53,7 @@ class IHttpServer {
   /**
    * Runs HTTP server
    */
-  virtual int Run(const bool &running) const = 0;
+  virtual int Run(const bool &running) = 0;
 };
 
 }  // namespace reduct::api

@@ -12,7 +12,7 @@ namespace reduct::api {
 using core::Error;
 using core::Result;
 
-Result<HttpRequestReceiver> Console::UiRequest(const rust::Box<asset::ZipAssetManager>& console,
+Result<HttpRequestReceiver> Console::UiRequest(const rust::Box<rust_part::ZipAssetManager>& console,
                                                std::string_view base_path, std::string_view path) {
   static StringMap cache;
 

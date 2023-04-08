@@ -39,7 +39,7 @@ int main() {
   std::signal(SIGINT, SignalHandler);
   std::signal(SIGTERM, SignalHandler);
 
-  auto env = reduct::core::new_env();
+  auto env = reduct::rust_part::new_env();
 
   LOG_INFO("ReductStore {}", reduct::kVersion);
 
@@ -53,7 +53,7 @@ int main() {
   auto cert_key_path = env->get_string("RS_CERT_KEY_PATH", "", false);
 
   Logger::set_level(log_level.c_str());
-  reduct::core::init_log(log_level);  // rust logger
+  reduct::rust_part::init_log(log_level);  // rust logger
 
   LOG_INFO("Configuration: \n {}", std::string(env->message()));
 
@@ -61,9 +61,9 @@ int main() {
   ILoop::set_loop(&loop);
 
 #if WITH_CONSOLE
-  auto console = reduct::asset::new_asset_manager(rust::Str(reduct::kZippedConsole.data()));
+  auto console = reduct::rust_part::new_asset_manager(rust::Str(reduct::kZippedConsole.data()));
 #else
-  auto console = reduct::asset::new_asset_manager(rust::Str(""));
+  auto console = reduct::rust_part::new_asset_manager(rust::Str(""));
 #endif
 
   IHttpServer::Components components{

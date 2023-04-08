@@ -7,8 +7,8 @@
 #define REDUCT_STORAGE_TOKEN_API_H
 
 #include "reduct/api/common.h"
-#include "reduct/auth/token_repository.h"
 #include "reduct/storage/storage.h"
+#include "rust_part.h"
 
 namespace reduct::api {
 
@@ -20,7 +20,7 @@ class TokenApi {
    * @param name
    * @return
    */
-  static core::Result<HttpRequestReceiver> CreateToken(auth::ITokenRepository* repository,
+  static core::Result<HttpRequestReceiver> CreateToken(rust_part::TokenRepository& repository,
                                                        const storage::IStorage* storage, std::string_view name);
 
   /**
@@ -29,7 +29,7 @@ class TokenApi {
    * @param repository
    * @return
    */
-  static core::Result<HttpRequestReceiver> ListTokens(auth::ITokenRepository* repository);
+  static core::Result<HttpRequestReceiver> ListTokens(rust_part::TokenRepository& repository);
 
   /**
    * Token info
@@ -38,7 +38,7 @@ class TokenApi {
    * @param name
    * @return
    */
-  static core::Result<HttpRequestReceiver> GetToken(auth::ITokenRepository* repository, std::string_view name);
+  static core::Result<HttpRequestReceiver> GetToken(rust_part::TokenRepository& repository, std::string_view name);
 
   /**
    * Token delete
@@ -48,7 +48,7 @@ class TokenApi {
    * @return
    */
 
-  static core::Result<HttpRequestReceiver> RemoveToken(auth::ITokenRepository* repository, std::string_view name);
+  static core::Result<HttpRequestReceiver> RemoveToken(rust_part::TokenRepository& repository, std::string_view name);
 };
 
 }  // namespace reduct::api

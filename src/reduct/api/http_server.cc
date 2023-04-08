@@ -53,7 +53,7 @@ class HttpServer : public IHttpServer {
         console_(std::move(components.console)),
         options_(std::move(options)) {}
 
-  [[nodiscard]] int Run(const bool &running) const override {
+  [[nodiscard]] int Run(const bool &running) override {
     if (options_.cert_path.empty()) {
       RegisterEndpointsAndRun(uWS::App(), running);
     } else {
@@ -238,7 +238,7 @@ class HttpServer : public IHttpServer {
   }
 
   template <bool SSL>
-  void RegisterEndpointsAndRun(uWS::TemplatedApp<SSL> &&app, const bool &running) const {
+  void RegisterEndpointsAndRun(uWS::TemplatedApp<SSL> &&app, const bool &running) {
     auto [host, port, base_path, cert_path, cert_key_path] = options_;
 
     if (!base_path.starts_with('/')) {
@@ -268,7 +268,7 @@ class HttpServer : public IHttpServer {
         .get(api_path + "me",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(Authenticated(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return ServerApi::Me(token_repository_.get(), req->getHeader("authorization"));
+                 return ServerApi::Me(*token_repository_, req->getHeader("authorization"));
                });
              })
         // Bucket API
@@ -301,7 +301,7 @@ class HttpServer : public IHttpServer {
         .del(api_path + "b/:bucket_name",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return BucketApi::RemoveBucket(storage_.get(), token_repository_.get(), req->getParameter(0));
+                 return BucketApi::RemoveBucket(storage_.get(), *token_repository_, req->getParameter(0));
                });
              })
         // Entry API
@@ -361,24 +361,23 @@ class HttpServer : public IHttpServer {
         .get(api_path + "tokens",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running},
-                                [this]() { return TokenApi::ListTokens(token_repository_.get()); });
+                                [this]() { return TokenApi::ListTokens(*token_repository_); });
              })
         .get(api_path + "tokens/:token_id",
              [this, running](auto *res, auto *req) {
-               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return TokenApi::GetToken(token_repository_.get(), req->getParameter(0));
-               });
+               RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running},
+                                [this, req]() { return TokenApi::GetToken(*token_repository_, req->getParameter(0)); });
              })
         .post(api_path + "tokens/:token_id",
               [this, running](auto *res, auto *req) {
                 RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                  return TokenApi::CreateToken(token_repository_.get(), storage_.get(), req->getParameter(0));
+                  return TokenApi::CreateToken(*token_repository_, storage_.get(), req->getParameter(0));
                 });
               })
         .del(api_path + "tokens/:token_id",
              [this, running](auto *res, auto *req) {
                RegisterEndpoint(FullAccess(), HttpContext<SSL>{res, req, running}, [this, req]() {
-                 return TokenApi::RemoveToken(token_repository_.get(), req->getParameter(0));
+                 return TokenApi::RemoveToken(*token_repository_, req->getParameter(0));
                });
              })
         .get(base_path,
@@ -435,8 +434,8 @@ class HttpServer : public IHttpServer {
   Options options_;
   std::unique_ptr<storage::IStorage> storage_;
   std::unique_ptr<ITokenAuthorization> auth_;
-  std::unique_ptr<auth::ITokenRepository> token_repository_;
-  rust::Box<asset::ZipAssetManager> console_;
+  rust::Box<rust_part::TokenRepository> token_repository_;
+  rust::Box<rust_part::ZipAssetManager> console_;
 };
 
 std::unique_ptr<IHttpServer> IHttpServer::Build(Components components, Options options) {

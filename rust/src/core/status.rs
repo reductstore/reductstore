@@ -6,8 +6,10 @@
 use std::fmt::{Display, Formatter, Debug, Error as FmtError};
 
 /// HTTP status codes.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum HTTPStatus {
+    OK = 200,
+    Continue = 100,
     Created = 201,
     Accepted = 202,
     NoContent = 204,
@@ -78,6 +80,28 @@ impl From<std::io::Error> for HTTPError {
 }
 
 impl HTTPError {
+    pub fn new(status: HTTPStatus, message: &str) -> Self {
+        HTTPError {
+            status,
+            message: message.to_string(),
+        }
+    }
+
+    pub fn status(&self) -> i32 {
+        self.status as i32
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn ok() -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::OK,
+            message: "".to_string(),
+        }
+    }
+
     /// Create a not found error.
     pub fn not_found(msg: &str) -> HTTPError {
         HTTPError {

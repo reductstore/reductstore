@@ -8,7 +8,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/lib.rs");
 
     println!("Current directory: {:?}", std::env::current_dir());
-    prost_build::compile_protos(&["src/proto/auth.proto"], &["src/protos/"])
+
+    prost_build::Config::new()
+        .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .type_attribute(".", "#[serde(default)]")
+        .extern_path(
+            ".google.protobuf.Timestamp",
+            "::prost_wkt_types::Timestamp",
+        ).compile_protos(&["src/proto/auth.proto"], &["src/protos/"])
         .expect("Failed to compile protos");
 
     Ok(())

@@ -7,8 +7,8 @@
 #define REDUCT_STORAGE_BUCKET_API_H
 
 #include "reduct/api/common.h"
-#include "reduct/auth/token_repository.h"
 #include "reduct/storage/storage.h"
+#include "rust_part.h"
 
 namespace reduct::api {
 
@@ -37,7 +37,8 @@ class BucketApi {
   /**
    * DELETE /b/:name
    */
-  static core::Result<HttpRequestReceiver> RemoveBucket(storage::IStorage* storage, auth::ITokenRepository* repo,
+  static core::Result<HttpRequestReceiver> RemoveBucket(storage::IStorage* storage,
+                                                        reduct::rust_part::TokenRepository& repo,
                                                         std::string_view name);
 };
 

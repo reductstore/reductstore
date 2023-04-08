@@ -13,7 +13,7 @@ namespace reduct::api {
 
 class Console {
  public:
-  static core::Result<HttpRequestReceiver> UiRequest(const rust::Box<asset::ZipAssetManager>& console,
+  static core::Result<HttpRequestReceiver> UiRequest(const rust::Box<rust_part::ZipAssetManager>& console,
                                                      std::string_view base_path, std::string_view path);
 };
 

@@ -21,10 +21,14 @@ Result<HttpRequestReceiver> ServerApi::Info(const IStorage* storage) { return Se
 
 Result<HttpRequestReceiver> ServerApi::List(const IStorage* storage) { return SendJson(storage->GetList()); }
 
-core::Result<HttpRequestReceiver> ServerApi::Me(const auth::ITokenRepository* token_repo,
+core::Result<HttpRequestReceiver> ServerApi::Me(const rust_part::TokenRepository& token_repo,
                                                 std::string_view auth_header) {
-  auto token = ParseBearerToken(auth_header);
-  return SendJson(token_repo->ValidateToken(std::move(token)));
+  auto value = ParseBearerToken(auth_header);
+  auto token = rust_part::new_token();
+  auto err = rust_part::token_repo_validate_token(token_repo, value.result.data(), *token);
+
+  auto http_err = Error(err->status(), err->message().data());
+  return SendJson(Result{rust_part::token_to_json(*token), http_err});
 }
 
 }  // namespace reduct::api

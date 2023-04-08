@@ -11,6 +11,7 @@ use rand::Rng;
 use bytes::Bytes;
 use log::debug;
 use prost::{bytes, Message};
+use prost_wkt_types::Timestamp;
 
 use crate::auth::proto::{Token, TokenRepo, TokenCreateResponse};
 use crate::auth::proto::token::Permissions;
@@ -48,7 +49,7 @@ impl TokenRepository {
                 Some(Token {
                     name: INIT_TOKEN_NAME.to_string(),
                     value,
-                    created_at: ::prost_types::Timestamp::try_from(SystemTime::now()).ok(),
+                    created_at: Timestamp::try_from(SystemTime::now()).ok(),
                     permissions: Some(Permissions {
                         full_access: true,
                         read: vec![],
@@ -116,7 +117,7 @@ impl TokenRepository {
             return Err(HTTPError::conflict(format!("Token '{}' already exists", name).as_str()));
         }
 
-        let created_at = ::prost_types::Timestamp::try_from(SystemTime::now()).ok();
+        let created_at = Timestamp::try_from(SystemTime::now()).ok();
 
         // Create a random hex string
         let mut rng = rand::thread_rng();
@@ -275,9 +276,27 @@ impl TokenRepository {
         if self.repo.remove(name).is_none() {
             Err(HTTPError::not_found(format!("Token '{}' doesn't exist", name).as_str()))
         } else {
-            self.save_repo()?;
-            Ok(())
+            self.save_repo()
         }
+    }
+
+    /// Remove a bucket from all tokens and save the repository
+    /// to the file system
+    ///
+    /// # Arguments
+    /// `bucket` - The name of the bucket
+    ///
+    /// # Returns
+    /// `Ok(())` if the bucket was removed successfully
+    pub fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HTTPError> {
+        for token in self.repo.values_mut() {
+            if let Some(permissions) = &mut token.permissions {
+                permissions.read.retain(|b| b != bucket);
+                permissions.write.retain(|b| b != bucket);
+            }
+        }
+
+        self.save_repo()
     }
 
     /// Save the token repository to the file system
@@ -295,6 +314,7 @@ impl TokenRepository {
         Ok(())
     }
 }
+
 
 #[cfg(test)]
 mod tests {
