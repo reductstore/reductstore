@@ -4,21 +4,12 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::Policy;
-use crate::auth::token_repository::TokenRepository;
+use crate::auth::token_repository::{parse_bearer_token, TokenRepository};
 use crate::core::status::HTTPError;
 
 /// Authorization by token
 pub struct TokenAuthorization {
     api_token: String,
-}
-
-fn parse_bearer_token(authorization_header: &str) -> Result<String, HTTPError> {
-    if !authorization_header.starts_with("Bearer ") {
-        return Err(HTTPError::unauthorized("No bearer token in request header"));
-    }
-
-    let token = authorization_header[7..].to_string();
-    Ok(token)
 }
 
 impl TokenAuthorization {
@@ -47,13 +38,8 @@ impl TokenAuthorization {
             return Ok(());
         }
 
-        match parse_bearer_token(authorization_header) {
-            Ok(token) => {
-                let token = repo.validate_token(token.as_str());
-                policy.validate(token)
-            }
-            Err(err) => policy.validate(Err(err)),
-        }
+        let token = repo.validate_token(authorization_header);
+        policy.validate(token)
     }
 }
 

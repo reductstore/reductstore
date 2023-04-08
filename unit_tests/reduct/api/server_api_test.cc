@@ -73,7 +73,8 @@ TEST_CASE("ServerAPI::Me should return current permissions", "[api]") {
   auto answer = rs::new_token_create_response();
   REQUIRE(rs::token_repo_create_token(*repo, "token-1", *permissions, *answer)->status() == 200);
 
-  auto [receiver, err] = ServerApi::Me(*repo, fmt::format("Bearer {}", fmt::format("Bearer {}", "token-1")).c_str());
+  std::string value = nlohmann::json::parse(rs::token_create_response_to_json(*answer))["value"];
+  auto [receiver, err] = ServerApi::Me(*repo, fmt::format("Bearer {}", value));
   REQUIRE(err == Error::kOk);
 
   auto [resp, recv_err] = receiver("", true);
@@ -103,7 +104,7 @@ TEST_CASE("ServerAPI::Me should return current permissions", "[api]") {
 }
 
 TEST_CASE("ServerAPI::Me should return placeholder always and authentication is disabled", "[api]") {
-  auto repo = rs::new_token_repo(BuildTmpDirectory().string(), "init-token");
+  auto repo = rs::new_token_repo(BuildTmpDirectory().string(), "");
 
   auto [receiver, err] = ServerApi::Me(*repo, "invalid-token");
   REQUIRE(err == Error::kOk);

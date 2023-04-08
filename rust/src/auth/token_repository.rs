@@ -28,6 +28,16 @@ pub struct TokenRepository {
     repo: HashMap<String, Token>,
 }
 
+
+pub fn parse_bearer_token(authorization_header: &str) -> Result<String, HTTPError> {
+    if !authorization_header.starts_with("Bearer ") {
+        return Err(HTTPError::unauthorized("No bearer token in request header"));
+    }
+
+    let token = authorization_header[7..].to_string();
+    Ok(token)
+}
+
 impl TokenRepository {
     /// Load the token repository from the file system
     ///
@@ -202,11 +212,13 @@ impl TokenRepository {
             return Ok(vec![]);
         }
 
-        Ok(self.repo.values().map(|token| Token {
-            name: token.name.clone(),
+        let mut sorted: Vec<_> = self.repo.iter().collect();
+        sorted.sort_by_key(|item| item.0);
+        Ok(sorted.iter().map(|item| Token {
+            name: item.1.name.clone(),
             value: "".to_string(),
-            created_at: token.created_at.clone(),
-            permissions: token.permissions.clone(),
+            created_at: item.1.created_at.clone(),
+            permissions: item.1.permissions.clone(),
         }).collect())
     }
 
@@ -214,12 +226,12 @@ impl TokenRepository {
     /// Validate a token
     ///
     /// # Arguments
-    /// `value` - The token value
+    /// `header` - The authorization header with bearer token
     ///
     /// # Returns
     ///
     /// Token with given value
-    pub fn validate_token(&self, value: &str) -> Result<Token, HTTPError> {
+    pub fn validate_token(&self, header: &str) -> Result<Token, HTTPError> {
         if self.init_token.is_none() {
             // Return placeholder
             return Ok(Token {
@@ -233,6 +245,8 @@ impl TokenRepository {
                 }),
             });
         }
+
+        let value = parse_bearer_token(header)?;
 
         // Check init token first
         if let Some(init_token) = &self.init_token {
@@ -325,7 +339,7 @@ mod tests {
     pub fn test_init_token() {
         let repo = setup();
 
-        let token = repo.validate_token("test").unwrap();
+        let token = repo.validate_token("Bearer test").unwrap();
         assert_eq!(token.name, "init-token");
         assert_eq!(token.value, "");
     }
@@ -551,20 +565,28 @@ mod tests {
         let mut repo = setup();
         let value = repo.create_token("test", Permissions {
             full_access: true,
-            read: vec![],
-            write: vec![],
+            read: vec!["bucket-1".to_string()],
+            write: vec!["bucket-2".to_string()],
         }).unwrap().value;
 
-        let token = repo.validate_token(&value).unwrap();
+        let token = repo.validate_token(format!("Bearer {}", value).as_str()).unwrap();
 
-        assert_eq!(token.name, "test");
-        assert_eq!(token.value, "");
+        assert_eq!(token, Token {
+            name: "test".to_string(),
+            created_at: token.created_at.clone(),
+            value: "".to_string(),
+            permissions: Some(Permissions {
+                full_access: true,
+                read: vec!["bucket-1".to_string()],
+                write: vec!["bucket-2".to_string()],
+            }),
+        });
     }
 
     #[test]
     pub fn test_validate_token_not_found() {
         let repo = setup();
-        let token = repo.validate_token("invalid-value");
+        let token = repo.validate_token("Bearer invalid-value");
 
         assert_eq!(token, Err(HTTPError::unauthorized("Invalid token")));
     }

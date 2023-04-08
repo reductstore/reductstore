@@ -120,6 +120,8 @@ pub fn new_token_permissions(full_access: bool, read: Vec<String>, write: Vec<St
 pub fn token_repo_create_token(repo: &mut TokenRepository, name: &str, permissions: &Permissions, resp: &mut TokenCreateResponse) -> Box<HTTPError> {
     let err = match repo.create_token(name, permissions.clone()) {
         Ok(token) => {
+            eprintln!("{:?}", ::serde_json::to_string(&permissions));
+
             *resp = token;
             HTTPError::ok()
         }
@@ -139,6 +141,7 @@ pub fn token_repo_remove_bucket_from_tokens(repo: &mut TokenRepository, bucket: 
 pub fn token_repo_validate_token(repo: &TokenRepository, value: &str, resp: &mut Token) -> Box<HTTPError> {
     let err = match repo.validate_token(value) {
         Ok(token) => {
+            eprintln!("{:?}", ::serde_json::to_string(&token));
             *resp = token;
             HTTPError::ok()
         }

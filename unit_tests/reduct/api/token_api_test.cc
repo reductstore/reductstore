@@ -34,7 +34,8 @@ TEST_CASE("TokenApi::CreateToken should create a token and return its value", "[
     auto [receiver, err] = TokenApi::CreateToken(*repo, storage.get(), "new-token");
     REQUIRE(err == Error::kOk);
 
-    auto [resp, resp_err] = receiver(rs::token_permissions_to_json(*permissions).data(), true);
+    auto json_str = std::string(rs::token_permissions_to_json(*permissions));
+    auto [resp, resp_err] = receiver(json_str, true);
 
     REQUIRE(resp_err == Error::kOk);
 
@@ -47,28 +48,35 @@ TEST_CASE("TokenApi::CreateToken should create a token and return its value", "[
     //    REQUIRE(json.get<std::string>("created_at") >= TimeUtil::GetCurrentTime());
 
     auto token = rs::new_token();
-    auto token_err = rs::token_repo_validate_token(*repo, json["value"].get<std::string>().data(), *token);
+    auto token_err =
+        rs::token_repo_validate_token(*repo, fmt::format("Bearer {}", json["value"].get<std::string>()), *token);
     REQUIRE(token_err->status() == 200);
 
     auto json_token = rs::token_to_json(*token);
     auto token_json = nlohmann::json::parse(json_token);
+
+    REQUIRE(token_json["name"] == "new-token");
     REQUIRE(token_json["permissions"]["full_access"] == true);
+    REQUIRE(token_json["permissions"]["read"].size() == 1);
+    REQUIRE(token_json["permissions"]["read"][0] == "bucket-1");
+    REQUIRE(token_json["permissions"]["write"].size() == 1);
+    REQUIRE(token_json["permissions"]["write"][0] == "bucket-2");
   }
 
   SECTION("already exists") {
     auto [receiver, err] = TokenApi::CreateToken(*repo, storage.get(), "new-token");
     REQUIRE(err == Error::kOk);
 
-    auto [resp, resp_err] = receiver(rs::token_permissions_to_json(*permissions).data(), true);
+    auto [resp, resp_err] = receiver(rs::token_permissions_to_json(*permissions).c_str(), true);
     REQUIRE(resp_err == Error::Conflict("Token 'new-token' already exists"));
   }
 
   SECTION("check if bucket exists") {
-    auto permission = rs::new_token_permissions(true, {"bucket-1", "bucket-3"}, {"bucket-2"});
+    auto wrong_permissions = rs::new_token_permissions(true, {"bucket-1", "bucket-3"}, {"bucket-2"});
     auto [receiver, err] = TokenApi::CreateToken(*repo, storage.get(), "new-token");
     REQUIRE(err == Error::kOk);
 
-    auto [resp, resp_err] = receiver(rs::token_permissions_to_json(*permissions).data(), true);
+    auto [resp, resp_err] = receiver(rs::token_permissions_to_json(*wrong_permissions).c_str(), true);
     REQUIRE(resp_err == Error::UnprocessableEntity("Bucket 'bucket-3' doesn't exist"));
   }
 }
@@ -91,7 +99,7 @@ TEST_CASE("TokenApi::ListTokens should list tokens", "[api]") {
 
   auto [resp, resp_err] = receiver({}, true);
   REQUIRE(resp_err == Error::kOk);
-  REQUIRE(resp.content_length == 144);
+  REQUIRE(resp.content_length == 305);
 
   auto json = nlohmann::json::parse(resp.SendData().result);
 
@@ -116,11 +124,15 @@ TEST_CASE("TokenApi::GetToken should show a token", "[api]") {
 
     auto [resp, resp_err] = receiver({}, true);
     REQUIRE(resp_err == Error::kOk);
-    REQUIRE(resp.content_length == 141);
+    REQUIRE(resp.content_length == 151);
 
     auto json = nlohmann::json::parse(resp.SendData().result);
     REQUIRE(json["name"] == "token-1");
     REQUIRE(json["permissions"]["full_access"] == true);
+    REQUIRE(json["permissions"]["read"].size() == 1);
+    REQUIRE(json["permissions"]["read"][0] == "bucket-1");
+    REQUIRE(json["permissions"]["write"].size() == 1);
+    REQUIRE(json["permissions"]["write"][0] == "bucket-2");
   }
 
   SECTION("not found") {
