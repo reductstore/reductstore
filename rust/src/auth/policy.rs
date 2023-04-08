@@ -35,6 +35,17 @@ impl Policy for AnonymousPolicy {
     }
 }
 
+/// AuthenticatedPolicy validates a token at least is valid.
+pub struct AuthenticatedPolicy {}
+
+impl Policy for AuthenticatedPolicy {
+    fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
+        token?;
+        Ok(())
+    }
+}
+
+
 /// FullAccessPolicy validates a token that has full access.
 pub struct FullAccessPolicy {}
 
@@ -52,7 +63,7 @@ impl Policy for FullAccessPolicy {
 
 /// ReadAccessPolicy validates a token that has read access for a certain bucket
 pub struct ReadAccessPolicy {
-    bucket: String,
+    pub(crate) bucket: String,
 }
 
 impl Policy for ReadAccessPolicy {
@@ -77,7 +88,7 @@ impl Policy for ReadAccessPolicy {
 
 /// WriteAccessPolicy validates a token that has write access for a certain bucket
 pub struct WriteAccessPolicy {
-    bucket: String,
+    pub(crate) bucket: String,
 }
 
 impl Policy for WriteAccessPolicy {
@@ -109,6 +120,14 @@ mod tests {
         let policy = AnonymousPolicy {};
         assert!(policy.validate(Ok(Token::default())).is_ok());
         assert!(policy.validate(Err(HTTPError::forbidden("Invalid token"))).is_ok());
+    }
+
+    #[test]
+    fn test_authenticated_policy() {
+        let policy = AuthenticatedPolicy {};
+        assert!(policy.validate(Ok(Token::default())).is_ok());
+        assert_eq!(policy.validate(Err(HTTPError::forbidden("Invalid token")))
+                   , Err(HTTPError::forbidden("Invalid token")));
     }
 
     #[test]

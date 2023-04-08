@@ -14,10 +14,14 @@ use crate::core::logger::{init_log};
 use crate::core::status::{HTTPStatus, HTTPError};
 
 use crate::asset::asset_manager::{ZipAssetManager, new_asset_manager};
+use crate::auth::policy::{AnonymousPolicy, AuthenticatedPolicy, FullAccessPolicy, Policy, ReadAccessPolicy, WriteAccessPolicy};
 
 use crate::auth::token_repository::*;
+use crate::auth::token_auth::*;
 use crate::auth::proto::{Token, TokenCreateResponse};
 use crate::auth::proto::token::Permissions;
+
+type DynPolicy = Box<dyn Policy>;
 
 #[cxx::bridge(namespace = "reduct::rust_part")]
 mod ffi_core {
@@ -77,6 +81,18 @@ mod ffi_core {
         fn new_token() -> Box<Token>;
         fn token_to_json(token: &Token) -> String;
         fn token_list_to_json(tokens: &Vec<Token>) -> String;
+    }
+
+    extern "Rust" {
+        type TokenAuthorization;
+        type DynPolicy;
+
+        fn auth_check(auth: &TokenAuthorization, header: &str, repo: &TokenRepository, policy: &DynPolicy) -> Box<HTTPError>;
+        fn new_anonymous_policy() ->Box<DynPolicy>;
+        fn new_authenticated_policy() -> Box<DynPolicy>;
+        fn new_full_access_policy() -> Box<DynPolicy>;
+        fn new_read_policy(bucket: &str) -> Box<DynPolicy>;
+        fn new_write_policy(bucket: &str) -> Box<DynPolicy>;
     }
 }
 
@@ -200,4 +216,37 @@ pub fn token_permissions_read(permissions: &Permissions) -> Vec<String> {
 
 pub fn token_permissions_write(permissions: &Permissions) -> Vec<String> {
     permissions.write.clone()
+}
+
+pub fn auth_check(auth: &TokenAuthorization, header: &str, repo: &TokenRepository, policy: &DynPolicy) -> Box<HTTPError> {
+    let err = match auth.check(header, repo, policy.as_ref()) {
+        Ok(_) => HTTPError::ok(),
+        Err(err) => err,
+    };
+    Box::new(err)
+}
+
+
+pub fn new_anonymous_policy() -> Box<DynPolicy> {
+    Box::new(Box::new(AnonymousPolicy{}))
+}
+
+pub fn new_authenticated_policy() -> Box<DynPolicy> {
+    Box::new(Box::new(AuthenticatedPolicy{}))
+}
+
+pub fn new_full_access_policy() -> Box<DynPolicy> {
+    Box::new(Box::new(FullAccessPolicy{}))
+}
+
+pub fn new_read_policy(bucket: &str) -> Box<DynPolicy> {
+    Box::new(Box::new(ReadAccessPolicy{
+        bucket: bucket.to_string(),
+    }))
+}
+
+pub fn new_write_policy(bucket: &str) -> Box<DynPolicy> {
+    Box::new(Box::new(WriteAccessPolicy{
+        bucket: bucket.to_string(),
+    }))
 }

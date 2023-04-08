@@ -29,7 +29,7 @@ class IHttpServer {
    */
   struct Components {
     std::unique_ptr<storage::IStorage> storage;
-    std::unique_ptr<auth::ITokenAuthorization> auth;
+    rust::Box<reduct::rust_part::TokenAuthorization> auth;
     rust::Box<reduct::rust_part::TokenRepository> token_repository;
     rust::Box<reduct::rust_part::ZipAssetManager> console;
   };
