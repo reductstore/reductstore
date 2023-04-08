@@ -72,12 +72,13 @@ int main() {
       .console = std::move(console),
   };
 
-  auto server = IHttpServer::Build(std::move(components), {
-                                                              .host = host.c_str(),
-                                                              .port = port,
-                                                              .base_path = api_base_path.c_str(),
-                                                              .cert_path = cert_path.c_str(),
-                                                              .cert_key_path = cert_key_path.c_str(),
-                                                          });
+  auto server = IHttpServer::Build(std::move(components),
+                                   {
+                                       .host = std::string(host.data(), host.size()),
+                                       .port = port,
+                                       .base_path = std::string{api_base_path.data(), api_base_path.size()},
+                                       .cert_path = std::string{cert_path.data(), cert_path.size()},
+                                       .cert_key_path = std::string{cert_key_path.data(), cert_key_path.size()},
+                                   });
   return server->Run(running);
 }
