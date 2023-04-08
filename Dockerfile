@@ -7,6 +7,8 @@ WORKDIR /src
 COPY conanfile.txt .
 COPY src src
 COPY rust rust
+COPY unit_tests unit_tests
+COPY benchmarks benchmarks
 COPY CMakeLists.txt .
 COPY VERSION VERSION
 
