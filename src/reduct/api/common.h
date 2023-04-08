@@ -13,7 +13,7 @@
 #include <string>
 #include <string_view>
 
-#include "../../../cmake-build-release/rust/rust_part.h"
+#include "rust_part.h"
 #include "reduct/core/error.h"
 #include "reduct/core/result.h"
 
