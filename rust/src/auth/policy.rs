@@ -4,8 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::core::status::HTTPError;
 
-use crate::auth::proto::Token;
 use crate::auth::proto::token::Permissions;
+use crate::auth::proto::Token;
 
 /// Policy is a trait that defines the interface for a policy.
 /// A policy is a set of rules that are applied to a token to determine
@@ -23,7 +23,6 @@ pub trait Policy {
     /// * `Result<(), HTTPError>` - The result of the validation.
     fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError>;
 }
-
 
 /// AnonymousPolicy validates any token and even if the token is invalid.
 pub struct AnonymousPolicy {}
@@ -45,15 +44,16 @@ impl Policy for AuthenticatedPolicy {
     }
 }
 
-
 /// FullAccessPolicy validates a token that has full access.
 pub struct FullAccessPolicy {}
 
 impl Policy for FullAccessPolicy {
     fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
-        if token?.permissions
+        if token?
+            .permissions
             .ok_or(HTTPError::internal_server_error("No permissions set"))?
-            .full_access {
+            .full_access
+        {
             Ok(())
         } else {
             Err(HTTPError::forbidden("Token doesn't have full access"))
@@ -68,7 +68,8 @@ pub struct ReadAccessPolicy {
 
 impl Policy for ReadAccessPolicy {
     fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
-        let permissions = &token?.permissions
+        let permissions = &token?
+            .permissions
             .ok_or(HTTPError::internal_server_error("No permissions set"))?;
 
         if permissions.full_access {
@@ -81,8 +82,13 @@ impl Policy for ReadAccessPolicy {
             }
         }
 
-        Err(HTTPError::forbidden(format!("Token doesn't have read access for the {} bucket",
-                                         self.bucket).as_str()))
+        Err(HTTPError::forbidden(
+            format!(
+                "Token doesn't have read access for the {} bucket",
+                self.bucket
+            )
+            .as_str(),
+        ))
     }
 }
 
@@ -93,7 +99,8 @@ pub struct WriteAccessPolicy {
 
 impl Policy for WriteAccessPolicy {
     fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
-        let permissions = &token?.permissions
+        let permissions = &token?
+            .permissions
             .ok_or(HTTPError::internal_server_error("No permissions set"))?;
 
         if permissions.full_access {
@@ -106,8 +113,13 @@ impl Policy for WriteAccessPolicy {
             }
         }
 
-        Err(HTTPError::forbidden(format!("Token doesn't have write access for the {} bucket",
-                                         self.bucket).as_str()))
+        Err(HTTPError::forbidden(
+            format!(
+                "Token doesn't have write access for the {} bucket",
+                self.bucket
+            )
+            .as_str(),
+        ))
     }
 }
 
@@ -119,15 +131,19 @@ mod tests {
     fn test_anonymous_policy() {
         let policy = AnonymousPolicy {};
         assert!(policy.validate(Ok(Token::default())).is_ok());
-        assert!(policy.validate(Err(HTTPError::forbidden("Invalid token"))).is_ok());
+        assert!(policy
+            .validate(Err(HTTPError::forbidden("Invalid token")))
+            .is_ok());
     }
 
     #[test]
     fn test_authenticated_policy() {
         let policy = AuthenticatedPolicy {};
         assert!(policy.validate(Ok(Token::default())).is_ok());
-        assert_eq!(policy.validate(Err(HTTPError::forbidden("Invalid token")))
-                   , Err(HTTPError::forbidden("Invalid token")));
+        assert_eq!(
+            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
+            Err(HTTPError::forbidden("Invalid token"))
+        );
     }
 
     #[test]
@@ -144,15 +160,22 @@ mod tests {
         assert!(policy.validate(Ok(token.clone())).is_ok());
 
         token.permissions.as_mut().unwrap().full_access = false;
-        assert_eq!(policy.validate(Ok(token)), Err(HTTPError::forbidden("Token doesn't have full access")));
+        assert_eq!(
+            policy.validate(Ok(token)),
+            Err(HTTPError::forbidden("Token doesn't have full access"))
+        );
 
-        assert_eq!(policy.validate(Err(HTTPError::forbidden("Invalid token")))
-                   , Err(HTTPError::forbidden("Invalid token")));
+        assert_eq!(
+            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
+            Err(HTTPError::forbidden("Invalid token"))
+        );
     }
 
     #[test]
     fn test_read_access_policy() {
-        let policy = ReadAccessPolicy { bucket: "bucket".to_string() };
+        let policy = ReadAccessPolicy {
+            bucket: "bucket".to_string(),
+        };
         let mut token = Token {
             permissions: Some(Permissions {
                 full_access: true,
@@ -168,15 +191,24 @@ mod tests {
         assert!(policy.validate(Ok(token.clone())).is_ok());
 
         token.permissions.as_mut().unwrap().read = vec!["bucket2".to_string()];
-        assert_eq!(policy.validate(Ok(token)), Err(HTTPError::forbidden("Token doesn't have read access for the bucket bucket")));
+        assert_eq!(
+            policy.validate(Ok(token)),
+            Err(HTTPError::forbidden(
+                "Token doesn't have read access for the bucket bucket"
+            ))
+        );
 
-        assert_eq!(policy.validate(Err(HTTPError::forbidden("Invalid token")))
-                   , Err(HTTPError::forbidden("Invalid token")));
+        assert_eq!(
+            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
+            Err(HTTPError::forbidden("Invalid token"))
+        );
     }
 
     #[test]
     fn test_write_access_policy() {
-        let policy = WriteAccessPolicy { bucket: "bucket".to_string() };
+        let policy = WriteAccessPolicy {
+            bucket: "bucket".to_string(),
+        };
         let mut token = Token {
             permissions: Some(Permissions {
                 full_access: true,
@@ -192,9 +224,16 @@ mod tests {
         assert!(policy.validate(Ok(token.clone())).is_ok());
 
         token.permissions.as_mut().unwrap().write = vec!["bucket2".to_string()];
-        assert_eq!(policy.validate(Ok(token)), Err(HTTPError::forbidden("Token doesn't have write access for the bucket bucket")));
+        assert_eq!(
+            policy.validate(Ok(token)),
+            Err(HTTPError::forbidden(
+                "Token doesn't have write access for the bucket bucket"
+            ))
+        );
 
-        assert_eq!(policy.validate(Err(HTTPError::forbidden("Invalid token")))
-                   , Err(HTTPError::forbidden("Invalid token")));
+        assert_eq!(
+            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
+            Err(HTTPError::forbidden("Invalid token"))
+        );
     }
 }

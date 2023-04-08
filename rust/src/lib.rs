@@ -2,24 +2,27 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
-pub mod core;
 pub mod asset;
 pub mod auth;
+pub mod core;
 
-use std::path::PathBuf;
 use serde_json;
+use std::path::PathBuf;
 
-use crate::core::env::{Env, new_env};
-use crate::core::logger::{init_log};
-use crate::core::status::{HTTPError};
+use crate::core::env::{new_env, Env};
+use crate::core::logger::init_log;
+use crate::core::status::HTTPError;
 
-use crate::asset::asset_manager::{ZipAssetManager, new_asset_manager};
-use crate::auth::policy::{AnonymousPolicy, AuthenticatedPolicy, FullAccessPolicy, Policy, ReadAccessPolicy, WriteAccessPolicy};
+use crate::asset::asset_manager::{new_asset_manager, ZipAssetManager};
+use crate::auth::policy::{
+    AnonymousPolicy, AuthenticatedPolicy, FullAccessPolicy, Policy, ReadAccessPolicy,
+    WriteAccessPolicy,
+};
 
-use crate::auth::token_repository::*;
-use crate::auth::token_auth::*;
-use crate::auth::proto::{Token, TokenCreateResponse};
 use crate::auth::proto::token::Permissions;
+use crate::auth::proto::{Token, TokenCreateResponse};
+use crate::auth::token_auth::*;
+use crate::auth::token_repository::*;
 
 type DynPolicy = Box<dyn Policy>;
 
@@ -53,12 +56,19 @@ mod ffi_core {
         type TokenCreateResponse;
         fn new_token_create_response() -> Box<TokenCreateResponse>;
         fn token_create_response_to_json(resp: &TokenCreateResponse) -> String;
-        fn json_to_token_create_response(json: &str, resp: &mut TokenCreateResponse) -> Box<HTTPError>;
+        fn json_to_token_create_response(
+            json: &str,
+            resp: &mut TokenCreateResponse,
+        ) -> Box<HTTPError>;
     }
 
     extern "Rust" {
         type Permissions;
-        fn new_token_permissions(full_access: bool, read: Vec<String>, write: Vec<String>) -> Box<Permissions>;
+        fn new_token_permissions(
+            full_access: bool,
+            read: Vec<String>,
+            write: Vec<String>,
+        ) -> Box<Permissions>;
         fn json_to_token_permissions(json: &str, permissions: &mut Permissions) -> Box<HTTPError>;
         fn token_permissions_read(permissions: &Permissions) -> Vec<String>;
         fn token_permissions_write(permissions: &Permissions) -> Vec<String>;
@@ -69,14 +79,30 @@ mod ffi_core {
         type TokenRepository;
         type Token;
         fn new_token_repo(config_path: &str, init_token: &str) -> Box<TokenRepository>;
-        fn token_repo_create_token(repo: &mut TokenRepository,
-                                   name: &str,
-                                   permissions: &Permissions,
-                                   resp: &mut TokenCreateResponse) -> Box<HTTPError>;
-        fn token_repo_remove_bucket_from_tokens(repo: &mut TokenRepository, bucket: &str) -> Box<HTTPError>;
-        fn token_repo_validate_token(repo: &TokenRepository, value: &str, resp: &mut Token) -> Box<HTTPError>;
-        fn token_repo_get_token(repo: &TokenRepository, name: &str, token: &mut Token) -> Box<HTTPError>;
-        fn token_repo_get_token_list(repo: &TokenRepository, tokens: &mut Vec<Token>) -> Box<HTTPError>;
+        fn token_repo_create_token(
+            repo: &mut TokenRepository,
+            name: &str,
+            permissions: &Permissions,
+            resp: &mut TokenCreateResponse,
+        ) -> Box<HTTPError>;
+        fn token_repo_remove_bucket_from_tokens(
+            repo: &mut TokenRepository,
+            bucket: &str,
+        ) -> Box<HTTPError>;
+        fn token_repo_validate_token(
+            repo: &TokenRepository,
+            value: &str,
+            resp: &mut Token,
+        ) -> Box<HTTPError>;
+        fn token_repo_get_token(
+            repo: &TokenRepository,
+            name: &str,
+            token: &mut Token,
+        ) -> Box<HTTPError>;
+        fn token_repo_get_token_list(
+            repo: &TokenRepository,
+            tokens: &mut Vec<Token>,
+        ) -> Box<HTTPError>;
         fn token_repo_remove_token(repo: &mut TokenRepository, name: &str) -> Box<HTTPError>;
 
         fn new_token() -> Box<Token>;
@@ -88,7 +114,12 @@ mod ffi_core {
         type TokenAuthorization;
         type DynPolicy;
 
-        fn auth_check(auth: &TokenAuthorization, header: &str, repo: &TokenRepository, policy: &DynPolicy) -> Box<HTTPError>;
+        fn auth_check(
+            auth: &TokenAuthorization,
+            header: &str,
+            repo: &TokenRepository,
+            policy: &DynPolicy,
+        ) -> Box<HTTPError>;
         fn new_token_authorization(api_token: &str) -> Box<TokenAuthorization>;
         fn new_anonymous_policy() -> Box<DynPolicy>;
         fn new_authenticated_policy() -> Box<DynPolicy>;
@@ -109,7 +140,11 @@ pub fn new_token_repo(config_path: &str, init_token: &str) -> Box<TokenRepositor
     Box::new(TokenRepository::new(config_path, init_token))
 }
 
-pub fn new_token_permissions(full_access: bool, read: Vec<String>, write: Vec<String>) -> Box<Permissions> {
+pub fn new_token_permissions(
+    full_access: bool,
+    read: Vec<String>,
+    write: Vec<String>,
+) -> Box<Permissions> {
     Box::new(Permissions {
         full_access,
         read,
@@ -117,7 +152,12 @@ pub fn new_token_permissions(full_access: bool, read: Vec<String>, write: Vec<St
     })
 }
 
-pub fn token_repo_create_token(repo: &mut TokenRepository, name: &str, permissions: &Permissions, resp: &mut TokenCreateResponse) -> Box<HTTPError> {
+pub fn token_repo_create_token(
+    repo: &mut TokenRepository,
+    name: &str,
+    permissions: &Permissions,
+    resp: &mut TokenCreateResponse,
+) -> Box<HTTPError> {
     let err = match repo.create_token(name, permissions.clone()) {
         Ok(token) => {
             eprintln!("{:?}", ::serde_json::to_string(&permissions));
@@ -130,7 +170,10 @@ pub fn token_repo_create_token(repo: &mut TokenRepository, name: &str, permissio
     Box::new(err)
 }
 
-pub fn token_repo_remove_bucket_from_tokens(repo: &mut TokenRepository, bucket: &str) -> Box<HTTPError> {
+pub fn token_repo_remove_bucket_from_tokens(
+    repo: &mut TokenRepository,
+    bucket: &str,
+) -> Box<HTTPError> {
     let err = match repo.remove_bucket_from_tokens(bucket) {
         Ok(_) => HTTPError::ok(),
         Err(err) => err,
@@ -138,7 +181,11 @@ pub fn token_repo_remove_bucket_from_tokens(repo: &mut TokenRepository, bucket: 
     Box::new(err)
 }
 
-pub fn token_repo_validate_token(repo: &TokenRepository, value: &str, resp: &mut Token) -> Box<HTTPError> {
+pub fn token_repo_validate_token(
+    repo: &TokenRepository,
+    value: &str,
+    resp: &mut Token,
+) -> Box<HTTPError> {
     let err = match repo.validate_token(value) {
         Ok(token) => {
             eprintln!("{:?}", ::serde_json::to_string(&token));
@@ -150,7 +197,11 @@ pub fn token_repo_validate_token(repo: &TokenRepository, value: &str, resp: &mut
     Box::new(err)
 }
 
-pub fn token_repo_get_token(repo: &TokenRepository, name: &str, token: &mut Token) -> Box<HTTPError> {
+pub fn token_repo_get_token(
+    repo: &TokenRepository,
+    name: &str,
+    token: &mut Token,
+) -> Box<HTTPError> {
     let err = match repo.find_by_name(name) {
         Ok(t) => {
             *token = t;
@@ -161,7 +212,10 @@ pub fn token_repo_get_token(repo: &TokenRepository, name: &str, token: &mut Toke
     Box::new(err)
 }
 
-pub fn token_repo_get_token_list(repo: &TokenRepository, tokens: &mut Vec<Token>) -> Box<HTTPError> {
+pub fn token_repo_get_token_list(
+    repo: &TokenRepository,
+    tokens: &mut Vec<Token>,
+) -> Box<HTTPError> {
     let err = match repo.get_token_list() {
         Ok(list) => {
             *tokens = list;
@@ -238,14 +292,18 @@ pub fn new_token_authorization(api_token: &str) -> Box<TokenAuthorization> {
     Box::new(TokenAuthorization::new(api_token))
 }
 
-pub fn auth_check(auth: &TokenAuthorization, header: &str, repo: &TokenRepository, policy: &DynPolicy) -> Box<HTTPError> {
+pub fn auth_check(
+    auth: &TokenAuthorization,
+    header: &str,
+    repo: &TokenRepository,
+    policy: &DynPolicy,
+) -> Box<HTTPError> {
     let err = match auth.check(header, repo, policy.as_ref()) {
         Ok(_) => HTTPError::ok(),
         Err(err) => err,
     };
     Box::new(err)
 }
-
 
 pub fn new_anonymous_policy() -> Box<DynPolicy> {
     Box::new(Box::new(AnonymousPolicy {}))

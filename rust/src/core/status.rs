@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt::{Display, Formatter, Debug, Error as FmtError};
+use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 
 /// HTTP status codes.
 #[derive(Debug, PartialEq, Copy, Clone)]

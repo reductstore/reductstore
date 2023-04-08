@@ -3,18 +3,18 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::time::SystemTime;
 use rand::Rng;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use log::debug;
 use prost::{bytes, Message};
 use prost_wkt_types::Timestamp;
 
-use crate::auth::proto::{Token, TokenRepo, TokenCreateResponse};
 use crate::auth::proto::token::Permissions;
+use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
 use crate::core::status::HTTPError;
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
@@ -27,7 +27,6 @@ pub struct TokenRepository {
     // TODO: Make it non-optional after C++ is removed
     repo: HashMap<String, Token>,
 }
-
 
 pub fn parse_bearer_token(authorization_header: &str) -> Result<String, HTTPError> {
     if !authorization_header.starts_with("Bearer ") {
@@ -53,20 +52,17 @@ impl TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
 
-
         let init_token = match api_token {
-            Some(value) => {
-                Some(Token {
-                    name: INIT_TOKEN_NAME.to_string(),
-                    value,
-                    created_at: Timestamp::try_from(SystemTime::now()).ok(),
-                    permissions: Some(Permissions {
-                        full_access: true,
-                        read: vec![],
-                        write: vec![],
-                    }),
-                })
-            }
+            Some(value) => Some(Token {
+                name: INIT_TOKEN_NAME.to_string(),
+                value,
+                created_at: Timestamp::try_from(SystemTime::now()).ok(),
+                permissions: Some(Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                }),
+            }),
             None => {
                 // No API token, no authentication
                 // TODO: After C++ is removed, this should use traits and an empty implementation
@@ -84,7 +80,10 @@ impl TokenRepository {
 
         match std::fs::read(&token_repository.config_path) {
             Ok(data) => {
-                debug!("Loading token repository from {}", token_repository.config_path.as_path().display());
+                debug!(
+                    "Loading token repository from {}",
+                    token_repository.config_path.as_path().display()
+                );
                 let toke_repository = TokenRepo::decode(&mut Bytes::from(data))
                     .expect("Could not decode token repository");
                 for token in toke_repository.tokens {
@@ -92,8 +91,13 @@ impl TokenRepository {
                 }
             }
             Err(_) => {
-                debug!("Creating a new token repository {}", token_repository.config_path.as_path().display());
-                token_repository.save_repo().expect("Failed to create a new token repository");
+                debug!(
+                    "Creating a new token repository {}",
+                    token_repository.config_path.as_path().display()
+                );
+                token_repository
+                    .save_repo()
+                    .expect("Failed to create a new token repository");
             }
         };
 
@@ -110,7 +114,11 @@ impl TokenRepository {
     /// # Returns
     ///
     /// token value and creation time
-    pub fn create_token(&mut self, name: &str, permissions: Permissions) -> Result<TokenCreateResponse, HTTPError> {
+    pub fn create_token(
+        &mut self,
+        name: &str,
+        permissions: Permissions,
+    ) -> Result<TokenCreateResponse, HTTPError> {
         if self.init_token.is_none() {
             return Err(HTTPError::bad_request("Authentication is disabled"));
         }
@@ -124,7 +132,9 @@ impl TokenRepository {
 
         // Check if the token already exists
         if self.repo.contains_key(name) {
-            return Err(HTTPError::conflict(format!("Token '{}' already exists", name).as_str()));
+            return Err(HTTPError::conflict(
+                format!("Token '{}' already exists", name).as_str(),
+            ));
         }
 
         let created_at = Timestamp::try_from(SystemTime::now()).ok();
@@ -145,10 +155,7 @@ impl TokenRepository {
         self.repo.insert(name.to_string(), token);
         self.save_repo()?;
 
-        Ok(TokenCreateResponse {
-            value,
-            created_at,
-        })
+        Ok(TokenCreateResponse { value, created_at })
     }
 
     /// Update a token
@@ -173,7 +180,9 @@ impl TokenRepository {
                 Ok(())
             }
 
-            None => Err(HTTPError::not_found(format!("Token '{}' doesn't exist", name).as_str())),
+            None => Err(HTTPError::not_found(
+                format!("Token '{}' doesn't exist", name).as_str(),
+            )),
         }
     }
 
@@ -191,15 +200,15 @@ impl TokenRepository {
         }
 
         match self.repo.get(name) {
-            Some(token) => {
-                Ok(Token {
-                    name: token.name.clone(),
-                    value: "".to_string(),
-                    created_at: token.created_at.clone(),
-                    permissions: token.permissions.clone(),
-                })
-            }
-            None => Err(HTTPError::not_found(format!("Token '{}' doesn't exist", name).as_str())),
+            Some(token) => Ok(Token {
+                name: token.name.clone(),
+                value: "".to_string(),
+                created_at: token.created_at.clone(),
+                permissions: token.permissions.clone(),
+            }),
+            None => Err(HTTPError::not_found(
+                format!("Token '{}' doesn't exist", name).as_str(),
+            )),
         }
     }
 
@@ -214,14 +223,16 @@ impl TokenRepository {
 
         let mut sorted: Vec<_> = self.repo.iter().collect();
         sorted.sort_by_key(|item| item.0);
-        Ok(sorted.iter().map(|item| Token {
-            name: item.1.name.clone(),
-            value: "".to_string(),
-            created_at: item.1.created_at.clone(),
-            permissions: item.1.permissions.clone(),
-        }).collect())
+        Ok(sorted
+            .iter()
+            .map(|item| Token {
+                name: item.1.name.clone(),
+                value: "".to_string(),
+                created_at: item.1.created_at.clone(),
+                permissions: item.1.permissions.clone(),
+            })
+            .collect())
     }
-
 
     /// Validate a token
     ///
@@ -288,7 +299,9 @@ impl TokenRepository {
         }
 
         if self.repo.remove(name).is_none() {
-            Err(HTTPError::not_found(format!("Token '{}' doesn't exist", name).as_str()))
+            Err(HTTPError::not_found(
+                format!("Token '{}' doesn't exist", name).as_str(),
+            ))
         } else {
             self.save_repo()
         }
@@ -321,19 +334,25 @@ impl TokenRepository {
         let mut buf = Vec::new();
         repo.encode(&mut buf)
             .map_err(|_| HTTPError::internal_server_error("Could not encode token repository"))?;
-        std::fs::write(&self.config_path, buf)
-            .map_err(|err| HTTPError::internal_server_error(
-                format!("Could not write token repository to {}: {}", self.config_path.as_path().display(), err).as_str()))?;
+        std::fs::write(&self.config_path, buf).map_err(|err| {
+            HTTPError::internal_server_error(
+                format!(
+                    "Could not write token repository to {}: {}",
+                    self.config_path.as_path().display(),
+                    err
+                )
+                .as_str(),
+            )
+        })?;
 
         Ok(())
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use tempfile::{tempdir};
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     pub fn test_init_token() {
@@ -350,41 +369,62 @@ mod tests {
     #[test]
     pub fn test_create_empty_token() {
         let mut repo = setup();
-        let token = repo.create_token("", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        });
+        let token = repo.create_token(
+            "",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        );
 
-        assert_eq!(token, Err(HTTPError::unprocessable_entity("Token name can't be empty")));
+        assert_eq!(
+            token,
+            Err(HTTPError::unprocessable_entity("Token name can't be empty"))
+        );
     }
 
     #[test]
     pub fn test_create_existing_token() {
         let mut repo = setup();
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
-        let token = repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        });
+        let token = repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        );
 
-        assert_eq!(token, Err(HTTPError::conflict("Token 'test' already exists")));
+        assert_eq!(
+            token,
+            Err(HTTPError::conflict("Token 'test' already exists"))
+        );
     }
 
     #[test]
     pub fn test_create_token() {
         let mut repo = setup();
-        let token = repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        let token = repo
+            .create_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .unwrap();
 
         assert_eq!(token.value.len(), 37);
         assert_eq!(token.value, "test-".to_string() + &token.value[5..]);
@@ -395,11 +435,15 @@ mod tests {
     pub fn test_create_token_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
         let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
         assert!(repo.repo.contains_key("test"));
@@ -408,13 +452,19 @@ mod tests {
     #[test]
     pub fn test_create_token_no_init_token() {
         let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
-        let token = repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        });
+        let token = repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        );
 
-        assert_eq!(token, Err(HTTPError::bad_request("Authentication is disabled")));
+        assert_eq!(
+            token,
+            Err(HTTPError::bad_request("Authentication is disabled"))
+        );
     }
 
     //------------
@@ -423,17 +473,26 @@ mod tests {
     #[test]
     pub fn test_update_token_ok() {
         let mut repo = setup();
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
-        let token = repo.update_token("test", Permissions {
-            full_access: false,
-            read: vec!["test".to_string()],
-            write: vec![],
-        }).unwrap();
+        let token = repo
+            .update_token(
+                "test",
+                Permissions {
+                    full_access: false,
+                    read: vec!["test".to_string()],
+                    write: vec![],
+                },
+            )
+            .unwrap();
 
         assert_eq!(token, ());
 
@@ -449,30 +508,44 @@ mod tests {
     #[test]
     pub fn test_update_token_not_found() {
         let mut repo = setup();
-        let token = repo.update_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        });
+        let token = repo.update_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        );
 
-        assert_eq!(token, Err(HTTPError::not_found("Token 'test' doesn't exist")));
+        assert_eq!(
+            token,
+            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+        );
     }
 
     #[test]
     pub fn test_update_token_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
-        repo.update_token("test", Permissions {
-            full_access: false,
-            read: vec!["test".to_string()],
-            write: vec![],
-        }).unwrap();
+        repo.update_token(
+            "test",
+            Permissions {
+                full_access: false,
+                read: vec!["test".to_string()],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
         let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
         let token = repo.find_by_name("test").unwrap();
@@ -487,13 +560,19 @@ mod tests {
     #[test]
     pub fn test_update_token_no_init_token() {
         let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
-        let token = repo.update_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        });
+        let token = repo.update_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        );
 
-        assert_eq!(token, Err(HTTPError::bad_request("Authentication is disabled")));
+        assert_eq!(
+            token,
+            Err(HTTPError::bad_request("Authentication is disabled"))
+        );
     }
 
     //----------------
@@ -502,11 +581,15 @@ mod tests {
     #[test]
     pub fn test_find_by_name() {
         let mut repo = setup();
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
         let token = repo.find_by_name("test").unwrap();
 
@@ -519,7 +602,10 @@ mod tests {
         let repo = setup();
         let token = repo.find_by_name("test");
 
-        assert_eq!(token, Err(HTTPError::not_found("Token 'test' doesn't exist")));
+        assert_eq!(
+            token,
+            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+        );
     }
 
     #[test]
@@ -527,7 +613,10 @@ mod tests {
         let repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
         let token = repo.find_by_name("test");
 
-        assert_eq!(token, Err(HTTPError::bad_request("Authentication is disabled")));
+        assert_eq!(
+            token,
+            Err(HTTPError::bad_request("Authentication is disabled"))
+        );
     }
 
     //------------
@@ -536,11 +625,15 @@ mod tests {
     #[test]
     pub fn test_get_token_list() {
         let mut repo = setup();
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
         let token_list = repo.get_token_list().unwrap();
 
@@ -563,24 +656,35 @@ mod tests {
     #[test]
     pub fn test_validate_token() {
         let mut repo = setup();
-        let value = repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec!["bucket-1".to_string()],
-            write: vec!["bucket-2".to_string()],
-        }).unwrap().value;
+        let value = repo
+            .create_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec!["bucket-1".to_string()],
+                    write: vec!["bucket-2".to_string()],
+                },
+            )
+            .unwrap()
+            .value;
 
-        let token = repo.validate_token(format!("Bearer {}", value).as_str()).unwrap();
+        let token = repo
+            .validate_token(format!("Bearer {}", value).as_str())
+            .unwrap();
 
-        assert_eq!(token, Token {
-            name: "test".to_string(),
-            created_at: token.created_at.clone(),
-            value: "".to_string(),
-            permissions: Some(Permissions {
-                full_access: true,
-                read: vec!["bucket-1".to_string()],
-                write: vec!["bucket-2".to_string()],
-            }),
-        });
+        assert_eq!(
+            token,
+            Token {
+                name: "test".to_string(),
+                created_at: token.created_at.clone(),
+                value: "".to_string(),
+                permissions: Some(Permissions {
+                    full_access: true,
+                    read: vec!["bucket-1".to_string()],
+                    write: vec!["bucket-2".to_string()],
+                }),
+            }
+        );
     }
 
     #[test]
@@ -607,11 +711,15 @@ mod tests {
     #[test]
     pub fn test_remove_token() {
         let mut repo = setup();
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
         let token = repo.remove_token("test").unwrap();
 
@@ -623,25 +731,35 @@ mod tests {
         let mut repo = setup();
         let token = repo.remove_token("test");
 
-        assert_eq!(token, Err(HTTPError::not_found("Token 'test' doesn't exist")));
+        assert_eq!(
+            token,
+            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+        );
     }
 
     #[test]
     pub fn test_remove_token_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
-        repo.create_token("test", Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        }).unwrap();
+        repo.create_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        )
+        .unwrap();
 
         repo.remove_token("test").unwrap();
 
         let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
         let token = repo.find_by_name("test");
 
-        assert_eq!(token, Err(HTTPError::not_found("Token 'test' doesn't exist")));
+        assert_eq!(
+            token,
+            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+        );
     }
 
     #[test]
@@ -651,7 +769,6 @@ mod tests {
 
         assert_eq!(token, Ok(()));
     }
-
 
     fn setup() -> TokenRepository {
         TokenRepository::new(tempdir().unwrap().into_path(), Some("test".to_string()))

@@ -3,15 +3,14 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fs::File;
-use zip::ZipArchive;
-use tempfile::{tempdir, TempDir};
-use std::io::{Cursor, Read};
-use log::{debug, trace};
 use hex;
+use log::{debug, trace};
+use std::fs::File;
+use std::io::{Cursor, Read};
+use tempfile::{tempdir, TempDir};
+use zip::ZipArchive;
 
-use crate::core::status::{HTTPError};
-
+use crate::core::status::HTTPError;
 
 /// Asset manager that reads files from a zip archive as hex string and returns them as string
 pub struct ZipAssetManager {
@@ -31,16 +30,13 @@ impl ZipAssetManager {
     /// The asset manager.
     pub fn new(zipped_content: &str) -> ZipAssetManager {
         if zipped_content.len() == 0 {
-            return ZipAssetManager {
-                path: None,
-            };
+            return ZipAssetManager { path: None };
         }
 
         // Convert hex string to binary and extract zip archive into a temporary directory
         if zipped_content.len() % 2 != 0 {
             panic!("Hex string must have even length");
         }
-
 
         let binary = hex::decode(zipped_content).expect("Could not decode hex string");
         let cursor = Cursor::new(binary);
@@ -52,8 +48,7 @@ impl ZipAssetManager {
         trace!("Extracting zip archive to {:?}", temp_dir.path());
 
         let mut root = String::new();
-        for i in 0..archive.len()
-        {
+        for i in 0..archive.len() {
             let mut file = archive.by_index(i).unwrap();
             if file.is_dir() {
                 if root.len() == 0 {
@@ -99,7 +94,9 @@ impl ZipAssetManager {
 
         trace!("Reading file {:?}", path);
         if !path.exists() {
-            return Err(HTTPError::not_found(format!("File {:?} not found", path).as_str()));
+            return Err(HTTPError::not_found(
+                format!("File {:?} not found", path).as_str(),
+            ));
         }
 
         // read file
@@ -124,6 +121,8 @@ mod tests {
     #[test]
     fn test_empty_asset_manager() {
         let asset_manager = ZipAssetManager::new("");
-        assert!(asset_manager.read("test") == Err(HTTPError::not_found("No static files supported")));
+        assert!(
+            asset_manager.read("test") == Err(HTTPError::not_found("No static files supported"))
+        );
     }
 }

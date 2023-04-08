@@ -20,8 +20,6 @@ RUN make -j4
 
 FROM ubuntu:22.04
 
-COPY --from=builder /tmp /tmp
-COPY --from=builder /data /data
+RUN mkdir /data
 COPY --from=builder /build/bin/ /usr/local/bin/
 ENV PATH=/usr/local/bin/
-CMD ["reductstore"]

@@ -12,10 +12,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     prost_build::Config::new()
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .type_attribute(".", "#[serde(default)]")
-        .extern_path(
-            ".google.protobuf.Timestamp",
-            "::prost_wkt_types::Timestamp",
-        ).compile_protos(&["src/proto/auth.proto"], &["src/protos/"])
+        .extern_path(".google.protobuf.Timestamp", "::prost_wkt_types::Timestamp")
+        .compile_protos(&["src/proto/auth.proto"], &["src/protos/"])
         .expect("Failed to compile protos");
 
     Ok(())
