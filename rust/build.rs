@@ -13,7 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .extern_path(".google.protobuf.Timestamp", "::prost_wkt_types::Timestamp")
-        .compile_protos(&["src/proto/auth.proto", "src/proto/storage.proto"], &["src/protos/"])
+        .compile_protos(
+            &["src/proto/auth.proto", "src/proto/storage.proto"],
+            &["src/protos/"],
+        )
         .expect("Failed to compile protos");
 
     Ok(())

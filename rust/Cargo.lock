@@ -838,6 +838,7 @@ dependencies = [
  "prost-wkt-build",
  "prost-wkt-types",
  "rand",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
