@@ -5,6 +5,7 @@
 pub mod asset;
 pub mod auth;
 pub mod core;
+pub mod storage;
 
 use serde_json;
 use std::path::PathBuf;

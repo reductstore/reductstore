@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
+use std::time::SystemTimeError;
 
 /// HTTP status codes.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -72,6 +73,16 @@ impl Display for HTTPError {
 impl From<std::io::Error> for HTTPError {
     fn from(err: std::io::Error) -> Self {
         // An IO error is an internal server error
+        HTTPError {
+            status: HTTPStatus::InternalServerError,
+            message: err.to_string(),
+        }
+    }
+}
+
+impl From<SystemTimeError> for HTTPError {
+    fn from(err: SystemTimeError) -> Self {
+        // A system time error is an internal server error
         HTTPError {
             status: HTTPStatus::InternalServerError,
             message: err.to_string(),

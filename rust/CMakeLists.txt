@@ -21,6 +21,11 @@ set(RUST_PART_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/env.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/logger.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/proto/auth.proto"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/proto/storage.proto"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/storage.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/proto.rs"
         )
 
 add_library(rust_part STATIC ${RUST_PART_CXX})
