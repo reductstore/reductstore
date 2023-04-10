@@ -1,19 +1,18 @@
-FROM ubuntu:22.04 AS builder
+FROM reduct/ubuntu-build-image:main AS  builder
 
-RUN apt update && apt install -y cmake python3-pip zip
-
-RUN pip3 install conan~=1.54.0
+RUN apt-get update && apt-get install -y rustc cargo
 
 WORKDIR /src
 
 COPY conanfile.txt .
 COPY src src
+COPY rust rust
 COPY CMakeLists.txt .
-COPY web-console web-console
+COPY VERSION VERSION
 
 WORKDIR /build
 
-RUN cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=OFF -DREDUCT_BUILD_BENCHMARKS=OFF -DWEB_CONSOLE_PATH=/src/web-console /src
+RUN cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=OFF -DREDUCT_BUILD_BENCHMARKS=OFF /src
 RUN make -j4
 
 FROM ubuntu:22.04

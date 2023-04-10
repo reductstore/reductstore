@@ -11,14 +11,24 @@ The current version supports Linux OS, MacOS and was tested on an AMD64 platform
 The easiest way to start using ReductStore is to run Docker image:
 
 ```
-docker run -p 8383:8383 -v ${PWD}/data:/data reductstore/reductstore:latest
+docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 ```
 
-The storage will be available on port http://127.0.01:8383 and stores data in the `./data` directory. You may check if it's working with a simple HTTP request:
+The database will be available on port http://127.0.01:8383 and stores data in the `./data` directory. You may check if it's working with a simple HTTP request:
 
 ```
 curl http://127.0.0.1:8383/api/v1/info
 ```
+
+### Start With Snap
+
+You can install the database with snap:
+
+```
+sudo snap install reductstore
+```
+
+ReductStore will be available on port http://127.0.01:8383 and store data in the `/var/snap/reductstore/common/data` directory.
 
 ### Build Manually
 
@@ -56,9 +66,9 @@ Finally, you can launch the storage:
 RS_DATA_PATH=./data bin/reductstore
 ```
 
-## Environment Variables
+## Configuration
 
-The storage can be customized with the following environmental variables:
+ReductStore can be configured with the following environmental variables:
 
 | Name                | Default | Description                                                                               |
 |---------------------|---------|-------------------------------------------------------------------------------------------|
@@ -70,3 +80,24 @@ The storage can be customized with the following environmental variables:
 | RS\_API\_TOKEN      |         | If set, the storage uses [token authorization](broken-reference)                          |
 | RS\_CERT\_PATH      |         | Path to an SSL certificate. If unset, the storage uses HTTP instead of HTTPS              |
 | RS\_CERT\_KEY\_PATH |         | Path to the private key of the desired SSL certificate. Should be set with RS\_CERT\_PATH |
+
+If you use snap, you can configure the database by using the `snap set` command:
+
+```
+snap set reductstore log-level=DEBUG
+```
+
+This command change the log level to DEBUG and restarts the database. You can check the current configuration with the `snap get reductstoret` command:
+
+```
+snap get reductstore
+Key            Value
+api-base       /
+api-token
+cert-key-path
+cert-path
+data-path      /var/snap/reductstore/common
+host           0.0.0.0
+log-level      DEBUG
+port           8383
+```

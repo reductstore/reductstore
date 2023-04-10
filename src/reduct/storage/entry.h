@@ -7,6 +7,7 @@
 #define REDUCT_STORAGE_ENTRY_H
 
 #include <filesystem>
+#include <optional>
 #include <ostream>
 #include <vector>
 
@@ -15,14 +16,14 @@
 #include "reduct/core/time.h"
 #include "reduct/proto/api/entry.pb.h"
 #include "reduct/storage/io/async_io.h"
-#include "reduct/storage/query/quiery.h"
+#include "reduct/storage/query/query.h"
 
 namespace reduct::storage {
 
 /**
  *  Entry of a bucket. Store history of blobs as time series
  */
-class IEntry : public io::IAsyncIO, public query::IQuery {
+class IEntry : public io::IAsyncIO {
  public:
   using UPtr = std::unique_ptr<IEntry>;
   using SPtr = std::shared_ptr<IEntry>;
@@ -63,6 +64,22 @@ class IEntry : public io::IAsyncIO, public query::IQuery {
    */
   virtual void SetOptions(const Options&) = 0;
 
+  /**
+   * @brief Start querying records
+   * @param start start point of time interval. If it is nullopt then first record
+   * @param stop stop point of time interval. If it is nullopt then last record
+   * @param options options
+   * @return return query Id
+   */
+  virtual core::Result<uint64_t> Query(const std::optional<core::Time>& start, const std::optional<core::Time>& stop,
+                                       const query::IQuery::Options& options) = 0;
+
+  /**
+   * @brief Get next record
+   * @param query_id
+   * @return information about record to read it
+   */
+  virtual core::Result<query::IQuery::NextRecord> Next(uint64_t query_id) const = 0;
   /**
    * @brief Creates a new entry.
    * Directory path/name must be empty

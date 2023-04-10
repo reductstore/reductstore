@@ -2,7 +2,6 @@ set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Generate protoc files
 set(PROTOBUF_SPEC_FILES
-        ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/auth.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/bucket.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/server.proto
         ${PROTO_SPEC_ROOT_DIR}/reduct/proto/api/entry.proto
@@ -10,7 +9,6 @@ set(PROTOBUF_SPEC_FILES
         )
 
 set(PROTOBUF_FILES
-        ${CMAKE_BINARY_DIR}/reduct/proto/api/auth.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/bucket.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/server.pb.cc
         ${CMAKE_BINARY_DIR}/reduct/proto/api/entry.pb.cc
@@ -38,20 +36,15 @@ set(SRC_FILES
         reduct/api/server_api.cc
         reduct/api/token_api.cc
 
-        reduct/asset/asset_manager.cc
         reduct/async/loop.cc
 
-        reduct/auth/policies.cc
-        reduct/auth/token_auth.cc
-        reduct/auth/token_repository.cc
-
-        reduct/core/env_variable.cc
         reduct/core/logger.cc
         reduct/core/error.cc
         reduct/core/common.h
 
         reduct/storage/io/async_reader.cc
         reduct/storage/io/async_writer.cc
+        reduct/storage/query/query.cc
         reduct/storage/bucket.cc
         reduct/storage/entry.cc
         reduct/storage/storage.cc
@@ -59,6 +52,7 @@ set(SRC_FILES
 
 
 add_library(reduct STATIC ${SRC_FILES} ${PROTOBUF_FILES})
+target_link_libraries(reduct ${CONAN_LIBS} rust_part)
 
 if (MSVC)
     target_compile_options(reduct PUBLIC /Zc:preprocessor)
@@ -69,30 +63,29 @@ endif ()
 configure_file(config.h.in ${CMAKE_BINARY_DIR}/reduct/config.h @ONLY)
 
 
-if (WEB_CONSOLE_PATH)
-    message(STATUS "Embedding Console from ${WEB_CONSOLE_PATH}")
+if (WITH_WEB_CONSOLE)
+    include(FetchContent)
+    FetchContent_Declare(
+            web_console
+            URL https://github.com/reductstore/web-console/releases/download/v1.2.0/web-console.build.tar.gz
+            URL_HASH MD5=5b48f33d8bbd0679e11eca2a1c71c0c9
+    )
+    FetchContent_MakeAvailable(web_console)
 
-    file(ARCHIVE_CREATE FORMAT zip OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/console.zip PATHS ${WEB_CONSOLE_PATH})
+    file(ARCHIVE_CREATE FORMAT zip OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/console.zip PATHS ${web_console_SOURCE_DIR}/)
     file(READ ${CMAKE_CURRENT_BINARY_DIR}/console.zip ZIPPED_CONSOLE HEX)
     configure_file(console.h.in ${CMAKE_BINARY_DIR}/reduct/console.h @ONLY)
     execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/cmake/split_string.py ${CMAKE_BINARY_DIR}/reduct/console.h)
     target_compile_definitions(reduct PUBLIC WITH_CONSOLE)
 endif ()
 
-FetchContent_Declare(
-        uWebSockets
-        GIT_REPOSITORY https://github.com/reductstore/uWebSockets
-        GIT_TAG        a30b4bb75c73ab11df585933a8d681072dcc4bcc
-)
-FetchContent_MakeAvailable(uWebSockets)
 
-
-add_executable(reduct-storage main.cc)
-target_link_libraries(reduct-storage reduct ${CONAN_LIBS})  # For backward compatibility
-target_link_libraries(reduct-storage reduct uWebSockets)
-target_include_directories(reduct-storage PUBLIC ${uWebSockets_SOURCE_DIR}/uWebSockets)
 
 add_executable(reductstore main.cc)
 target_link_libraries(reductstore reduct ${CONAN_LIBS})
 target_link_libraries(reductstore reduct uWebSockets)
-target_include_directories(reductstore PUBLIC ${uWebSockets_SOURCE_DIR}/uWebSockets)
+
+add_executable(reductstore main.cc)
+target_link_libraries(reductstore reduct)
+install(TARGETS reductstore DESTINATION bin)
+

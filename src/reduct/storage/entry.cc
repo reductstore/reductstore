@@ -1,4 +1,4 @@
-// Copyright 2022 ReductStore
+// Copyright 2022-2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -9,6 +9,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <filesystem>
+#include <fstream>
 #include <ranges>
 
 #include "reduct/async/io.h"
@@ -18,7 +19,6 @@
 #include "reduct/proto/storage/entry.pb.h"
 #include "reduct/storage/block_manager.h"
 #include "reduct/storage/io/async_reader.h"
-#include "reduct/storage/io/async_writer.h"
 
 namespace reduct::storage {
 
@@ -31,7 +31,6 @@ using query::IQuery;
 
 using google::protobuf::Timestamp;
 using google::protobuf::util::TimeUtil;
-auto to_time_t = core::Time::clock::to_time_t;
 
 namespace fs = std::filesystem;
 
@@ -50,10 +49,25 @@ class Entry : public IEntry {
         auto path = file.path();
         if (fs::is_regular_file(file) && path.extension() == kMetaExt) {
           try {
-            auto ts = TimeUtil::MicrosecondsToTimestamp(std::stoull(path.stem().c_str()));
-            auto [block, err] = block_manager_->LoadBlock(ts);
+            Error err = Error::kOk;
 
-            if (err || block->begin_time().seconds() == 0 || block->invalid()) {
+            google::protobuf::Arena arena;
+            auto block = google::protobuf::Arena::CreateMessage<proto::Block>(&arena);
+
+            {
+              std::ifstream block_descriptor(path);
+              if (!block_descriptor) {
+                LOG_ERROR("Failed to open file {}: {}", path.string(), std::strerror(errno));
+                err = Error::InternalError();
+              }
+
+              if (!block->ParseFromIstream(&block_descriptor)) {
+                LOG_ERROR("Failed to parse meta: {}", path.string());
+                err = Error::InternalError();
+              }
+            }
+
+            if (err || !block->has_begin_time() || block->invalid()) {
               LOG_WARNING("Block {} looks broken. Remove it.", path.string());
               std::error_code ec;
               if (!fs::remove(path, ec)) {
@@ -67,7 +81,7 @@ class Entry : public IEntry {
               continue;
             }
 
-            block_set_.insert(ts);
+            block_set_.insert(block->begin_time());
             size_counter_ += block->size();
             record_counter_ += block->records_size();
           } catch (std::exception& err) {
@@ -256,18 +270,11 @@ class Entry : public IEntry {
 
     RemoveOutDatedQueries();
 
-    const auto current_time = Time::clock::now();
-    queries_[query_id] = QueryInfo{
-        .start = (start ? *start : Time::min()),
-        .stop = (stop ? *stop : Time::max()),
-        .last_update = Time::clock::now(),
-        .options = options,
-    };
-
-    return {query_id++, Error::kOk};
+    RESULT_OR_RETURN_ERROR(queries_[query_id], IQuery::Build(start, stop, options));
+    return query_id++;
   }
 
-  Result<NextRecord> Next(uint64_t query_id) const override {
+  Result<IQuery::NextRecord> Next(uint64_t query_id) const override {
     RemoveOutDatedQueries();
 
     if (!queries_.contains(query_id)) {
@@ -278,93 +285,15 @@ class Entry : public IEntry {
       return Error::NoContent("No records in the entry");
     }
 
-    auto& query_info = queries_[query_id];
-    query_info.last_update = Time::clock::now();
+    auto& query = queries_[query_id];
+    auto [record, err] = query->Next(block_set_, block_manager_.get());
 
-    auto start_ts = FromTimePoint(query_info.start);
-    if (query_info.next_record) {
-      start_ts = FromTimePoint(*query_info.next_record);
-    }
-    auto stop_ts = FromTimePoint(query_info.stop);
-
-    // Find start block
-    auto start_block_it = block_set_.upper_bound(start_ts);
-    if (start_block_it == block_set_.end()) {
-      start_block_it = std::prev(start_block_it);
-    } else if (start_block_it != block_set_.begin()) {
-      start_block_it = std::prev(start_block_it);
-    }
-
-    std::vector<int> records;
-    IBlockManager::BlockSPtr block;
-    Error search_err = Error::kOk;
-    for (auto it = start_block_it; it != std::end(block_set_) && *it < stop_ts; it++) {
-      auto ret = block_manager_->LoadBlock(*it);
-      if (ret.error) {
-        search_err = std::move(ret.error);
-        break;
-      }
-
-      block = ret.result;
-      if (block->invalid()) {
-        continue;
-      }
-      // Find records
-      records = QueryRecordsInBlock(block, query_info, start_ts, stop_ts);
-      if (!records.empty() || query_info.options.include.empty()) {
-        break;
-      }
-    }
-
-    RETURN_ERROR(search_err);
-
-    if (records.empty()) {
-      queries_.erase(query_id);
-      return Error::NoContent();
-    }
-
-    auto get_timestamp = [block](int index) { return block->records(index).timestamp(); };
-    std::ranges::sort(records, {}, get_timestamp);
-    auto& record_index = records[0];
-
-    bool last = false;
-    if (records.size() > 1) {
-      query_info.next_record = ToTimePoint(get_timestamp(records[1]));
-    } else {
-      // Only one record in current block check next one
-      auto next_block_it = std::next(block_set_.find(block->begin_time()));
-      if (next_block_it != std::end(block_set_)) {
-        if (*next_block_it < stop_ts) {
-          query_info.next_record = ToTimePoint(*next_block_it);
-        } else {
-          // no records in next block
-          last = true;
-        }
-      } else {
-        // no next block
-        last = true;
-      }
-    }
-
-    if (last) {
+    if (query->is_done() || err) {
       queries_.erase(query_id);
     }
 
-    auto [reader, reader_err] =
-        block_manager_->BeginRead(block, AsyncReaderParameters{.path = BlockPath(full_path_, *block),
-                                                               .record_index = record_index,
-                                                               .chunk_size = kDefaultMaxReadChunk,
-                                                               .time = ToTimePoint(get_timestamp(record_index))});
-    if (reader_err) {
-      return reader_err;
-    }
-
-    NextRecord next_record{
-        .reader = reader,
-        .last = last,
-    };
-
-    return {next_record, Error::kOk};
+    RETURN_ERROR(err);
+    return {record, std::move(err)};
   }
 
   Error RemoveOldestBlock() override {
@@ -372,18 +301,15 @@ class Entry : public IEntry {
       return Error::InternalError("Tries to remove a block in empty entry");
     }
 
-    auto [first_block, err] = block_manager_->LoadBlock(*block_set_.begin());
-    if (err) {
-      return err;
-    }
+    IBlockManager::BlockSPtr first_block;
+    RESULT_OR_RETURN_ERROR(first_block, block_manager_->LoadBlock(*block_set_.begin()));
 
-    if (auto remove_err = block_manager_->RemoveBlock(first_block)) {
-      return remove_err;
-    }
+    RETURN_ERROR(block_manager_->RemoveBlock(first_block));
 
     size_counter_ -= first_block->size();
     record_counter_ -= first_block->records_size();
     block_set_.erase(block_set_.begin());
+
     return Error::kOk;
   }
 
@@ -431,15 +357,9 @@ class Entry : public IEntry {
     return TimeUtil::MicrosecondsToTimestamp(microseconds);
   }
 
-  static Time ToTimePoint(const google::protobuf::Timestamp& time) {
-    return Time() + std::chrono::microseconds(TimeUtil::TimestampToMicroseconds(time));
-  }
-
   Error CheckLatestRecord(const Timestamp& proto_ts) const {
-    auto [block, err] = block_manager_->LoadBlock(*block_set_.rbegin());
-    if (err) {
-      return err;
-    }
+    IBlockManager::BlockSPtr block;
+    RESULT_OR_RETURN_ERROR(block, block_manager_->LoadBlock(*block_set_.rbegin()));
 
     if (block->latest_record_time() < proto_ts) {
       return Error::NotFound("No records for this timestamp");
@@ -453,56 +373,8 @@ class Entry : public IEntry {
 
     std::erase_if(queries_, [current_time](const auto& item) {
       auto const& [id, query] = item;
-      return query.last_update + query.options.ttl < current_time;
+      return query->is_outdated();
     });
-  }
-
-  struct QueryInfo {
-    Time start;
-    Time stop;
-    std::optional<Time> next_record;
-    Time last_update;
-
-    query::IQuery::Options options;
-  };
-
-  std::vector<int> QueryRecordsInBlock(const IBlockManager::BlockSPtr& block, const QueryInfo& query_info,
-                                       const Timestamp& start_ts, const Timestamp& stop_ts) const {
-    std::vector<int> records;
-    records.reserve(block->records_size());
-    for (auto record_index = 0; record_index < block->records_size(); ++record_index) {
-      const auto& record = block->records(record_index);
-      bool in_time_interval =
-          record.timestamp() >= start_ts && record.timestamp() < stop_ts && record.state() == proto::Record::kFinished;
-      if (!in_time_interval) continue;
-
-      // check if a record has value of labels that match include
-      if (!query_info.options.include.empty()) {
-        auto include = query_info.options.include;
-        for (const auto& label : record.labels()) {
-          if (include.contains(label.name()) && label.value() == include[label.name()]) {
-            include.erase(label.name());
-          }
-        }
-
-        if (!include.empty()) continue;
-      }
-
-      // check if a record has value of labels that does not match exclude
-      if (!query_info.options.exclude.empty()) {
-        auto exclude = query_info.options.exclude;
-        for (const auto& label : record.labels()) {
-          if (exclude.contains(label.name()) && label.value() == exclude[label.name()]) {
-            exclude.erase(label.name());
-          }
-        }
-
-        if (exclude.empty()) continue;
-      }
-
-      records.push_back(record_index);
-    }
-    return records;
   }
 
   std::string name_;
@@ -514,7 +386,7 @@ class Entry : public IEntry {
   size_t size_counter_;
   size_t record_counter_;
 
-  mutable std::unordered_map<uint64_t, QueryInfo> queries_;
+  mutable std::unordered_map<uint64_t, IQuery::UPtr> queries_;
 };
 
 IEntry::UPtr IEntry::Build(std::string_view name, const fs::path& path, IEntry::Options options) {

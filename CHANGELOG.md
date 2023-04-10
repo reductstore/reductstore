@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Continuous query `GET /api/v1/:bucket/:entry/q?continuous=true|false`,
+  [PR-248](https://github.com/reductstore/reductstore/pull/248)
+- Build ARM64 Docker image
+- Integration of Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
+
+### Changed
+
+- New public Docker repository `reduct/store`, [PR-246](https://github.com/reductstore/reductstore/pull/246)
+- Speed up loading entries at start, [PR-250](https://github.com/reductstore/reductstore/pull/250)
+- Rewrite static asset management in Rust, [PR-252](https://github.com/reductstore/reductstore/pull/252)
+- Rewrite token authentication module in Rust, [PR-255](https://github.com/reductstore/reductstore/pull/255)
+
+### Removed
+
+- Disable Windows and Macos builds because of migration on Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
+
+### Fixed
+
+- GET /api/v1/me endpoint for disabled authentication, [PR-245](https://github.com/reductstore/reductstore/pull/245)
+
+## [1.3.2] - 2023-03-10
+
+### Added
+
+- Build and publish snap, [PR-241](https://github.com/reductstore/reductstore/pull/241)
+
+### Changed
+
+- Fetch Web Console from cmake, [PR-239](https://github.com/reductstore/reductstore/pull/239)
+- Install snap as a daemon, [PR-240](https://github.com/reductstore/reductstore/pull/240)
+
+### Fixed
+
+- Begin time 0 is valid for a block, [PR-242](https://github.com/reductstore/reductstore/pull/242)
+
 ## [1.3.1] - 2023-02-03
 
 ### Fixed
@@ -354,7 +391,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.2...HEAD
+
+[1.3.2]: https://github.com/reductstore/reductstore/compare/v1.3.1...v1.3.2
 
 [1.3.1]: https://github.com/reductstore/reductstore/compare/v1.3.0...v1.3.1
 

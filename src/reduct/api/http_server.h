@@ -11,11 +11,9 @@
 #include <memory>
 #include <string>
 
-#include "reduct/asset/asset_manager.h"
-#include "reduct/auth/token_auth.h"
-#include "reduct/auth/token_repository.h"
 #include "reduct/core/error.h"
 #include "reduct/storage/storage.h"
+#include "rust/rust_part.h"
 
 namespace reduct::api {
 
@@ -29,9 +27,9 @@ class IHttpServer {
    */
   struct Components {
     std::unique_ptr<storage::IStorage> storage;
-    std::unique_ptr<auth::ITokenAuthorization> auth;
-    std::unique_ptr<auth::ITokenRepository> token_repository;
-    std::unique_ptr<asset::IAssetManager> console;
+    rust::Box<reduct::rust_part::TokenAuthorization> auth;
+    rust::Box<reduct::rust_part::TokenRepository> token_repository;
+    rust::Box<reduct::rust_part::ZipAssetManager> console;
   };
 
   struct Options {
@@ -53,7 +51,7 @@ class IHttpServer {
   /**
    * Runs HTTP server
    */
-  virtual int Run(const bool &running) const = 0;
+  virtual int Run(const bool &running) = 0;
 };
 
 }  // namespace reduct::api

@@ -12,8 +12,8 @@ namespace reduct::api {
 using core::Error;
 using core::Result;
 
-Result<HttpRequestReceiver> Console::UiRequest(const asset::IAssetManager* console, std::string_view base_path,
-                                               std::string_view path) {
+Result<HttpRequestReceiver> Console::UiRequest(const rust::Box<rust_part::ZipAssetManager>& console,
+                                               std::string_view base_path, std::string_view path) {
   static StringMap cache;
 
   std::string* content;
@@ -22,22 +22,20 @@ Result<HttpRequestReceiver> Console::UiRequest(const asset::IAssetManager* conso
   if (it != cache.end()) {
     content = &it->second;
   } else {
-    auto ret = console->Read(path);
-    switch (ret.error.code) {
-      case 200:
-        break;
-      case Error::kNotFound: {
-        // It's React.js paths
-        ret = console->Read("index.html");
-        break;
-      }
-      default: {
-        return ret.error;
+    rust::String ret;
+    try {
+      ret = console->read(rust::Str(path.data()));
+    } catch (...) {
+      // It's React.js paths
+      try {
+        ret = console->read("index.html");
+      } catch (...) {
+        return Error::InternalError("Can't read index.html from console");
       }
     }
 
     auto [inserted_it, _] = cache.insert(
-        {std::string(path), std::regex_replace(ret.result, std::regex("/ui/"), fmt::format("{}ui/", base_path))});
+        {std::string(path), std::regex_replace(ret.data(), std::regex("/ui/"), fmt::format("{}ui/", base_path))});
     content = &inserted_it->second;
   }
 

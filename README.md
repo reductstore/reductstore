@@ -1,9 +1,13 @@
+
+
+
 # ReductStore
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
-[![Docker Pulls](https://img.shields.io/docker/pulls/reductstore/reductstore)](https://hub.docker.com/r/reductstore/reductstore)
+[![Docker Pulls](https://img.shields.io/docker/pulls/reduct/store)](https://hub.docker.com/r/reduct/store)
 [![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
+[![reductstore](https://snapcraft.io/reductstore/badge.svg)](https://snapcraft.io/reductstore)
 
 ReductStore is a time series database designed specifically for storing and managing large amounts of blob data. It has
 high performance for writing and real-time querying, making it suitable for edge computing, computer vision, and IoT
@@ -20,14 +24,14 @@ more [here](https://docs.reduct.store/).
 * Token authorization
 * Labeling and searching
 * Embedded Web Console
-* Support Linux, MacOS and Windows on AMD64
+* Support Linux, MacOS and Windows
 
 ## Get started
 
 The easiest way to start is to use Docker image:
 
 ```shell
-docker run -p 8383:8383 -v ${PWD}/data:/data reductstore/reductstore:latest
+docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 ```
 
 or you can use the demo instance https://play.reduct.store/ with API token `reduct`.
@@ -52,7 +56,7 @@ curl -d "some_data_1" \
 
 curl -d "some_data_2" \
   -X POST \
-    --header "x-reduct-label-quality: bad" \
+  --header "x-reduct-label-quality: bad" \
   "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?ts=20000"
 
 # Query all records in the bucket (TTL of request 10000s, so you don't need to hurry)

@@ -1,0 +1,15 @@
+#!/bin/sh
+
+. "$SNAP/bin/management-script"
+
+
+export RS_HOST=$(host)
+export RS_PORT=$(port)
+export RS_DATA_PATH=$(data_path)
+export RS_LOG_LEVEL=$(log_level)
+export RS_API_BASE_PATH=$(api_base)
+export RS_API_TOKEN=$(api_token)
+export RS_CERT_PATH=$(cert_path)
+export RS_CERT_KEY_PATH=$(cert_key_path)
+
+$SNAP/usr/local/bin/reductstore

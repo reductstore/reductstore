@@ -1,0 +1,9 @@
+#!/bin/sh
+
+handle_config_change()
+{
+        #TODO: Add validations here
+        snapctl restart reductstore
+}
+
+handle_config_change

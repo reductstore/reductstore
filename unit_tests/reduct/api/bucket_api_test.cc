@@ -5,14 +5,16 @@
 #include "reduct/api/bucket_api.h"
 
 #include <catch2/catch.hpp>
+#include <nlohmann/json.hpp>
 
 #include "reduct/helpers.h"
+#include "rust_part.h"
 
 using google::protobuf::util::JsonStringToMessage;
 using reduct::api::BucketApi;
-using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::storage::IStorage;
+namespace rs = reduct::rust_part;
 
 TEST_CASE("BucketApi::CreateBucket should create a bucket", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
@@ -131,20 +133,20 @@ TEST_CASE("BucketApi::UpdateBucket should update a bucket", "[api]") {
 TEST_CASE("BucketApi::RemoveBucket should remove a bucket", "[api]") {
   const auto path = BuildTmpDirectory();
   auto storage = IStorage::Build({.data_path = path});
-  auto repo = ITokenRepository::Build({.data_path = path});
+  auto repo = rs::new_token_repo(path.string().data(), "init-token");
 
   SECTION("ok") {
     REQUIRE(storage->CreateBucket("bucket", {}) == Error::kOk);
 
-    ITokenRepository::TokenPermissions permissions;
-    permissions.add_read("bucket");
-    permissions.add_read("bucket-2");
-    permissions.add_write("bucket");
-    permissions.add_write("bucket-3");
+    auto permissions = rs::new_token_permissions(false, {"bucket", "bucket-2"}, {"bucket", "bucket-3"});
 
-    REQUIRE(repo->CreateToken("token", permissions).error == Error::kOk);
+    {
+      auto resp = rs::new_token_create_response();
+      auto err = reduct::rust_part::token_repo_create_token(*repo, "token", *permissions, *resp);
+      REQUIRE(err->status() == 200);
+    }
 
-    auto [receiver, err] = BucketApi::RemoveBucket(storage.get(), repo.get(), "bucket");
+    auto [receiver, err] = BucketApi::RemoveBucket(storage.get(), *repo, "bucket");
     REQUIRE(err == Error::kOk);
 
     auto [resp, recv_err] = receiver("", true);
@@ -155,18 +157,21 @@ TEST_CASE("BucketApi::RemoveBucket should remove a bucket", "[api]") {
     REQUIRE(storage->GetBucket("bucket") == Error::NotFound("Bucket 'bucket' is not found"));
 
     SECTION("remove from tokens") {
-      auto [token, token_err] = repo->FindByName("token");
-      REQUIRE(token_err == Error::kOk);
+      auto token = rs::new_token();
+      auto token_err = rs::token_repo_get_token(*repo, "token", *token);
 
-      REQUIRE(token.permissions().read_size() == 1);
-      REQUIRE(token.permissions().read(0) == "bucket-2");
-      REQUIRE(token.permissions().write_size() == 1);
-      REQUIRE(token.permissions().write(0) == "bucket-3");
+        REQUIRE(token_err->status() == 200);
+        auto json_token = nlohmann::json::parse(rs::token_to_json(*token));
+
+        REQUIRE(json_token["permissions"]["read"].size() == 1);
+        REQUIRE(json_token["permissions"]["read"][0] == "bucket-2");
+        REQUIRE(json_token["permissions"]["write"].size() == 1);
+        REQUIRE(json_token["permissions"]["write"][0] == "bucket-3");
     }
   }
 
   SECTION("doesn't exist") {
-    REQUIRE(BucketApi::RemoveBucket(storage.get(), repo.get(), "bucket").error ==
+    REQUIRE(BucketApi::RemoveBucket(storage.get(), *repo, "bucket").error ==
             Error::NotFound("Bucket 'bucket' is not found"));
   }
 }

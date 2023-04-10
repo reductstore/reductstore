@@ -5,14 +5,16 @@
 #include "reduct/api/server_api.h"
 
 #include <catch2/catch.hpp>
+#include <nlohmann/json.hpp>
 
 #include "reduct/helpers.h"
 
 using google::protobuf::util::JsonStringToMessage;
 using reduct::api::ServerApi;
-using reduct::auth::ITokenRepository;
 using reduct::core::Error;
 using reduct::storage::IStorage;
+
+namespace rs = reduct::rust_part;
 
 TEST_CASE("ServerApi::Alive should return empty body", "[api]") {
   auto storage = IStorage::Build({.data_path = BuildTmpDirectory()});
@@ -65,17 +67,14 @@ TEST_CASE("ServerApi::List should return JSON", "[api]") {
 }
 
 TEST_CASE("ServerAPI::Me should return current permissions", "[api]") {
-  auto repo = ITokenRepository::Build({.data_path = BuildTmpDirectory()});
+  auto repo = rs::new_token_repo(BuildTmpDirectory().string(), "init-token");
 
-  ITokenRepository::TokenPermissions permissions;
-  permissions.set_full_access(true);
-  permissions.mutable_read()->Add("bucket-1");
-  permissions.mutable_write()->Add("bucket-2");
+  auto permissions = rs::new_token_permissions(true, {"bucket-1"}, {"bucket-2"});
+  auto answer = rs::new_token_create_response();
+  REQUIRE(rs::token_repo_create_token(*repo, "token-1", *permissions, *answer)->status() == 200);
 
-  auto [token_value, creat_err] = repo->CreateToken("token-1", permissions);
-  REQUIRE(creat_err == Error::kOk);
-
-  auto [receiver, err] = ServerApi::Me(repo.get(), fmt::format("Bearer {}", token_value.value()));
+  std::string value = nlohmann::json::parse(rs::token_create_response_to_json(*answer))["value"];
+  auto [receiver, err] = ServerApi::Me(*repo, fmt::format("Bearer {}", value));
   REQUIRE(err == Error::kOk);
 
   auto [resp, recv_err] = receiver("", true);
@@ -84,21 +83,42 @@ TEST_CASE("ServerAPI::Me should return current permissions", "[api]") {
   auto output = resp.SendData();
   REQUIRE(output.error == Error::kOk);
 
-  ITokenRepository::Token token;
-  JsonStringToMessage(output.result, &token);
+  auto token = rs::new_token();
 
-  REQUIRE(token.name() == "token-1");
-  REQUIRE(token.permissions().full_access());
-  REQUIRE(token.permissions().read().size() == 1);
-  REQUIRE(token.permissions().read(0) == "bucket-1");
-  REQUIRE(token.permissions().write().size() == 1);
-  REQUIRE(token.permissions().write(0) == "bucket-2");
+  auto json = nlohmann::json::parse(output.result);
+
+  REQUIRE(json["name"] == "token-1");
+  REQUIRE(json["permissions"]["full_access"] == true);
+  REQUIRE(json["permissions"]["read"].size() == 1);
+  REQUIRE(json["permissions"]["read"][0] == "bucket-1");
+  REQUIRE(json["permissions"]["write"].size() == 1);
+  REQUIRE(json["permissions"]["write"][0] == "bucket-2");
 
   SECTION("invalid token") {
-    REQUIRE(ServerApi::Me(repo.get(), "Bearer XXXX").error == Error::Unauthorized("Invalid token"));
+    REQUIRE(ServerApi::Me(*repo, "Bearer XXXX").error == Error::Unauthorized("Invalid token"));
   }
 
   SECTION("no token") {
-    REQUIRE(ServerApi::Me(repo.get(), "").error == Error::Unauthorized("No bearer token in request header"));
+    REQUIRE(ServerApi::Me(*repo, "").error == Error::Unauthorized("No bearer token in request header"));
   }
+}
+
+TEST_CASE("ServerAPI::Me should return placeholder always and authentication is disabled", "[api]") {
+  auto repo = rs::new_token_repo(BuildTmpDirectory().string(), "");
+
+  auto [receiver, err] = ServerApi::Me(*repo, "invalid-token");
+  REQUIRE(err == Error::kOk);
+
+  auto [resp, recv_err] = receiver("", true);
+  REQUIRE(recv_err == Error::kOk);
+
+  auto output = resp.SendData();
+  REQUIRE(output.error == Error::kOk);
+
+  auto json = nlohmann::json::parse(output.result);
+
+  REQUIRE(json["name"] == "AUTHENTICATION-DISABLED");
+  REQUIRE(json["permissions"]["full_access"] == true);
+  REQUIRE(json["permissions"]["read"].size() == 0);
+  REQUIRE(json["permissions"]["write"].size() == 0);
 }

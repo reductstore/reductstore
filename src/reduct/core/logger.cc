@@ -3,7 +3,6 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include "reduct/core/logger.h"
-
 #include <map>
 #include <utility>
 
@@ -18,7 +17,13 @@ void Logger::set_level(const std::string &print_level) {
       std::make_pair("ERROR", LogLevels::kError),
   };
 
-  log_level_ = kIdsLoglevel.at(print_level);
+  try {
+    log_level_ = kIdsLoglevel.at(print_level);
+  } catch (const std::out_of_range &e) {
+    log_level_ = LogLevels::kInfo;
+
+    LOG_WARNING("Invalid log level {}. Use INFO as default.", print_level);
+  }
 }
 
 }  // namespace reduct::core

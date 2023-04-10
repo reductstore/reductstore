@@ -1,0 +1,72 @@
+title: ReductStore
+name: reductstore # you probably want to 'snapcraft register <name>'
+base: core22 # the base snap is the execution environment for this snap
+adopt-info:  reductstore  # use the upstream version number for the snap version
+summary: A time series database for storing and managing large amounts of blob data # 79 char long summary
+description: |
+  ReductStore is a time series database designed specifically for storing and managing
+  large amounts of blob data. It has high performance for writing and real-time querying,
+  making it suitable for edge computing, computer vision, and IoT applications.
+  ReductStore is 100% open source under Mozilla Public License v2.0.
+contact: info@reduct.store
+issues: https://github.com/reductstore/reductstore/issues
+source-code: https://github.com/reductstore/reductstore.git
+website: https://wwww.reduct.store
+license: MPL-2.0
+confinement: strict # use 'strict' once you have the right plugs and slots
+grade: stable # must be 'stable' to release into candidate/stable channels
+
+architectures:
+- build-on: amd64
+  build-for: amd64
+- build-on: amd64
+  build-for: arm64
+parts:
+  reductstore:
+    # See 'snapcraft plugins'
+    plugin: cmake
+    source: .
+    source-type: local
+    cmake-parameters:
+    - -DCMAKE_BUILD_TYPE=Release
+    - -DREDUCT_BUILD_TEST=OFF
+    - -DREDUCT_BUILD_BENCHMARKS=OFF
+    override-build: |
+      pip3 install conan==1.58
+      snapcraftctl build
+
+    override-pull: |
+        craftctl default
+        VERSION=$(cat ./VERSION)
+        echo "Version: $VERSION"
+        craftctl set version="${VERSION}-git$(git rev-parse --short HEAD)"
+
+    build-packages:
+      - g++
+      - make
+      - python3-pip
+      - rustc
+      - cargo
+
+    stage-packages:
+      - libstdc++6
+  hooks:
+    plugin: dump
+    source: snap/local/hooks
+    organize:
+      bin/: snap/hooks/
+  scripts:
+    plugin: dump
+    source: snap/local/scripts
+
+
+apps:
+  reductstore:
+    command: bin/wrapper
+    daemon: simple
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+      - removable-media
+      - home

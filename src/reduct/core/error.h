@@ -10,6 +10,8 @@
 #include <string>
 #include <variant>
 
+#include "rust_part.h"
+
 namespace reduct::core {
 
 /**
@@ -30,6 +32,9 @@ struct [[nodiscard]] Error {  // NOLINT
   std::strong_ordering operator<=>(const Error& rhs) const = default;
   friend std::ostream& operator<<(std::ostream& os, const Error& error);
 
+  static Error FromRust(const rust_part::HTTPError& rust_err) {
+    return Error{rust_err.status(), std::string(rust_err.message())};
+  }
   /**
    * Use Error::kOk to avoid creating an object
    */

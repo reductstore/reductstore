@@ -20,6 +20,7 @@ class EntryApi {
     std::string_view ttl;
     std::map<std::string, std::string> include;
     std::map<std::string, std::string> exclude;
+    std::string_view continuous;
   };
   /**
    * POST /b/:bucket_name/:entry
@@ -42,8 +43,7 @@ class EntryApi {
    */
   static core::Result<HttpRequestReceiver> Query(storage::IStorage* storage, std::string_view bucket_name,
                                                  std::string_view entry_name, std::string_view start_timestamp,
-                                                 std::string_view stop_timestamp,
-                                                 const QueryOptions& options);
+                                                 std::string_view stop_timestamp, const QueryOptions& options);
 };
 
 }  // namespace reduct::api

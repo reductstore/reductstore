@@ -4,9 +4,8 @@ protobuf/3.19.2
 gtest/1.11.0
 catch2/2.13.8
 zlib/1.2.12
-libzippp/5.0-1.8.0
 openssl/1.1.1q
-arrow/10.0.0
+nlohmann_json/3.11.2
 
 [generators]
 cmake
