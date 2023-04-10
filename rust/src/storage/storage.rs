@@ -175,8 +175,14 @@ mod tests {
     fn test_recover_from_fs() {
         let path = tempdir().unwrap().into_path();
         let mut storage = Storage::new(path.clone());
+
+        let bucket_settings = BucketSettings {
+            quota_size: Some(100),
+            quota_type: Some(QuotaType::Fifo as i32),
+            ..Bucket::defaults()
+        };
         let bucket = storage
-            .create_bucket("test", BucketSettings::default())
+            .create_bucket("test", bucket_settings.clone())
             .unwrap();
         assert_eq!(bucket.name(), "test");
 
@@ -195,6 +201,11 @@ mod tests {
                 }),
             }
         );
+
+        let bucket = storage.get_bucket("test").unwrap();
+        assert_eq!(bucket.name(), "test");
+        assert_eq!(bucket.settings(), &bucket_settings);
+
     }
 
     #[test]

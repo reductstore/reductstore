@@ -129,7 +129,7 @@ impl Bucket {
         Ok(BucketInfo {
             name: self.name.clone(),
             size: 0,
-            entry_count: 0,
+            entry_count: self.entries.len() as u64,
             oldest_record: 0,
             latest_record: 0,
         })
@@ -178,5 +178,45 @@ impl Bucket {
         let mut file = std::fs::File::create(path)?;
         file.write(&buf)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_keep_settings_peristent() {
+        let path = std::env::temp_dir().join("test_keep_settings_peristent");
+        std::fs::create_dir_all(&path).unwrap();
+
+        let init_settings = BucketSettings {
+            max_block_size: Some(100),
+            quota_type: Some(QuotaType::Fifo as i32),
+            quota_size: Some(1000),
+            max_block_records: Some(100),
+        };
+
+        let bucket = Bucket::new("test", &path, init_settings.clone()).unwrap();
+        let settings = bucket.settings();
+        assert_eq!(settings, &init_settings);
+
+        let bucket = Bucket::restore(path).unwrap();
+        let settings = bucket.settings();
+        assert_eq!(settings, &init_settings);
+    }
+
+    #[test]
+    fn test_fill_default_settings() {
+        let settings = BucketSettings {
+            max_block_size: None,
+            quota_type: None,
+            quota_size: None,
+            max_block_records: None,
+        };
+
+        let default_settings = Bucket::defaults();
+        let filled_settings = Bucket::fill_settings(settings, default_settings.clone());
+        assert_eq!(filled_settings, default_settings);
     }
 }
