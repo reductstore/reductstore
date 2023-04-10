@@ -14,9 +14,6 @@ use crate::storage::bucket::Bucket;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfoList, BucketSettings, Defaults, ServerInfo};
 
-const DEFAULT_MAX_RECORDS: u64 = 1024;
-const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
-
 /// Storage is the main entry point for the storage service.
 pub struct Storage {
     data_path: PathBuf,
@@ -67,18 +64,17 @@ impl Storage {
             oldest_record: 0,
             latest_record: 0,
             defaults: Some(Defaults {
-                bucket: Some(BucketSettings {
-                    quota_type: Some(QuotaType::None as i32),
-                    quota_size: Some(0),
-                    max_block_records: Some(DEFAULT_MAX_RECORDS),
-                    max_block_size: Some(DEFAULT_MAX_BLOCK_SIZE),
-                }),
+                bucket: Some(Bucket::defaults()),
             }),
         })
     }
 
     /// Creat a new bucket.
-    fn create_bucket(&mut self, name: &str) -> Result<&Bucket, HTTPError> {
+    fn create_bucket(
+        &mut self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<&Bucket, HTTPError> {
         let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
         if !regex.is_match(name) {
             return Err(HTTPError::unprocessable_entity(
@@ -92,7 +88,7 @@ impl Storage {
             ));
         }
 
-        let bucket = Bucket::new(name, &self.data_path)?;
+        let bucket = Bucket::new(name, &self.data_path, settings)?;
         self.buckets.insert(name.to_string(), bucket);
 
         Ok(self.buckets.get(name).unwrap())
@@ -169,12 +165,7 @@ mod tests {
                 oldest_record: 0,
                 latest_record: 0,
                 defaults: Some(Defaults {
-                    bucket: Some(BucketSettings {
-                        quota_type: Some(QuotaType::None as i32),
-                        quota_size: Some(0),
-                        max_block_records: Some(DEFAULT_MAX_RECORDS),
-                        max_block_size: Some(DEFAULT_MAX_BLOCK_SIZE),
-                    })
+                    bucket: Some(Bucket::defaults()),
                 }),
             }
         );
@@ -184,7 +175,9 @@ mod tests {
     fn test_recover_from_fs() {
         let path = tempdir().unwrap().into_path();
         let mut storage = Storage::new(path.clone());
-        let bucket = storage.create_bucket("test").unwrap();
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
         assert_eq!(bucket.name(), "test");
 
         let storage = Storage::new(path);
@@ -198,12 +191,7 @@ mod tests {
                 oldest_record: 0,
                 latest_record: 0,
                 defaults: Some(Defaults {
-                    bucket: Some(BucketSettings {
-                        quota_type: Some(QuotaType::None as i32),
-                        quota_size: Some(0),
-                        max_block_records: Some(DEFAULT_MAX_RECORDS),
-                        max_block_size: Some(DEFAULT_MAX_BLOCK_SIZE),
-                    })
+                    bucket: Some(Bucket::defaults()),
                 }),
             }
         );
@@ -212,14 +200,16 @@ mod tests {
     #[test]
     fn test_create_bucket() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
-        let bucket = storage.create_bucket("test").unwrap();
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
         assert_eq!(bucket.name(), "test");
     }
 
     #[test]
     fn test_create_bucket_with_invalid_name() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
-        let result = storage.create_bucket("test$");
+        let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
             result,
             Err(HTTPError::unprocessable_entity(
@@ -231,10 +221,12 @@ mod tests {
     #[test]
     fn test_create_bucket_with_existing_name() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
-        let bucket = storage.create_bucket("test").unwrap();
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
         assert_eq!(bucket.name(), "test");
 
-        let result = storage.create_bucket("test");
+        let result = storage.create_bucket("test", BucketSettings::default());
         assert_eq!(
             result,
             Err(HTTPError::conflict("Bucket 'test' already exists"))
@@ -244,7 +236,7 @@ mod tests {
     #[test]
     fn test_get_bucket() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
-        let bucket = storage.create_bucket("test").unwrap();
+        let bucket = storage.create_bucket("test", BucketSettings::default()).unwrap();
         assert_eq!(bucket.name(), "test");
 
         let bucket = storage.get_bucket("test").unwrap();
@@ -264,7 +256,7 @@ mod tests {
     #[test]
     fn test_remove_bucket() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
-        let bucket = storage.create_bucket("test").unwrap();
+        let bucket = storage.create_bucket("test", BucketSettings::default()).unwrap();
         assert_eq!(bucket.name(), "test");
 
         let result = storage.remove_bucket("test");
@@ -291,7 +283,7 @@ mod tests {
     fn test_remove_bucket_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut storage = Storage::new(path.clone());
-        let bucket = storage.create_bucket("test").unwrap();
+        let bucket = storage.create_bucket("test", BucketSettings::default()).unwrap();
         assert_eq!(bucket.name(), "test");
 
         let result = storage.remove_bucket("test");
@@ -309,8 +301,8 @@ mod tests {
     fn test_get_bucket_list() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
 
-        storage.create_bucket("test1").unwrap();
-        storage.create_bucket("test2").unwrap();
+        storage.create_bucket("test1", Bucket::defaults()).unwrap();
+        storage.create_bucket("test2", Bucket::defaults()).unwrap();
 
         let bucket_list = storage.get_bucket_list().unwrap();
         assert_eq!(bucket_list.buckets.len(), 2);

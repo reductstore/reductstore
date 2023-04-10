@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use bytes::Bytes;
 use log::debug;
-use prost::{bytes, Message};
+use prost::{Message};
+use prost::bytes::{Bytes};
 use prost_wkt_types::Timestamp;
 
 use crate::auth::proto::token::Permissions;
