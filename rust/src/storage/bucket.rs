@@ -5,6 +5,7 @@
 
 use crate::core::status::HTTPError;
 use std::path::PathBuf;
+use crate::storage::proto::BucketInfo;
 
 /// Bucket is a single storage bucket.
 #[derive(PartialEq, Debug)]
@@ -54,6 +55,18 @@ impl Bucket {
     pub fn remove(&self) -> Result<(), HTTPError> {
         std::fs::remove_dir_all(&self.path)?;
         Ok(())
+    }
+
+
+    /// Return bucket stats
+    pub fn info(&self) -> Result<BucketInfo, HTTPError> {
+        Ok(BucketInfo {
+            name: self.name.clone(),
+            size: 0,
+            entry_count: 0,
+            oldest_record: 0,
+            latest_record: 0,
+        })
     }
 
     pub(crate) fn name(&self) -> &str {

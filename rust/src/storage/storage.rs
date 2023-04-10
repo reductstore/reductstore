@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use log::info;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use crate::core::status::HTTPError;
 use crate::storage::bucket::Bucket;
 use crate::storage::proto::bucket_settings::QuotaType;
-use crate::storage::proto::{BucketSettings, Defaults, ServerInfo};
+use crate::storage::proto::{BucketInfoList, BucketSettings, Defaults, ServerInfo};
 
 const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -21,7 +21,7 @@ const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
 pub struct Storage {
     data_path: PathBuf,
     start_time: Instant,
-    buckets: HashMap<String, Bucket>,
+    buckets: BTreeMap<String, Bucket>,
 }
 
 impl Storage {
@@ -33,7 +33,7 @@ impl Storage {
         }
 
         // restore buckets
-        let mut buckets = HashMap::new();
+        let mut buckets = BTreeMap::new();
         for entry in std::fs::read_dir(&data_path).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
@@ -135,6 +135,15 @@ impl Storage {
                 format!("Bucket '{}' is not found", name).as_str(),
             )),
         }
+    }
+
+    pub fn get_bucket_list(&self) -> Result<BucketInfoList, HTTPError> {
+        let mut buckets = Vec::new();
+        for bucket in self.buckets.values() {
+            buckets.push(bucket.info()?);
+        }
+
+        Ok(BucketInfoList { buckets })
     }
 }
 
@@ -294,5 +303,18 @@ mod tests {
             result,
             Err(HTTPError::not_found("Bucket 'test' is not found"))
         );
+    }
+
+    #[test]
+    fn test_get_bucket_list() {
+        let mut storage = Storage::new(tempdir().unwrap().into_path());
+
+        storage.create_bucket("test1").unwrap();
+        storage.create_bucket("test2").unwrap();
+
+        let bucket_list = storage.get_bucket_list().unwrap();
+        assert_eq!(bucket_list.buckets.len(), 2);
+        assert_eq!(bucket_list.buckets[0].name, "test1");
+        assert_eq!(bucket_list.buckets[1].name, "test2");
     }
 }

@@ -5,3 +5,4 @@
 pub mod bucket;
 pub mod proto;
 pub mod storage;
+pub mod entry;
