@@ -36,7 +36,7 @@ class EntryApi {
    */
   static core::Result<HttpRequestReceiver> Read(storage::IStorage* storage, std::string_view bucket_name,
                                                 std::string_view entry_name, std::string_view timestamp,
-                                                std::string_view query_id);
+                                                std::string_view query_id, bool send_record_data);
 
   /**
    * GET /b/:bucket/:entry/query

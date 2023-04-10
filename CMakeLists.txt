@@ -1,3 +1,5 @@
+include(FetchContent)
+
 cmake_minimum_required(VERSION 3.18)
 
 file(READ "${CMAKE_SOURCE_DIR}/VERSION" FULL_VERSION)
