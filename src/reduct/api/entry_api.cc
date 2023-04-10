@@ -161,7 +161,8 @@ core::Result<HttpRequestReceiver> EntryApi::Write(storage::IStorage* storage, st
 }
 
 Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view bucket_name, std::string_view entry_name,
-                                           std::string_view timestamp, std::string_view query_id) {
+                                           std::string_view timestamp, std::string_view query_id,
+                                           const bool send_record_data) {
   IEntry::SPtr entry;
   RESULT_OR_RETURN_ERROR(entry, GetOrCreateEntry(storage, std::string{bucket_name}, std::string{entry_name}, true));
 
@@ -194,7 +195,7 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
 
   assert(reader && "Failed to reach reader");
   return {
-      [reader, last](std::string_view chunk, bool) -> Result<HttpResponse> {
+      [reader, last, send_record_data](std::string_view, bool) -> Result<HttpResponse> {
         StringMap headers = {{"x-reduct-time", std::to_string(core::ToMicroseconds(reader->timestamp()))},
                              {"x-reduct-last", std::to_string(static_cast<int>(last))},
                              {"content-type", reader->content_type()}};
@@ -203,18 +204,21 @@ Result<HttpRequestReceiver> EntryApi::Read(IStorage* storage, std::string_view b
           headers.insert({fmt::format("{}{}", kLabelHeaderPrefix, key), value});
         }
 
-        return Result<HttpResponse>{
-            HttpResponse{
-                .headers = std::move(headers),
-                .content_length = reader->size(),
-                .SendData =
-                    [reader]() {
-                      auto [chunk, err] = reader->Read();
-                      return Result<std::string>{std::move(chunk.data), err};
-                    },
-            },
-            Error::kOk,
+        HttpResponse response = {
+            .headers = std::move(headers),
+            .content_length = reader->size(),
         };
+
+        if (send_record_data) {
+          response.SendData = [&reader]() {
+            auto [chunk, err] = reader->Read();
+            return Result<std::string>{std::move(chunk.data), err};
+          };
+        } else {
+          response.SendData = []() { return Result<std::string>{"", Error::kOk}; };
+        }
+
+        return Result<HttpResponse>{response, Error::kOk};
       },
       error,
   };

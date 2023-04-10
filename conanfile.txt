@@ -1,6 +1,5 @@
 [requires]
 fmt/9.0.0
-uwebsockets/20.14.0
 protobuf/3.19.2
 gtest/1.11.0
 catch2/2.13.8

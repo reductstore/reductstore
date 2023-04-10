@@ -80,6 +80,12 @@ if (WITH_WEB_CONSOLE)
 endif ()
 
 
+
+add_executable(reductstore main.cc)
+target_link_libraries(reductstore reduct ${CONAN_LIBS})
+target_link_libraries(reductstore reduct uWebSockets)
+
 add_executable(reductstore main.cc)
 target_link_libraries(reductstore reduct)
 install(TARGETS reductstore DESTINATION bin)
+
