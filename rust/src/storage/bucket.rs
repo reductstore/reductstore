@@ -7,7 +7,7 @@ use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use std::collections::BTreeMap;
-use std::io::{Write};
+use std::io::Write;
 use std::path::PathBuf;
 
 use crate::core::status::HTTPError;
@@ -80,10 +80,9 @@ impl Bucket {
         }
 
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
-        let settings = BucketSettings::decode(&mut Bytes::from(buf))
-            .map_err(|e|
-                HTTPError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
-            )?;
+        let settings = BucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
+            HTTPError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
+        })?;
 
         let settings = Self::fill_settings(settings, Self::defaults());
 
@@ -172,7 +171,8 @@ impl Bucket {
         let mut buf = BytesMut::new();
         self.settings.encode(&mut buf).map_err(|e| {
             HTTPError::internal_server_error(
-                format!("Failed to encode bucket settings: {}", e).as_str())
+                format!("Failed to encode bucket settings: {}", e).as_str(),
+            )
         })?;
 
         let mut file = std::fs::File::create(path)?;

@@ -205,7 +205,6 @@ mod tests {
         let bucket = storage.get_bucket("test").unwrap();
         assert_eq!(bucket.name(), "test");
         assert_eq!(bucket.settings(), &bucket_settings);
-
     }
 
     #[test]
@@ -247,7 +246,9 @@ mod tests {
     #[test]
     fn test_get_bucket() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
-        let bucket = storage.create_bucket("test", BucketSettings::default()).unwrap();
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
         assert_eq!(bucket.name(), "test");
 
         let bucket = storage.get_bucket("test").unwrap();
@@ -267,7 +268,9 @@ mod tests {
     #[test]
     fn test_remove_bucket() {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
-        let bucket = storage.create_bucket("test", BucketSettings::default()).unwrap();
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
         assert_eq!(bucket.name(), "test");
 
         let result = storage.remove_bucket("test");
@@ -294,7 +297,9 @@ mod tests {
     fn test_remove_bucket_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut storage = Storage::new(path.clone());
-        let bucket = storage.create_bucket("test", BucketSettings::default()).unwrap();
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
         assert_eq!(bucket.name(), "test");
 
         let result = storage.remove_bucket("test");

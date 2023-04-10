@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use log::debug;
-use prost::{Message};
-use prost::bytes::{Bytes};
+use prost::bytes::Bytes;
+use prost::Message;
 use prost_wkt_types::Timestamp;
 
 use crate::auth::proto::token::Permissions;
