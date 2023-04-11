@@ -1,4 +1,5 @@
 set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(PROTO_SPEC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Generate protoc files
 set(PROTOBUF_SPEC_FILES
@@ -79,13 +80,6 @@ if (WITH_WEB_CONSOLE)
     target_compile_definitions(reduct PUBLIC WITH_CONSOLE)
 endif ()
 
-
-
-add_executable(reductstore main.cc)
-target_link_libraries(reductstore reduct ${CONAN_LIBS})
-target_link_libraries(reductstore reduct uWebSockets)
-
 add_executable(reductstore main.cc)
 target_link_libraries(reductstore reduct)
 install(TARGETS reductstore DESTINATION bin)
-
