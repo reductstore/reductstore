@@ -6,6 +6,7 @@ catch2/2.13.8
 zlib/1.2.12
 openssl/1.1.1q
 nlohmann_json/3.11.2
+uwebsockets/20.36.0
 
 [generators]
 cmake
