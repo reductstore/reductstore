@@ -332,7 +332,7 @@ class HttpServer : public IHttpServer {
                 std::string bucket_name(req->getParameter(0));
                 std::string entry_name(req->getParameter(1));
 
-                RegisterEndpoint(ReadAccess(bucket_name), HttpContext<SSL>{res, req, running},
+                RegisterEndpoint(*rust_part::new_read_policy(bucket_name), HttpContext<SSL>{res, req, running},
                                  [this, req, &bucket_name, &entry_name]() {
                                    return EntryApi::Read(storage_.get(), bucket_name, entry_name, req->getQuery("ts"),
                                                          req->getQuery("q"), false);
