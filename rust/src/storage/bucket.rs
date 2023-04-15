@@ -3,7 +3,6 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use std::collections::BTreeMap;
@@ -11,9 +10,9 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::core::status::HTTPError;
-use crate::storage::entry::Entry;
+use crate::storage::entry::{Entry, EntryOptions};
 use crate::storage::proto::bucket_settings::QuotaType;
-use crate::storage::proto::{bucket_settings, BucketInfo, BucketSettings};
+use crate::storage::proto::{BucketInfo, BucketSettings};
 
 const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -70,21 +69,27 @@ impl Bucket {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub fn restore(path: PathBuf) -> Result<Bucket, HTTPError> {
-        let mut entries = BTreeMap::new();
-        for entry in std::fs::read_dir(&path)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                let entry = Entry::restore(path)?;
-                entries.insert(entry.name().to_string(), entry);
-            }
-        }
-
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = BucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             HTTPError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
         })?;
 
         let settings = Self::fill_settings(settings, Self::defaults());
+
+        let mut entries = BTreeMap::new();
+        for entry in std::fs::read_dir(&path)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                let entry = Entry::restore(
+                    path,
+                    EntryOptions {
+                        max_block_size: settings.max_block_size.unwrap(),
+                        max_block_records: settings.max_block_records.unwrap(),
+                    },
+                )?;
+                entries.insert(entry.name().to_string(), entry);
+            }
+        }
 
         Ok(Bucket {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
@@ -106,7 +111,14 @@ impl Bucket {
 
     pub fn get_or_create_entry(&mut self, key: &str) -> Result<&Entry, HTTPError> {
         if !self.entries.contains_key(key) {
-            let entry = Entry::new(&key, self.path.clone());
+            let entry = Entry::new(
+                &key,
+                self.path.clone(),
+                EntryOptions {
+                    max_block_size: self.settings.max_block_size.unwrap(),
+                    max_block_records: self.settings.max_block_records.unwrap(),
+                },
+            );
             self.entries.insert(key.to_string(), entry);
         }
 

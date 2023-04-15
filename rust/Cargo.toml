@@ -29,5 +29,8 @@ cxx-build = "1.0"
 prost-build = "0.11"
 prost-wkt-build = "0.4"
 
+[dev-dependencies]
+mockall = "0.11.4"
+
 [lib]
 crate-type = ["staticlib"]
