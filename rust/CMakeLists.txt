@@ -10,6 +10,7 @@ endif ()
 set(RUST_PART_LIB "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_DIR}/librust_part.a")
 set(RUST_PART_CXX "${CMAKE_CURRENT_BINARY_DIR}/rust_part.cpp")
 set(RUST_PART_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/build.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/asset.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/asset/asset_manager.rs"
