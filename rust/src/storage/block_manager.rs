@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use crate::core::status::HTTPError;
 use crate::storage::proto::*;
@@ -19,6 +20,7 @@ use crate::storage::writer::RecordWriter;
 pub struct BlockManager {
     path: PathBuf,
     counters: HashMap<u64, u64>,
+    current_block: Option<Rc<Block>>,
 }
 
 const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -29,6 +31,7 @@ impl BlockManager {
         Self {
             path,
             counters: HashMap::new(),
+            current_block: None
         }
     }
 
@@ -78,7 +81,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was loaded successfully.
-    fn load(&self, block_id: u64) -> Result<Block, HTTPError>;
+    fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
     /// Save block descriptor to disk.
     ///
     /// # Arguments
@@ -99,7 +102,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was created successfully.
-    fn start(&self, begin_time: Timestamp, max_block_size: u64) -> Result<Block, HTTPError>;
+    fn start(&mut self, begin_time: Timestamp, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
     /// Finish a block by truncating the file to the actual size.
     ///
     /// # Arguments
@@ -123,7 +126,10 @@ impl ManageBlock for BlockManager {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was loaded successfully.
-    fn load(&self, block_id: u64) -> Result<Block, HTTPError> {
+    fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError> {
+        if self.current_block.is_some() && ts_to_u64((*self.current_block.as_ref().unwrap()).begin_time.as_ref().unwrap()) == block_id {
+            return Ok(self.current_block.clone().unwrap());
+        }
         let path = self
             .path
             .join(format!("{}.{}", block_id, DESCRIPTOR_FILE_EXT));
@@ -131,7 +137,9 @@ impl ManageBlock for BlockManager {
         let block = Block::decode(Bytes::from(buf)).map_err(|e| {
             HTTPError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
         })?;
-        Ok(block)
+
+        self.current_block = Some(Rc::new(block));
+        return Ok(self.current_block.clone().unwrap());
     }
     /// Save block descriptor to disk.
     ///
@@ -162,7 +170,7 @@ impl ManageBlock for BlockManager {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was created successfully.
-    fn start(&self, begin_time: Timestamp, max_block_size: u64) -> Result<Block, HTTPError> {
+    fn start(&mut self, begin_time: Timestamp, max_block_size: u64) -> Result<Rc<Block>, HTTPError> {
         let block_id = ts_to_u64(&begin_time);
         let mut block = Block::default();
         block.begin_time = Some(begin_time);
@@ -172,7 +180,9 @@ impl ManageBlock for BlockManager {
         file.set_len(max_block_size)?;
 
         self.save(&block)?;
-        Ok(block)
+
+        self.current_block = Some(Rc::new(block));
+        Ok(self.current_block.clone().unwrap())
     }
     /// Finish a block by truncating the file to the actual size.
     ///

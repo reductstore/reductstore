@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use log::debug;
+use log::{debug, warn};
 use prost::bytes::Bytes;
 use prost::Message;
 use prost_wkt_types::Timestamp;
@@ -66,7 +66,7 @@ impl TokenRepository {
             None => {
                 // No API token, no authentication
                 // TODO: After C++ is removed, this should use traits and an empty implementation
-                debug!("API token is not set, no authentication is required");
+                warn!("API token is not set, no authentication is required");
                 None
             }
         };

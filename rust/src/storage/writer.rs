@@ -5,6 +5,7 @@
 
 use prost_wkt_types::Timestamp;
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -94,9 +95,9 @@ impl<'a> RecordWriter<'a> {
         Ok(())
     }
 
-    fn on_update(&self, state: record::State) {
-        let mut block = match self.block_manager.borrow().load(self.block_id) {
-            Ok(block) => block,
+    fn on_update(&mut self, state: record::State) {
+        let mut block = match self.block_manager.borrow_mut().load(self.block_id) {
+            Ok(block) => (*block).clone(),  // TODO: a block may have many labels and could be expensive
             Err(e) => {
                 log::error!("Failed to load block: {}", e);
                 return;
@@ -127,9 +128,9 @@ mod tests {
         BlockManager {}
 
         impl ManageBlock for BlockManager {
-            fn load(&self, block_id: u64) -> Result<Block, HTTPError>;
+            fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
             fn save(&self, block: &Block) -> Result<(), HTTPError>;
-            fn start(&self, begin_time: Timestamp, max_block_size: u64) -> Result<Block, HTTPError>;
+            fn start(&mut self, begin_time: Timestamp, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
             fn finish(&self, block: &Block) -> Result<(), HTTPError>;
             fn unregister(&mut self, block_id: u64);
         }
@@ -149,7 +150,7 @@ mod tests {
         block_manager
             .expect_load()
             .times(1)
-            .returning(move |_| Ok(same_block.clone()));
+            .returning(move |_| Ok(Rc::new(same_block.clone())));
         block_manager
             .expect_unregister()
             .times(1)
@@ -176,7 +177,7 @@ mod tests {
         block_manager
             .expect_load()
             .times(1)
-            .returning(move |_| Ok(same_block.clone()));
+            .returning(move |_| Ok(Rc::new(same_block.clone())));
         block_manager
             .expect_unregister()
             .times(1)
@@ -209,7 +210,7 @@ mod tests {
         block_manager
             .expect_load()
             .times(1)
-            .returning(move |_| Ok(same_block.clone()));
+            .returning(move |_| Ok(Rc::new(same_block.clone())));
         block_manager
             .expect_unregister()
             .times(1)
