@@ -221,8 +221,8 @@ mod tests {
         let mut storage = Storage::new(tempdir().unwrap().into_path());
         let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
-            result,
-            Err(HTTPError::unprocessable_entity(
+            result.err(),
+            Some(HTTPError::unprocessable_entity(
                 "Bucket name can contain only letters, digests and [-,_] symbols"
             ))
         );
@@ -238,8 +238,8 @@ mod tests {
 
         let result = storage.create_bucket("test", BucketSettings::default());
         assert_eq!(
-            result,
-            Err(HTTPError::conflict("Bucket 'test' already exists"))
+            result.err(),
+            Some(HTTPError::conflict("Bucket 'test' already exists"))
         );
     }
 
@@ -260,8 +260,8 @@ mod tests {
         let storage = Storage::new(tempdir().unwrap().into_path());
         let result = storage.get_bucket("test");
         assert_eq!(
-            result,
-            Err(HTTPError::not_found("Bucket 'test' is not found"))
+            result.err(),
+            Some(HTTPError::not_found("Bucket 'test' is not found"))
         );
     }
 
@@ -278,8 +278,8 @@ mod tests {
 
         let result = storage.get_bucket("test");
         assert_eq!(
-            result,
-            Err(HTTPError::not_found("Bucket 'test' is not found"))
+            result.err(),
+            Some(HTTPError::not_found("Bucket 'test' is not found"))
         );
     }
 
@@ -308,8 +308,8 @@ mod tests {
         let storage = Storage::new(path);
         let result = storage.get_bucket("test");
         assert_eq!(
-            result,
-            Err(HTTPError::not_found("Bucket 'test' is not found"))
+            result.err(),
+            Some(HTTPError::not_found("Bucket 'test' is not found"))
         );
     }
 

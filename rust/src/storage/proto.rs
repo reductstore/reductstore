@@ -12,7 +12,7 @@ pub fn ts_to_us(ts: &Timestamp) -> u64 {
 }
 
 /// Converts a UNIX microseconds to a Timestamp.
-pub fn us_to_ts(ts: u64) -> Timestamp {
+pub fn us_to_ts(ts: &u64) -> Timestamp {
     Timestamp {
         seconds: (ts / 1000000) as i64,
         nanos: ((ts % 1000000) * 1000) as i32,

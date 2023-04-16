@@ -19,7 +19,6 @@ const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
 const SETTINGS_NAME: &str = "bucket.settings";
 
 /// Bucket is a single storage bucket.
-#[derive(PartialEq, Debug)]
 pub struct Bucket {
     name: String,
     path: PathBuf,
@@ -102,7 +101,7 @@ impl Bucket {
     /// Default settings for a new bucket bucket
     pub fn defaults() -> BucketSettings {
         BucketSettings {
-            max_block_size: Some(DEFAULT_MAX_RECORDS),
+            max_block_size: Some(DEFAULT_MAX_BLOCK_SIZE),
             quota_type: Some(QuotaType::None as i32),
             quota_size: Some(0),
             max_block_records: Some(DEFAULT_MAX_RECORDS),
@@ -119,7 +118,7 @@ impl Bucket {
                     max_block_records: self.settings.max_block_records.unwrap(),
                 },
             );
-            self.entries.insert(key.to_string(), entry);
+            self.entries.insert(key.to_string(), entry?);
         }
 
         Ok(self.entries.get(key).unwrap())
@@ -196,10 +195,11 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_keep_settings_peristent() {
-        let path = std::env::temp_dir().join("test_keep_settings_peristent");
+        let path = tempdir().unwrap().into_path();
         std::fs::create_dir_all(&path).unwrap();
 
         let init_settings = BucketSettings {
@@ -210,12 +210,11 @@ mod tests {
         };
 
         let bucket = Bucket::new("test", &path, init_settings.clone()).unwrap();
-        let settings = bucket.settings();
-        assert_eq!(settings, &init_settings);
+        assert_eq!(bucket.settings(), &init_settings);
 
-        let bucket = Bucket::restore(path).unwrap();
-        let settings = bucket.settings();
-        assert_eq!(settings, &init_settings);
+        let bucket = Bucket::restore(path.join("test")).unwrap();
+        assert_eq!(bucket.name(), "test");
+        assert_eq!(bucket.settings(), &init_settings);
     }
 
     #[test]

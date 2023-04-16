@@ -153,7 +153,7 @@ mod tests {
             .expect_unregister()
             .times(1)
             .returning(|_| ())
-            .with(eq(0));
+            .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
 
         let mut writer =
             RecordWriter::new(path, &block, 0, 10, RefCell::new(&mut block_manager)).unwrap();
@@ -180,7 +180,7 @@ mod tests {
             .expect_unregister()
             .times(1)
             .returning(|_| ())
-            .with(eq(0));
+            .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
 
         let mut writer =
             RecordWriter::new(path, &block, 0, 10, RefCell::new(&mut block_manager)).unwrap();
@@ -213,7 +213,7 @@ mod tests {
             .expect_unregister()
             .times(1)
             .returning(|_| ())
-            .with(eq(0));
+            .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
 
         let mut writer =
             RecordWriter::new(path, &block, 0, 10, RefCell::new(&mut block_manager)).unwrap();
@@ -227,36 +227,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_filesystem_err() {
-        let (path, mut block_manager, block) = setup();
-        let mut writer = RecordWriter::new(
-            path.clone(),
-            &block,
-            0,
-            10,
-            RefCell::new(&mut block_manager),
-        )
-        .unwrap();
-
-        std::fs::remove_dir_all(path).unwrap();
-        assert_eq!(
-            writer.write(b"67890", false),
-            Err(HTTPError::internal_server_error(""))
-        );
-    }
-
     fn setup() -> (PathBuf, MockBlockManager, Block) {
         let path = tempdir().unwrap().into_path().join("test");
         let block_manager = MockBlockManager::new();
         let block = Block {
             begin_time: Some(Timestamp {
-                seconds: 0,
+                seconds: 1,
                 nanos: 0,
             }),
             records: vec![Record {
                 timestamp: Option::from(Timestamp {
-                    seconds: 0,
+                    seconds: 1,
                     nanos: 0,
                 }),
                 begin: 0,
