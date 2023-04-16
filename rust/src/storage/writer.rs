@@ -5,16 +5,14 @@
 
 use prost_wkt_types::Timestamp;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::block_manager::ManageBlock;
-use crate::storage::proto::{record, ts_to_u64, Block};
-
-type OnStateUpdated = fn(record_index: usize, state: record::State);
+use crate::storage::proto::{record, ts_to_us, Block};
 
 pub struct RecordWriter<'a> {
     file: File,
@@ -48,7 +46,7 @@ impl<'a> RecordWriter<'a> {
             written_bytes: 0,
             content_length,
             record_index,
-            block_id: ts_to_u64(&block.begin_time.clone().unwrap()),
+            block_id: ts_to_us(&block.begin_time.clone().unwrap()),
             block_manager,
         })
     }
@@ -97,7 +95,7 @@ impl<'a> RecordWriter<'a> {
 
     fn on_update(&mut self, state: record::State) {
         let mut block = match self.block_manager.borrow_mut().load(self.block_id) {
-            Ok(block) => (*block).clone(),  // TODO: a block may have many labels and could be expensive
+            Ok(block) => (*block).clone(), // TODO: a block may have many labels and could be expensive
             Err(e) => {
                 log::error!("Failed to load block: {}", e);
                 return;
@@ -108,7 +106,7 @@ impl<'a> RecordWriter<'a> {
         block.invalid = state == record::State::Invalid;
 
         self.block_manager
-            .borrow()
+            .borrow_mut()
             .save(&block)
             .map_err(|e| {
                 log::error!("Failed to save block: {}", e);
@@ -128,9 +126,9 @@ mod tests {
         BlockManager {}
 
         impl ManageBlock for BlockManager {
-            fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
-            fn save(&self, block: &Block) -> Result<(), HTTPError>;
-            fn start(&mut self, begin_time: Timestamp, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
+            fn load(&mut self, begin_time: u64) -> Result<Rc<Block>, HTTPError>;
+            fn save(&mut self, block: &Block) -> Result<(), HTTPError>;
+            fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
             fn finish(&self, block: &Block) -> Result<(), HTTPError>;
             fn unregister(&mut self, block_id: u64);
         }
@@ -229,6 +227,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn test_filesystem_err() {
         let (path, mut block_manager, block) = setup();
         let mut writer = RecordWriter::new(
