@@ -99,7 +99,6 @@ pub trait ManageBlock {
     /// * `Ok(block)` - Block was loaded successfully.
     fn get(&self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
 
-
     /// Save block descriptor to disk.
     ///
     /// # Arguments
@@ -194,7 +193,6 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-
     fn unregister(&mut self, block_id: u64) {
         self.counters.get_mut(&block_id).map(|c| *c -= 1);
         if self
@@ -238,7 +236,7 @@ mod tests {
             bm.path
                 .join(format!("{}{}", ts_to_us(&ts), DESCRIPTOR_FILE_EXT)),
         )
-            .unwrap();
+        .unwrap();
         let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
         assert_eq!(block_from_file, *block);

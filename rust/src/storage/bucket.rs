@@ -239,5 +239,4 @@ mod tests {
         let filled_settings = Bucket::fill_settings(settings, default_settings.clone());
         assert_eq!(filled_settings, default_settings);
     }
-
 }

@@ -3,8 +3,8 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::cmp::max;
 use log::info;
+use std::cmp::max;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::thread::sleep;
@@ -159,8 +159,8 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use crate::storage::proto::record::Label;
+    use tempfile::tempdir;
 
     #[test]
     fn test_info() {
@@ -202,17 +202,23 @@ mod tests {
 
         {
             let mut entry = bucket.get_or_create_entry("entry-1").unwrap();
-            let mut writer = entry.begin_write(1000, 10, "text/plain".to_string(), Labels::new()).unwrap();
+            let mut writer = entry
+                .begin_write(1000, 10, "text/plain".to_string(), Labels::new())
+                .unwrap();
             writer.write(b"0123456789", true).unwrap();
         }
         {
             let mut entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let mut writer = entry.begin_write(2000, 10, "text/plain".to_string(), Labels::new()).unwrap();
+            let mut writer = entry
+                .begin_write(2000, 10, "text/plain".to_string(), Labels::new())
+                .unwrap();
             writer.write(b"0123456789", true).unwrap();
         }
         {
             let mut entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let mut writer = entry.begin_write(5000, 10, "text/plain".to_string(), Labels::new()).unwrap();
+            let mut writer = entry
+                .begin_write(5000, 10, "text/plain".to_string(), Labels::new())
+                .unwrap();
             writer.write(b"0123456789", true).unwrap();
         }
 

@@ -5,7 +5,7 @@
 
 use crate::core::status::HTTPError;
 use crate::storage::block_manager::{BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT};
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record, EntryInfo};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, EntryInfo, Record};
 use crate::storage::writer::RecordWriter;
 use log::debug;
 use prost::bytes::Bytes;
@@ -199,15 +199,19 @@ impl Entry {
             let latest_record = if latest_block.records.is_empty() {
                 0
             } else {
-                ts_to_us((*latest_block).records.iter().last()
-                             .unwrap().timestamp.as_ref().unwrap())
+                ts_to_us(
+                    (*latest_block)
+                        .records
+                        .iter()
+                        .last()
+                        .unwrap()
+                        .timestamp
+                        .as_ref()
+                        .unwrap(),
+                )
             };
-            (
-                *self.block_index.first().unwrap(),
-                latest_record
-            )
+            (*self.block_index.first().unwrap(), latest_record)
         };
-
 
         Ok(EntryInfo {
             name: self.name.clone(),
