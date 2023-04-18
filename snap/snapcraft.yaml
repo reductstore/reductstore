@@ -48,7 +48,7 @@ parts:
       - make
       - python3-pip
       - curl
-      -
+
 
     stage-packages:
       - libstdc++6
