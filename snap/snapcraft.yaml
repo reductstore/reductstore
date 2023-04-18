@@ -33,6 +33,8 @@ parts:
     - -DREDUCT_BUILD_BENCHMARKS=OFF
     override-build: |
       pip3 install conan==1.58
+      curl https://sh.rustup.rs -sSf | sh -s -- -y
+      export  PATH="${HOME}/.cargo/bin:${PATH}"
       snapcraftctl build
 
     override-pull: |
@@ -45,8 +47,8 @@ parts:
       - g++
       - make
       - python3-pip
-      - rustc
-      - cargo
+      - curl
+      -
 
     stage-packages:
       - libstdc++6
