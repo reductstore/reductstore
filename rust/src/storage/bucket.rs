@@ -108,7 +108,7 @@ impl Bucket {
         }
     }
 
-    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&Entry, HTTPError> {
+    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, HTTPError> {
         if !self.entries.contains_key(key) {
             let entry = Entry::new(
                 &key,
@@ -121,7 +121,7 @@ impl Bucket {
             self.entries.insert(key.to_string(), entry?);
         }
 
-        Ok(self.entries.get(key).unwrap())
+        Ok(self.entries.get_mut(key).unwrap())
     }
 
     /// Remove a Bucket from disk
@@ -136,12 +136,21 @@ impl Bucket {
 
     /// Return bucket stats
     pub fn info(&self) -> Result<BucketInfo, HTTPError> {
+        let mut size = 0;
+        let mut oldest_record = u64::MAX;
+        let mut latest_record = 0u64;
+        for entry in self.entries.values() {
+            let info = entry.info()?;
+            size += info.size;
+            oldest_record = oldest_record.min(info.oldest_record);
+            latest_record = latest_record.max(info.latest_record);
+        }
         Ok(BucketInfo {
             name: self.name.clone(),
-            size: 0,
+            size,
             entry_count: self.entries.len() as u64,
-            oldest_record: 0,
-            latest_record: 0,
+            oldest_record,
+            latest_record,
         })
     }
 
@@ -230,4 +239,5 @@ mod tests {
         let filled_settings = Bucket::fill_settings(settings, default_settings.clone());
         assert_eq!(filled_settings, default_settings);
     }
+
 }

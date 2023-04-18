@@ -3,6 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::cmp::max;
 use log::info;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::core::status::HTTPError;
 use crate::storage::bucket::Bucket;
+use crate::storage::entry::Labels;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfoList, BucketSettings, Defaults, ServerInfo};
 
@@ -54,15 +56,26 @@ impl Storage {
     ///
     /// * `ServerInfo` - The server info or an HTTPError
     pub fn info(&self) -> Result<ServerInfo, HTTPError> {
+        let mut usage = 0u64;
+        let mut oldest_record = u64::MAX;
+        let mut latest_record = 0u64;
+
+        for bucket in self.buckets.values() {
+            let bucket = bucket.info()?;
+            usage += bucket.size;
+            oldest_record = oldest_record.min(bucket.oldest_record);
+            latest_record = latest_record.max(bucket.latest_record);
+        }
+
         Ok(ServerInfo {
             version: option_env!("CARGO_PKG_VERSION")
                 .unwrap_or("unknown")
                 .to_string(),
             bucket_count: self.buckets.len() as u64,
-            usage: 0,
+            usage,
             uptime: self.start_time.elapsed().as_secs(),
-            oldest_record: 0,
-            latest_record: 0,
+            oldest_record,
+            latest_record,
             defaults: Some(Defaults {
                 bucket: Some(Bucket::defaults()),
             }),
@@ -74,7 +87,7 @@ impl Storage {
         &mut self,
         name: &str,
         settings: BucketSettings,
-    ) -> Result<&Bucket, HTTPError> {
+    ) -> Result<&mut Bucket, HTTPError> {
         let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
         if !regex.is_match(name) {
             return Err(HTTPError::unprocessable_entity(
@@ -91,7 +104,7 @@ impl Storage {
         let bucket = Bucket::new(name, &self.data_path, settings)?;
         self.buckets.insert(name.to_string(), bucket);
 
-        Ok(self.buckets.get(name).unwrap())
+        Ok(self.buckets.get_mut(name).unwrap())
     }
 
     /// Get a bucket by name.
@@ -103,8 +116,8 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn get_bucket(&self, name: &str) -> Result<&Bucket, HTTPError> {
-        match self.buckets.get(name) {
+    pub fn get_bucket(&mut self, name: &str) -> Result<&mut Bucket, HTTPError> {
+        match self.buckets.get_mut(name) {
             Some(bucket) => Ok(bucket),
             None => Err(HTTPError::not_found(
                 format!("Bucket '{}' is not found", name).as_str(),
@@ -147,6 +160,7 @@ impl Storage {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use crate::storage::proto::record::Label;
 
     #[test]
     fn test_info() {
@@ -162,7 +176,7 @@ mod tests {
                 bucket_count: 0,
                 usage: 0,
                 uptime: 1,
-                oldest_record: 0,
+                oldest_record: u64::MAX,
                 latest_record: 0,
                 defaults: Some(Defaults {
                     bucket: Some(Bucket::defaults()),
@@ -181,21 +195,37 @@ mod tests {
             quota_type: Some(QuotaType::Fifo as i32),
             ..Bucket::defaults()
         };
-        let bucket = storage
+        let mut bucket = storage
             .create_bucket("test", bucket_settings.clone())
             .unwrap();
         assert_eq!(bucket.name(), "test");
 
-        let storage = Storage::new(path);
+        {
+            let mut entry = bucket.get_or_create_entry("entry-1").unwrap();
+            let mut writer = entry.begin_write(1000, 10, "text/plain".to_string(), Labels::new()).unwrap();
+            writer.write(b"0123456789", true).unwrap();
+        }
+        {
+            let mut entry = bucket.get_or_create_entry("entry-2").unwrap();
+            let mut writer = entry.begin_write(2000, 10, "text/plain".to_string(), Labels::new()).unwrap();
+            writer.write(b"0123456789", true).unwrap();
+        }
+        {
+            let mut entry = bucket.get_or_create_entry("entry-2").unwrap();
+            let mut writer = entry.begin_write(5000, 10, "text/plain".to_string(), Labels::new()).unwrap();
+            writer.write(b"0123456789", true).unwrap();
+        }
+
+        let mut storage = Storage::new(path);
         assert_eq!(
             storage.info().unwrap(),
             ServerInfo {
                 version: "1.4.0".to_string(),
                 bucket_count: 1,
-                usage: 0,
+                usage: 30,
                 uptime: 0,
-                oldest_record: 0,
-                latest_record: 0,
+                oldest_record: 1000,
+                latest_record: 5000,
                 defaults: Some(Defaults {
                     bucket: Some(Bucket::defaults()),
                 }),
@@ -257,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_get_bucket_with_non_existing_name() {
-        let storage = Storage::new(tempdir().unwrap().into_path());
+        let mut storage = Storage::new(tempdir().unwrap().into_path());
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
@@ -305,7 +335,7 @@ mod tests {
         let result = storage.remove_bucket("test");
         assert_eq!(result, Ok(()));
 
-        let storage = Storage::new(path);
+        let mut storage = Storage::new(path);
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),

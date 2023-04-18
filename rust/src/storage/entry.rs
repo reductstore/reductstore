@@ -5,7 +5,7 @@
 
 use crate::core::status::HTTPError;
 use crate::storage::block_manager::{BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT};
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record, EntryInfo};
 use crate::storage::writer::RecordWriter;
 use log::debug;
 use prost::bytes::Bytes;
@@ -15,7 +15,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-type Labels = HashMap<String, String>;
+pub type Labels = HashMap<String, String>;
 
 /// Entry is a time series in a bucket.
 pub struct Entry {
@@ -52,6 +52,7 @@ impl Entry {
     pub fn restore(path: PathBuf, options: EntryOptions) -> Result<Self, HTTPError> {
         let mut record_count = 0;
         let mut size = 0;
+        let mut block_index = BTreeSet::new();
         for filein in fs::read_dir(path.clone())? {
             let file = filein?;
             let path = file.path();
@@ -73,13 +74,14 @@ impl Entry {
 
             record_count += block.records.len() as u64;
             size += block.size;
+            block_index.insert(ts_to_us(block.begin_time.as_ref().unwrap()));
         }
 
         Ok(Self {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
             path: path.clone(),
             options,
-            block_index: BTreeSet::new(),
+            block_index,
             block_manager: BlockManager::new(path),
             record_count,
             size,
@@ -186,6 +188,35 @@ impl Entry {
         self.block_manager.save(block)?;
         self.block_manager
             .begin_write(block, block.records.len() - 1)
+    }
+
+    /// Returns stats about the entry.
+    pub fn info(&self) -> Result<EntryInfo, HTTPError> {
+        let (oldest_record, latest_record) = if self.block_index.is_empty() {
+            (0, 0)
+        } else {
+            let latest_block = self.block_manager.get(*self.block_index.last().unwrap())?;
+            let latest_record = if latest_block.records.is_empty() {
+                0
+            } else {
+                ts_to_us((*latest_block).records.iter().last()
+                             .unwrap().timestamp.as_ref().unwrap())
+            };
+            (
+                *self.block_index.first().unwrap(),
+                latest_record
+            )
+        };
+
+
+        Ok(EntryInfo {
+            name: self.name.clone(),
+            size: self.size,
+            record_count: self.record_count,
+            block_count: self.block_index.len() as u64,
+            oldest_record,
+            latest_record,
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -369,6 +400,26 @@ mod tests {
                 "A record with timestamp 1000000 already exists"
             ))
         );
+    }
+
+    #[test]
+    fn test_info() {
+        let (_, mut entry) = setup(EntryOptions {
+            max_block_size: 10000,
+            max_block_records: 10000,
+        });
+
+        write_record(&mut entry, 1000000, 10).unwrap();
+        write_record(&mut entry, 2000000, 10).unwrap();
+        write_record(&mut entry, 3000000, 10).unwrap();
+
+        let info = entry.info().unwrap();
+        assert_eq!(info.name, "entry");
+        assert_eq!(info.size, 30);
+        assert_eq!(info.record_count, 3);
+        assert_eq!(info.block_count, 1);
+        assert_eq!(info.oldest_record, 1000000);
+        assert_eq!(info.latest_record, 3000000);
     }
 
     fn setup(options: EntryOptions) -> (EntryOptions, Entry) {

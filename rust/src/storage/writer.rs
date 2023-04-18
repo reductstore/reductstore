@@ -127,6 +127,7 @@ mod tests {
 
         impl ManageBlock for BlockManager {
             fn load(&mut self, begin_time: u64) -> Result<Rc<Block>, HTTPError>;
+            fn get(&self, begin_time: u64) -> Result<Rc<Block>, HTTPError>;
             fn save(&mut self, block: &Block) -> Result<(), HTTPError>;
             fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
             fn finish(&self, block: &Block) -> Result<(), HTTPError>;

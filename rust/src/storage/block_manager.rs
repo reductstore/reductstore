@@ -88,6 +88,18 @@ pub trait ManageBlock {
     ///
     /// * `Ok(block)` - Block was loaded successfully.
     fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
+
+    /// Load block descriptor from disk without caching.
+    ///
+    /// # Arguments
+    /// * `block_id` - ID of the block to load (begin time of the block).
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(block)` - Block was loaded successfully.
+    fn get(&self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
+
+
     /// Save block descriptor to disk.
     ///
     /// # Arguments
@@ -124,14 +136,6 @@ pub trait ManageBlock {
 }
 
 impl ManageBlock for BlockManager {
-    /// Load block descriptor from disk.
-    ///
-    /// # Arguments
-    /// * `block_id` - ID of the block to load (begin time of the block).
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(block)` - Block was loaded successfully.
     fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError> {
         let proto_ts = us_to_ts(&block_id);
         if self.current_block.is_some()
@@ -140,23 +144,19 @@ impl ManageBlock for BlockManager {
             return Ok(self.current_block.clone().unwrap());
         }
 
+        self.get(block_id)
+    }
+
+    fn get(&self, block_id: u64) -> Result<Rc<Block>, HTTPError> {
+        let proto_ts = us_to_ts(&block_id);
         let buf = std::fs::read(self.path_to_desc(&proto_ts))?;
         let block = Block::decode(Bytes::from(buf)).map_err(|e| {
             HTTPError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
         })?;
 
-        self.current_block = Some(Rc::new(block));
-        return Ok(self.current_block.clone().unwrap());
+        Ok(Rc::new(block))
     }
-    /// Save block descriptor to disk.
-    ///
-    /// # Arguments
-    ///
-    /// * `block` - Block to save.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Block was saved successfully.
+
     fn save(&mut self, block: &Block) -> Result<(), HTTPError> {
         let path = self.path_to_desc(block.begin_time.as_ref().unwrap());
         let mut buf = BytesMut::new();
@@ -169,16 +169,7 @@ impl ManageBlock for BlockManager {
         self.current_block = Some(Rc::new(block.clone()));
         Ok(())
     }
-    /// Start a new block
-    ///
-    /// # Arguments
-    ///
-    /// * `begin_time` - Begin time of the block.
-    /// * `max_block_size` - Maximum size of the block.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(block)` - Block was created successfully.
+
     fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError> {
         let mut block = Block::default();
         block.begin_time = Some(us_to_ts(&block_id));
@@ -192,15 +183,7 @@ impl ManageBlock for BlockManager {
         self.current_block = Some(Rc::new(block));
         Ok(self.current_block.clone().unwrap())
     }
-    /// Finish a block by truncating the file to the actual size.
-    ///
-    /// # Arguments
-    ///
-    /// * `block` - Block to finish.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Block was finished successfully.
+
     fn finish(&self, block: &Block) -> Result<(), HTTPError> {
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
         let file = std::fs::OpenOptions::new()
@@ -210,7 +193,8 @@ impl ManageBlock for BlockManager {
         file.set_len(block.size as u64)?;
         Ok(())
     }
-    /// Unregister writer or reader.
+
+
     fn unregister(&mut self, block_id: u64) {
         self.counters.get_mut(&block_id).map(|c| *c -= 1);
         if self
@@ -254,7 +238,7 @@ mod tests {
             bm.path
                 .join(format!("{}{}", ts_to_us(&ts), DESCRIPTOR_FILE_EXT)),
         )
-        .unwrap();
+            .unwrap();
         let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
         assert_eq!(block_from_file, *block);
