@@ -3,14 +3,14 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::core::status::HTTPError;
+use crate::storage::block_manager::ManageBlock;
+use crate::storage::proto::{ts_to_us, Block};
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
-use crate::core::status::HTTPError;
-use crate::storage::block_manager::ManageBlock;
-use crate::storage::proto::{Block, ts_to_us};
+use std::rc::Rc;
 
 pub struct RecordReader<'a> {
     file: File,
@@ -62,7 +62,6 @@ impl<'a> RecordReader<'a> {
         })
     }
 
-
     /// Read the next chunk of data from the record.
     ///
     /// # Returns
@@ -70,8 +69,7 @@ impl<'a> RecordReader<'a> {
     /// * `DataChunk` - The next chunk of data.
     /// * `HTTPError` - If the data cannot be read.
     pub fn read(&mut self) -> Result<DataChunk, HTTPError> {
-        let buffer_size = std::cmp::min(self.chunk_size,
-                                        self.content_length - self.written_bytes);
+        let buffer_size = std::cmp::min(self.chunk_size, self.content_length - self.written_bytes);
         let mut buf = vec![0u8; buffer_size as usize];
         let read = self.file.read(&mut *buf)?;
         self.written_bytes += read as u64;
@@ -90,13 +88,13 @@ impl Drop for RecordReader<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use super::*;
+    use crate::storage::proto::{record, Record};
     use mockall::mock;
     use mockall::predicate::eq;
     use prost_wkt_types::Timestamp;
+    use std::io::Write;
     use tempfile::tempdir;
-    use crate::storage::proto::{Record, record};
-    use super::*;
 
     mock! {
         BlockManager {}
@@ -134,7 +132,11 @@ mod tests {
             ..Block::default()
         };
 
-        let mut file = OpenOptions::new().write(true).create(true).open(&path).unwrap();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&path)
+            .unwrap();
         file.write_all("1234567890".as_bytes()).unwrap();
 
         block_manager
@@ -144,8 +146,9 @@ mod tests {
             .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
 
         {
-            let mut reader = RecordReader::new(path.clone(), &block,
-                                               0, 5, RefCell::new(&mut block_manager)).unwrap();
+            let mut reader =
+                RecordReader::new(path.clone(), &block, 0, 5, RefCell::new(&mut block_manager))
+                    .unwrap();
             let chunk = reader.read().unwrap();
             assert_eq!(chunk.data, "12345".as_bytes());
             assert_eq!(chunk.last, false);

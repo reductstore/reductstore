@@ -8,5 +8,5 @@ pub mod proto;
 pub mod storage;
 
 mod block_manager;
-mod writer;
 mod reader;
+mod writer;
