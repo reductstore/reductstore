@@ -14,6 +14,7 @@ use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
 
+/// RecordWriter is used to write a record to a file.
 pub struct RecordWriter<'a> {
     file: File,
     written_bytes: u64,
