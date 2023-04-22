@@ -69,11 +69,20 @@ impl BlockManager {
         Ok(writer)
     }
 
-    pub fn begin_read(&mut self, block: &Block, record_index: usize) -> Result<RecordReader, HTTPError> {
+    pub fn begin_read(
+        &mut self,
+        block: &Block,
+        record_index: usize,
+    ) -> Result<RecordReader, HTTPError> {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
-        let reader = RecordReader::new(path, block, record_index,
-                                       DEFAULT_MAX_READ_CHUNK, RefCell::new(self))?;
+        let reader = RecordReader::new(
+            path,
+            block,
+            record_index,
+            DEFAULT_MAX_READ_CHUNK,
+            RefCell::new(self),
+        )?;
 
         Ok(reader)
     }
@@ -248,7 +257,7 @@ mod tests {
             bm.path
                 .join(format!("{}{}", ts_to_us(&ts), DESCRIPTOR_FILE_EXT)),
         )
-            .unwrap();
+        .unwrap();
         let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
         assert_eq!(block_from_file, *block);

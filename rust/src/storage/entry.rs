@@ -6,6 +6,7 @@
 use crate::core::status::HTTPError;
 use crate::storage::block_manager::{BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT};
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, EntryInfo, Record};
+use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
 use log::debug;
 use prost::bytes::Bytes;
@@ -14,7 +15,6 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
-use crate::storage::reader::RecordReader;
 
 pub type Labels = HashMap<String, String>;
 
@@ -215,8 +215,7 @@ impl Entry {
             return not_found_err;
         }
 
-        if &time > self.block_index.last().unwrap()
-            || &time < self.block_index.first().unwrap() {
+        if &time > self.block_index.last().unwrap() || &time < self.block_index.first().unwrap() {
             return not_found_err;
         }
 
@@ -247,9 +246,9 @@ impl Entry {
             )));
         }
 
-        self.block_manager.begin_read(block.as_ref(), record_index.unwrap())
+        self.block_manager
+            .begin_read(block.as_ref(), record_index.unwrap())
     }
-
 
     /// Returns stats about the entry.
     pub fn info(&self) -> Result<EntryInfo, HTTPError> {
@@ -301,8 +300,8 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
+    use tempfile;
 
     #[test]
     fn test_restore() {
@@ -460,8 +459,10 @@ mod tests {
     fn test_begin_read_empty() {
         let (_, mut entry) = setup_default();
         let writer = entry.begin_read(1000);
-        assert_eq!(writer.err(),
-                   Some(HTTPError::not_found("No record with timestamp 1000")));
+        assert_eq!(
+            writer.err(),
+            Some(HTTPError::not_found("No record with timestamp 1000"))
+        );
     }
 
     #[test]
@@ -470,8 +471,10 @@ mod tests {
 
         write_record(&mut entry, 1000000, 10).unwrap();
         let writer = entry.begin_read(1000);
-        assert_eq!(writer.err(),
-                   Some(HTTPError::not_found("No record with timestamp 1000")));
+        assert_eq!(
+            writer.err(),
+            Some(HTTPError::not_found("No record with timestamp 1000"))
+        );
     }
 
     #[test]
@@ -480,25 +483,28 @@ mod tests {
 
         write_record(&mut entry, 1000000, 10).unwrap();
         let writer = entry.begin_read(2000000);
-        assert_eq!(writer.err(),
-                   Some(HTTPError::not_found("No record with timestamp 2000000")));
+        assert_eq!(
+            writer.err(),
+            Some(HTTPError::not_found("No record with timestamp 2000000"))
+        );
     }
 
     #[test]
     fn test_begin_read_still_written() {
         let (_, mut entry) = setup_default();
         {
-            let mut writer = entry.begin_write(
-                1000000,
-                10,
-                "text/plain".to_string(),
-                Labels::new(),
-            ).unwrap();
+            let mut writer = entry
+                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+                .unwrap();
             writer.write(&vec![0; 5], false).unwrap();
         }
         let reader = entry.begin_read(1000000);
-        assert_eq!(reader.err(),
-                   Some(HTTPError::too_early("Record with timestamp 1000000 is still being written")));
+        assert_eq!(
+            reader.err(),
+            Some(HTTPError::too_early(
+                "Record with timestamp 1000000 is still being written"
+            ))
+        );
     }
 
     #[test]
@@ -509,20 +515,19 @@ mod tests {
         write_record(&mut entry, 3000000, 10).unwrap();
 
         let reader = entry.begin_read(2000000);
-        assert_eq!(reader.err(),
-                   Some(HTTPError::not_found("No record with timestamp 2000000")));
+        assert_eq!(
+            reader.err(),
+            Some(HTTPError::not_found("No record with timestamp 2000000"))
+        );
     }
 
     #[test]
     fn test_begin_read_ok() {
         let (_, mut entry) = setup_default();
         {
-            let mut writer = entry.begin_write(
-                1000000,
-                10,
-                "text/plain".to_string(),
-                Labels::new(),
-            ).unwrap();
+            let mut writer = entry
+                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+                .unwrap();
             writer.write("0123456789".as_bytes(), true).unwrap();
         }
         let mut reader = entry.begin_read(1000000).unwrap();
@@ -539,12 +544,14 @@ mod tests {
         data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
 
         {
-            let mut writer = entry.begin_write(
-                1000000,
-                data.len() as u64,
-                "text/plain".to_string(),
-                Labels::new(),
-            ).unwrap();
+            let mut writer = entry
+                .begin_write(
+                    1000000,
+                    data.len() as u64,
+                    "text/plain".to_string(),
+                    Labels::new(),
+                )
+                .unwrap();
             writer.write(&data, true).unwrap();
         }
         let mut reader = entry.begin_read(1000000).unwrap();
@@ -556,7 +563,6 @@ mod tests {
         assert_eq!(chunk.data, data[DEFAULT_MAX_READ_CHUNK as usize..]);
         assert!(chunk.last);
     }
-
 
     #[test]
     fn test_info() {
@@ -577,7 +583,6 @@ mod tests {
         assert_eq!(info.oldest_record, 1000000);
         assert_eq!(info.latest_record, 3000000);
     }
-
 
     fn setup(options: EntryOptions) -> (EntryOptions, Entry) {
         let path = tempfile::tempdir().unwrap();
