@@ -14,6 +14,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
+use crate::storage::reader::RecordReader;
 
 pub type Labels = HashMap<String, String>;
 
@@ -88,6 +89,19 @@ impl Entry {
         })
     }
 
+    /// Starts a new record write.
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - The timestamp of the record.
+    /// * `content_size` - The size of the record content.
+    /// * `content_type` - The content type of the record.
+    /// * `labels` - The labels of the record.
+    ///
+    /// # Returns
+    ///
+    /// * `RecordWriter` - The record writer to write the record content in chunks.
+    /// * `HTTPError` - The error if any.
     pub fn begin_write(
         &mut self,
         time: u64,
@@ -125,8 +139,8 @@ impl Entry {
                         "Timestamp {} is in the middle. Finding the proper block",
                         time
                     );
-                    let prev = self.block_index.range(time..).next().unwrap();
-                    let block = self.block_manager.load(*prev)?;
+                    let block_id = self.block_index.range(time..).next().unwrap();
+                    let block = self.block_manager.load(*block_id)?;
                     // check if the record already exists
                     let proto_time = Some(us_to_ts(&time));
                     if block
@@ -190,6 +204,53 @@ impl Entry {
             .begin_write(block, block.records.len() - 1)
     }
 
+    fn begin_read(&mut self, time: u64) -> Result<RecordReader, HTTPError> {
+        debug!("Reading record for ts={}", time);
+        let not_found_err = Err(HTTPError::not_found(&format!(
+            "No record with timestamp {}",
+            time
+        )));
+
+        if self.block_index.is_empty() {
+            return not_found_err;
+        }
+
+        if &time > self.block_index.last().unwrap()
+            || &time < self.block_index.first().unwrap() {
+            return not_found_err;
+        }
+
+        let block_id = self.block_index.range(time..).next().unwrap();
+        let block = self.block_manager.load(*block_id)?;
+
+        let record_index = block
+            .records
+            .iter()
+            .position(|record| ts_to_us(record.timestamp.as_ref().unwrap()) == time);
+
+        if record_index.is_none() {
+            return not_found_err;
+        }
+
+        let record = &block.records[record_index.unwrap()];
+        if record.state == record::State::Started as i32 {
+            return Err(HTTPError::too_early(&format!(
+                "Record with timestamp {} is still being written",
+                time
+            )));
+        }
+
+        if record.state == record::State::Errored as i32 {
+            return Err(HTTPError::internal_server_error(&format!(
+                "Record with timestamp {} is broken",
+                time
+            )));
+        }
+
+        self.block_manager.begin_read(block.as_ref(), record_index.unwrap())
+    }
+
+
     /// Returns stats about the entry.
     pub fn info(&self) -> Result<EntryInfo, HTTPError> {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
@@ -241,14 +302,11 @@ impl Entry {
 mod tests {
     use super::*;
     use tempfile;
+    use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
 
     #[test]
     fn test_restore() {
-        let (options, mut entry) = setup(EntryOptions {
-            max_block_size: 10000,
-            max_block_records: 10000,
-        });
-
+        let (options, mut entry) = setup_default();
         write_record(&mut entry, 1, 10).unwrap();
         write_record(&mut entry, 2000010, 10).unwrap();
 
@@ -286,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_block_size() {
+    fn test_begin_write_new_block_size() {
         let (_, mut entry) = setup(EntryOptions {
             max_block_size: 10,
             max_block_records: 10000,
@@ -321,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_block_records() {
+    fn test_begin_write_new_block_records() {
         let (_, mut entry) = setup(EntryOptions {
             max_block_size: 10000,
             max_block_records: 1,
@@ -357,11 +415,8 @@ mod tests {
     }
 
     #[test]
-    fn test_belated_record() {
-        let (_, mut entry) = setup(EntryOptions {
-            max_block_size: 10000,
-            max_block_records: 10000,
-        });
+    fn test_begin_write_belated_record() {
+        let (_, mut entry) = setup_default();
 
         write_record(&mut entry, 1000000, 10).unwrap();
         write_record(&mut entry, 3000000, 10).unwrap();
@@ -375,11 +430,8 @@ mod tests {
     }
 
     #[test]
-    fn test_belated_first() {
-        let (_, mut entry) = setup(EntryOptions {
-            max_block_size: 10000,
-            max_block_records: 10000,
-        });
+    fn test_begin_write_belated_first() {
+        let (_, mut entry) = setup_default();
 
         write_record(&mut entry, 3000000, 10).unwrap();
         write_record(&mut entry, 1000000, 10).unwrap();
@@ -390,11 +442,8 @@ mod tests {
     }
 
     #[test]
-    fn test_existing_record() {
-        let (_, mut entry) = setup(EntryOptions {
-            max_block_size: 10000,
-            max_block_records: 10000,
-        });
+    fn test_begin_write_existing_record() {
+        let (_, mut entry) = setup_default();
 
         write_record(&mut entry, 1000000, 10).unwrap();
         let err = write_record(&mut entry, 1000000, 10);
@@ -405,6 +454,109 @@ mod tests {
             ))
         );
     }
+
+    // Test begin_read
+    #[test]
+    fn test_begin_read_empty() {
+        let (_, mut entry) = setup_default();
+        let writer = entry.begin_read(1000);
+        assert_eq!(writer.err(),
+                   Some(HTTPError::not_found("No record with timestamp 1000")));
+    }
+
+    #[test]
+    fn test_begin_read_early() {
+        let (_, mut entry) = setup_default();
+
+        write_record(&mut entry, 1000000, 10).unwrap();
+        let writer = entry.begin_read(1000);
+        assert_eq!(writer.err(),
+                   Some(HTTPError::not_found("No record with timestamp 1000")));
+    }
+
+    #[test]
+    fn test_begin_read_late() {
+        let (_, mut entry) = setup_default();
+
+        write_record(&mut entry, 1000000, 10).unwrap();
+        let writer = entry.begin_read(2000000);
+        assert_eq!(writer.err(),
+                   Some(HTTPError::not_found("No record with timestamp 2000000")));
+    }
+
+    #[test]
+    fn test_begin_read_still_written() {
+        let (_, mut entry) = setup_default();
+        {
+            let mut writer = entry.begin_write(
+                1000000,
+                10,
+                "text/plain".to_string(),
+                Labels::new(),
+            ).unwrap();
+            writer.write(&vec![0; 5], false).unwrap();
+        }
+        let reader = entry.begin_read(1000000);
+        assert_eq!(reader.err(),
+                   Some(HTTPError::too_early("Record with timestamp 1000000 is still being written")));
+    }
+
+    #[test]
+    fn test_begin_read_not_found() {
+        let (_, mut entry) = setup_default();
+
+        write_record(&mut entry, 1000000, 10).unwrap();
+        write_record(&mut entry, 3000000, 10).unwrap();
+
+        let reader = entry.begin_read(2000000);
+        assert_eq!(reader.err(),
+                   Some(HTTPError::not_found("No record with timestamp 2000000")));
+    }
+
+    #[test]
+    fn test_begin_read_ok() {
+        let (_, mut entry) = setup_default();
+        {
+            let mut writer = entry.begin_write(
+                1000000,
+                10,
+                "text/plain".to_string(),
+                Labels::new(),
+            ).unwrap();
+            writer.write("0123456789".as_bytes(), true).unwrap();
+        }
+        let mut reader = entry.begin_read(1000000).unwrap();
+        let chunk = reader.read().unwrap();
+        assert_eq!(chunk.data, "0123456789".as_bytes());
+        assert!(chunk.last);
+    }
+
+    #[test]
+    fn test_begin_read_ok_in_chunks() {
+        let (_, mut entry) = setup_default();
+        let mut data = vec![0; DEFAULT_MAX_READ_CHUNK as usize + 1];
+        data[0] = 1;
+        data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
+
+        {
+            let mut writer = entry.begin_write(
+                1000000,
+                data.len() as u64,
+                "text/plain".to_string(),
+                Labels::new(),
+            ).unwrap();
+            writer.write(&data, true).unwrap();
+        }
+        let mut reader = entry.begin_read(1000000).unwrap();
+        let chunk = reader.read().unwrap();
+        assert_eq!(chunk.data, data[0..DEFAULT_MAX_READ_CHUNK as usize]);
+        assert!(!chunk.last);
+
+        let chunk = reader.read().unwrap();
+        assert_eq!(chunk.data, data[DEFAULT_MAX_READ_CHUNK as usize..]);
+        assert!(chunk.last);
+    }
+
 
     #[test]
     fn test_info() {
@@ -426,10 +578,18 @@ mod tests {
         assert_eq!(info.latest_record, 3000000);
     }
 
+
     fn setup(options: EntryOptions) -> (EntryOptions, Entry) {
         let path = tempfile::tempdir().unwrap();
         let entry = Entry::new("entry", path.into_path(), options.clone()).unwrap();
         (options, entry)
+    }
+
+    fn setup_default() -> (EntryOptions, Entry) {
+        setup(EntryOptions {
+            max_block_size: 10000,
+            max_block_records: 10000,
+        })
     }
 
     fn write_record(entry: &mut Entry, time: u64, content_size: usize) -> Result<(), HTTPError> {

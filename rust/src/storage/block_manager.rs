@@ -14,7 +14,10 @@ use std::rc::Rc;
 
 use crate::core::status::HTTPError;
 use crate::storage::proto::*;
+use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
+
+pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
 
 /// Helper class for basic operations on blocks.
 pub struct BlockManager {
@@ -51,7 +54,7 @@ impl BlockManager {
         record_index: usize,
     ) -> Result<RecordWriter, HTTPError> {
         let ts = block.begin_time.clone().unwrap();
-        let path = self.path_to_desc(&ts);
+        let path = self.path_to_data(&ts);
         self.counters.get_mut(&ts_to_us(&ts)).map(|c| *c += 1);
 
         let content_length = block.records[record_index].end - block.records[record_index].begin;
@@ -64,6 +67,15 @@ impl BlockManager {
         )?;
 
         Ok(writer)
+    }
+
+    pub fn begin_read(&mut self, block: &Block, record_index: usize) -> Result<RecordReader, HTTPError> {
+        let ts = block.begin_time.clone().unwrap();
+        let path = self.path_to_data(&ts);
+        let reader = RecordReader::new(path, block, record_index,
+                                       DEFAULT_MAX_READ_CHUNK, RefCell::new(self))?;
+
+        Ok(reader)
     }
 
     fn path_to_desc(&self, begin_time: &Timestamp) -> PathBuf {
@@ -236,7 +248,7 @@ mod tests {
             bm.path
                 .join(format!("{}{}", ts_to_us(&ts), DESCRIPTOR_FILE_EXT)),
         )
-        .unwrap();
+            .unwrap();
         let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
         assert_eq!(block_from_file, *block);

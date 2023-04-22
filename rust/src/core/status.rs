@@ -161,6 +161,14 @@ impl HTTPError {
         }
     }
 
+    /// Create a too early error.
+    pub fn too_early(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::TooEarly,
+            message: msg.to_string(),
+        }
+    }
+
     /// Create a bad request error.
     pub fn internal_server_error(msg: &str) -> HTTPError {
         HTTPError {
