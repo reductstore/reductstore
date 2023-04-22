@@ -34,7 +34,7 @@ parts:
     override-build: |
       pip3 install conan==1.58
       curl https://sh.rustup.rs -sSf | sh -s -- -y
-      export  PATH="${HOME}/.cargo/bin:${PATH}"
+      source "$HOME/.cargo/env"
       snapcraftctl build
 
     override-pull: |
