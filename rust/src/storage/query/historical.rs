@@ -9,7 +9,7 @@ use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Recor
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
 use prost_wkt_types::Timestamp;
-use std::collections::{BTreeSet};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use time::Instant;
 
