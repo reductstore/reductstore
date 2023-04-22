@@ -28,6 +28,8 @@ set(RUST_PART_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/block_manager.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/bucket.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/entry.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/query.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/query/base.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/reader.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/writer.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/storage.rs"

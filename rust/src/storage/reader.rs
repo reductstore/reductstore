@@ -21,6 +21,7 @@ pub struct RecordReader<'a> {
     block_manager: RefCell<&'a mut dyn ManageBlock>,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct DataChunk {
     pub data: Vec<u8>,
     pub last: bool,
