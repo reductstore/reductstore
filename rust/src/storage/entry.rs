@@ -288,7 +288,6 @@ impl Entry {
         Ok(id)
     }
 
-
     /// Returns the next record for a query.
     ///
     /// # Arguments
@@ -362,10 +361,10 @@ impl Entry {
 
 #[cfg(test)]
 mod tests {
-    use std::thread::sleep;
-    use std::time::Duration;
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
+    use std::thread::sleep;
+    use std::time::Duration;
     use tempfile;
 
     #[test]
@@ -652,8 +651,14 @@ mod tests {
             assert_eq!(reader.timestamp(), 3000000);
         }
 
-        assert_eq!(entry.next(id).err(), Some(HTTPError::no_content("No content")));
-        assert_eq!(entry.next(id).err(), Some(HTTPError::not_found(&format!("Query {} not found", id))));
+        assert_eq!(
+            entry.next(id).err(),
+            Some(HTTPError::no_content("No content"))
+        );
+        assert_eq!(
+            entry.next(id).err(),
+            Some(HTTPError::not_found(&format!("Query {} not found", id)))
+        );
     }
 
     #[test]
@@ -661,18 +666,27 @@ mod tests {
         let (_, mut entry) = setup_default();
         write_record(&mut entry, 1000000, 10).unwrap();
 
-        let id = entry.query(0, 4000000, QueryOptions {
-            ttl: Duration::from_millis(100),
-            continuous: true,
-            ..QueryOptions::default()
-        }).unwrap();
+        let id = entry
+            .query(
+                0,
+                4000000,
+                QueryOptions {
+                    ttl: Duration::from_millis(100),
+                    continuous: true,
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
 
         {
             let (reader, _) = entry.next(id).unwrap();
             assert_eq!(reader.timestamp(), 1000000);
         }
 
-        assert_eq!(entry.next(id).err(), Some(HTTPError::no_content("No content")));
+        assert_eq!(
+            entry.next(id).err(),
+            Some(HTTPError::no_content("No content"))
+        );
 
         write_record(&mut entry, 2000000, 10).unwrap();
         {
@@ -681,7 +695,10 @@ mod tests {
         }
 
         sleep(Duration::from_millis(200));
-        assert_eq!(entry.next(id).err(), Some(HTTPError::not_found(&format!("Query {} not found", id))));
+        assert_eq!(
+            entry.next(id).err(),
+            Some(HTTPError::not_found(&format!("Query {} not found", id)))
+        );
     }
 
     #[test]

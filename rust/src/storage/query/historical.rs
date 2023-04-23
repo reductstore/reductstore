@@ -161,7 +161,6 @@ impl Query for HistoricalQuery {
         Ok((block_manager.begin_read(block.as_ref(), record_idx)?, last))
     }
 
-
     fn state(&self) -> &QueryState {
         if self.last_update.elapsed() > self.options.ttl {
             &QueryState::Expired

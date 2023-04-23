@@ -42,9 +42,9 @@ impl Query for ContinuousQuery {
                 Ok((record, last))
             }
             Err(HTTPError {
-                    status: HTTPStatus::NoContent,
-                    ..
-                }) => {
+                status: HTTPStatus::NoContent,
+                ..
+            }) => {
                 self.query =
                     HistoricalQuery::new(self.last_timestamp + 1, u64::MAX, self.options.clone());
                 Err(HTTPError {
@@ -71,9 +71,7 @@ mod tests {
 
     use crate::core::status::HTTPStatus;
     use crate::storage::block_manager::ManageBlock;
-    use crate::storage::proto::{
-        record::State as RecordState, Record,
-    };
+    use crate::storage::proto::{record::State as RecordState, Record};
 
     #[test]
     fn test_query() {
