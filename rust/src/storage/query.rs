@@ -5,6 +5,7 @@
 
 mod base;
 mod historical;
+mod continuous;
 
 use crate::storage::query::base::{Query, QueryOptions};
 

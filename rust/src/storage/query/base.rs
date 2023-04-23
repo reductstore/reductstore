@@ -48,6 +48,7 @@ pub trait Query {
 }
 
 /// QueryOptions is used to specify the options for a query.
+#[derive(Clone, Debug)]
 pub struct QueryOptions {
     /// The time to live of the query.
     pub ttl: Duration,
