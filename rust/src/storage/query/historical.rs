@@ -5,13 +5,13 @@
 
 use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::block_manager::{BlockManager, ManageBlock};
-use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
+use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record, record::Label};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
 use prost_wkt_types::Timestamp;
 use std::collections::BTreeSet;
 use std::rc::Rc;
-use time::Instant;
+use std::time::Instant;
 
 pub struct HistoricalQuery {
     start_time: u64,
@@ -108,11 +108,11 @@ impl Query for HistoricalQuery {
                     if self.options.exclude.is_empty() {
                         true
                     } else {
-                        self.options.exclude.iter().all(|(key, value)| {
+                        !self.options.exclude.iter().all(|(key, value)| {
                             record
                                 .labels
                                 .iter()
-                                .all(|label| label.name != *key || label.value != *value)
+                                .any(|label| label.name == *key && label.value == *value)
                         })
                     }
                 })
@@ -162,7 +162,7 @@ impl Query for HistoricalQuery {
 
     fn state(&self) -> &QueryState {
         if self.last_update.elapsed() > self.options.ttl {
-            &QueryState::Outdated
+            &QueryState::Expired
         } else {
             &self.state
         }
@@ -171,27 +171,34 @@ impl Query for HistoricalQuery {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::time::Duration;
     use super::*;
     use crate::storage::reader::DataChunk;
     use tempfile::tempdir;
 
     #[test]
-    fn test_query_ok_1_rec() {
+    fn test_state() {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
         assert_eq!(query.state(), &QueryState::Running);
+        query.last_update = Instant::now() - Duration::from_secs(61);
+        assert_eq!(query.state(), &QueryState::Expired);
+    }
+
+    #[test]
+    fn test_query_ok_1_rec() {
+        let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
         let (mut block_manager, index) = setup();
         {
-            let (mut reader, last) = query.next(&index, &mut block_manager).unwrap();
+            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
-                    last: true
+                    last: true,
                 }
             );
-            assert_eq!(last, true);
-            assert_eq!(query.state(), &QueryState::Done);
         }
         {
             let res = query.next(&index, &mut block_manager);
@@ -204,93 +211,160 @@ mod tests {
     #[test]
     fn test_query_ok_2_recs() {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
-        assert_eq!(query.state(), &QueryState::Running);
 
         let (mut block_manager, index) = setup();
         {
-            let (mut reader, last) = query.next(&index, &mut block_manager).unwrap();
+            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
-                    last: true
+                    last: true,
                 }
             );
-            assert_eq!(last, false);
-            assert_eq!(query.state(), &QueryState::Running);
         }
         {
-            let (mut reader, last) = query.next(&index, &mut block_manager).unwrap();
+            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
-                    last: true
+                    last: true,
                 }
             );
-            assert_eq!(last, true);
-            assert_eq!(query.state(), &QueryState::Done);
         }
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HTTPError {
                 status: HTTPStatus::NoContent,
-                message: "No content".to_string()
+                message: "No content".to_string(),
             })
         );
+        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[test]
     fn test_query_ok_3_recs() {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
-        assert_eq!(query.state(), &QueryState::Running);
 
         let (mut block_manager, index) = setup();
         {
-            let (mut reader, last) = query.next(&index, &mut block_manager).unwrap();
+            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
-                    last: true
+                    last: true,
                 }
             );
-            assert_eq!(last, false);
-            assert_eq!(query.state(), &QueryState::Running);
         }
         {
-            let (mut reader, last) = query.next(&index, &mut block_manager).unwrap();
+            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
-                    last: true
+                    last: true,
                 }
             );
-            assert_eq!(last, false);
-            assert_eq!(query.state(), &QueryState::Running);
         }
         {
-            let (mut reader, last) = query.next(&index, &mut block_manager).unwrap();
+            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
-                    last: true
+                    last: true,
                 }
             );
-            assert_eq!(last, true);
-            assert_eq!(query.state(), &QueryState::Done);
+        }
+        assert_eq!(
+            query.next(&index, &mut block_manager).err(),
+            Some(HTTPError {
+                status: HTTPStatus::NoContent,
+                message: "No content".to_string(),
+            })
+        );
+        assert_eq!(query.state(), &QueryState::Done);
+    }
+
+    #[test]
+    fn test_query_include() {
+        let mut query = HistoricalQuery::new(0, 1001,
+                                             QueryOptions {
+                                                 include: HashMap::from(
+                                                     [
+                                                         ("block".to_string(), "2".to_string()),
+                                                         ("record".to_string(), "1".to_string()),
+                                                     ]
+                                                 ),
+                                                 ..QueryOptions::default()
+                                             });
+        let (mut block_manager, index) = setup();
+        {
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            assert_eq!(
+                reader.labels(),
+                &HashMap::from([
+                    ("block".to_string(), "2".to_string()),
+                    ("record".to_string(), "1".to_string()),
+                ])
+            );
         }
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HTTPError {
                 status: HTTPStatus::NoContent,
-                message: "No content".to_string()
+                message: "No content".to_string(),
             })
         );
+        assert_eq!(query.state(), &QueryState::Done);
+    }
+
+    #[test]
+    fn test_query_exclude() {
+        let mut query = HistoricalQuery::new(0, 1001,
+                                             QueryOptions {
+                                                 exclude: HashMap::from(
+                                                     [
+                                                         ("block".to_string(), "1".to_string()),
+                                                         ("record".to_string(), "1".to_string()),
+                                                     ]
+                                                 ),
+                                                 ..QueryOptions::default()
+                                             });
+        let (mut block_manager, index) = setup();
+        {
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            assert_eq!(
+                reader.labels(),
+                &HashMap::from([
+                    ("block".to_string(), "1".to_string()),
+                    ("record".to_string(), "2".to_string()),
+                ])
+            );
+        }
+        {
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            assert_eq!(
+                reader.labels(),
+                &HashMap::from([
+                    ("block".to_string(), "2".to_string()),
+                    ("record".to_string(), "1".to_string()),
+                ])
+            );
+        }
+
+        assert_eq!(
+            query.next(&index, &mut block_manager).err(),
+            Some(HTTPError {
+                status: HTTPStatus::NoContent,
+                message: "No content".to_string(),
+            })
+        );
+        assert_eq!(query.state(), &QueryState::Done);
     }
 
     fn setup() -> (BlockManager, BTreeSet<u64>) {
@@ -307,7 +381,16 @@ mod tests {
             begin: 0,
             end: 10,
             state: RecordState::Finished as i32,
-            labels: vec![],
+            labels: vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "1".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "1".to_string(),
+                },
+            ],
             content_type: "".to_string(),
         });
 
@@ -319,7 +402,16 @@ mod tests {
             begin: 10,
             end: 20,
             state: RecordState::Finished as i32,
-            labels: vec![],
+            labels: vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "1".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "2".to_string(),
+                },
+            ],
             content_type: "".to_string(),
         });
 
@@ -353,7 +445,16 @@ mod tests {
             begin: 0,
             end: 10,
             state: RecordState::Finished as i32,
-            labels: vec![],
+            labels: vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "2".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "1".to_string(),
+                },
+            ],
             content_type: "".to_string(),
         });
 

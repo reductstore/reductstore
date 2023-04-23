@@ -934,7 +934,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thread-id",
- "time 0.3.20",
  "zip",
 ]
 

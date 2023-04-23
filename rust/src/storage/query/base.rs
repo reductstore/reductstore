@@ -7,7 +7,7 @@ use crate::core::status::HTTPError;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::reader::RecordReader;
 use std::collections::{BTreeSet, HashMap};
-use time::Duration;
+use std::time::Duration;
 
 #[derive(PartialEq, Debug)]
 pub enum QueryState {
@@ -16,7 +16,7 @@ pub enum QueryState {
     /// The query is done.
     Done,
     /// The query is outdated.
-    Outdated,
+    Expired,
 }
 
 /// Query is used to iterate over the records among multiple blocks.
@@ -31,7 +31,12 @@ pub trait Query {
     /// # Returns
     ///
     /// * `RecordReader` - The record reader.
-    /// * `bool` - True if it is the last record.
+    /// * `bool` - True if it is the last record (should be remove in the future, doesn't work with include/exclude).
+    ///
+    /// # Errors
+    ///
+    /// * `HTTPError` - If the record cannot be read.
+    /// * `HTTPError(NoContent)` - If all records have been read.
     fn next<'a>(
         &mut self,
         block_indexes: &BTreeSet<u64>,
@@ -57,7 +62,7 @@ pub struct QueryOptions {
 impl QueryOptions {
     pub fn default() -> QueryOptions {
         QueryOptions {
-            ttl: Duration::seconds(60),
+            ttl: Duration::from_secs(60),
             include: HashMap::new(),
             exclude: HashMap::new(),
             continuous: false,

@@ -7,6 +7,7 @@ use crate::core::status::HTTPError;
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{ts_to_us, Block};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -19,6 +20,9 @@ pub struct RecordReader<'a> {
     chunk_size: u64,
     block_id: u64,
     block_manager: RefCell<&'a mut dyn ManageBlock>,
+    timestamp: u64,
+    labels: HashMap<String, String>,
+    content_type: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -53,6 +57,10 @@ impl<'a> RecordReader<'a> {
         let offset = record.begin;
         file.seek(SeekFrom::Start(offset))?;
 
+        let mut labels = HashMap::new();
+        for label in &record.labels {
+            labels.insert(label.name.clone(), label.value.clone());
+        }
         Ok(Self {
             file,
             written_bytes: 0,
@@ -60,6 +68,9 @@ impl<'a> RecordReader<'a> {
             chunk_size,
             block_id: ts_to_us(&block.begin_time.clone().unwrap()),
             block_manager,
+            timestamp: ts_to_us(&record.timestamp.clone().unwrap()),
+            labels: labels,
+            content_type: record.content_type.clone(),
         })
     }
 
@@ -78,6 +89,21 @@ impl<'a> RecordReader<'a> {
             data: buf[..read].to_vec(),
             last: self.written_bytes == self.content_length,
         })
+    }
+
+    /// Get the timestamp of the record.
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    /// Get the labels of the record.
+    pub fn labels(&self) -> &HashMap<String, String> {
+        &self.labels
+    }
+
+    /// Get the content type of the record.
+    pub fn content_type(&self) -> &String {
+        &self.content_type
     }
 }
 
