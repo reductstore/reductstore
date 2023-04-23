@@ -10,6 +10,7 @@ use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
 use prost_wkt_types::Timestamp;
 use std::collections::BTreeSet;
+use std::ops::Range;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -45,7 +46,17 @@ impl Query for HistoricalQuery {
     ) -> Result<(RecordReader<'a>, bool), HTTPError> {
         self.last_update = Instant::now();
 
+        let find_first_block = |start| -> u64 {
+            let start_block_id = block_index.range(&start..).next();
+            if start_block_id.is_some() && start <= *start_block_id.unwrap() {
+                start
+            } else {
+                block_index.range(..&start).rev().next().unwrap().clone()
+            }
+        };
+
         let check_next_block = |start, stop| -> bool {
+            let start = find_first_block(start);
             let next_block_id = block_index.range(start..stop).next();
             if let Some(next_block_id) = next_block_id {
                 next_block_id >= &stop
@@ -59,7 +70,7 @@ impl Query for HistoricalQuery {
             let record_reader = block_manager.begin_read(block, self.next_record)?;
             self.next_record += 1;
             let last = if self.next_record >= block.records.len() {
-                self.start_time = ts_to_us(block.latest_record_time.as_ref().unwrap());
+                self.start_time = ts_to_us(block.latest_record_time.as_ref().unwrap()) + 1;
                 self.block = None;
                 self.next_record = 0;
                 check_next_block(self.start_time, self.stop_time)
@@ -67,16 +78,13 @@ impl Query for HistoricalQuery {
                 false
             };
 
-            if last {
-                self.state = QueryState::Done;
-            }
-
             return Ok((record_reader, last));
         }
 
         let mut records: Vec<Record> = Vec::new();
         let mut block: Rc<Block> = Rc::new(Block::default());
-        for block_id in block_index.range(self.start_time..self.stop_time) {
+        let start = find_first_block(self.start_time);
+        for block_id in block_index.range(start..self.stop_time) {
             block = block_manager.load(*block_id)?;
 
             if block.invalid {
@@ -128,10 +136,7 @@ impl Query for HistoricalQuery {
 
         if records.is_empty() {
             self.state = QueryState::Done;
-            return Err(HTTPError {
-                status: HTTPStatus::NoContent,
-                message: "No content".to_string(),
-            });
+            return Err(HTTPError::no_content("No content"));
         }
 
         records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
@@ -147,10 +152,6 @@ impl Query for HistoricalQuery {
             check_next_block(self.start_time, self.stop_time)
         };
 
-        if last {
-            self.state = QueryState::Done;
-        }
-
         let record_idx = block
             .as_ref()
             .records
@@ -159,6 +160,7 @@ impl Query for HistoricalQuery {
             .unwrap();
         Ok((block_manager.begin_read(block.as_ref(), record_idx)?, last))
     }
+
 
     fn state(&self) -> &QueryState {
         if self.last_update.elapsed() > self.options.ttl {

@@ -113,6 +113,14 @@ impl HTTPError {
         }
     }
 
+    /// Create a no content error.
+    pub fn no_content(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::NoContent,
+            message: msg.to_string(),
+        }
+    }
+
     /// Create a not found error.
     pub fn not_found(msg: &str) -> HTTPError {
         HTTPError {

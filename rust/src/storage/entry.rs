@@ -6,6 +6,8 @@
 use crate::core::status::HTTPError;
 use crate::storage::block_manager::{BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT};
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, EntryInfo, Record};
+use crate::storage::query::base::{Query, QueryOptions, QueryState};
+use crate::storage::query::build_query;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
 use log::debug;
@@ -15,6 +17,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub type Labels = HashMap<String, String>;
 
@@ -27,6 +30,7 @@ pub struct Entry {
     block_manager: BlockManager,
     record_count: u64,
     size: u64,
+    queries: HashMap<u64, Box<dyn Query>>,
 }
 
 /// EntryOptions is the options for creating a new entry.
@@ -47,6 +51,7 @@ impl Entry {
             block_manager: BlockManager::new(path.join(name)),
             record_count: 0,
             size: 0,
+            queries: HashMap::new(),
         })
     }
 
@@ -86,6 +91,7 @@ impl Entry {
             block_manager: BlockManager::new(path),
             record_count,
             size,
+            queries: HashMap::new(),
         })
     }
 
@@ -204,6 +210,16 @@ impl Entry {
             .begin_write(block, block.records.len() - 1)
     }
 
+    /// Starts a new record read.
+    ///
+    /// # Arguments
+    ///
+    /// * `time` - The timestamp of the record.
+    ///
+    /// # Returns
+    ///
+    /// * `RecordReader` - The record reader to read the record content in chunks.
+    /// * `HTTPError` - The error if any.
     fn begin_read(&mut self, time: u64) -> Result<RecordReader, HTTPError> {
         debug!("Reading record for ts={}", time);
         let not_found_err = Err(HTTPError::not_found(&format!(
@@ -248,6 +264,48 @@ impl Entry {
 
         self.block_manager
             .begin_read(block.as_ref(), record_index.unwrap())
+    }
+
+    /// Query records for a time range.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The start time of the query.
+    /// * `end` - The end time of the query. Ignored if `continuous` is true.
+    /// * `options` - The query options.
+    ///
+    /// # Returns
+    ///
+    /// * `u64` - The query ID.
+    /// * `HTTPError` - The error if any.
+    pub fn query(&mut self, start: u64, end: u64, options: QueryOptions) -> Result<u64, HTTPError> {
+        static QUERY_ID: AtomicU64 = AtomicU64::new(0);
+
+        let id = QUERY_ID.fetch_add(1, Ordering::Relaxed);
+        self.remove_expired_query();
+        self.queries.insert(id, build_query(start, end, options));
+
+        Ok(id)
+    }
+
+
+    /// Returns the next record for a query.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The query ID.
+    ///
+    /// # Returns
+    ///
+    /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
+    /// * `HTTPError` - The error if any.
+    pub fn next(&mut self, query_id: u64) -> Result<(RecordReader, bool), HTTPError> {
+        self.remove_expired_query();
+        let query = self
+            .queries
+            .get_mut(&query_id)
+            .ok_or_else(|| HTTPError::not_found(&format!("Query {} not found", query_id)))?;
+        query.next(&self.block_index, &mut self.block_manager)
     }
 
     /// Returns stats about the entry.
@@ -295,10 +353,16 @@ impl Entry {
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));
         Ok::<Rc<Block>, HTTPError>(block)
     }
+
+    fn remove_expired_query(&mut self) {
+        self.queries
+            .retain(|_, query| query.state() == &QueryState::Running);
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
     use tempfile;
@@ -562,6 +626,57 @@ mod tests {
         let chunk = reader.read().unwrap();
         assert_eq!(chunk.data, data[DEFAULT_MAX_READ_CHUNK as usize..]);
         assert!(chunk.last);
+    }
+
+    #[test]
+    fn test_historical_query() {
+        let (_, mut entry) = setup_default();
+
+        write_record(&mut entry, 1000000, 10).unwrap();
+        write_record(&mut entry, 2000000, 10).unwrap();
+        write_record(&mut entry, 3000000, 10).unwrap();
+
+        let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
+
+        {
+            let (reader, _) = entry.next(id).unwrap();
+            assert_eq!(reader.timestamp(), 1000000);
+        }
+        {
+            let (reader, _) = entry.next(id).unwrap();
+            assert_eq!(reader.timestamp(), 2000000);
+        }
+        {
+            let (reader, _) = entry.next(id).unwrap();
+            assert_eq!(reader.timestamp(), 3000000);
+        }
+
+        assert_eq!(entry.next(id).err(), Some(HTTPError::no_content("No content")));
+        assert_eq!(entry.next(id).err(), Some(HTTPError::not_found(&format!("Query {} not found", id))));
+    }
+
+    #[test]
+    fn test_continuous_query() {
+        let (_, mut entry) = setup_default();
+        write_record(&mut entry, 1000000, 10).unwrap();
+
+        let id = entry.query(0, 4000000, QueryOptions {
+            continuous: true,
+            ..QueryOptions::default()
+        }).unwrap();
+
+        {
+            let (reader, _) = entry.next(id).unwrap();
+            assert_eq!(reader.timestamp(), 1000000);
+        }
+
+        assert_eq!(entry.next(id).err(), Some(HTTPError::no_content("No content")));
+
+        write_record(&mut entry, 2000000, 10).unwrap();
+        {
+            let (reader, _) = entry.next(id).unwrap();
+            assert_eq!(reader.timestamp(), 2000000);
+        }
     }
 
     #[test]
