@@ -5,7 +5,7 @@
 
 use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::block_manager::{BlockManager, ManageBlock};
-use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record, record::Label};
+use crate::storage::proto::{record::Label, record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
 use prost_wkt_types::Timestamp;
@@ -171,10 +171,10 @@ impl Query for HistoricalQuery {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::time::Duration;
     use super::*;
     use crate::storage::reader::DataChunk;
+    use std::collections::HashMap;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     #[test]
@@ -291,16 +291,17 @@ mod tests {
 
     #[test]
     fn test_query_include() {
-        let mut query = HistoricalQuery::new(0, 1001,
-                                             QueryOptions {
-                                                 include: HashMap::from(
-                                                     [
-                                                         ("block".to_string(), "2".to_string()),
-                                                         ("record".to_string(), "1".to_string()),
-                                                     ]
-                                                 ),
-                                                 ..QueryOptions::default()
-                                             });
+        let mut query = HistoricalQuery::new(
+            0,
+            1001,
+            QueryOptions {
+                include: HashMap::from([
+                    ("block".to_string(), "2".to_string()),
+                    ("record".to_string(), "1".to_string()),
+                ]),
+                ..QueryOptions::default()
+            },
+        );
         let (mut block_manager, index) = setup();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
@@ -325,16 +326,17 @@ mod tests {
 
     #[test]
     fn test_query_exclude() {
-        let mut query = HistoricalQuery::new(0, 1001,
-                                             QueryOptions {
-                                                 exclude: HashMap::from(
-                                                     [
-                                                         ("block".to_string(), "1".to_string()),
-                                                         ("record".to_string(), "1".to_string()),
-                                                     ]
-                                                 ),
-                                                 ..QueryOptions::default()
-                                             });
+        let mut query = HistoricalQuery::new(
+            0,
+            1001,
+            QueryOptions {
+                exclude: HashMap::from([
+                    ("block".to_string(), "1".to_string()),
+                    ("record".to_string(), "1".to_string()),
+                ]),
+                ..QueryOptions::default()
+            },
+        );
         let (mut block_manager, index) = setup();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();

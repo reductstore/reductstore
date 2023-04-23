@@ -4,8 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod base;
-mod historical;
 mod continuous;
+mod historical;
 
 use crate::storage::query::base::{Query, QueryOptions};
 
