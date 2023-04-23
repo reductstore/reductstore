@@ -362,6 +362,7 @@ impl Entry {
 
 #[cfg(test)]
 mod tests {
+    use std::thread::sleep;
     use std::time::Duration;
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
@@ -661,6 +662,7 @@ mod tests {
         write_record(&mut entry, 1000000, 10).unwrap();
 
         let id = entry.query(0, 4000000, QueryOptions {
+            ttl: Duration::from_millis(100),
             continuous: true,
             ..QueryOptions::default()
         }).unwrap();
@@ -677,6 +679,9 @@ mod tests {
             let (reader, _) = entry.next(id).unwrap();
             assert_eq!(reader.timestamp(), 2000000);
         }
+
+        sleep(Duration::from_millis(200));
+        assert_eq!(entry.next(id).err(), Some(HTTPError::not_found(&format!("Query {} not found", id))));
     }
 
     #[test]
