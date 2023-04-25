@@ -13,6 +13,7 @@ use crate::storage::writer::RecordWriter;
 use log::debug;
 use prost::bytes::Bytes;
 use prost::Message;
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
@@ -114,7 +115,7 @@ impl Entry {
         content_size: u64,
         content_type: String,
         labels: Labels,
-    ) -> Result<RecordWriter, HTTPError> {
+    ) -> Result<Rc<RefCell<RecordWriter>>, HTTPError> {
         #[derive(PartialEq)]
         enum RecordType {
             Latest,
@@ -175,7 +176,7 @@ impl Entry {
         {
             // We need to create a new block.
             debug!("Creating a new block");
-            self.block_manager.finish(block.as_ref())?;
+            self.block_manager.finish(&block)?;
             self.start_new_block(time)?
         } else {
             // We can just append to the latest block.
@@ -194,8 +195,6 @@ impl Entry {
                 .collect(),
         };
 
-        let mut block = Rc::make_mut(&mut block);
-
         block.size += content_size as u64;
         block.records.push(record);
 
@@ -205,9 +204,9 @@ impl Entry {
             block.latest_record_time = Some(us_to_ts(&time));
         }
 
-        self.block_manager.save(block)?;
+        self.block_manager.save(&block)?;
         self.block_manager
-            .begin_write(block, block.records.len() - 1)
+            .begin_write(&block, block.records.len() - 1)
     }
 
     /// Starts a new record read.
@@ -220,7 +219,7 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    fn begin_read(&mut self, time: u64) -> Result<RecordReader, HTTPError> {
+    fn begin_read(&mut self, time: u64) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
         debug!("Reading record for ts={}", time);
         let not_found_err = Err(HTTPError::not_found(&format!(
             "No record with timestamp {}",
@@ -262,8 +261,7 @@ impl Entry {
             )));
         }
 
-        self.block_manager
-            .begin_read(block.as_ref(), record_index.unwrap())
+        self.block_manager.begin_read(&block, record_index.unwrap())
     }
 
     /// Query records for a time range.
@@ -298,7 +296,7 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub fn next(&mut self, query_id: u64) -> Result<(RecordReader, bool), HTTPError> {
+    pub fn next(&mut self, query_id: u64) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError> {
         self.remove_expired_query();
         let query = self
             .queries
@@ -312,12 +310,12 @@ impl Entry {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
             (0, 0)
         } else {
-            let latest_block = self.block_manager.get(*self.block_index.last().unwrap())?;
+            let latest_block = self.block_manager.load(*self.block_index.last().unwrap())?;
             let latest_record = if latest_block.records.is_empty() {
                 0
             } else {
                 ts_to_us(
-                    (*latest_block)
+                    latest_block
                         .records
                         .iter()
                         .last()
@@ -370,13 +368,13 @@ impl Entry {
         self.settings = settings;
     }
 
-    fn start_new_block(&mut self, time: u64) -> Result<Rc<Block>, HTTPError> {
+    fn start_new_block(&mut self, time: u64) -> Result<Block, HTTPError> {
         let block = self
             .block_manager
             .start(time, self.settings.max_block_size)?;
         self.block_index
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));
-        Ok::<Rc<Block>, HTTPError>(block)
+        Ok::<Block, HTTPError>(block)
     }
 
     fn remove_expired_query(&mut self) {
@@ -583,10 +581,10 @@ mod tests {
     fn test_begin_read_still_written() {
         let (_, mut entry) = setup_default();
         {
-            let mut writer = entry
+            let writer = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write(&vec![0; 5], false).unwrap();
+            writer.borrow_mut().write(&vec![0; 5], false).unwrap();
         }
         let reader = entry.begin_read(1000000);
         assert_eq!(
@@ -615,13 +613,16 @@ mod tests {
     fn test_begin_read_ok() {
         let (_, mut entry) = setup_default();
         {
-            let mut writer = entry
+            let writer = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write("0123456789".as_bytes(), true).unwrap();
+            writer
+                .borrow_mut()
+                .write("0123456789".as_bytes(), true)
+                .unwrap();
         }
-        let mut reader = entry.begin_read(1000000).unwrap();
-        let chunk = reader.read().unwrap();
+        let reader = entry.begin_read(1000000).unwrap();
+        let chunk = reader.borrow_mut().read().unwrap();
         assert_eq!(chunk.data, "0123456789".as_bytes());
         assert!(chunk.last);
     }
@@ -634,7 +635,7 @@ mod tests {
         data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
 
         {
-            let mut writer = entry
+            let writer = entry
                 .begin_write(
                     1000000,
                     data.len() as u64,
@@ -642,14 +643,14 @@ mod tests {
                     Labels::new(),
                 )
                 .unwrap();
-            writer.write(&data, true).unwrap();
+            writer.borrow_mut().write(&data, true).unwrap();
         }
-        let mut reader = entry.begin_read(1000000).unwrap();
-        let chunk = reader.read().unwrap();
+        let reader = entry.begin_read(1000000).unwrap();
+        let chunk = reader.borrow_mut().read().unwrap();
         assert_eq!(chunk.data, data[0..DEFAULT_MAX_READ_CHUNK as usize]);
         assert!(!chunk.last);
 
-        let chunk = reader.read().unwrap();
+        let chunk = reader.borrow_mut().read().unwrap();
         assert_eq!(chunk.data, data[DEFAULT_MAX_READ_CHUNK as usize..]);
         assert!(chunk.last);
     }
@@ -666,15 +667,15 @@ mod tests {
 
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.timestamp(), 1000000);
+            assert_eq!(reader.borrow().timestamp(), 1000000);
         }
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.timestamp(), 2000000);
+            assert_eq!(reader.borrow_mut().timestamp(), 2000000);
         }
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.timestamp(), 3000000);
+            assert_eq!(reader.borrow().timestamp(), 3000000);
         }
 
         assert_eq!(
@@ -706,7 +707,7 @@ mod tests {
 
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.timestamp(), 1000000);
+            assert_eq!(reader.borrow().timestamp(), 1000000);
         }
 
         assert_eq!(
@@ -717,7 +718,7 @@ mod tests {
         write_record(&mut entry, 2000000, 10).unwrap();
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.timestamp(), 2000000);
+            assert_eq!(reader.borrow().timestamp(), 2000000);
         }
 
         sleep(Duration::from_millis(200));
@@ -761,12 +762,13 @@ mod tests {
     }
 
     fn write_record(entry: &mut Entry, time: u64, content_size: usize) -> Result<(), HTTPError> {
-        let mut writer = entry.begin_write(
+        let writer = entry.begin_write(
             time,
             content_size as u64,
             "text/plain".to_string(),
             Labels::new(),
         )?;
-        writer.write(&vec![0; content_size], true)
+        let ret = writer.borrow_mut().write(&vec![0; content_size], true);
+        ret
     }
 }

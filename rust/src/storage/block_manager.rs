@@ -7,10 +7,11 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use prost_wkt_types::Timestamp;
 use std::cell::RefCell;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::core::status::HTTPError;
 use crate::storage::proto::*;
@@ -20,10 +21,11 @@ use crate::storage::writer::RecordWriter;
 pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
 
 /// Helper class for basic operations on blocks.
+
 pub struct BlockManager {
     path: PathBuf,
-    counters: HashMap<u64, u64>,
-    current_block: Option<Rc<Block>>,
+    readers: HashMap<u64, Vec<Weak<RefCell<RecordReader>>>>,
+    writers: HashMap<u64, Vec<Weak<RefCell<RecordWriter>>>>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -33,8 +35,8 @@ impl BlockManager {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            counters: HashMap::new(),
-            current_block: None,
+            readers: HashMap::new(),
+            writers: HashMap::new(),
         }
     }
 
@@ -52,19 +54,30 @@ impl BlockManager {
         &mut self,
         block: &Block,
         record_index: usize,
-    ) -> Result<RecordWriter, HTTPError> {
+    ) -> Result<Rc<RefCell<RecordWriter>>, HTTPError> {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
-        self.counters.get_mut(&ts_to_us(&ts)).map(|c| *c += 1);
 
         let content_length = block.records[record_index].end - block.records[record_index].begin;
-        let writer = RecordWriter::new(
+        let writer = Rc::new(RefCell::new(RecordWriter::new(
             path,
             block,
             record_index,
             content_length,
-            RefCell::new(self),
-        )?;
+            Box::new(Self::new(self.path.clone())),
+        )?));
+
+        let block_id = ts_to_us(&ts);
+        match self.writers.entry(block_id) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().push(Rc::downgrade(&writer));
+            }
+            Entry::Vacant(e) => {
+                e.insert(vec![Rc::downgrade(&writer)]);
+            }
+        }
+
+        self.clean_readers_or_writers(block_id);
 
         Ok(writer)
     }
@@ -73,17 +86,27 @@ impl BlockManager {
         &mut self,
         block: &Block,
         record_index: usize,
-    ) -> Result<RecordReader, HTTPError> {
+    ) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
-        let reader = RecordReader::new(
+        let reader = Rc::new(RefCell::new(RecordReader::new(
             path,
             block,
             record_index,
             DEFAULT_MAX_READ_CHUNK,
-            RefCell::new(self),
-        )?;
+        )?));
 
+        let block_id = ts_to_us(&ts);
+        match self.readers.entry(block_id) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().push(Rc::downgrade(&reader));
+            }
+            Entry::Vacant(e) => {
+                e.insert(vec![Rc::downgrade(&reader)]);
+            }
+        }
+
+        self.clean_readers_or_writers(block_id);
         Ok(reader)
     }
 
@@ -97,6 +120,41 @@ impl BlockManager {
         let block_id = ts_to_us(&begin_time);
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
     }
+
+    /// Remove done or expired readers/writers of a block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_id` - ID of the block to clean.
+    ///
+    /// # Returns
+    ///
+    /// * `true` - If there are no more readers or writers.
+    fn clean_readers_or_writers(&mut self, block_id: u64) -> bool {
+        let readers_empty = match self.readers.get_mut(&block_id) {
+            Some(readers) => {
+                readers.retain(|r| {
+                    let reader = r.upgrade();
+                    reader.is_some() && !reader.unwrap().try_borrow().map_or(false, |r| r.is_done())
+                });
+                readers.is_empty()
+            }
+            None => true,
+        };
+
+        let writers_empty = match self.writers.get_mut(&block_id) {
+            Some(writers) => {
+                writers.retain(|w| {
+                    let writer = w.upgrade();
+                    writer.is_some() && !writer.unwrap().try_borrow().map_or(false, |w| w.is_done())
+                });
+                writers.is_empty()
+            }
+            None => true,
+        };
+
+        readers_empty && writers_empty
+    }
 }
 
 pub trait ManageBlock {
@@ -108,17 +166,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was loaded successfully.
-    fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
-
-    /// Load block descriptor from disk without caching.
-    ///
-    /// # Arguments
-    /// * `block_id` - ID of the block to load (begin time of the block).
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(block)` - Block was loaded successfully.
-    fn get(&self, block_id: u64) -> Result<Rc<Block>, HTTPError>;
+    fn load(&self, block_id: u64) -> Result<Block, HTTPError>;
 
     /// Save block descriptor to disk.
     ///
@@ -129,7 +177,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was saved successfully.
-    fn save(&mut self, block: &Block) -> Result<(), HTTPError>;
+    fn save(&self, block: &Block) -> Result<(), HTTPError>;
 
     /// Start a new block
     ///
@@ -141,7 +189,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was created successfully.
-    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
+    fn start(&self, block_id: u64, max_block_size: u64) -> Result<Block, HTTPError>;
 
     /// Finish a block by truncating the file to the actual size.
     ///
@@ -155,36 +203,19 @@ pub trait ManageBlock {
     fn finish(&self, block: &Block) -> Result<(), HTTPError>;
 
     /// Remove a block from disk if there are no readers or writers.
-    fn remove(&self, block_id: u64) -> Result<(), HTTPError>;
-
-    /// Unregister writer or reader.
-    /// *NOTE*: This method is called by the writer or reader when it is dropped.
-    fn unregister(&mut self, block_id: u64);
+    fn remove(&mut self, block_id: u64) -> Result<(), HTTPError>;
 }
 
 impl ManageBlock for BlockManager {
-    fn load(&mut self, block_id: u64) -> Result<Rc<Block>, HTTPError> {
-        let proto_ts = us_to_ts(&block_id);
-        if self.current_block.is_some()
-            && self.current_block.as_ref().unwrap().begin_time == Some(proto_ts.clone())
-        {
-            return Ok(self.current_block.clone().unwrap());
-        }
-
-        self.get(block_id)
-    }
-
-    fn get(&self, block_id: u64) -> Result<Rc<Block>, HTTPError> {
+    fn load(&self, block_id: u64) -> Result<Block, HTTPError> {
         let proto_ts = us_to_ts(&block_id);
         let buf = std::fs::read(self.path_to_desc(&proto_ts))?;
-        let block = Block::decode(Bytes::from(buf)).map_err(|e| {
+        Block::decode(Bytes::from(buf)).map_err(|e| {
             HTTPError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
-        })?;
-
-        Ok(Rc::new(block))
+        })
     }
 
-    fn save(&mut self, block: &Block) -> Result<(), HTTPError> {
+    fn save(&self, block: &Block) -> Result<(), HTTPError> {
         let path = self.path_to_desc(block.begin_time.as_ref().unwrap());
         let mut buf = BytesMut::new();
         block.encode(&mut buf).map_err(|e| {
@@ -193,11 +224,10 @@ impl ManageBlock for BlockManager {
         let mut file = std::fs::File::create(path)?;
         file.write_all(&buf)?;
 
-        self.current_block = Some(Rc::new(block.clone()));
         Ok(())
     }
 
-    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError> {
+    fn start(&self, block_id: u64, max_block_size: u64) -> Result<Block, HTTPError> {
         let mut block = Block::default();
         block.begin_time = Some(us_to_ts(&block_id));
 
@@ -207,8 +237,7 @@ impl ManageBlock for BlockManager {
         file.set_len(max_block_size)?;
         self.save(&block)?;
 
-        self.current_block = Some(Rc::new(block));
-        Ok(self.current_block.clone().unwrap())
+        Ok(block)
     }
 
     fn finish(&self, block: &Block) -> Result<(), HTTPError> {
@@ -221,8 +250,8 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    fn remove(&self, block_id: u64) -> Result<(), HTTPError> {
-        if self.counters.get(&block_id).map(|c| *c > 0).unwrap_or(false) {
+    fn remove(&mut self, block_id: u64) -> Result<(), HTTPError> {
+        if !self.clean_readers_or_writers(block_id) {
             return Err(HTTPError::internal_server_error(&format!(
                 "Cannot remove block {} because it is still in use",
                 block_id
@@ -236,32 +265,19 @@ impl ManageBlock for BlockManager {
         std::fs::remove_file(path)?;
         Ok(())
     }
-
-    fn unregister(&mut self, block_id: u64) {
-        self.counters.get_mut(&block_id).map(|c| *c -= 1);
-        if self
-            .counters
-            .get(&block_id)
-            .map(|c| *c == 0)
-            .unwrap_or(false)
-        {
-            self.counters.remove(&block_id);
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ops::Deref;
     use tempfile::tempdir;
 
     #[test]
     fn test_starting_block() {
-        let mut bm = setup();
+        let bm = setup();
         let block = bm.start(1_000_005, 1024).unwrap();
 
-        let ts = (*block).begin_time.clone().unwrap();
+        let ts = block.begin_time.clone().unwrap();
         assert_eq!(
             ts,
             Timestamp {
@@ -280,42 +296,42 @@ mod tests {
             bm.path
                 .join(format!("{}{}", ts_to_us(&ts), DESCRIPTOR_FILE_EXT)),
         )
-            .unwrap();
+        .unwrap();
         let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
-        assert_eq!(block_from_file, *block);
+        assert_eq!(block_from_file, block);
     }
 
     #[test]
     fn test_loading_block() {
-        let mut bm = setup();
+        let bm = setup();
 
         bm.start(1, 1024).unwrap();
         let block = bm.start(20000005, 1024).unwrap();
 
-        let ts = (*block).begin_time.clone().unwrap();
+        let ts = block.begin_time.clone().unwrap();
         let loaded_block = bm.load(ts_to_us(&ts)).unwrap();
-        assert_eq!(*loaded_block, *block);
+        assert_eq!(loaded_block, block);
     }
 
     #[test]
     fn test_start_reading() {
-        let mut bm = setup();
+        let bm = setup();
 
         let block = bm.start(1, 1024).unwrap();
-        let ts = (*block).begin_time.clone().unwrap();
+        let ts = block.begin_time.clone().unwrap();
         let loaded_block = bm.load(ts_to_us(&ts)).unwrap();
-        assert_eq!(*loaded_block, *block);
+        assert_eq!(loaded_block, block);
     }
 
     #[test]
     fn test_finish_block() {
-        let mut bm = setup();
+        let bm = setup();
 
         let block = bm.start(1, 1024).unwrap();
-        let ts = (*block).begin_time.clone().unwrap();
+        let ts = block.begin_time.clone().unwrap();
         let loaded_block = bm.load(ts_to_us(&ts)).unwrap();
-        assert_eq!(*loaded_block, *block);
+        assert_eq!(loaded_block, block);
 
         bm.finish(&loaded_block).unwrap();
 
@@ -329,7 +345,7 @@ mod tests {
         let mut bm = setup();
 
         let block_id = 1;
-        let mut block = bm.start(block_id, 1024).unwrap().deref().clone();
+        let mut block = bm.start(block_id, 1024).unwrap().clone();
         block.records.push(Record {
             timestamp: Some(Timestamp {
                 seconds: 1,
@@ -345,24 +361,20 @@ mod tests {
         bm.save(&block).unwrap();
 
         {
-            let mut writer = bm.begin_write(&block, 0).unwrap();
-            writer.write("hello".as_bytes(), true).unwrap();
+            let writer = bm.begin_write(&block, 0).unwrap();
+            writer.borrow_mut().write("hello".as_bytes(), true).unwrap();
         }
 
         bm.finish(&block).unwrap();
-        assert!(!bm.counters.contains_key(&block_id));
     }
 
     #[test]
-    fn test_remove_busy_block() {
-        let bm = setup();
-
-        let bm = RefCell::new(bm);
+    fn test_remove_with_writers() {
+        let mut bm = setup();
         let block_id = 1;
 
         {
-            let mut mut_bm = bm.borrow_mut();
-            let mut block = mut_bm.start(block_id, 1024).unwrap().deref().clone();
+            let mut block = bm.start(block_id, 1024).unwrap().clone();
             block.records.push(Record {
                 timestamp: Some(Timestamp {
                     seconds: 1,
@@ -374,15 +386,48 @@ mod tests {
                 labels: vec![],
                 content_type: "".to_string(),
             });
-            let writer = mut_bm.begin_write(&block, 0).unwrap();
 
+            let writer = bm.begin_write(&block, 0).unwrap();
+            assert!(!writer.borrow().is_done());
 
-            assert_eq!(bm.borrow().remove(block_id).err(), Some(
-                HTTPError::internal_server_error(&format!(
+            assert_eq!(
+                bm.remove(block_id).err(),
+                Some(HTTPError::internal_server_error(&format!(
                     "Cannot remove block {} because it is still in use",
                     block_id
-                ))
-            ));
+                )))
+            );
+        }
+    }
+
+    #[test]
+    fn test_remove_block_with_readers() {
+        let mut bm = setup();
+        let block_id = 1;
+
+        {
+            let mut block = bm.start(block_id, 1024).unwrap().clone();
+            block.records.push(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 1,
+                    nanos: 5000,
+                }),
+                begin: 0,
+                end: 5,
+                state: 0,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
+            let reader = bm.begin_read(&block, 0).unwrap();
+            assert!(!reader.borrow().is_done());
+
+            assert_eq!(
+                bm.remove(block_id).err(),
+                Some(HTTPError::internal_server_error(&format!(
+                    "Cannot remove block {} because it is still in use",
+                    block_id
+                )))
+            );
         }
     }
 

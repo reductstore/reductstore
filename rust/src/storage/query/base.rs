@@ -6,7 +6,9 @@
 use crate::core::status::HTTPError;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::reader::RecordReader;
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 use std::time::Duration;
 
 #[derive(PartialEq, Debug)]
@@ -37,11 +39,11 @@ pub trait Query {
     ///
     /// * `HTTPError` - If the record cannot be read.
     /// * `HTTPError(NoContent)` - If all records have been read.
-    fn next<'a>(
+    fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &'a mut BlockManager,
-    ) -> Result<(RecordReader<'a>, bool), HTTPError>;
+        block_manager: &mut BlockManager,
+    ) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError>;
 
     /// Get the state of the query.
     fn state(&self) -> &QueryState;

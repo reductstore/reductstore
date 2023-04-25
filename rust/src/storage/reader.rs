@@ -4,22 +4,17 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::core::status::HTTPError;
-use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{ts_to_us, Block};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
-use std::rc::Rc;
 
-pub struct RecordReader<'a> {
+pub struct RecordReader {
     file: File,
     written_bytes: u64,
     content_length: u64,
     chunk_size: u64,
-    block_id: u64,
-    block_manager: RefCell<&'a mut dyn ManageBlock>,
     timestamp: u64,
     labels: HashMap<String, String>,
     content_type: String,
@@ -31,7 +26,7 @@ pub struct DataChunk {
     pub last: bool,
 }
 
-impl<'a> RecordReader<'a> {
+impl RecordReader {
     /// Create a new RecordReader.
     ///
     /// # Arguments
@@ -50,8 +45,7 @@ impl<'a> RecordReader<'a> {
         block: &Block,
         record_index: usize,
         chunk_size: u64,
-        block_manager: RefCell<&'a mut dyn ManageBlock>,
-    ) -> Result<RecordReader<'a>, HTTPError> {
+    ) -> Result<RecordReader, HTTPError> {
         let mut file = OpenOptions::new().read(true).open(path)?;
         let record = &block.records[record_index];
         let offset = record.begin;
@@ -66,8 +60,6 @@ impl<'a> RecordReader<'a> {
             written_bytes: 0,
             content_length: record.end - record.begin,
             chunk_size,
-            block_id: ts_to_us(&block.begin_time.clone().unwrap()),
-            block_manager,
             timestamp: ts_to_us(&record.timestamp.clone().unwrap()),
             labels: labels,
             content_type: record.content_type.clone(),
@@ -105,11 +97,10 @@ impl<'a> RecordReader<'a> {
     pub fn content_type(&self) -> &String {
         &self.content_type
     }
-}
 
-impl Drop for RecordReader<'_> {
-    fn drop(&mut self) {
-        self.block_manager.borrow_mut().unregister(self.block_id);
+    /// Test if the record has been fully read.
+    pub fn is_done(&self) -> bool {
+        self.written_bytes == self.content_length
     }
 }
 
@@ -117,30 +108,13 @@ impl Drop for RecordReader<'_> {
 mod tests {
     use super::*;
     use crate::storage::proto::{record, Record};
-    use mockall::mock;
-    use mockall::predicate::eq;
     use prost_wkt_types::Timestamp;
     use std::io::Write;
     use tempfile::tempdir;
 
-    mock! {
-        BlockManager {}
-
-        impl ManageBlock for BlockManager {
-            fn load(&mut self, begin_time: u64) -> Result<Rc<Block>, HTTPError>;
-            fn get(&self, begin_time: u64) -> Result<Rc<Block>, HTTPError>;
-            fn save(&mut self, block: &Block) -> Result<(), HTTPError>;
-            fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
-            fn finish(&self, block: &Block) -> Result<(), HTTPError>;
-            fn unregister(&mut self, block_id: u64);
-            fn remove(&self, block_id: u64) -> Result<(), HTTPError>;
-        }
-    }
-
     #[test]
     fn test_read() {
         let path = tempdir().unwrap().into_path().join("test");
-        let mut block_manager = MockBlockManager::new();
         let block = Block {
             begin_time: Some(Timestamp {
                 seconds: 1,
@@ -167,16 +141,8 @@ mod tests {
             .unwrap();
         file.write_all("1234567890".as_bytes()).unwrap();
 
-        block_manager
-            .expect_unregister()
-            .times(1)
-            .returning(|_| ())
-            .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
-
         {
-            let mut reader =
-                RecordReader::new(path.clone(), &block, 0, 5, RefCell::new(&mut block_manager))
-                    .unwrap();
+            let mut reader = RecordReader::new(path.clone(), &block, 0, 5).unwrap();
             let chunk = reader.read().unwrap();
             assert_eq!(chunk.data, "12345".as_bytes());
             assert_eq!(chunk.last, false);

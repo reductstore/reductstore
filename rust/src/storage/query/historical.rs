@@ -3,16 +3,17 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use prost_wkt_types::Timestamp;
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::rc::Rc;
+use std::time::Instant;
+
 use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::block_manager::{BlockManager, ManageBlock};
 use crate::storage::proto::{record::Label, record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
-use prost_wkt_types::Timestamp;
-use std::collections::BTreeSet;
-use std::ops::Range;
-use std::rc::Rc;
-use std::time::Instant;
 
 pub struct HistoricalQuery {
     start_time: u64,
@@ -42,8 +43,8 @@ impl Query for HistoricalQuery {
     fn next<'a>(
         &mut self,
         block_index: &BTreeSet<u64>,
-        block_manager: &'a mut BlockManager,
-    ) -> Result<(RecordReader<'a>, bool), HTTPError> {
+        block_manager: &mut BlockManager,
+    ) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError> {
         self.last_update = Instant::now();
 
         let find_first_block = |start| -> u64 {
@@ -82,7 +83,7 @@ impl Query for HistoricalQuery {
         }
 
         let mut records: Vec<Record> = Vec::new();
-        let mut block: Rc<Block> = Rc::new(Block::default());
+        let mut block = Block::default();
         let start = find_first_block(self.start_time);
         for block_id in block_index.range(start..self.stop_time) {
             block = block_manager.load(*block_id)?;
@@ -145,7 +146,7 @@ impl Query for HistoricalQuery {
 
         let last = if records.len() > 1 {
             // Only one record in current block check next one
-            self.block = Some((*block).clone());
+            self.block = Some(block.clone());
             self.next_record = 1;
             false
         } else {
@@ -153,12 +154,11 @@ impl Query for HistoricalQuery {
         };
 
         let record_idx = block
-            .as_ref()
             .records
             .iter()
             .position(|v| v.timestamp == record.timestamp)
             .unwrap();
-        Ok((block_manager.begin_read(block.as_ref(), record_idx)?, last))
+        Ok((block_manager.begin_read(&block, record_idx)?, last))
     }
 
     fn state(&self) -> &QueryState {
@@ -192,9 +192,9 @@ mod tests {
 
         let (mut block_manager, index) = setup();
         {
-            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.read().unwrap(),
+                reader.borrow_mut().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -215,9 +215,9 @@ mod tests {
 
         let (mut block_manager, index) = setup();
         {
-            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.read().unwrap(),
+                reader.borrow_mut().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -225,9 +225,9 @@ mod tests {
             );
         }
         {
-            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.read().unwrap(),
+                reader.borrow_mut().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -251,9 +251,9 @@ mod tests {
 
         let (mut block_manager, index) = setup();
         {
-            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.read().unwrap(),
+                reader.borrow_mut().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -261,9 +261,9 @@ mod tests {
             );
         }
         {
-            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.read().unwrap(),
+                reader.borrow_mut().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -271,9 +271,9 @@ mod tests {
             );
         }
         {
-            let (mut reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.read().unwrap(),
+                reader.borrow_mut().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -307,7 +307,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.labels(),
+                reader.borrow().labels(),
                 &HashMap::from([
                     ("block".to_string(), "2".to_string()),
                     ("record".to_string(), "1".to_string()),
@@ -342,7 +342,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.labels(),
+                reader.borrow().labels(),
                 &HashMap::from([
                     ("block".to_string(), "1".to_string()),
                     ("record".to_string(), "2".to_string()),
@@ -352,7 +352,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.labels(),
+                reader.borrow().labels(),
                 &HashMap::from([
                     ("block".to_string(), "2".to_string()),
                     ("record".to_string(), "1".to_string()),
@@ -374,7 +374,6 @@ mod tests {
         let dir = tempdir().unwrap().into_path();
         let mut block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();
-        let block = Rc::make_mut(&mut block);
 
         block.records.push(Record {
             timestamp: Some(Timestamp {
@@ -423,22 +422,22 @@ mod tests {
             nanos: 5000,
         });
         block.size = 20;
-        block_manager.save(block).unwrap();
+        block_manager.save(&block).unwrap();
 
         {
-            let mut writer = block_manager.begin_write(block, 0).unwrap();
-            writer.write(b"0123456789", true).unwrap();
+            let writer = block_manager.begin_write(&block, 0).unwrap();
+
+            writer.borrow_mut().write(b"0123456789", true).unwrap();
         }
 
         {
-            let mut writer = block_manager.begin_write(block, 1).unwrap();
-            writer.write(b"0123456789", true).unwrap();
+            let writer = block_manager.begin_write(&block, 1).unwrap();
+            writer.borrow_mut().write(b"0123456789", true).unwrap();
         }
 
-        block_manager.finish(block).unwrap();
+        block_manager.finish(&block).unwrap();
 
         let mut block = block_manager.start(1000, 10).unwrap();
-        let block = Rc::make_mut(&mut block);
 
         block.records.push(Record {
             timestamp: Some(Timestamp {
@@ -466,14 +465,14 @@ mod tests {
             nanos: 1000_000,
         });
         block.size = 10;
-        block_manager.save(block).unwrap();
+        block_manager.save(&block).unwrap();
 
         {
-            let mut writer = block_manager.begin_write(block, 0).unwrap();
-            writer.write(b"0123456789", true).unwrap();
+            let writer = block_manager.begin_write(&block, 0).unwrap();
+            writer.borrow_mut().write(b"0123456789", true).unwrap();
         }
 
-        block_manager.finish(block).unwrap();
+        block_manager.finish(&block).unwrap();
         (block_manager, BTreeSet::from([0, 1000]))
     }
 }

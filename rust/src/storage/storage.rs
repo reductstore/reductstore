@@ -200,24 +200,24 @@ mod tests {
 
         {
             let entry = bucket.get_or_create_entry("entry-1").unwrap();
-            let mut writer = entry
+            let writer = entry
                 .begin_write(1000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write(b"0123456789", true).unwrap();
+            writer.borrow_mut().write(b"0123456789", true).unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let mut writer = entry
+            let writer = entry
                 .begin_write(2000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write(b"0123456789", true).unwrap();
+            writer.borrow_mut().write(b"0123456789", true).unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let mut writer = entry
+            let writer = entry
                 .begin_write(5000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write(b"0123456789", true).unwrap();
+            writer.borrow_mut().write(b"0123456789", true).unwrap();
         }
 
         let mut storage = Storage::new(path);

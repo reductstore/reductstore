@@ -4,40 +4,32 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use prost_wkt_types::Timestamp;
-use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
 
 /// RecordWriter is used to write a record to a file.
-pub struct RecordWriter<'a> {
+pub struct RecordWriter {
     file: File,
     written_bytes: u64,
     content_length: u64,
     record_index: usize,
     block_id: u64,
-    block_manager: RefCell<&'a mut dyn ManageBlock>,
+    block_manager: Box<dyn ManageBlock>,
 }
 
-impl Drop for RecordWriter<'_> {
-    fn drop(&mut self) {
-        self.block_manager.borrow_mut().unregister(self.block_id);
-    }
-}
-
-impl<'a> RecordWriter<'a> {
+impl RecordWriter {
     pub fn new(
         path: PathBuf,
         block: &Block,
         record_index: usize,
         content_length: u64,
-        block_manager: RefCell<&'a mut dyn ManageBlock>,
-    ) -> Result<RecordWriter<'a>, HTTPError> {
+        block_manager: Box<dyn ManageBlock>,
+    ) -> Result<RecordWriter, HTTPError> {
         let mut file = OpenOptions::new().write(true).create(true).open(path)?;
         let offset = block.records[record_index].begin;
         file.seek(SeekFrom::Start(offset))?;
@@ -94,9 +86,13 @@ impl<'a> RecordWriter<'a> {
         Ok(())
     }
 
+    pub fn is_done(&self) -> bool {
+        self.written_bytes == self.content_length
+    }
+
     fn on_update(&mut self, state: record::State) {
-        let mut block = match self.block_manager.borrow_mut().load(self.block_id) {
-            Ok(block) => (*block).clone(), // TODO: a block may have many labels and could be expensive
+        let mut block = match self.block_manager.load(self.block_id) {
+            Ok(block) => block.clone(), // TODO: a block may have many labels and could be expensive
             Err(e) => {
                 log::error!("Failed to load block: {}", e);
                 return;
@@ -107,7 +103,6 @@ impl<'a> RecordWriter<'a> {
         block.invalid = state == record::State::Invalid;
 
         self.block_manager
-            .borrow_mut()
             .save(&block)
             .map_err(|e| {
                 log::error!("Failed to save block: {}", e);
@@ -127,13 +122,11 @@ mod tests {
         BlockManager {}
 
         impl ManageBlock for BlockManager {
-            fn load(&mut self, begin_time: u64) -> Result<Rc<Block>, HTTPError>;
-            fn get(&self, begin_time: u64) -> Result<Rc<Block>, HTTPError>;
-            fn save(&mut self, block: &Block) -> Result<(), HTTPError>;
-            fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
+            fn load(&self, begin_time: u64) -> Result<Block, HTTPError>;
+            fn save(&self, block: &Block) -> Result<(), HTTPError>;
+            fn start(&self, begin_time: u64, max_block_size: u64) -> Result<Block, HTTPError>;
             fn finish(&self, block: &Block) -> Result<(), HTTPError>;
-            fn unregister(&mut self, block_id: u64);
-            fn remove(&self, block_id: u64) -> Result<(), HTTPError>;
+            fn remove(&mut self, block_id: u64) -> Result<(), HTTPError>;
 
         }
     }
@@ -152,15 +145,9 @@ mod tests {
         block_manager
             .expect_load()
             .times(1)
-            .returning(move |_| Ok(Rc::new(same_block.clone())));
-        block_manager
-            .expect_unregister()
-            .times(1)
-            .returning(|_| ())
-            .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
+            .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer =
-            RecordWriter::new(path, &block, 0, 10, RefCell::new(&mut block_manager)).unwrap();
+        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
         writer.write(b"67890", false).unwrap();
         writer.write(b"12345", true).unwrap();
     }
@@ -179,15 +166,9 @@ mod tests {
         block_manager
             .expect_load()
             .times(1)
-            .returning(move |_| Ok(Rc::new(same_block.clone())));
-        block_manager
-            .expect_unregister()
-            .times(1)
-            .returning(|_| ())
-            .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
+            .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer =
-            RecordWriter::new(path, &block, 0, 10, RefCell::new(&mut block_manager)).unwrap();
+        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
         writer.write(b"67890", false).unwrap();
 
         assert_eq!(
@@ -212,15 +193,9 @@ mod tests {
         block_manager
             .expect_load()
             .times(1)
-            .returning(move |_| Ok(Rc::new(same_block.clone())));
-        block_manager
-            .expect_unregister()
-            .times(1)
-            .returning(|_| ())
-            .with(eq(ts_to_us(block.begin_time.as_ref().unwrap())));
+            .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer =
-            RecordWriter::new(path, &block, 0, 10, RefCell::new(&mut block_manager)).unwrap();
+        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
         writer.write(b"67890", false).unwrap();
 
         assert_eq!(

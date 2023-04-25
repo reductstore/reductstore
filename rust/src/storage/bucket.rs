@@ -164,7 +164,7 @@ impl Bucket {
 
     pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), HTTPError> {
         self.settings = Self::fill_settings(settings, Self::defaults());
-        for mut entry in self.entries.values_mut() {
+        for entry in self.entries.values_mut() {
             entry.set_settings(EntrySettings {
                 max_block_size: self.settings.max_block_size.unwrap(),
                 max_block_records: self.settings.max_block_records.unwrap(),

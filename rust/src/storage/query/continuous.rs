@@ -8,7 +8,9 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
 use crate::storage::reader::RecordReader;
+use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
@@ -31,14 +33,14 @@ impl ContinuousQuery {
 }
 
 impl Query for ContinuousQuery {
-    fn next<'a>(
+    fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &'a mut BlockManager,
-    ) -> Result<(RecordReader<'a>, bool), HTTPError> {
+        block_manager: &mut BlockManager,
+    ) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError> {
         match self.query.next(block_indexes, block_manager) {
             Ok((record, last)) => {
-                self.last_timestamp = record.timestamp();
+                self.last_timestamp = record.borrow().timestamp();
                 Ok((record, last))
             }
             Err(HTTPError {
@@ -65,7 +67,6 @@ impl Query for ContinuousQuery {
 mod tests {
     use super::*;
     use prost_wkt_types::Timestamp;
-    use std::rc::Rc;
     use std::thread::sleep;
     use tempfile::tempdir;
 
@@ -86,8 +87,8 @@ mod tests {
             },
         );
         {
-            let (mut reader, _) = query.next(&block_indexes, &mut block_manager).unwrap();
-            assert_eq!(reader.timestamp(), 0);
+            let (reader, _) = query.next(&block_indexes, &mut block_manager).unwrap();
+            assert_eq!(reader.borrow().timestamp(), 0);
         }
         assert_eq!(
             query.next(&block_indexes, &mut block_manager).err(),
@@ -106,7 +107,6 @@ mod tests {
         let dir = tempdir().unwrap().into_path();
         let mut block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();
-        let block = Rc::make_mut(&mut block);
 
         block.records.push(Record {
             timestamp: Some(Timestamp {
@@ -125,14 +125,14 @@ mod tests {
             nanos: 0,
         });
         block.size = 10;
-        block_manager.save(block).unwrap();
+        block_manager.save(&block).unwrap();
 
         {
-            let mut writer = block_manager.begin_write(block, 0).unwrap();
-            writer.write(b"0123456789", true).unwrap();
+            let writer = block_manager.begin_write(&block, 0).unwrap();
+            writer.borrow_mut().write(b"0123456789", true).unwrap();
         }
 
-        block_manager.finish(block).unwrap();
+        block_manager.finish(&block).unwrap();
         (block_manager, BTreeSet::from([0]))
     }
 }
