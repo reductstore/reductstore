@@ -133,6 +133,8 @@ mod tests {
             fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
             fn finish(&self, block: &Block) -> Result<(), HTTPError>;
             fn unregister(&mut self, block_id: u64);
+            fn remove(&self, block_id: u64) -> Result<(), HTTPError>;
+
         }
     }
 

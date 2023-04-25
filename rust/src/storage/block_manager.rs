@@ -130,6 +130,7 @@ pub trait ManageBlock {
     ///
     /// * `Ok(())` - Block was saved successfully.
     fn save(&mut self, block: &Block) -> Result<(), HTTPError>;
+
     /// Start a new block
     ///
     /// # Arguments
@@ -141,6 +142,7 @@ pub trait ManageBlock {
     ///
     /// * `Ok(block)` - Block was created successfully.
     fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Rc<Block>, HTTPError>;
+
     /// Finish a block by truncating the file to the actual size.
     ///
     /// # Arguments
@@ -151,7 +153,12 @@ pub trait ManageBlock {
     ///
     /// * `Ok(())` - Block was finished successfully.
     fn finish(&self, block: &Block) -> Result<(), HTTPError>;
+
+    /// Remove a block from disk if there are no readers or writers.
+    fn remove(&self, block_id: u64) -> Result<(), HTTPError>;
+
     /// Unregister writer or reader.
+    /// *NOTE*: This method is called by the writer or reader when it is dropped.
     fn unregister(&mut self, block_id: u64);
 }
 
@@ -214,6 +221,22 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
+    fn remove(&self, block_id: u64) -> Result<(), HTTPError> {
+        if self.counters.get(&block_id).map(|c| *c > 0).unwrap_or(false) {
+            return Err(HTTPError::internal_server_error(&format!(
+                "Cannot remove block {} because it is still in use",
+                block_id
+            )));
+        }
+
+        let proto_ts = us_to_ts(&block_id);
+        let path = self.path_to_data(&proto_ts);
+        std::fs::remove_file(path)?;
+        let path = self.path_to_desc(&proto_ts);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
     fn unregister(&mut self, block_id: u64) {
         self.counters.get_mut(&block_id).map(|c| *c -= 1);
         if self
@@ -257,7 +280,7 @@ mod tests {
             bm.path
                 .join(format!("{}{}", ts_to_us(&ts), DESCRIPTOR_FILE_EXT)),
         )
-        .unwrap();
+            .unwrap();
         let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
         assert_eq!(block_from_file, *block);
@@ -328,6 +351,39 @@ mod tests {
 
         bm.finish(&block).unwrap();
         assert!(!bm.counters.contains_key(&block_id));
+    }
+
+    #[test]
+    fn test_remove_busy_block() {
+        let bm = setup();
+
+        let bm = RefCell::new(bm);
+        let block_id = 1;
+
+        {
+            let mut mut_bm = bm.borrow_mut();
+            let mut block = mut_bm.start(block_id, 1024).unwrap().deref().clone();
+            block.records.push(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 1,
+                    nanos: 5000,
+                }),
+                begin: 0,
+                end: 5,
+                state: 0,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
+            let writer = mut_bm.begin_write(&block, 0).unwrap();
+
+
+            assert_eq!(bm.borrow().remove(block_id).err(), Some(
+                HTTPError::internal_server_error(&format!(
+                    "Cannot remove block {} because it is still in use",
+                    block_id
+                ))
+            ));
+        }
     }
 
     fn setup() -> BlockManager {

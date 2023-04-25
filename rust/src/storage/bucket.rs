@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::core::status::HTTPError;
-use crate::storage::entry::{Entry, EntryOptions};
+use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfo, BucketSettings};
 
@@ -81,7 +81,7 @@ impl Bucket {
             if path.is_dir() {
                 let entry = Entry::restore(
                     path,
-                    EntryOptions {
+                    EntrySettings {
                         max_block_size: settings.max_block_size.unwrap(),
                         max_block_records: settings.max_block_records.unwrap(),
                     },
@@ -113,7 +113,7 @@ impl Bucket {
             let entry = Entry::new(
                 &key,
                 self.path.clone(),
-                EntryOptions {
+                EntrySettings {
                     max_block_size: self.settings.max_block_size.unwrap(),
                     max_block_records: self.settings.max_block_records.unwrap(),
                 },
@@ -164,6 +164,12 @@ impl Bucket {
 
     pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), HTTPError> {
         self.settings = Self::fill_settings(settings, Self::defaults());
+        for mut entry in self.entries.values_mut() {
+            entry.set_settings(EntrySettings {
+                max_block_size: self.settings.max_block_size.unwrap(),
+                max_block_records: self.settings.max_block_records.unwrap(),
+            });
+        }
         self.save_settings()?;
         Ok(())
     }
@@ -207,18 +213,9 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_keep_settings_peristent() {
-        let path = tempdir().unwrap().into_path();
-        std::fs::create_dir_all(&path).unwrap();
+    fn test_keep_settings_persistent() {
+        let (bucket, init_settings, path) = setup();
 
-        let init_settings = BucketSettings {
-            max_block_size: Some(100),
-            quota_type: Some(QuotaType::Fifo as i32),
-            quota_size: Some(1000),
-            max_block_records: Some(100),
-        };
-
-        let bucket = Bucket::new("test", &path, init_settings.clone()).unwrap();
         assert_eq!(bucket.settings(), &init_settings);
 
         let bucket = Bucket::restore(path.join("test")).unwrap();
@@ -238,5 +235,38 @@ mod tests {
         let default_settings = Bucket::defaults();
         let filled_settings = Bucket::fill_settings(settings, default_settings.clone());
         assert_eq!(filled_settings, default_settings);
+    }
+
+    #[test]
+    fn test_apply_settings_to_entries() {
+        let (mut bucket, init_settings, _) = setup();
+
+        bucket.get_or_create_entry("entry-1").unwrap();
+        bucket.get_or_create_entry("entry-2").unwrap();
+
+        let mut new_settings = init_settings.clone();
+        new_settings.max_block_size = Some(200);
+        new_settings.max_block_records = Some(200);
+        bucket.set_settings(new_settings).unwrap();
+
+        for entry in bucket.entries.values() {
+            assert_eq!(entry.settings().max_block_size, 200);
+            assert_eq!(entry.settings().max_block_records, 200);
+        }
+    }
+
+    fn setup() -> (Bucket, BucketSettings, PathBuf) {
+        let path = tempdir().unwrap().into_path();
+        std::fs::create_dir_all(&path).unwrap();
+
+        let init_settings = BucketSettings {
+            max_block_size: Some(100),
+            quota_type: Some(QuotaType::Fifo as i32),
+            quota_size: Some(1000),
+            max_block_records: Some(100),
+        };
+
+        let bucket = Bucket::new("test", &path, init_settings.clone()).unwrap();
+        (bucket, init_settings, path)
     }
 }

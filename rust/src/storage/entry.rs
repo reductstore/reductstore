@@ -25,7 +25,7 @@ pub type Labels = HashMap<String, String>;
 pub struct Entry {
     name: String,
     path: PathBuf,
-    options: EntryOptions,
+    settings: EntrySettings,
     block_index: BTreeSet<u64>,
     block_manager: BlockManager,
     record_count: u64,
@@ -35,18 +35,18 @@ pub struct Entry {
 
 /// EntryOptions is the options for creating a new entry.
 #[derive(PartialEq, Debug, Clone)]
-pub struct EntryOptions {
+pub struct EntrySettings {
     pub max_block_size: u64,
     pub max_block_records: u64,
 }
 
 impl Entry {
-    pub fn new(name: &str, path: PathBuf, options: EntryOptions) -> Result<Self, HTTPError> {
+    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, HTTPError> {
         fs::create_dir_all(path.join(name))?;
         Ok(Self {
             name: name.to_string(),
             path: path.clone(),
-            options,
+            settings,
             block_index: BTreeSet::new(),
             block_manager: BlockManager::new(path.join(name)),
             record_count: 0,
@@ -55,7 +55,7 @@ impl Entry {
         })
     }
 
-    pub fn restore(path: PathBuf, options: EntryOptions) -> Result<Self, HTTPError> {
+    pub fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, HTTPError> {
         let mut record_count = 0;
         let mut size = 0;
         let mut block_index = BTreeSet::new();
@@ -86,7 +86,7 @@ impl Entry {
         Ok(Self {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
             path: path.clone(),
-            options,
+            settings: options,
             block_index,
             block_manager: BlockManager::new(path),
             record_count,
@@ -166,9 +166,9 @@ impl Entry {
                 (block, RecordType::Latest)
             };
 
-        let has_no_space = block.size + content_size > self.options.max_block_size;
+        let has_no_space = block.size + content_size > self.settings.max_block_size;
         let has_too_many_records =
-            block.records.len() + 1 >= self.options.max_block_records as usize;
+            block.records.len() + 1 >= self.settings.max_block_records as usize;
 
         let mut block = if record_type == RecordType::Latest
             && (has_no_space || has_too_many_records || block.invalid)
@@ -340,14 +340,40 @@ impl Entry {
         })
     }
 
+    /// Try to remove the oldest block.
+    ///
+    /// # Returns
+    ///
+    /// HTTTPError - The error if any.
+    pub fn try_remove_oldest_block(&mut self) -> Result<(), HTTPError> {
+        if self.block_index.is_empty() {
+            return Ok(());
+        }
+
+        let oldest_block_id = *self.block_index.first().unwrap();
+
+        self.block_manager.remove(oldest_block_id)?;
+        self.block_index.remove(&oldest_block_id);
+
+        Ok(())
+    }
+
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn settings(&self) -> &EntrySettings {
+        &self.settings
+    }
+
+    pub fn set_settings(&mut self, settings: EntrySettings) {
+        self.settings = settings;
     }
 
     fn start_new_block(&mut self, time: u64) -> Result<Rc<Block>, HTTPError> {
         let block = self
             .block_manager
-            .start(time, self.options.max_block_size)?;
+            .start(time, self.settings.max_block_size)?;
         self.block_index
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));
         Ok::<Rc<Block>, HTTPError>(block)
@@ -408,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_begin_write_new_block_size() {
-        let (_, mut entry) = setup(EntryOptions {
+        let (_, mut entry) = setup(EntrySettings {
             max_block_size: 10,
             max_block_records: 10000,
         });
@@ -443,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_begin_write_new_block_records() {
-        let (_, mut entry) = setup(EntryOptions {
+        let (_, mut entry) = setup(EntrySettings {
             max_block_size: 10000,
             max_block_records: 1,
         });
@@ -703,7 +729,7 @@ mod tests {
 
     #[test]
     fn test_info() {
-        let (_, mut entry) = setup(EntryOptions {
+        let (_, mut entry) = setup(EntrySettings {
             max_block_size: 10000,
             max_block_records: 10000,
         });
@@ -721,14 +747,14 @@ mod tests {
         assert_eq!(info.latest_record, 3000000);
     }
 
-    fn setup(options: EntryOptions) -> (EntryOptions, Entry) {
+    fn setup(options: EntrySettings) -> (EntrySettings, Entry) {
         let path = tempfile::tempdir().unwrap();
         let entry = Entry::new("entry", path.into_path(), options.clone()).unwrap();
         (options, entry)
     }
 
-    fn setup_default() -> (EntryOptions, Entry) {
-        setup(EntryOptions {
+    fn setup_default() -> (EntrySettings, Entry) {
+        setup(EntrySettings {
             max_block_size: 10000,
             max_block_records: 10000,
         })
