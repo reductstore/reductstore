@@ -3,10 +3,10 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::cell::RefCell;
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
@@ -198,7 +198,11 @@ impl Bucket {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_read(&mut self, name: &str, time: u64) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
+    pub fn begin_read(
+        &mut self,
+        name: &str,
+        time: u64,
+    ) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
         let entry = self.get_or_create_entry(name)?;
         entry.begin_read(time)
     }
@@ -219,11 +223,10 @@ impl Bucket {
                         .iter_mut()
                         .map(|entry| entry.1)
                         .collect::<Vec<&mut Entry>>();
-                    candidates.sort_by_key(|entry|
-                        match entry.info() {
-                            Ok(info) => info.oldest_record,
-                            Err(_) => u64::MAX, //todo: handle error
-                        });
+                    candidates.sort_by_key(|entry| match entry.info() {
+                        Ok(info) => info.oldest_record,
+                        Err(_) => u64::MAX, //todo: handle error
+                    });
 
                     let mut success = false;
                     for entry in candidates {
@@ -244,11 +247,7 @@ impl Bucket {
 
                     if !success {
                         return Err(HTTPError::internal_server_error(
-                            format!(
-                                "Failed to keep quota of '{}'",
-                                self.name()
-                            )
-                                .as_str(),
+                            format!("Failed to keep quota of '{}'", self.name()).as_str(),
                         ));
                     }
 
@@ -263,7 +262,8 @@ impl Bucket {
                         entries_to_remove.push(entry.name().to_string());
                     }
                 }
-                self.entries.retain(|_, entry| !entries_to_remove.contains(&entry.name().to_string()));
+                self.entries
+                    .retain(|_, entry| !entries_to_remove.contains(&entry.name().to_string()));
 
                 Ok(())
             }
@@ -326,8 +326,8 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use crate::storage::entry::Labels;
+    use tempfile::tempdir;
 
     #[test]
     fn test_keep_settings_persistent() {
@@ -381,7 +381,6 @@ mod tests {
             max_block_records: Some(100),
         });
 
-
         write(&mut bucket, "test-1", 0, b"test").unwrap();
         assert_eq!(bucket.info().unwrap().size, 4);
 
@@ -391,12 +390,25 @@ mod tests {
         write(&mut bucket, "test-3", 2, b"test").unwrap();
         assert_eq!(bucket.info().unwrap().size, 8);
 
-        assert_eq!(read(&mut bucket, "test-1", 0).err(),
-                   Some(HTTPError::not_found("No record with timestamp 0")));
+        assert_eq!(
+            read(&mut bucket, "test-1", 0).err(),
+            Some(HTTPError::not_found("No record with timestamp 0"))
+        );
     }
 
-    fn write(bucket: &mut Bucket, entry_name: &str, time: u64, content: &[u8]) -> Result<(), HTTPError> {
-        let mut writer = bucket.begin_write(entry_name, time, content.len() as u64, "".to_string(), Labels::new())?;
+    fn write(
+        bucket: &mut Bucket,
+        entry_name: &str,
+        time: u64,
+        content: &[u8],
+    ) -> Result<(), HTTPError> {
+        let mut writer = bucket.begin_write(
+            entry_name,
+            time,
+            content.len() as u64,
+            "".to_string(),
+            Labels::new(),
+        )?;
         writer.borrow_mut().write(content, true)?;
         Ok(())
     }
