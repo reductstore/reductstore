@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
+use std::time::SystemTimeError;
 
 /// HTTP status codes.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -79,6 +80,16 @@ impl From<std::io::Error> for HTTPError {
     }
 }
 
+impl From<SystemTimeError> for HTTPError {
+    fn from(err: SystemTimeError) -> Self {
+        // A system time error is an internal server error
+        HTTPError {
+            status: HTTPStatus::InternalServerError,
+            message: err.to_string(),
+        }
+    }
+}
+
 impl HTTPError {
     pub fn new(status: HTTPStatus, message: &str) -> Self {
         HTTPError {
@@ -99,6 +110,14 @@ impl HTTPError {
         HTTPError {
             status: HTTPStatus::OK,
             message: "".to_string(),
+        }
+    }
+
+    /// Create a no content error.
+    pub fn no_content(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::NoContent,
+            message: msg.to_string(),
         }
     }
 
@@ -146,6 +165,14 @@ impl HTTPError {
     pub fn unprocessable_entity(msg: &str) -> HTTPError {
         HTTPError {
             status: HTTPStatus::UnprocessableEntity,
+            message: msg.to_string(),
+        }
+    }
+
+    /// Create a too early error.
+    pub fn too_early(msg: &str) -> HTTPError {
+        HTTPError {
+            status: HTTPStatus::TooEarly,
             message: msg.to_string(),
         }
     }

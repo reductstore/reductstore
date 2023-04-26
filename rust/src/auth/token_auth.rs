@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::Policy;
-use crate::auth::token_repository::{parse_bearer_token, TokenRepository};
+use crate::auth::token_repository::TokenRepository;
 use crate::core::status::HTTPError;
 
 /// Authorization by token

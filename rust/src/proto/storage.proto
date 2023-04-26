@@ -1,0 +1,127 @@
+// Copyright 2022 ReductStore
+// This Source Code Form is subject to the terms of the Mozilla Public
+//    License, v. 2.0. If a copy of the MPL was not distributed with this
+//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package reduct.proto.storage;
+
+
+// Stats of entry
+message EntryInfo {
+  string name = 1;          // name of bucket
+  uint64 size = 2;          // size of bucket in bytes
+  uint64 record_count = 3;  // number of records
+  uint64 block_count = 4;   // number of blocks
+  uint64 oldest_record = 5; // unix timestamp of oldest record in microseconds
+  uint64 latest_record = 6; // unix timestamp of latest record in microseconds
+}
+
+// Record
+message RecordInfo {
+  uint64 ts = 1;      // timestamp of record in microseconds
+  uint64 size = 2;    // size in bytes
+}
+
+// List of records
+message RecordInfoList {
+  repeated RecordInfo records = 1;
+}
+
+// Query Info
+message QueryInfo {
+  uint64  id = 1; // id to fetch records
+}
+
+
+// Stats of bucket
+message BucketInfo {
+  string name = 1;          // name of bucket
+  uint64 size = 2;          // size of bucket in bytes
+  uint64 entry_count = 3;   // number of entries
+  uint64 oldest_record = 5; // unix timestamp of oldest record in microseconds
+  uint64 latest_record = 6; // unix timestamp of latest record in microseconds
+}
+
+// Full information about bucket
+message FullBucketInfo {
+  BucketInfo info = 1;          // stats about the bucket
+  BucketSettings settings = 2;  // settings of the bucket
+  repeated EntryInfo entries = 3;  // list of entries names
+}
+
+// List of buckets
+message BucketInfoList {
+  repeated BucketInfo buckets = 1;
+}
+
+// Settings of bucket
+message BucketSettings {
+  enum QuotaType {
+    NONE = 0;   // No quota
+    FIFO = 1;   // Remove oldest block in the bucket if we reach quota
+  }
+
+  optional uint64 max_block_size = 1; // max size of block in bytes
+  optional QuotaType quota_type = 2;
+  optional uint64 quota_size = 3;     // size of quota in bytes
+  optional uint64 max_block_records = 4;  // max number of records in a block
+}
+
+
+message Defaults {
+  BucketSettings bucket = 1;  // default values for a new bucket
+}
+
+// Stats of server
+message ServerInfo {
+  string version = 1;       // version of storage
+  uint64 bucket_count = 2;  // number of buckets in storage
+  uint64 usage = 3;         // disk usage in bytes
+  uint64 uptime = 4;        // uptime in seconds
+  uint64 oldest_record = 5; // unix timestamp of oldest record in microseconds
+  uint64 latest_record = 6; // unix timestamp of latest record in microseconds
+
+  Defaults defaults = 7;    // default settings for everything
+}
+
+// Represents a stored blob in a block
+message Record {
+  enum State {
+    STARTED = 0;     // has at least one chunk written
+    FINISHED = 1;    // finished without errors
+    ERRORED = 2;     // finished with error
+    INVALID = 3;     // something wierd happened
+  }
+
+  message Label {
+    string name = 1;
+    string value = 2;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;  // timestamp (works as ID)
+  uint64 begin = 2;                         // begin position of a blob in a block
+  uint64 end = 3;                           // end position of a blob in a block
+  State state = 4;                          // state of record
+  repeated Label labels = 5;                // labels
+  string content_type = 6;                  // Content type of the record
+}
+
+// Represents a block of records.
+// The storage engine create a new block if the current one bigger than EntrySettings::max_block_size
+message Block {
+  message KeyValueMap {
+    uint64 key = 1;
+    string value = 2;
+  }
+
+  google.protobuf.Timestamp begin_time = 1;           // when the block started being recorded
+  google.protobuf.Timestamp latest_record_time = 2;    // the timestamp of the latest record
+  uint64 size = 3;                                // size of block in bytes (with protobuf overhead)
+  repeated Record records = 4;                    // stored records
+  bool invalid = 5;                               // mark block as invalid if some IO happened
+
+}

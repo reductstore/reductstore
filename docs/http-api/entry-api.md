@@ -98,7 +98,7 @@ The method finds a record for the given timestamp and sends its content in the H
 
 **x-reduct-time** - UNIX timestamp of the record in microseconds
 
-**x-reduct-last** - 1 - if a record is the last record in the query
+**x-reduct-last** - 1 - if a record is the last record in the query (deprecated since version 1.4, use NoContent response)
 
 **x-reduct-label-\<name>** - a value of the \<name> label
 

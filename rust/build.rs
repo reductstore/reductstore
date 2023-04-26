@@ -10,10 +10,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Current directory: {:?}", std::env::current_dir());
 
     prost_build::Config::new()
+        .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
-        .type_attribute(".", "#[serde(default)]")
+        .type_attribute(".reduct.proto.auth", "#[serde(default)]")
         .extern_path(".google.protobuf.Timestamp", "::prost_wkt_types::Timestamp")
-        .compile_protos(&["src/proto/auth.proto"], &["src/protos/"])
+        .compile_protos(
+            &["src/proto/auth.proto", "src/proto/storage.proto"],
+            &["src/protos/"],
+        )
         .expect("Failed to compile protos");
 
     Ok(())

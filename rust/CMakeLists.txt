@@ -10,6 +10,7 @@ endif ()
 set(RUST_PART_LIB "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_DIR}/librust_part.a")
 set(RUST_PART_CXX "${CMAKE_CURRENT_BINARY_DIR}/rust_part.cpp")
 set(RUST_PART_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/build.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/asset.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/asset/asset_manager.rs"
@@ -21,6 +22,20 @@ set(RUST_PART_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/env.rs"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/logger.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/proto/auth.proto"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/proto/storage.proto"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/block_manager.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/bucket.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/entry.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/query.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/query/base.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/query/historical.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/query/continuous.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/reader.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/writer.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/storage.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/proto.rs"
         )
 
 add_library(rust_part STATIC ${RUST_PART_CXX})

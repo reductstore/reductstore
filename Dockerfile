@@ -1,6 +1,13 @@
 FROM reduct/ubuntu-build-image:main AS  builder
 
-RUN apt-get update && apt-get install -y rustc cargo
+RUN apt-get install -y \
+    build-essential \
+    curl
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+
+# Add .cargo/bin to PATH
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /src
 
