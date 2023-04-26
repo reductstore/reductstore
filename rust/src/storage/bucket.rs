@@ -3,16 +3,22 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::cell::RefCell;
+use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use std::collections::BTreeMap;
+use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use crate::core::status::HTTPError;
-use crate::storage::entry::{Entry, EntrySettings};
+use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfo, BucketSettings};
+use crate::storage::reader::RecordReader;
+use crate::storage::writer::RecordWriter;
 
 const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -154,6 +160,116 @@ impl Bucket {
         })
     }
 
+    /// Starts a new record write with
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Entry name.
+    /// * `time` - The timestamp of the record.
+    /// * `content_size` - The size of the record content.
+    /// * `content_type` - The content type of the record.
+    /// * `labels` - The labels of the record.
+    ///
+    /// # Returns
+    ///
+    /// * `RecordWriter` - The record writer to write the record content in chunks.
+    /// * `HTTPError` - The error if any.
+    pub fn begin_write(
+        &mut self,
+        name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Rc<RefCell<RecordWriter>>, HTTPError> {
+        self.keep_quota_for(content_size)?;
+        let mut entry = self.get_or_create_entry(name)?;
+        entry.begin_write(time, content_size, content_type, labels)
+    }
+
+    /// Starts a new record read with
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Entry name.
+    /// * `time` - The timestamp of the record.
+    ///
+    /// # Returns
+    ///
+    /// * `RecordReader` - The record reader to read the record content in chunks.
+    /// * `HTTPError` - The error if any.
+    pub fn begin_read(&mut self, name: &str, time: u64) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
+        let entry = self.get_or_create_entry(name)?;
+        entry.begin_read(time)
+    }
+
+    fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HTTPError> {
+        match QuotaType::from_i32(self.settings.quota_type.unwrap()).unwrap() {
+            QuotaType::None => Ok(()),
+            QuotaType::Fifo => {
+                let mut size = self.info()?.size + content_size;
+                while size > self.settings.quota_size() {
+                    debug!(
+                        "Need more space.  Try to remove an oldest block from bucket '{}'",
+                        self.name()
+                    );
+
+                    let mut candidates: Vec<&mut Entry> = self
+                        .entries
+                        .iter_mut()
+                        .map(|entry| entry.1)
+                        .collect::<Vec<&mut Entry>>();
+                    candidates.sort_by_key(|entry|
+                        match entry.info() {
+                            Ok(info) => info.oldest_record,
+                            Err(_) => u64::MAX, //todo: handle error
+                        });
+
+                    let mut success = false;
+                    for entry in candidates {
+                        match entry.try_remove_oldest_block() {
+                            Ok(_) => {
+                                success = true;
+                                break;
+                            }
+                            Err(e) => {
+                                debug!(
+                                    "Failed to remove oldest block from entry '{}': {}",
+                                    entry.name(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+
+                    if !success {
+                        return Err(HTTPError::internal_server_error(
+                            format!(
+                                "Failed to keep quota of '{}'",
+                                self.name()
+                            )
+                                .as_str(),
+                        ));
+                    }
+
+                    size = self.info()?.size + content_size;
+                }
+
+                // Remove empty entries
+                let mut entries_to_remove: Vec<String> = Vec::new();
+                for entry in self.entries.values_mut() {
+                    if entry.info().unwrap().size == 0 {
+                        remove_dir_all(self.path.join(entry.name()))?;
+                        entries_to_remove.push(entry.name().to_string());
+                    }
+                }
+                self.entries.retain(|_, entry| !entries_to_remove.contains(&entry.name().to_string()));
+
+                Ok(())
+            }
+        }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -211,6 +327,7 @@ impl Bucket {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use crate::storage::entry::Labels;
 
     #[test]
     fn test_keep_settings_persistent() {
@@ -255,6 +372,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_quota_keeping() {
+        let (mut bucket, _) = setup_with(BucketSettings {
+            max_block_size: Some(5),
+            quota_type: Some(i32::from(QuotaType::Fifo)),
+            quota_size: Some(10),
+            max_block_records: Some(100),
+        });
+
+
+        write(&mut bucket, "test-1", 0, b"test").unwrap();
+        assert_eq!(bucket.info().unwrap().size, 4);
+
+        write(&mut bucket, "test-2", 1, b"test").unwrap();
+        assert_eq!(bucket.info().unwrap().size, 8);
+
+        write(&mut bucket, "test-3", 2, b"test").unwrap();
+        assert_eq!(bucket.info().unwrap().size, 8);
+
+        assert_eq!(read(&mut bucket, "test-1", 0).err(),
+                   Some(HTTPError::not_found("No record with timestamp 0")));
+    }
+
+    fn write(bucket: &mut Bucket, entry_name: &str, time: u64, content: &[u8]) -> Result<(), HTTPError> {
+        let mut writer = bucket.begin_write(entry_name, time, content.len() as u64, "".to_string(), Labels::new())?;
+        writer.borrow_mut().write(content, true)?;
+        Ok(())
+    }
+
+    fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, HTTPError> {
+        let mut reader = bucket.begin_read(entry_name, time)?;
+        let data = reader.borrow_mut().read()?.data;
+        Ok(data)
+    }
+
     fn setup() -> (Bucket, BucketSettings, PathBuf) {
         let path = tempdir().unwrap().into_path();
         std::fs::create_dir_all(&path).unwrap();
@@ -268,5 +420,13 @@ mod tests {
 
         let bucket = Bucket::new("test", &path, init_settings.clone()).unwrap();
         (bucket, init_settings, path)
+    }
+
+    fn setup_with(settings: BucketSettings) -> (Bucket, PathBuf) {
+        let path = tempdir().unwrap().into_path();
+        std::fs::create_dir_all(&path).unwrap();
+
+        let bucket = Bucket::new("test", &path, settings.clone()).unwrap();
+        (bucket, path)
     }
 }

@@ -219,7 +219,7 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    fn begin_read(&mut self, time: u64) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
+    pub(crate) fn begin_read(&mut self, time: u64) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
         debug!("Reading record for ts={}", time);
         let not_found_err = Err(HTTPError::not_found(&format!(
             "No record with timestamp {}",
@@ -349,6 +349,10 @@ impl Entry {
         }
 
         let oldest_block_id = *self.block_index.first().unwrap();
+
+        let block = self.block_manager.load(oldest_block_id)?;
+        self.size -= block.size;
+        self.record_count -= block.records.len() as u64;
 
         self.block_manager.remove(oldest_block_id)?;
         self.block_index.remove(&oldest_block_id);
