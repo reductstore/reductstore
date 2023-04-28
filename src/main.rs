@@ -3,15 +3,14 @@ pub mod auth;
 pub mod core;
 pub mod storage;
 
-use std::cell::RefCell;
-use std::future::Future;
+use crate::core::env::Env;
+use crate::core::logger::Logger;
+use crate::storage::storage::Storage;
 use asset::asset_manager::ZipAssetManager;
 use auth::token_auth::TokenAuthorization;
 use auth::token_repository::TokenRepository;
-use crate::core::env::Env;
-use crate::core::logger::{Logger};
-use crate::storage::storage::Storage;
-
+use std::cell::RefCell;
+use std::future::Future;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -19,15 +18,14 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use bytes::{Bytes};
+use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
-use hyper::service::{Service};
+use hyper::service::Service;
 use hyper::{body::Incoming as IncomingBody, Method, Request, Response};
 
-use hyper::server::conn::{http1};
-use log::{info};
-use tokio::net::{TcpListener};
-
+use hyper::server::conn::http1;
+use log::info;
+use tokio::net::TcpListener;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
@@ -59,13 +57,14 @@ impl HttpServer {}
 impl Service<Request<IncomingBody>> for HttpServer {
     type Response = Response<Full<Bytes>>;
     type Error = GenericError;
-    type Future = Pin<Box<dyn Future<Output=Result<Self::Response>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response>> + Send>>;
 
     fn call(&mut self, req: Request<IncomingBody>) -> Self::Future {
         fn mk_response(s: String, status: u16) -> Result<Response<Full<Bytes>>> {
             Ok(Response::builder()
                 .status(status)
-                .body(Full::new(Bytes::from(s))).unwrap())
+                .body(Full::new(Bytes::from(s)))
+                .unwrap())
         }
 
         let _INFO_PATH = format!("{}/info", self.api_base_path);
@@ -77,15 +76,16 @@ impl Service<Request<IncomingBody>> for HttpServer {
                 let body = serde_json::to_string(&info).unwrap();
                 mk_response(body, 200)
             }
-            _ => {
-                mk_response("not found".to_string(), 404)
-            }
+            _ => mk_response("not found".to_string(), 404),
         };
 
-        info!("{} {} [{}]", req.method(), req.uri().path(), resp.as_ref().unwrap().status().as_str());
-        Box::pin(async move {
-            resp
-        })
+        info!(
+            "{} {} [{}]",
+            req.method(),
+            req.uri().path(),
+            resp.as_ref().unwrap().status().as_str()
+        );
+        Box::pin(async move { resp })
     }
 }
 
@@ -110,8 +110,7 @@ async fn run() {
 
     let log_level = env.get::<String>("LOG_LEVEL", "INFO".to_string(), false);
     let host = env.get::<String>("RS_HOST", "0.0.0.0".to_string(), false);
-    let port = env.get::<i32>("RS_PORT", 8383
-                              , false);
+    let port = env.get::<i32>("RS_PORT", 8383, false);
     let api_base_path = env.get::<String>("RS_API_BASE_PATH", "/".to_string(), false);
     let data_path = env.get::<String>("RS_DATA_PATH", "/data".to_string(), false);
     let api_token = env.get::<String>("RS_API_TOKEN", "".to_string(), true);
@@ -138,17 +137,20 @@ async fn run() {
 
     let addr = SocketAddr::new(
         IpAddr::from_str(&host).expect("Invalid host address"),
-        port as u16);
+        port as u16,
+    );
 
-    let listener = TcpListener::bind(addr).await.expect("Failed to bind to address");
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind to address");
     loop {
-        let (stream, _) = listener.accept().await.expect("Failed to accept connection");
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("Failed to accept connection");
         let server = server.clone();
         tokio::task::spawn_local(async move {
-            if let Err(err) = http1::Builder::new()
-                .serve_connection(stream, server)
-                .await
-            {
+            if let Err(err) = http1::Builder::new().serve_connection(stream, server).await {
                 println!("Failed to serve connection: {:?}", err);
             }
         });

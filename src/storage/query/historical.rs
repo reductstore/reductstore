@@ -3,13 +3,12 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::core::status::{HTTPError};
+use crate::core::status::HTTPError;
 use crate::storage::block_manager::{BlockManager, ManageBlock};
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};

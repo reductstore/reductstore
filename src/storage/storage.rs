@@ -7,11 +7,10 @@ use log::info;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use std::time::{Instant};
+use std::time::Instant;
 
 use crate::core::status::HTTPError;
 use crate::storage::bucket::Bucket;
-
 
 use crate::storage::proto::{BucketInfoList, BucketSettings, Defaults, ServerInfo};
 
