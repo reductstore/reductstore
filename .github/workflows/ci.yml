@@ -32,8 +32,6 @@ jobs:
     needs:
       - rust-fmt
     strategy:
-      matrix:
-        build_type: [ "debug", "release" ]
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
@@ -44,12 +42,12 @@ jobs:
           context: .
           tags: ${{github.repository}}:latest
           outputs: type=docker,dest=/tmp/image_${{ matrix.build_type }}.tar
-          build-args: BUILD_TYPE=${{ matrix.build_type }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
           name: image
-          path: /tmp/image_${{ matrix.build_type }}.tar
+          path: /tmp/image.tar
 
   unit_tests:
     name: Unit Tests
@@ -58,11 +56,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        build_type: [ "debug", "release" ]
+        build_type: [ "", "--release" ]
 
     steps:
       - name: Load image
-        run: cargo test --${{ matrix.build_type }}
+        run: cargo test ${{ matrix.build_type }}
 
   api_tests:
     name: API Tests
@@ -70,7 +68,6 @@ jobs:
     needs: unit_tests
     strategy:
       matrix:
-        build_type: [ "debug", "release" ]
         token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
         include:
@@ -87,7 +84,7 @@ jobs:
           path: /tmp/
       - name: Load image
         run: |
-          docker load --input /tmp/image_${{matrix.build_type}}.tar
+          docker load --input /tmp/image.tar
           docker image ls -a
       - name: Run Storage
         run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}

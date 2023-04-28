@@ -17,14 +17,11 @@ COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY build.rs build.rs
 
-ARG BUILD_TYPE=release
-RUN cargo build --${BUILD_TYPE}
-
+RUN cargo build --release
 
 FROM ubuntu:22.04
 
-ARG BUILD_TYPE=release
-COPY --from=builder /src/target/${BUILD_TYPE}/reductstore /usr/local/bin/reductstore
+COPY --from=builder /src/target/release/reductstore /usr/local/bin/reductstore
 
 EXPOSE 8383
 
