@@ -125,6 +125,7 @@ impl Policy for WriteAccessPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::proto::token::Permissions;
 
     #[test]
     fn test_anonymous_policy() {

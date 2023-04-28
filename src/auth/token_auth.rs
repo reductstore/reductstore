@@ -58,15 +58,15 @@ mod tests {
     fn test_anonymous_policy() {
         let policy = AnonymousPolicy {};
         let (repo, auth) = setup();
-        let result = auth.check("invalid", &repo, &policy);
+        let result = auth.check(Some("invalid"), &repo, &policy);
 
         assert!(result.is_ok());
 
-        let result = auth.check("Bearer invalid", &repo, &policy);
+        let result = auth.check(Some("Bearer invalid"), &repo, &policy);
 
         assert!(result.is_ok());
 
-        let result = auth.check("Bearer test", &repo, &policy);
+        let result = auth.check(Some("Bearer test"), &repo, &policy);
         assert!(result.is_ok());
     }
 
@@ -74,22 +74,22 @@ mod tests {
     fn test_full_access_policy() {
         let policy = FullAccessPolicy {};
         let (repo, auth) = setup();
-        let result = auth.check("invalid", &repo, &policy);
+        let result = auth.check(Some("invalid"), &repo, &policy);
 
         assert_eq!(
             result,
             Err(HTTPError::unauthorized("No bearer token in request header"))
         );
 
-        let result = auth.check("Bearer invalid", &repo, &policy);
+        let result = auth.check(Some("Bearer invalid"), &repo, &policy);
         assert_eq!(result, Err(HTTPError::unauthorized("Invalid token")));
 
-        let result = auth.check("Bearer test", &repo, &policy);
+        let result = auth.check(Some("Bearer test"), &repo, &policy);
         assert!(result.is_ok());
     }
 
     fn setup() -> (TokenRepository, TokenAuthorization) {
-        let repo = TokenRepository::new(tempdir().unwrap().into_path(), Some("test".to_string()));
+        let repo = TokenRepository::new(tempdir().unwrap().into_path(), "test");
         let auth = TokenAuthorization::new("test");
 
         (repo, auth)

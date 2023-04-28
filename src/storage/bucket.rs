@@ -402,7 +402,7 @@ mod tests {
         time: u64,
         content: &[u8],
     ) -> Result<(), HTTPError> {
-        let mut writer = bucket.begin_write(
+        let writer = bucket.begin_write(
             entry_name,
             time,
             content.len() as u64,
@@ -414,7 +414,7 @@ mod tests {
     }
 
     fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, HTTPError> {
-        let mut reader = bucket.begin_read(entry_name, time)?;
+        let reader = bucket.begin_read(entry_name, time)?;
         let data = reader.borrow_mut().read()?.data;
         Ok(data)
     }

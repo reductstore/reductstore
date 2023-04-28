@@ -115,6 +115,7 @@ mod tests {
     use super::*;
     use crate::storage::proto::Record;
     use mockall::{mock, predicate::*};
+    use prost_wkt_types::Timestamp;
     use tempfile::tempdir;
 
     mock! {

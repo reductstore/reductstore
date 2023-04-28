@@ -354,7 +354,7 @@ mod tests {
     pub fn test_init_token() {
         let repo = setup();
 
-        let token = repo.validate_token("Bearer test").unwrap();
+        let token = repo.validate_token(Some("Bearer test")).unwrap();
         assert_eq!(token.name, "init-token");
         assert_eq!(token.value, "");
     }
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     pub fn test_create_token_persistent() {
         let path = tempdir().unwrap().into_path();
-        let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let mut repo = TokenRepository::new(path.clone(), "test");
         repo.create_token(
             "test",
             Permissions {
@@ -441,13 +441,13 @@ mod tests {
         )
         .unwrap();
 
-        let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let repo = TokenRepository::new(path.clone(), "test");
         assert!(repo.repo.contains_key("test"));
     }
 
     #[test]
     pub fn test_create_token_no_init_token() {
-        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), "");
         let token = repo.create_token(
             "test",
             Permissions {
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     pub fn test_update_token_persistent() {
         let path = tempdir().unwrap().into_path();
-        let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let mut repo = TokenRepository::new(path.clone(), "test");
         repo.create_token(
             "test",
             Permissions {
@@ -543,7 +543,7 @@ mod tests {
         )
         .unwrap();
 
-        let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let repo = TokenRepository::new(path.clone(), "test");
         let token = repo.find_by_name("test").unwrap();
 
         assert_eq!(token.name, "test");
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     pub fn test_update_token_no_init_token() {
-        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), "");
         let token = repo.update_token(
             "test",
             Permissions {
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     pub fn test_find_by_name_no_init_token() {
-        let repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let repo = TokenRepository::new(tempdir().unwrap().into_path(), "");
         let token = repo.find_by_name("test");
 
         assert_eq!(
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     pub fn test_get_token_list_no_init_token() {
-        let repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let repo = TokenRepository::new(tempdir().unwrap().into_path(), "");
         let token_list = repo.get_token_list().unwrap();
 
         assert_eq!(token_list, vec![]);
@@ -665,7 +665,7 @@ mod tests {
             .value;
 
         let token = repo
-            .validate_token(format!("Bearer {}", value).as_str())
+            .validate_token(Some(&format!("Bearer {}", value)))
             .unwrap();
 
         assert_eq!(
@@ -686,15 +686,15 @@ mod tests {
     #[test]
     pub fn test_validate_token_not_found() {
         let repo = setup();
-        let token = repo.validate_token("Bearer invalid-value");
+        let token = repo.validate_token(Some("Bearer invalid-value"));
 
         assert_eq!(token, Err(HTTPError::unauthorized("Invalid token")));
     }
 
     #[test]
     pub fn test_validate_token_no_init_token() {
-        let repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
-        let placeholder = repo.validate_token("invalid-value").unwrap();
+        let repo = TokenRepository::new(tempdir().unwrap().into_path(), "");
+        let placeholder = repo.validate_token(Some("invalid-value")).unwrap();
 
         assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
         assert_eq!(placeholder.value, "");
@@ -736,7 +736,7 @@ mod tests {
     #[test]
     pub fn test_remove_token_persistent() {
         let path = tempdir().unwrap().into_path();
-        let mut repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let mut repo = TokenRepository::new(path.clone(), "test");
         repo.create_token(
             "test",
             Permissions {
@@ -749,7 +749,7 @@ mod tests {
 
         repo.remove_token("test").unwrap();
 
-        let repo = TokenRepository::new(path.clone(), Some("test".to_string()));
+        let repo = TokenRepository::new(path.clone(), "test");
         let token = repo.find_by_name("test");
 
         assert_eq!(
@@ -760,13 +760,13 @@ mod tests {
 
     #[test]
     pub fn test_remove_token_no_init_token() {
-        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), None);
+        let mut repo = TokenRepository::new(tempdir().unwrap().into_path(), "");
         let token = repo.remove_token("test");
 
         assert_eq!(token, Ok(()));
     }
 
     fn setup() -> TokenRepository {
-        TokenRepository::new(tempdir().unwrap().into_path(), Some("test".to_string()))
+        TokenRepository::new(tempdir().unwrap().into_path(), "test")
     }
 }

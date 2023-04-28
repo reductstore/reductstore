@@ -157,6 +157,10 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::entry::Labels;
+    use crate::storage::proto::bucket_settings::QuotaType;
+    use std::thread::sleep;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     #[test]

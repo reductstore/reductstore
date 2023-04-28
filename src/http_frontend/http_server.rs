@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::Full;
 use hyper::service::Service;
 use hyper::{body::Incoming as IncomingBody, Method, Request, Response};
 use log::{debug, error};
@@ -27,7 +27,6 @@ use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::storage::Storage;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
-type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
 
 pub struct HttpServerComponents {
     pub storage: Storage,
@@ -42,12 +41,6 @@ pub struct HttpServer {
     api_base_path: String,
     cert_path: String,
     cert_key_path: String,
-}
-
-fn full<T: Into<Bytes>>(chunk: T) -> BoxBody {
-    Full::new(chunk.into())
-        .map_err(|never| match never {})
-        .boxed()
 }
 
 impl HttpServer {

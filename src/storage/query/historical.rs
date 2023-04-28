@@ -172,7 +172,10 @@ impl Query for HistoricalQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::status::HTTPStatus;
+    use crate::storage::proto::record::Label;
     use crate::storage::reader::DataChunk;
+    use prost_wkt_types::Timestamp;
     use std::collections::HashMap;
     use std::time::Duration;
     use tempfile::tempdir;
