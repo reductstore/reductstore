@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::f32::consts::E;
+
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::service::Service;
 use hyper::{body::Incoming as IncomingBody, Method, Request, Response};
-use log::{debug, error, info};
+use log::{debug, error};
 use serde::Serialize;
 
 use crate::asset::asset_manager::ZipAssetManager;
@@ -22,8 +22,7 @@ use crate::auth::policy::*;
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::TokenRepository;
-use crate::core::env::Env;
-use crate::core::logger::Logger;
+
 use crate::core::status::{HTTPError, HTTPStatus};
 use crate::storage::storage::Storage;
 
@@ -138,7 +137,7 @@ impl Service<Request<IncomingBody>> for HttpServer {
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, GenericError>> + Send>>;
 
     fn call(&mut self, req: Request<IncomingBody>) -> Self::Future {
-        let base = if self.api_base_path.chars().last().unwrap() == '/' {
+        let _base = if self.api_base_path.chars().last().unwrap() == '/' {
             self.api_base_path.clone()
         } else {
             format!("{}/", self.api_base_path)
@@ -149,7 +148,7 @@ impl Service<Request<IncomingBody>> for HttpServer {
         let alive_path: String = format!("{}api/v1/alive", self.api_base_path);
         let me_path: String = format!("{}api/v1/me", self.api_base_path);
 
-        let mut comp = self.components.borrow_mut();
+        let comp = self.components.borrow_mut();
         let route = (req.method(), req.uri().path());
         let resp = if route == (&Method::GET, &info_path) {
             // GET /info
