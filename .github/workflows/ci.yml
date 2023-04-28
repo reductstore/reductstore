@@ -31,7 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - rust-fmt
-    strategy:
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
