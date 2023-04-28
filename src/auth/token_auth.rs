@@ -12,7 +12,7 @@ pub struct TokenAuthorization {
     api_token: String,
 }
 
-impl  TokenAuthorization {
+impl TokenAuthorization {
     /// Create a new TokenAuthorization
     ///
     /// # Arguments
