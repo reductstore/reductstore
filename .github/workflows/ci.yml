@@ -134,8 +134,6 @@ jobs:
         arch: [amd64, arm64]
     needs:
       - build_snap
-      - unit_tests_macos
-      - unit_tests_windows
     steps:
       - uses: actions/download-artifact@v3
         with:
