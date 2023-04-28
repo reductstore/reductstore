@@ -34,7 +34,7 @@ impl TokenAuthorization {
     /// * `policy` - The policy to validate the token permissions.
     pub fn check(
         &self,
-        authorization_header: &str,
+        authorization_header: Option<&str>,
         repo: &TokenRepository,
         policy: &dyn Policy,
     ) -> Result<(), HTTPError> {

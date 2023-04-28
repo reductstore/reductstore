@@ -3,11 +3,12 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use serde::{Serialize, Serializer};
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 use std::time::SystemTimeError;
 
 /// HTTP status codes.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
 pub enum HTTPStatus {
     OK = 200,
     Continue = 100,

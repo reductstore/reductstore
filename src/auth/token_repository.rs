@@ -43,32 +43,30 @@ impl TokenRepository {
     /// # Arguments
     ///
     /// * `data_path` - The path to the data directory
-    /// * `api_token` - The API token with full access to the repository. If it is none, no authentication is required.
+    /// * `api_token` - The API token with full access to the repository. If it is empty, no authentication is required.
     ///
     /// # Returns
     ///
     /// The repository
-    pub fn new(data_path: PathBuf, api_token: Option<String>) -> TokenRepository {
+    pub fn new(data_path: PathBuf, api_token: &str) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
 
-        let init_token = match api_token {
-            Some(value) => Some(Token {
+        let init_token = if !api_token.is_empty() {
+            Some(Token {
                 name: INIT_TOKEN_NAME.to_string(),
-                value,
+                value: api_token.to_string(),
                 created_at: Timestamp::try_from(SystemTime::now()).ok(),
                 permissions: Some(Permissions {
                     full_access: true,
                     read: vec![],
                     write: vec![],
                 }),
-            }),
-            None => {
-                // No API token, no authentication
-                // TODO: After C++ is removed, this should use traits and an empty implementation
-                warn!("API token is not set, no authentication is required");
-                None
-            }
+            })
+        } else {
+            // TODO: After C++ is removed, this should use traits and an empty implementation
+            warn!("API token is not set, no authentication is required");
+            None
         };
 
         // Load the token repository from the file system
@@ -240,7 +238,7 @@ impl TokenRepository {
     /// # Returns
     ///
     /// Token with given value
-    pub fn validate_token(&self, header: &str) -> Result<Token, HTTPError> {
+    pub fn validate_token(&self, header: Option<&str>) -> Result<Token, HTTPError> {
         if self.init_token.is_none() {
             // Return placeholder
             return Ok(Token {
@@ -255,7 +253,7 @@ impl TokenRepository {
             });
         }
 
-        let value = parse_bearer_token(header)?;
+        let value = parse_bearer_token(header.unwrap_or(""))?;
 
         // Check init token first
         if let Some(init_token) = &self.init_token {
