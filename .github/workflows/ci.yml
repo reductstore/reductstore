@@ -15,7 +15,7 @@ on:
       - docs/**
       - README.md
       - CHANGELOG.md
-
+jobs:
   rust-fmt:
     runs-on: ubuntu-latest
     name: Rust Linter
