@@ -17,7 +17,7 @@ COPY rust rust
 COPY unit_tests unit_tests
 COPY benchmarks benchmarks
 COPY CMakeLists.txt .
-COPY VERSION VERSION
+COPY version version
 
 WORKDIR /build
 

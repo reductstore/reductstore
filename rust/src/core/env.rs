@@ -18,7 +18,7 @@ pub fn new_env() -> Box<Env> {
 
 impl Env {
     /// Create a new environment.
-    fn new() -> Env {
+    pub fn new() -> Env {
         Env {
             message: String::new(),
         }
@@ -35,7 +35,7 @@ impl Env {
     /// # Returns
     ///
     /// The value of the environment variable.
-    fn get<T: FromStr + Display + Default + PartialEq>(
+    pub fn get<T: FromStr + Display + Default + PartialEq>(
         &mut self,
         key: &str,
         default_value: T,
