@@ -23,8 +23,8 @@ jobs:
       - uses: actions/checkout@v3
       - name: Install rustfmt
         run: rustup component add rustfmt
-      - name: Check code in /rust
-        run: find rust/ -name "*.rs" | xargs rustfmt --check
+      - name: Check code
+        run: find . -name "*.rs" | xargs rustfmt --check
 
   build:
     name: Build Linux Docker image
@@ -61,11 +61,6 @@ jobs:
         build_type: [ "debug", "release" ]
 
     steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: image
-          path: /tmp/
       - name: Load image
         run: cargo test --${{ matrix.build_type }}
 
