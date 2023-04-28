@@ -1,8 +1,9 @@
-FROM reduct/ubuntu-build-image:main AS  builder
+FROM ubuntu:22.04 AS  builder
 
-RUN apt-get install -y \
+RUN apt-get update && apt-get install -y \
     build-essential \
-    curl
+    curl \
+    protobuf-compiler
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
@@ -11,25 +12,23 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /src
 
-COPY conanfile.txt .
 COPY src src
-COPY rust rust
-COPY unit_tests unit_tests
-COPY benchmarks benchmarks
-COPY CMakeLists.txt .
-COPY version version
+COPY Cargo.toml Cargo.toml
+COPY Cargo.lock Cargo.lock
+COPY build.rs build.rs
 
-WORKDIR /build
-
-ARG BUILD_TYPE=Release
-RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON /src
-RUN make -j4
+ARG BUILD_TYPE=release
+RUN cargo build --${BUILD_TYPE}
 
 
 FROM ubuntu:22.04
 
-RUN mkdir /data
-COPY --from=builder /build/bin/ /usr/local/bin/
-ENV PATH=/usr/local/bin/
+ARG BUILD_TYPE=release
+COPY --from=builder /src/target/${BUILD_TYPE}/reductstore /usr/local/bin/reductstore
 
+EXPOSE 8383
+
+RUN mkdir /data
+
+ENV PATH=/usr/local/bin/
 CMD ["reductstore"]

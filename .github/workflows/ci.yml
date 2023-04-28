@@ -15,22 +15,8 @@ on:
       - docs/**
       - README.md
       - CHANGELOG.md
-jobs:
-  cpplint:
-    runs-on: ubuntu-latest
-    name: C++ Linter
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install cpplint
-        run: pip install cpplint
-      - name: Check code in /src
-        run: find src/ -name "*.cc" -o -name "*.h"  | xargs cpplint
-      - name: Check code in /unit_tests
-        run: find unit_tests/ -name "*.cc" -o -name "*.h"  | xargs cpplint
-      - name: Check code in /benchmarks
-        run: find benchmarks/ -name "*.cc" -o -name "*.h"  | xargs cpplint
 
-  rustfmt:
+  rust-fmt:
     runs-on: ubuntu-latest
     name: Rust Linter
     steps:
@@ -44,11 +30,10 @@ jobs:
     name: Build Linux Docker image
     runs-on: ubuntu-latest
     needs:
-      - cpplint
-      - rustfmt
+      - rust-fmt
     strategy:
       matrix:
-        build_type: [ "Debug", "Release" ]
+        build_type: [ "debug", "release" ]
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
@@ -66,63 +51,14 @@ jobs:
           name: image
           path: /tmp/image_${{ matrix.build_type }}.tar
 
-  build_macos:
-    name: Build for MacOS-12
-    runs-on: macos-12
-    if: ${{false}}
-    needs:
-      - cpplint
-    steps:
-      - uses: actions/checkout@v3
-      - name: Select Xcode 13.4
-        run: sudo xcode-select --switch /Applications/Xcode_13.4.app
-      - name: Install conan dependencies and build
-        run: |
-          pip3 install -U pip
-          pipx install conan==1.58
-          brew install gcc@11
-          mkdir build && cd build
-          CC=gcc-11 CXX=g++-11 cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON  ..
-          cmake --build . -- -j
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: macos_binary
-          path: build/bin/
-
-  build_windows:
-    name: Build for Windows
-    runs-on: windows-2019
-    if: ${{false}}
-    needs:
-      - cpplint
-    steps:
-      - uses: actions/checkout@v3
-      - name: Update windows SDK
-        uses: fbactions/setup-winsdk@v1
-        with:
-          winsdk-build-version: 19041
-      - name: Install conan dependencies and build
-        shell: bash
-        run: |
-          pip3 install -U pip
-          pip3 install conan==1.58
-          mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DREDUCT_BUILD_TEST=ON -DREDUCT_BUILD_BENCHMARKS=ON -DCMAKE_SYSTEM_VERSION="10.0.19041.0"  ..
-          cmake --build . -j --config Release
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: windows_binary
-          path: build/bin/
-
   unit_tests:
-    name: Unit Tests On Linux
-    needs: build
+    name: Unit Tests
+    needs:
+      - rust-fmt
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        build_type: [ "Debug", "Release" ]
+        build_type: [ "debug", "release" ]
 
     steps:
       - name: Download artifact
@@ -131,39 +67,7 @@ jobs:
           name: image
           path: /tmp/
       - name: Load image
-        run: |
-          docker load --input /tmp/image_${{ matrix.build_type }}.tar
-          docker image ls -a
-      - name: Run tests
-        run: docker run ${{github.repository}} reduct-tests
-
-  unit_tests_macos:
-    name: Unit Tests On MacOs
-    needs: build_macos
-    runs-on: macos-12
-    steps:
-      - name: Download Macos artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: macos_binary
-          path: /tmp/
-      - name: Make executable
-        run: chmod +x /tmp/reduct-tests
-      - name: Run tests
-        run: /tmp/reduct-tests
-
-  unit_tests_windows:
-    name: Unit Tests On Windows
-    needs: build_windows
-    runs-on: windows-2019
-    steps:
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: windows_binary
-          path: ./bin
-      - name: Run tests
-        run: ./bin/reduct-tests
+        run: cargo test --${{ matrix.build_type }}
 
   api_tests:
     name: API Tests
@@ -171,7 +75,7 @@ jobs:
     needs: unit_tests
     strategy:
       matrix:
-        build_type: [ "Debug", "Release" ]
+        build_type: [ "debug", "release" ]
         token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
         include:
@@ -252,8 +156,6 @@ jobs:
     name: Push to DockerHub Registry
     needs:
       - api_tests
-      - unit_tests_macos
-      - unit_tests_windows
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v3
@@ -290,8 +192,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - api_tests
-      - unit_tests_macos
-      - unit_tests_windows
     name: Make release
     if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
