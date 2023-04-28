@@ -21,10 +21,8 @@ jobs:
     name: Rust Linter
     steps:
       - uses: actions/checkout@v3
-      - name: Install rustfmt
-        run: rustup component add rustfmt
       - name: Check code
-        run: find . -name "*.rs" | xargs rustfmt --check
+        run: cargo fmt --all -- --check
 
   build:
     name: Build Linux Docker image
