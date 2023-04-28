@@ -57,10 +57,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: Install Protobuf
+      - name: Install latest Rust and dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          apt-get update && apt-get install -y build-essential curl protobuf-compiler
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+
       - name: Run Tests
         run: cargo test ${{ matrix.build_type }}
 
