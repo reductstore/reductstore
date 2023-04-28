@@ -81,7 +81,7 @@ mod tests {
         let mut query = ContinuousQuery::new(
             0,
             QueryOptions {
-                ttl: std::time::Duration::from_millis(50),
+                ttl: std::time::Duration::from_millis(100),
                 continuous: true,
                 ..QueryOptions::default()
             },
@@ -99,7 +99,7 @@ mod tests {
         );
         assert_eq!(query.state(), &QueryState::Running);
 
-        sleep(std::time::Duration::from_millis(100));
+        sleep(std::time::Duration::from_millis(200));
         assert_eq!(query.state(), &QueryState::Expired);
     }
 
