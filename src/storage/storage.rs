@@ -6,13 +6,13 @@
 use log::info;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+
+use std::time::{Instant};
 
 use crate::core::status::HTTPError;
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::Labels;
-use crate::storage::proto::bucket_settings::QuotaType;
+
+
 use crate::storage::proto::{BucketInfoList, BucketSettings, Defaults, ServerInfo};
 
 /// Storage is the main entry point for the storage service.

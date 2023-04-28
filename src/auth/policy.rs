@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::core::status::HTTPError;
 
-use crate::auth::proto::token::Permissions;
+
 use crate::auth::proto::Token;
 
 /// Policy is a trait that defines the interface for a policy.

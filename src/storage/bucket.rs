@@ -183,7 +183,7 @@ impl Bucket {
         labels: Labels,
     ) -> Result<Rc<RefCell<RecordWriter>>, HTTPError> {
         self.keep_quota_for(content_size)?;
-        let mut entry = self.get_or_create_entry(name)?;
+        let entry = self.get_or_create_entry(name)?;
         entry.begin_write(time, content_size, content_type, labels)
     }
 

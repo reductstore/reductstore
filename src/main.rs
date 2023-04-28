@@ -9,7 +9,7 @@ use asset::asset_manager::ZipAssetManager;
 use auth::token_auth::TokenAuthorization;
 use auth::token_repository::TokenRepository;
 use crate::core::env::Env;
-use crate::core::logger::{init_log, Logger};
+use crate::core::logger::{Logger};
 use crate::storage::storage::Storage;
 
 
@@ -19,15 +19,15 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use bytes::{Buf, Bytes};
+use bytes::{Bytes};
 use http_body_util::{BodyExt, Full};
-use hyper::service::{Service, service_fn};
-use hyper::{body::Incoming as IncomingBody, header, Method, Request, Response, StatusCode};
-use hyper::body::Incoming;
-use hyper::server::conn::{http1, http2};
-use log::{debug, info};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::task;
+use hyper::service::{Service};
+use hyper::{body::Incoming as IncomingBody, Method, Request, Response};
+
+use hyper::server::conn::{http1};
+use log::{info};
+use tokio::net::{TcpListener};
+
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
@@ -65,13 +65,13 @@ impl Service<Request<IncomingBody>> for HttpServer {
         fn mk_response(s: String, status: u16) -> Result<Response<Full<Bytes>>> {
             Ok(Response::builder()
                 .status(status)
-                .body((Full::new(Bytes::from(s)))).unwrap())
+                .body(Full::new(Bytes::from(s))).unwrap())
         }
 
-        let INFO_PATH = format!("{}/info", self.api_base_path);
+        let _INFO_PATH = format!("{}/info", self.api_base_path);
         let resp = match (req.method(), req.uri().path()) {
-            (&Method::GET, INFO_PATH) => {
-                let mut comp = self.components.borrow_mut();
+            (&Method::GET, _INFO_PATH) => {
+                let comp = self.components.borrow_mut();
                 let info = comp.storage.info().unwrap();
 
                 let body = serde_json::to_string(&info).unwrap();
@@ -129,7 +129,7 @@ async fn run() {
         console: ZipAssetManager::new(""),
     };
 
-    let mut server = HttpServer {
+    let server = HttpServer {
         components: Rc::new(RefCell::new(components)),
         api_base_path,
         cert_path,
