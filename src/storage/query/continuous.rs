@@ -8,9 +8,9 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
 use crate::storage::reader::RecordReader;
-use std::cell::RefCell;
+
 use std::collections::BTreeSet;
-use std::rc::Rc;
+
 use std::sync::{Arc, RwLock};
 
 pub struct ContinuousQuery {

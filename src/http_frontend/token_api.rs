@@ -5,10 +5,10 @@
 
 use crate::auth::proto::token::Permissions;
 use http_body_util::BodyExt;
-use hyper::body::Body;
-use hyper::{body::Incoming as IncomingBody, Request};
+
+use hyper::Request;
 use prost::Message;
-use serde::de::Error;
+
 use std::fmt::Display;
 use std::sync::{Arc, RwLock};
 
@@ -24,7 +24,7 @@ impl TokenApi {
         components: Arc<RwLock<HttpServerComponents>>,
         _: Request<Body>,
     ) -> Result<TokenRepo, HttpError> {
-        let mut components = components.write().unwrap();
+        let components = components.write().unwrap();
 
         let mut list = TokenRepo::default();
         for x in components.token_repo.get_token_list()?.iter() {
@@ -107,7 +107,7 @@ mod tests {
     async fn test_create_token() {
         let (components, _) = setup();
 
-        let permissions = Permissions::default();
+        let _permissions = Permissions::default();
 
         let req = Builder::new()
             .uri("/tokens/new-token")
@@ -157,7 +157,7 @@ mod tests {
             .create_token("test", Permissions::default())
             .unwrap();
 
-        let mut req = Builder::new()
+        let req = Builder::new()
             .uri("/tokens/test")
             .body(Full::new(Bytes::from("")))
             .unwrap();

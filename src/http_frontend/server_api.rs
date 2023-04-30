@@ -7,7 +7,7 @@ use crate::auth::proto::Token;
 use crate::core::status::HttpError;
 use crate::http_frontend::http_server::HttpServerComponents;
 use crate::storage::proto::{BucketInfoList, ServerInfo};
-use hyper::{body::Incoming as IncomingBody, Request};
+use hyper::Request;
 use std::sync::{Arc, RwLock};
 
 pub struct ServerApi {}
@@ -56,14 +56,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_info() {
-        let (mut components, req) = setup();
+        let (components, req) = setup();
         let info = ServerApi::info(components, req).await.unwrap();
         assert_eq!(info.bucket_count, 2);
     }
 
     #[tokio::test]
     async fn test_list() {
-        let (mut components, req) = setup();
+        let (components, req) = setup();
 
         let list = ServerApi::list(components, req).await.unwrap();
         assert_eq!(list.buckets.len(), 2);
@@ -71,7 +71,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_me() {
-        let (mut components, req) = setup();
+        let (components, req) = setup();
         let token = ServerApi::me(components, req).await.unwrap();
         assert_eq!(token.name, "AUTHENTICATION-DISABLED");
     }

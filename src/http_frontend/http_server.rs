@@ -3,13 +3,11 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::arch::x86_64::_mm256_rcp_ps;
-use std::cell::RefCell;
 use std::collections::HashMap;
 
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
+
 use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
@@ -122,7 +120,7 @@ impl HttpServer {
         };
 
         let auth = {
-            let mut comp = comp.read().unwrap();
+            let comp = comp.read().unwrap();
             comp.auth.check(header, &comp.token_repo, policy)
         };
 

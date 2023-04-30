@@ -9,11 +9,9 @@ pub mod core;
 pub mod http_frontend;
 pub mod storage;
 
-use std::cell::RefCell;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
-use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
