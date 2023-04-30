@@ -5,7 +5,7 @@
 
 use crate::auth::policy::Policy;
 use crate::auth::token_repository::TokenRepository;
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 
 /// Authorization by token
 pub struct TokenAuthorization {
@@ -32,12 +32,12 @@ impl TokenAuthorization {
     /// * `authorization_header` - The value of the Authorization header.
     /// * `repo` - The token repository to validate the token value.
     /// * `policy` - The policy to validate the token permissions.
-    pub fn check(
+    pub fn check<Plc: Policy>(
         &self,
         authorization_header: Option<&str>,
         repo: &TokenRepository,
-        policy: &dyn Policy,
-    ) -> Result<(), HTTPError> {
+        policy: Plc,
+    ) -> Result<(), HttpError> {
         if self.api_token.is_empty() {
             // No API token set, so no authorization is required.
             return Ok(());
@@ -56,35 +56,33 @@ mod tests {
 
     #[test]
     fn test_anonymous_policy() {
-        let policy = AnonymousPolicy {};
         let (repo, auth) = setup();
-        let result = auth.check(Some("invalid"), &repo, &policy);
+        let result = auth.check(Some("invalid"), &repo, AnonymousPolicy {});
 
         assert!(result.is_ok());
 
-        let result = auth.check(Some("Bearer invalid"), &repo, &policy);
+        let result = auth.check(Some("Bearer invalid"), &repo, AnonymousPolicy {});
 
         assert!(result.is_ok());
 
-        let result = auth.check(Some("Bearer test"), &repo, &policy);
+        let result = auth.check(Some("Bearer test"), &repo, AnonymousPolicy {});
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_full_access_policy() {
-        let policy = FullAccessPolicy {};
         let (repo, auth) = setup();
-        let result = auth.check(Some("invalid"), &repo, &policy);
+        let result = auth.check(Some("invalid"), &repo, FullAccessPolicy {});
 
         assert_eq!(
             result,
-            Err(HTTPError::unauthorized("No bearer token in request header"))
+            Err(HttpError::unauthorized("No bearer token in request header"))
         );
 
-        let result = auth.check(Some("Bearer invalid"), &repo, &policy);
-        assert_eq!(result, Err(HTTPError::unauthorized("Invalid token")));
+        let result = auth.check(Some("Bearer invalid"), &repo, FullAccessPolicy {});
+        assert_eq!(result, Err(HttpError::unauthorized("Invalid token")));
 
-        let result = auth.check(Some("Bearer test"), &repo, &policy);
+        let result = auth.check(Some("Bearer test"), &repo, FullAccessPolicy {});
         assert!(result.is_ok());
     }
 

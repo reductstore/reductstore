@@ -15,7 +15,7 @@ use prost_wkt_types::Timestamp;
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
 const INIT_TOKEN_NAME: &str = "init-token";
@@ -28,9 +28,9 @@ pub struct TokenRepository {
     repo: HashMap<String, Token>,
 }
 
-pub fn parse_bearer_token(authorization_header: &str) -> Result<String, HTTPError> {
+pub fn parse_bearer_token(authorization_header: &str) -> Result<String, HttpError> {
     if !authorization_header.starts_with("Bearer ") {
-        return Err(HTTPError::unauthorized("No bearer token in request header"));
+        return Err(HttpError::unauthorized("No bearer token in request header"));
     }
 
     let token = authorization_header[7..].to_string();
@@ -116,19 +116,19 @@ impl TokenRepository {
         &mut self,
         name: &str,
         permissions: Permissions,
-    ) -> Result<TokenCreateResponse, HTTPError> {
+    ) -> Result<TokenCreateResponse, HttpError> {
         if self.init_token.is_none() {
-            return Err(HTTPError::bad_request("Authentication is disabled"));
+            return Err(HttpError::bad_request("Authentication is disabled"));
         }
 
         // Check if the token isn't empty
         if name.is_empty() {
-            return Err(HTTPError::unprocessable_entity("Token name can't be empty"));
+            return Err(HttpError::unprocessable_entity("Token name can't be empty"));
         }
 
         // Check if the token already exists
         if self.repo.contains_key(name) {
-            return Err(HTTPError::conflict(
+            return Err(HttpError::conflict(
                 format!("Token '{}' already exists", name).as_str(),
             ));
         }
@@ -160,9 +160,9 @@ impl TokenRepository {
     ///
     /// `name` - The name of the token
     /// `permissions` - The permissions of the token
-    pub fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), HTTPError> {
+    pub fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), HttpError> {
         if self.init_token.is_none() {
-            return Err(HTTPError::bad_request("Authentication is disabled"));
+            return Err(HttpError::bad_request("Authentication is disabled"));
         }
 
         debug!("Updating token '{}'", name);
@@ -176,7 +176,7 @@ impl TokenRepository {
                 Ok(())
             }
 
-            None => Err(HTTPError::not_found(
+            None => Err(HttpError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
             )),
         }
@@ -190,9 +190,9 @@ impl TokenRepository {
     ///
     /// # Returns
     /// The token without value
-    pub fn find_by_name(&self, name: &str) -> Result<Token, HTTPError> {
+    pub fn find_by_name(&self, name: &str) -> Result<Token, HttpError> {
         if self.init_token.is_none() {
-            return Err(HTTPError::bad_request("Authentication is disabled"));
+            return Err(HttpError::bad_request("Authentication is disabled"));
         }
 
         match self.repo.get(name) {
@@ -202,7 +202,7 @@ impl TokenRepository {
                 created_at: token.created_at.clone(),
                 permissions: token.permissions.clone(),
             }),
-            None => Err(HTTPError::not_found(
+            None => Err(HttpError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
             )),
         }
@@ -212,7 +212,7 @@ impl TokenRepository {
     ///
     /// # Returns
     /// The token list, it the authentication is disabled, it returns an empty list
-    pub fn get_token_list(&self) -> Result<Vec<Token>, HTTPError> {
+    pub fn get_token_list(&self) -> Result<Vec<Token>, HttpError> {
         if self.init_token.is_none() {
             return Ok(vec![]);
         }
@@ -238,7 +238,7 @@ impl TokenRepository {
     /// # Returns
     ///
     /// Token with given value
-    pub fn validate_token(&self, header: Option<&str>) -> Result<Token, HTTPError> {
+    pub fn validate_token(&self, header: Option<&str>) -> Result<Token, HttpError> {
         if self.init_token.is_none() {
             // Return placeholder
             return Ok(Token {
@@ -277,7 +277,7 @@ impl TokenRepository {
                     permissions: token.permissions.clone(),
                 })
             }
-            None => Err(HTTPError::unauthorized("Invalid token")),
+            None => Err(HttpError::unauthorized("Invalid token")),
         }
     }
 
@@ -289,13 +289,13 @@ impl TokenRepository {
     /// # Returns
     ///
     /// `Ok(())` if the token was removed successfully
-    pub fn remove_token(&mut self, name: &str) -> Result<(), HTTPError> {
+    pub fn remove_token(&mut self, name: &str) -> Result<(), HttpError> {
         if self.init_token.is_none() {
             return Ok(());
         }
 
         if self.repo.remove(name).is_none() {
-            Err(HTTPError::not_found(
+            Err(HttpError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
             ))
         } else {
@@ -311,7 +311,7 @@ impl TokenRepository {
     ///
     /// # Returns
     /// `Ok(())` if the bucket was removed successfully
-    pub fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HTTPError> {
+    pub fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HttpError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
                 permissions.read.retain(|b| b != bucket);
@@ -323,15 +323,15 @@ impl TokenRepository {
     }
 
     /// Save the token repository to the file system
-    fn save_repo(&mut self) -> Result<(), HTTPError> {
+    fn save_repo(&mut self) -> Result<(), HttpError> {
         let repo = TokenRepo {
             tokens: self.repo.values().cloned().collect(),
         };
         let mut buf = Vec::new();
         repo.encode(&mut buf)
-            .map_err(|_| HTTPError::internal_server_error("Could not encode token repository"))?;
+            .map_err(|_| HttpError::internal_server_error("Could not encode token repository"))?;
         std::fs::write(&self.config_path, buf).map_err(|err| {
-            HTTPError::internal_server_error(
+            HttpError::internal_server_error(
                 format!(
                     "Could not write token repository to {}: {}",
                     self.config_path.as_path().display(),
@@ -376,7 +376,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::unprocessable_entity("Token name can't be empty"))
+            Err(HttpError::unprocessable_entity("Token name can't be empty"))
         );
     }
 
@@ -404,7 +404,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::conflict("Token 'test' already exists"))
+            Err(HttpError::conflict("Token 'test' already exists"))
         );
     }
 
@@ -459,7 +459,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::bad_request("Authentication is disabled"))
+            Err(HttpError::bad_request("Authentication is disabled"))
         );
     }
 
@@ -515,7 +515,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+            Err(HttpError::not_found("Token 'test' doesn't exist"))
         );
     }
 
@@ -567,7 +567,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::bad_request("Authentication is disabled"))
+            Err(HttpError::bad_request("Authentication is disabled"))
         );
     }
 
@@ -600,7 +600,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+            Err(HttpError::not_found("Token 'test' doesn't exist"))
         );
     }
 
@@ -611,7 +611,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::bad_request("Authentication is disabled"))
+            Err(HttpError::bad_request("Authentication is disabled"))
         );
     }
 
@@ -688,7 +688,7 @@ mod tests {
         let repo = setup();
         let token = repo.validate_token(Some("Bearer invalid-value"));
 
-        assert_eq!(token, Err(HTTPError::unauthorized("Invalid token")));
+        assert_eq!(token, Err(HttpError::unauthorized("Invalid token")));
     }
 
     #[test]
@@ -729,7 +729,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+            Err(HttpError::not_found("Token 'test' doesn't exist"))
         );
     }
 
@@ -754,7 +754,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HTTPError::not_found("Token 'test' doesn't exist"))
+            Err(HttpError::not_found("Token 'test' doesn't exist"))
         );
     }
 

@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::{Arc, RwLock};
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -77,7 +78,7 @@ async fn run() {
     );
 
     let server = HttpServer::new(
-        Rc::new(RefCell::new(components)),
+        Arc::new(RwLock::new(components)),
         api_base_path,
         cert_path,
         cert_key_path,

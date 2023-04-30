@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::{HTTPError, HTTPStatus};
+use crate::core::status::{HTTPStatus, HttpError};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
@@ -11,6 +11,7 @@ use crate::storage::reader::RecordReader;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
@@ -37,19 +38,19 @@ impl Query for ContinuousQuery {
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError> {
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
         match self.query.next(block_indexes, block_manager) {
             Ok((record, last)) => {
-                self.last_timestamp = record.borrow().timestamp();
+                self.last_timestamp = record.read().unwrap().timestamp();
                 Ok((record, last))
             }
-            Err(HTTPError {
+            Err(HttpError {
                 status: HTTPStatus::NoContent,
                 ..
             }) => {
                 self.query =
                     HistoricalQuery::new(self.last_timestamp + 1, u64::MAX, self.options.clone());
-                Err(HTTPError {
+                Err(HttpError {
                     status: HTTPStatus::NoContent,
                     message: "No content".to_string(),
                 })
@@ -88,11 +89,11 @@ mod tests {
         );
         {
             let (reader, _) = query.next(&block_indexes, &mut block_manager).unwrap();
-            assert_eq!(reader.borrow().timestamp(), 0);
+            assert_eq!(reader.read().unwrap().timestamp(), 0);
         }
         assert_eq!(
             query.next(&block_indexes, &mut block_manager).err(),
-            Some(HTTPError {
+            Some(HttpError {
                 status: HTTPStatus::NoContent,
                 message: "No content".to_string(),
             })
@@ -129,7 +130,7 @@ mod tests {
 
         {
             let writer = block_manager.begin_write(&block, 0).unwrap();
-            writer.borrow_mut().write(b"0123456789", true).unwrap();
+            writer.write().unwrap().write(b"0123456789", true).unwrap();
         }
 
         block_manager.finish(&block).unwrap();

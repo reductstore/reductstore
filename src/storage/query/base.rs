@@ -3,12 +3,13 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::reader::RecordReader;
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 #[derive(PartialEq, Debug)]
@@ -43,7 +44,7 @@ pub trait Query {
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError>;
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError>;
 
     /// Get the state of the query.
     fn state(&self) -> &QueryState;

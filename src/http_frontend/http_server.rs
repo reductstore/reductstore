@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -23,7 +24,8 @@ use crate::auth::proto::TokenRepo;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::TokenRepository;
 
-use crate::core::status::{HTTPError, HTTPStatus};
+use crate::core::status::{HTTPStatus, HttpError};
+use crate::http_frontend::server_api::ServerApi;
 use crate::storage::storage::Storage;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
@@ -37,7 +39,7 @@ pub struct HttpServerComponents {
 
 #[derive(Clone)]
 pub struct HttpServer {
-    components: Rc<RefCell<HttpServerComponents>>,
+    components: Arc<RwLock<HttpServerComponents>>,
     api_base_path: String,
     cert_path: String,
     cert_key_path: String,
@@ -45,7 +47,7 @@ pub struct HttpServer {
 
 impl HttpServer {
     pub fn new(
-        components: Rc<RefCell<HttpServerComponents>>,
+        components: Arc<RwLock<HttpServerComponents>>,
         api_base_path: String,
         cert_path: String,
         cert_key_path: String,
@@ -58,14 +60,21 @@ impl HttpServer {
         }
     }
 
-    fn process_msg<Msg: Serialize, Plc: Policy>(
-        comp: &HttpServerComponents,
+    async fn process_msg<Msg: Serialize, Plc: Policy, Handle, Fut>(
+        comp: Arc<RwLock<HttpServerComponents>>,
         policy: Plc,
         req: Request<IncomingBody>,
-        msg: Result<Msg, HTTPError>,
-    ) -> Result<Response<Full<Bytes>>, GenericError> {
+        msg: Handle,
+    ) -> Result<Response<Full<Bytes>>, GenericError>
+    where
+        Handle: FnOnce(Arc<RwLock<HttpServerComponents>>, Request<IncomingBody>) -> Fut,
+        Fut: Future<Output = Result<Msg, HttpError>> + Send,
+    {
+        // Check errors and access, then create response
+
         fn mk_response(
-            req: &Request<IncomingBody>,
+            method: Method,
+            path: String,
             content: String,
             status: HTTPStatus,
             headers: HashMap<String, String>,
@@ -82,9 +91,9 @@ impl HttpServer {
             }
 
             if status >= HTTPStatus::InternalServerError {
-                error!("{} {} [{}]", req.method(), req.uri().path(), status as u16);
+                error!("{} {} [{}]", method, path, status as u16);
             } else {
-                debug!("{} {} [{}]", req.method(), req.uri().path(), status as u16);
+                debug!("{} {} [{}]", method, path, status as u16);
             }
 
             if status >= HTTPStatus::BadRequest {
@@ -92,7 +101,7 @@ impl HttpServer {
                 content = format!("{{\"detail\": \"{}\"}}", content);
             }
 
-            let content = if req.method() == &Method::HEAD {
+            let content = if method == &Method::HEAD {
                 String::new()
             } else {
                 content
@@ -109,17 +118,26 @@ impl HttpServer {
             None => None,
         };
 
-        let msg = match comp.auth.check(header, &comp.token_repo, &policy) {
-            Ok(()) => msg,
-            Err(e) => Err(e),
+        let auth = {
+            let mut comp = comp.read().unwrap();
+            comp.auth.check(header, &comp.token_repo, policy)
+        };
+
+        let method = req.method().clone();
+        let path = req.uri().path().to_string();
+        let msg = {
+            match auth {
+                Ok(_) => msg(Arc::clone(&comp), req).await,
+                Err(e) => Err(e),
+            }
         };
 
         match msg {
             Ok(msg) => {
                 let body = serde_json::to_string(&msg).unwrap();
-                mk_response(&req, body, HTTPStatus::OK, HashMap::new())
+                mk_response(method, path, body, HTTPStatus::OK, HashMap::new())
             }
-            Err(e) => mk_response(&req, e.message.clone(), e.status, HashMap::new()),
+            Err(e) => mk_response(method, path, e.message.clone(), e.status, HashMap::new()),
         }
     }
 }
@@ -141,43 +159,52 @@ impl Service<Request<IncomingBody>> for HttpServer {
         let alive_path: String = format!("{}api/v1/alive", self.api_base_path);
         let me_path: String = format!("{}api/v1/me", self.api_base_path);
 
-        let comp = self.components.borrow_mut();
         let route = (req.method(), req.uri().path());
-        let resp = if route == (&Method::GET, &info_path) {
+
+        if route == (&Method::GET, &info_path) {
             // GET /info
-            HttpServer::process_msg(&comp, AuthenticatedPolicy {}, req, comp.storage.info())
-        } else if route == (&Method::GET, &list_path) {
-            // GET /list
-            HttpServer::process_msg(
-                &comp,
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
                 AuthenticatedPolicy {},
                 req,
-                comp.storage.get_bucket_list(),
-            )
+                ServerApi::info,
+            );
+            Box::pin(resp)
+        } else if route == (&Method::GET, &list_path) {
+            // GET /list
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
+                AuthenticatedPolicy {},
+                req,
+                ServerApi::list,
+            );
+            Box::pin(resp)
         } else if route == (&Method::HEAD, &alive_path) {
-            // GET /alive
-            HttpServer::process_msg(&comp, AnonymousPolicy {}, req, comp.storage.info())
+            // HEAD /alive
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
+                AnonymousPolicy {},
+                req,
+                ServerApi::info,
+            );
+            Box::pin(resp)
         } else if route == (&Method::GET, &me_path) {
-            let headers = req.headers().clone();
-            let header = match headers.get("Authorization") {
-                Some(header) => header.to_str().ok(),
-                None => None,
-            };
-            HttpServer::process_msg(
-                &comp,
+            // GET /me
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
                 AnonymousPolicy {},
                 req,
-                comp.token_repo.validate_token(header),
-            )
+                ServerApi::me,
+            );
+            Box::pin(resp)
         } else {
-            HttpServer::process_msg::<TokenRepo, AnonymousPolicy>(
-                &comp,
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
                 AnonymousPolicy {},
                 req,
-                Err(HTTPError::not_found("Not found")),
-            )
-        };
-
-        Box::pin(async move { resp })
+                |_, _| async { Err::<TokenRepo, HttpError>(HttpError::not_found("Not found.")) },
+            );
+            Box::pin(resp)
+        }
     }
 }

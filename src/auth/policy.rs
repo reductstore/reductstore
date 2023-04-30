@@ -2,7 +2,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 
 use crate::auth::proto::Token;
 
@@ -20,14 +20,14 @@ pub trait Policy {
     ///
     /// # Returns
     /// * `Result<(), HTTPError>` - The result of the validation.
-    fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError>;
+    fn validate(&self, token: Result<Token, HttpError>) -> Result<(), HttpError>;
 }
 
 /// AnonymousPolicy validates any token and even if the token is invalid.
 pub struct AnonymousPolicy {}
 
 impl Policy for AnonymousPolicy {
-    fn validate(&self, _: Result<Token, HTTPError>) -> Result<(), HTTPError> {
+    fn validate(&self, _: Result<Token, HttpError>) -> Result<(), HttpError> {
         // Allow any token to perform any action.
         Ok(())
     }
@@ -37,7 +37,7 @@ impl Policy for AnonymousPolicy {
 pub struct AuthenticatedPolicy {}
 
 impl Policy for AuthenticatedPolicy {
-    fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
+    fn validate(&self, token: Result<Token, HttpError>) -> Result<(), HttpError> {
         token?;
         Ok(())
     }
@@ -47,15 +47,15 @@ impl Policy for AuthenticatedPolicy {
 pub struct FullAccessPolicy {}
 
 impl Policy for FullAccessPolicy {
-    fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
+    fn validate(&self, token: Result<Token, HttpError>) -> Result<(), HttpError> {
         if token?
             .permissions
-            .ok_or(HTTPError::internal_server_error("No permissions set"))?
+            .ok_or(HttpError::internal_server_error("No permissions set"))?
             .full_access
         {
             Ok(())
         } else {
-            Err(HTTPError::forbidden("Token doesn't have full access"))
+            Err(HttpError::forbidden("Token doesn't have full access"))
         }
     }
 }
@@ -66,10 +66,10 @@ pub struct ReadAccessPolicy {
 }
 
 impl Policy for ReadAccessPolicy {
-    fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
+    fn validate(&self, token: Result<Token, HttpError>) -> Result<(), HttpError> {
         let permissions = &token?
             .permissions
-            .ok_or(HTTPError::internal_server_error("No permissions set"))?;
+            .ok_or(HttpError::internal_server_error("No permissions set"))?;
 
         if permissions.full_access {
             return Ok(());
@@ -81,7 +81,7 @@ impl Policy for ReadAccessPolicy {
             }
         }
 
-        Err(HTTPError::forbidden(
+        Err(HttpError::forbidden(
             format!(
                 "Token doesn't have read access for the {} bucket",
                 self.bucket
@@ -97,10 +97,10 @@ pub struct WriteAccessPolicy {
 }
 
 impl Policy for WriteAccessPolicy {
-    fn validate(&self, token: Result<Token, HTTPError>) -> Result<(), HTTPError> {
+    fn validate(&self, token: Result<Token, HttpError>) -> Result<(), HttpError> {
         let permissions = &token?
             .permissions
-            .ok_or(HTTPError::internal_server_error("No permissions set"))?;
+            .ok_or(HttpError::internal_server_error("No permissions set"))?;
 
         if permissions.full_access {
             return Ok(());
@@ -112,7 +112,7 @@ impl Policy for WriteAccessPolicy {
             }
         }
 
-        Err(HTTPError::forbidden(
+        Err(HttpError::forbidden(
             format!(
                 "Token doesn't have write access for the {} bucket",
                 self.bucket
@@ -132,7 +132,7 @@ mod tests {
         let policy = AnonymousPolicy {};
         assert!(policy.validate(Ok(Token::default())).is_ok());
         assert!(policy
-            .validate(Err(HTTPError::forbidden("Invalid token")))
+            .validate(Err(HttpError::forbidden("Invalid token")))
             .is_ok());
     }
 
@@ -141,8 +141,8 @@ mod tests {
         let policy = AuthenticatedPolicy {};
         assert!(policy.validate(Ok(Token::default())).is_ok());
         assert_eq!(
-            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
-            Err(HTTPError::forbidden("Invalid token"))
+            policy.validate(Err(HttpError::forbidden("Invalid token"))),
+            Err(HttpError::forbidden("Invalid token"))
         );
     }
 
@@ -162,12 +162,12 @@ mod tests {
         token.permissions.as_mut().unwrap().full_access = false;
         assert_eq!(
             policy.validate(Ok(token)),
-            Err(HTTPError::forbidden("Token doesn't have full access"))
+            Err(HttpError::forbidden("Token doesn't have full access"))
         );
 
         assert_eq!(
-            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
-            Err(HTTPError::forbidden("Invalid token"))
+            policy.validate(Err(HttpError::forbidden("Invalid token"))),
+            Err(HttpError::forbidden("Invalid token"))
         );
     }
 
@@ -193,14 +193,14 @@ mod tests {
         token.permissions.as_mut().unwrap().read = vec!["bucket2".to_string()];
         assert_eq!(
             policy.validate(Ok(token)),
-            Err(HTTPError::forbidden(
+            Err(HttpError::forbidden(
                 "Token doesn't have read access for the bucket bucket"
             ))
         );
 
         assert_eq!(
-            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
-            Err(HTTPError::forbidden("Invalid token"))
+            policy.validate(Err(HttpError::forbidden("Invalid token"))),
+            Err(HttpError::forbidden("Invalid token"))
         );
     }
 
@@ -226,14 +226,14 @@ mod tests {
         token.permissions.as_mut().unwrap().write = vec!["bucket2".to_string()];
         assert_eq!(
             policy.validate(Ok(token)),
-            Err(HTTPError::forbidden(
+            Err(HttpError::forbidden(
                 "Token doesn't have write access for the bucket bucket"
             ))
         );
 
         assert_eq!(
-            policy.validate(Err(HTTPError::forbidden("Invalid token"))),
-            Err(HTTPError::forbidden("Invalid token"))
+            policy.validate(Err(HttpError::forbidden("Invalid token"))),
+            Err(HttpError::forbidden("Invalid token"))
         );
     }
 }

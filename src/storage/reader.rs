@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 use crate::storage::proto::{ts_to_us, Block};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -45,7 +45,7 @@ impl RecordReader {
         block: &Block,
         record_index: usize,
         chunk_size: u64,
-    ) -> Result<RecordReader, HTTPError> {
+    ) -> Result<RecordReader, HttpError> {
         let mut file = OpenOptions::new().read(true).open(path)?;
         let record = &block.records[record_index];
         let offset = record.begin;
@@ -72,7 +72,7 @@ impl RecordReader {
     ///
     /// * `DataChunk` - The next chunk of data.
     /// * `HTTPError` - If the data cannot be read.
-    pub fn read(&mut self) -> Result<DataChunk, HTTPError> {
+    pub fn read(&mut self) -> Result<DataChunk, HttpError> {
         let buffer_size = std::cmp::min(self.chunk_size, self.content_length - self.written_bytes);
         let mut buf = vec![0u8; buffer_size as usize];
         let read = self.file.read(&mut *buf)?;

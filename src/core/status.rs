@@ -56,7 +56,7 @@ pub enum HTTPStatus {
 
 /// An HTTP error, we use it for error handling.
 #[derive(PartialEq, Debug)]
-pub struct HTTPError {
+pub struct HttpError {
     /// The HTTP status code.
     pub status: HTTPStatus,
 
@@ -64,35 +64,35 @@ pub struct HTTPError {
     pub message: String,
 }
 
-impl Display for HTTPError {
+impl Display for HttpError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
         write!(f, "[{:?}] {}", self.status, self.message)
     }
 }
 
-impl From<std::io::Error> for HTTPError {
+impl From<std::io::Error> for HttpError {
     fn from(err: std::io::Error) -> Self {
         // An IO error is an internal server error
-        HTTPError {
+        HttpError {
             status: HTTPStatus::InternalServerError,
             message: err.to_string(),
         }
     }
 }
 
-impl From<SystemTimeError> for HTTPError {
+impl From<SystemTimeError> for HttpError {
     fn from(err: SystemTimeError) -> Self {
         // A system time error is an internal server error
-        HTTPError {
+        HttpError {
             status: HTTPStatus::InternalServerError,
             message: err.to_string(),
         }
     }
 }
 
-impl HTTPError {
+impl HttpError {
     pub fn new(status: HTTPStatus, message: &str) -> Self {
-        HTTPError {
+        HttpError {
             status,
             message: message.to_string(),
         }
@@ -106,80 +106,80 @@ impl HTTPError {
         &self.message
     }
 
-    pub fn ok() -> HTTPError {
-        HTTPError {
+    pub fn ok() -> HttpError {
+        HttpError {
             status: HTTPStatus::OK,
             message: "".to_string(),
         }
     }
 
     /// Create a no content error.
-    pub fn no_content(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn no_content(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::NoContent,
             message: msg.to_string(),
         }
     }
 
     /// Create a not found error.
-    pub fn not_found(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn not_found(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::NotFound,
             message: msg.to_string(),
         }
     }
 
     /// Create a conflict error.
-    pub fn conflict(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn conflict(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::Conflict,
             message: msg.to_string(),
         }
     }
 
     /// Create a bad request error.
-    pub fn bad_request(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn bad_request(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::BadRequest,
             message: msg.to_string(),
         }
     }
 
     /// Create an unauthorized error.
-    pub fn unauthorized(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn unauthorized(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::Unauthorized,
             message: msg.to_string(),
         }
     }
 
     /// Create a forbidden error.
-    pub fn forbidden(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn forbidden(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::Forbidden,
             message: msg.to_string(),
         }
     }
 
     /// Create an unprocessable entity error.
-    pub fn unprocessable_entity(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn unprocessable_entity(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::UnprocessableEntity,
             message: msg.to_string(),
         }
     }
 
     /// Create a too early error.
-    pub fn too_early(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn too_early(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::TooEarly,
             message: msg.to_string(),
         }
     }
 
     /// Create a bad request error.
-    pub fn internal_server_error(msg: &str) -> HTTPError {
-        HTTPError {
+    pub fn internal_server_error(msg: &str) -> HttpError {
+        HttpError {
             status: HTTPStatus::InternalServerError,
             message: msg.to_string(),
         }

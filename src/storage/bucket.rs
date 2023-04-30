@@ -12,8 +12,9 @@ use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfo, BucketSettings};
@@ -48,7 +49,7 @@ impl Bucket {
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
-    ) -> Result<Bucket, HTTPError> {
+    ) -> Result<Bucket, HttpError> {
         let path = path.join(name);
         std::fs::create_dir_all(&path)?;
 
@@ -73,10 +74,10 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn restore(path: PathBuf) -> Result<Bucket, HTTPError> {
+    pub fn restore(path: PathBuf) -> Result<Bucket, HttpError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = BucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
-            HTTPError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
+            HttpError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
         })?;
 
         let settings = Self::fill_settings(settings, Self::defaults());
@@ -114,7 +115,7 @@ impl Bucket {
         }
     }
 
-    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, HTTPError> {
+    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, HttpError> {
         if !self.entries.contains_key(key) {
             let entry = Entry::new(
                 &key,
@@ -135,13 +136,13 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Result<(), HTTPError>` - The result or an HTTPError
-    pub fn remove(&self) -> Result<(), HTTPError> {
+    pub fn remove(&self) -> Result<(), HttpError> {
         std::fs::remove_dir_all(&self.path)?;
         Ok(())
     }
 
     /// Return bucket stats
-    pub fn info(&self) -> Result<BucketInfo, HTTPError> {
+    pub fn info(&self) -> Result<BucketInfo, HttpError> {
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
@@ -181,7 +182,7 @@ impl Bucket {
         content_size: u64,
         content_type: String,
         labels: Labels,
-    ) -> Result<Rc<RefCell<RecordWriter>>, HTTPError> {
+    ) -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
         self.keep_quota_for(content_size)?;
         let entry = self.get_or_create_entry(name)?;
         entry.begin_write(time, content_size, content_type, labels)
@@ -202,12 +203,12 @@ impl Bucket {
         &mut self,
         name: &str,
         time: u64,
-    ) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
+    ) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
         let entry = self.get_or_create_entry(name)?;
         entry.begin_read(time)
     }
 
-    fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HTTPError> {
+    fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HttpError> {
         match QuotaType::from_i32(self.settings.quota_type.unwrap()).unwrap() {
             QuotaType::None => Ok(()),
             QuotaType::Fifo => {
@@ -246,7 +247,7 @@ impl Bucket {
                     }
 
                     if !success {
-                        return Err(HTTPError::internal_server_error(
+                        return Err(HttpError::internal_server_error(
                             format!("Failed to keep quota of '{}'", self.name()).as_str(),
                         ));
                     }
@@ -278,7 +279,7 @@ impl Bucket {
         &self.settings
     }
 
-    pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), HTTPError> {
+    pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), HttpError> {
         self.settings = Self::fill_settings(settings, Self::defaults());
         for entry in self.entries.values_mut() {
             entry.set_settings(EntrySettings {
@@ -308,11 +309,11 @@ impl Bucket {
         settings
     }
 
-    fn save_settings(&self) -> Result<(), HTTPError> {
+    fn save_settings(&self) -> Result<(), HttpError> {
         let path = self.path.join(SETTINGS_NAME);
         let mut buf = BytesMut::new();
         self.settings.encode(&mut buf).map_err(|e| {
-            HTTPError::internal_server_error(
+            HttpError::internal_server_error(
                 format!("Failed to encode bucket settings: {}", e).as_str(),
             )
         })?;
@@ -392,7 +393,7 @@ mod tests {
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).err(),
-            Some(HTTPError::not_found("No record with timestamp 0"))
+            Some(HttpError::not_found("No record with timestamp 0"))
         );
     }
 
@@ -401,7 +402,7 @@ mod tests {
         entry_name: &str,
         time: u64,
         content: &[u8],
-    ) -> Result<(), HTTPError> {
+    ) -> Result<(), HttpError> {
         let writer = bucket.begin_write(
             entry_name,
             time,
@@ -409,13 +410,13 @@ mod tests {
             "".to_string(),
             Labels::new(),
         )?;
-        writer.borrow_mut().write(content, true)?;
+        writer.write().unwrap().write(content, true)?;
         Ok(())
     }
 
-    fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, HTTPError> {
+    fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, HttpError> {
         let reader = bucket.begin_read(entry_name, time)?;
-        let data = reader.borrow_mut().read()?.data;
+        let data = reader.write().unwrap().read()?.data;
         Ok(data)
     }
 

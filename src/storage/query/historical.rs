@@ -6,9 +6,10 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 use crate::storage::block_manager::{BlockManager, ManageBlock};
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
@@ -43,7 +44,7 @@ impl Query for HistoricalQuery {
         &mut self,
         block_index: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError> {
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
         self.last_update = Instant::now();
 
         let find_first_block = |start| -> u64 {
@@ -136,7 +137,7 @@ impl Query for HistoricalQuery {
 
         if records.is_empty() {
             self.state = QueryState::Done;
-            return Err(HTTPError::no_content("No content"));
+            return Err(HttpError::no_content("No content"));
         }
 
         records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
@@ -196,7 +197,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow_mut().read().unwrap(),
+                reader.write().unwrap().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -219,7 +220,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow_mut().read().unwrap(),
+                reader.write().unwrap().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -229,7 +230,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow_mut().read().unwrap(),
+                reader.write().unwrap().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -239,7 +240,7 @@ mod tests {
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HTTPError {
+            Some(HttpError {
                 status: HTTPStatus::NoContent,
                 message: "No content".to_string(),
             })
@@ -255,7 +256,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow_mut().read().unwrap(),
+                reader.write().unwrap().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -265,7 +266,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow_mut().read().unwrap(),
+                reader.write().unwrap().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -275,7 +276,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow_mut().read().unwrap(),
+                reader.write().unwrap().read().unwrap(),
                 DataChunk {
                     data: Vec::from("0123456789"),
                     last: true,
@@ -284,7 +285,7 @@ mod tests {
         }
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HTTPError {
+            Some(HttpError {
                 status: HTTPStatus::NoContent,
                 message: "No content".to_string(),
             })
@@ -309,7 +310,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow().labels(),
+                reader.read().unwrap().labels(),
                 &HashMap::from([
                     ("block".to_string(), "2".to_string()),
                     ("record".to_string(), "1".to_string()),
@@ -319,7 +320,7 @@ mod tests {
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HTTPError {
+            Some(HttpError {
                 status: HTTPStatus::NoContent,
                 message: "No content".to_string(),
             })
@@ -344,7 +345,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow().labels(),
+                reader.read().unwrap().labels(),
                 &HashMap::from([
                     ("block".to_string(), "1".to_string()),
                     ("record".to_string(), "2".to_string()),
@@ -354,7 +355,7 @@ mod tests {
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
-                reader.borrow().labels(),
+                reader.read().unwrap().labels(),
                 &HashMap::from([
                     ("block".to_string(), "2".to_string()),
                     ("record".to_string(), "1".to_string()),
@@ -364,7 +365,7 @@ mod tests {
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HTTPError {
+            Some(HttpError {
                 status: HTTPStatus::NoContent,
                 message: "No content".to_string(),
             })
@@ -429,12 +430,12 @@ mod tests {
         {
             let writer = block_manager.begin_write(&block, 0).unwrap();
 
-            writer.borrow_mut().write(b"0123456789", true).unwrap();
+            writer.write().unwrap().write(b"0123456789", true).unwrap();
         }
 
         {
             let writer = block_manager.begin_write(&block, 1).unwrap();
-            writer.borrow_mut().write(b"0123456789", true).unwrap();
+            writer.write().unwrap().write(b"0123456789", true).unwrap();
         }
 
         block_manager.finish(&block).unwrap();
@@ -471,7 +472,7 @@ mod tests {
 
         {
             let writer = block_manager.begin_write(&block, 0).unwrap();
-            writer.borrow_mut().write(b"0123456789", true).unwrap();
+            writer.write().unwrap().write(b"0123456789", true).unwrap();
         }
 
         block_manager.finish(&block).unwrap();

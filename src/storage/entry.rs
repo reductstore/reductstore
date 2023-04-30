@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 use crate::storage::block_manager::{BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT};
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, EntryInfo, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
@@ -17,8 +17,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
+use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 pub type Labels = HashMap<String, String>;
 
@@ -31,7 +33,7 @@ pub struct Entry {
     block_manager: BlockManager,
     record_count: u64,
     size: u64,
-    queries: HashMap<u64, Box<dyn Query>>,
+    queries: HashMap<u64, Box<dyn Query + Send + Sync>>,
 }
 
 /// EntryOptions is the options for creating a new entry.
@@ -42,7 +44,7 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, HTTPError> {
+    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, HttpError> {
         fs::create_dir_all(path.join(name))?;
         Ok(Self {
             name: name.to_string(),
@@ -56,7 +58,7 @@ impl Entry {
         })
     }
 
-    pub fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, HTTPError> {
+    pub fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, HttpError> {
         let mut record_count = 0;
         let mut size = 0;
         let mut block_index = BTreeSet::new();
@@ -73,7 +75,7 @@ impl Entry {
 
             let buf = std::fs::read(path)?;
             let block = Block::decode(Bytes::from(buf)).map_err(|e| {
-                HTTPError::internal_server_error(&format!(
+                HttpError::internal_server_error(&format!(
                     "Failed to decode block descriptor: {}",
                     e
                 ))
@@ -115,7 +117,7 @@ impl Entry {
         content_size: u64,
         content_type: String,
         labels: Labels,
-    ) -> Result<Rc<RefCell<RecordWriter>>, HTTPError> {
+    ) -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
         #[derive(PartialEq)]
         enum RecordType {
             Latest,
@@ -155,7 +157,7 @@ impl Entry {
                         .iter()
                         .any(|record| record.timestamp == proto_time)
                     {
-                        return Err(HTTPError::conflict(&format!(
+                        return Err(HttpError::conflict(&format!(
                             "A record with timestamp {} already exists",
                             time
                         )));
@@ -219,9 +221,9 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) fn begin_read(&mut self, time: u64) -> Result<Rc<RefCell<RecordReader>>, HTTPError> {
+    pub(crate) fn begin_read(&mut self, time: u64) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
         debug!("Reading record for ts={}", time);
-        let not_found_err = Err(HTTPError::not_found(&format!(
+        let not_found_err = Err(HttpError::not_found(&format!(
             "No record with timestamp {}",
             time
         )));
@@ -248,14 +250,14 @@ impl Entry {
 
         let record = &block.records[record_index.unwrap()];
         if record.state == record::State::Started as i32 {
-            return Err(HTTPError::too_early(&format!(
+            return Err(HttpError::too_early(&format!(
                 "Record with timestamp {} is still being written",
                 time
             )));
         }
 
         if record.state == record::State::Errored as i32 {
-            return Err(HTTPError::internal_server_error(&format!(
+            return Err(HttpError::internal_server_error(&format!(
                 "Record with timestamp {} is broken",
                 time
             )));
@@ -276,7 +278,7 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(&mut self, start: u64, end: u64, options: QueryOptions) -> Result<u64, HTTPError> {
+    pub fn query(&mut self, start: u64, end: u64, options: QueryOptions) -> Result<u64, HttpError> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(0);
 
         let id = QUERY_ID.fetch_add(1, Ordering::Relaxed);
@@ -296,17 +298,17 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub fn next(&mut self, query_id: u64) -> Result<(Rc<RefCell<RecordReader>>, bool), HTTPError> {
+    pub fn next(&mut self, query_id: u64) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
         self.remove_expired_query();
         let query = self
             .queries
             .get_mut(&query_id)
-            .ok_or_else(|| HTTPError::not_found(&format!("Query {} not found", query_id)))?;
+            .ok_or_else(|| HttpError::not_found(&format!("Query {} not found", query_id)))?;
         query.next(&self.block_index, &mut self.block_manager)
     }
 
     /// Returns stats about the entry.
-    pub fn info(&self) -> Result<EntryInfo, HTTPError> {
+    pub fn info(&self) -> Result<EntryInfo, HttpError> {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
             (0, 0)
         } else {
@@ -343,7 +345,7 @@ impl Entry {
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub fn try_remove_oldest_block(&mut self) -> Result<(), HTTPError> {
+    pub fn try_remove_oldest_block(&mut self) -> Result<(), HttpError> {
         if self.block_index.is_empty() {
             return Ok(());
         }
@@ -372,13 +374,13 @@ impl Entry {
         self.settings = settings;
     }
 
-    fn start_new_block(&mut self, time: u64) -> Result<Block, HTTPError> {
+    fn start_new_block(&mut self, time: u64) -> Result<Block, HttpError> {
         let block = self
             .block_manager
             .start(time, self.settings.max_block_size)?;
         self.block_index
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));
-        Ok::<Block, HTTPError>(block)
+        Ok::<Block, HttpError>(block)
     }
 
     fn remove_expired_query(&mut self) {
@@ -540,7 +542,7 @@ mod tests {
         let err = write_record(&mut entry, 1000000, 10);
         assert_eq!(
             err.err(),
-            Some(HTTPError::conflict(
+            Some(HttpError::conflict(
                 "A record with timestamp 1000000 already exists"
             ))
         );
@@ -553,7 +555,7 @@ mod tests {
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),
-            Some(HTTPError::not_found("No record with timestamp 1000"))
+            Some(HttpError::not_found("No record with timestamp 1000"))
         );
     }
 
@@ -565,7 +567,7 @@ mod tests {
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),
-            Some(HTTPError::not_found("No record with timestamp 1000"))
+            Some(HttpError::not_found("No record with timestamp 1000"))
         );
     }
 
@@ -577,7 +579,7 @@ mod tests {
         let writer = entry.begin_read(2000000);
         assert_eq!(
             writer.err(),
-            Some(HTTPError::not_found("No record with timestamp 2000000"))
+            Some(HttpError::not_found("No record with timestamp 2000000"))
         );
     }
 
@@ -588,12 +590,12 @@ mod tests {
             let writer = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.borrow_mut().write(&vec![0; 5], false).unwrap();
+            writer.write().unwrap().write(&vec![0; 5], false).unwrap();
         }
         let reader = entry.begin_read(1000000);
         assert_eq!(
             reader.err(),
-            Some(HTTPError::too_early(
+            Some(HttpError::too_early(
                 "Record with timestamp 1000000 is still being written"
             ))
         );
@@ -609,7 +611,7 @@ mod tests {
         let reader = entry.begin_read(2000000);
         assert_eq!(
             reader.err(),
-            Some(HTTPError::not_found("No record with timestamp 2000000"))
+            Some(HttpError::not_found("No record with timestamp 2000000"))
         );
     }
 
@@ -621,12 +623,13 @@ mod tests {
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
             writer
-                .borrow_mut()
+                .write()
+                .unwrap()
                 .write("0123456789".as_bytes(), true)
                 .unwrap();
         }
         let reader = entry.begin_read(1000000).unwrap();
-        let chunk = reader.borrow_mut().read().unwrap();
+        let chunk = reader.write().unwrap().read().unwrap();
         assert_eq!(chunk.data, "0123456789".as_bytes());
         assert!(chunk.last);
     }
@@ -647,14 +650,14 @@ mod tests {
                     Labels::new(),
                 )
                 .unwrap();
-            writer.borrow_mut().write(&data, true).unwrap();
+            writer.write().unwrap().write(&data, true).unwrap();
         }
         let reader = entry.begin_read(1000000).unwrap();
-        let chunk = reader.borrow_mut().read().unwrap();
+        let chunk = reader.write().unwrap().read().unwrap();
         assert_eq!(chunk.data, data[0..DEFAULT_MAX_READ_CHUNK as usize]);
         assert!(!chunk.last);
 
-        let chunk = reader.borrow_mut().read().unwrap();
+        let chunk = reader.write().unwrap().read().unwrap();
         assert_eq!(chunk.data, data[DEFAULT_MAX_READ_CHUNK as usize..]);
         assert!(chunk.last);
     }
@@ -671,24 +674,24 @@ mod tests {
 
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.borrow().timestamp(), 1000000);
+            assert_eq!(reader.read().unwrap().timestamp(), 1000000);
         }
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.borrow_mut().timestamp(), 2000000);
+            assert_eq!(reader.read().unwrap().timestamp(), 2000000);
         }
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.borrow().timestamp(), 3000000);
+            assert_eq!(reader.read().unwrap().timestamp(), 3000000);
         }
 
         assert_eq!(
             entry.next(id).err(),
-            Some(HTTPError::no_content("No content"))
+            Some(HttpError::no_content("No content"))
         );
         assert_eq!(
             entry.next(id).err(),
-            Some(HTTPError::not_found(&format!("Query {} not found", id)))
+            Some(HttpError::not_found(&format!("Query {} not found", id)))
         );
     }
 
@@ -711,24 +714,24 @@ mod tests {
 
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.borrow().timestamp(), 1000000);
+            assert_eq!(reader.read().unwrap().timestamp(), 1000000);
         }
 
         assert_eq!(
             entry.next(id).err(),
-            Some(HTTPError::no_content("No content"))
+            Some(HttpError::no_content("No content"))
         );
 
         write_record(&mut entry, 2000000, 10).unwrap();
         {
             let (reader, _) = entry.next(id).unwrap();
-            assert_eq!(reader.borrow().timestamp(), 2000000);
+            assert_eq!(reader.read().unwrap().timestamp(), 2000000);
         }
 
         sleep(Duration::from_millis(200));
         assert_eq!(
             entry.next(id).err(),
-            Some(HTTPError::not_found(&format!("Query {} not found", id)))
+            Some(HttpError::not_found(&format!("Query {} not found", id)))
         );
     }
 
@@ -765,14 +768,14 @@ mod tests {
         })
     }
 
-    fn write_record(entry: &mut Entry, time: u64, content_size: usize) -> Result<(), HTTPError> {
+    fn write_record(entry: &mut Entry, time: u64, content_size: usize) -> Result<(), HttpError> {
         let writer = entry.begin_write(
             time,
             content_size as u64,
             "text/plain".to_string(),
             Labels::new(),
         )?;
-        let ret = writer.borrow_mut().write(&vec![0; content_size], true);
+        let ret = writer.write().unwrap().write(&vec![0; content_size], true);
         ret
     }
 }

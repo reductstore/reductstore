@@ -10,7 +10,7 @@ use std::io::{Cursor, Read};
 use tempfile::{tempdir, TempDir};
 use zip::ZipArchive;
 
-use crate::core::status::HTTPError;
+use crate::core::status::HttpError;
 
 /// Asset manager that reads files from a zip archive as hex string and returns them as string
 pub struct ZipAssetManager {
@@ -83,10 +83,10 @@ impl ZipAssetManager {
     /// # Returns
     ///
     /// The file content as string.
-    pub fn read(&self, relative_path: &str) -> Result<String, HTTPError> {
+    pub fn read(&self, relative_path: &str) -> Result<String, HttpError> {
         if self.path.is_none() {
             // TODO: When C++ is gone, use trait and emtpy implementation
-            return Err(HTTPError::not_found("No static files supported"));
+            return Err(HttpError::not_found("No static files supported"));
         }
 
         // check if file exists
@@ -94,7 +94,7 @@ impl ZipAssetManager {
 
         trace!("Reading file {:?}", path);
         if !path.exists() {
-            return Err(HTTPError::not_found(
+            return Err(HttpError::not_found(
                 format!("File {:?} not found", path).as_str(),
             ));
         }
@@ -116,13 +116,13 @@ pub fn new_asset_manager(zipped_content: &str) -> Box<ZipAssetManager> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::status::HTTPError;
+    use crate::core::status::HttpError;
 
     #[test]
     fn test_empty_asset_manager() {
         let asset_manager = ZipAssetManager::new("");
         assert!(
-            asset_manager.read("test") == Err(HTTPError::not_found("No static files supported"))
+            asset_manager.read("test") == Err(HttpError::not_found("No static files supported"))
         );
     }
 }

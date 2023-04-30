@@ -7,7 +7,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use crate::core::status::{HTTPError, HTTPStatus};
+use crate::core::status::{HTTPStatus, HttpError};
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
 
@@ -18,8 +18,11 @@ pub struct RecordWriter {
     content_length: u64,
     record_index: usize,
     block_id: u64,
-    block_manager: Box<dyn ManageBlock>,
+    block_manager: Box<dyn ManageBlock + Send>,
 }
+
+unsafe impl Send for RecordWriter {}
+unsafe impl Sync for RecordWriter {}
 
 impl RecordWriter {
     pub fn new(
@@ -27,8 +30,8 @@ impl RecordWriter {
         block: &Block,
         record_index: usize,
         content_length: u64,
-        block_manager: Box<dyn ManageBlock>,
-    ) -> Result<RecordWriter, HTTPError> {
+        block_manager: Box<dyn ManageBlock + Send>,
+    ) -> Result<RecordWriter, HttpError> {
         let mut file = OpenOptions::new().write(true).create(true).open(path)?;
         let offset = block.records[record_index].begin;
         file.seek(SeekFrom::Start(offset))?;
@@ -43,7 +46,7 @@ impl RecordWriter {
         })
     }
 
-    pub fn write(&mut self, buf: &[u8], last: bool) -> Result<(), HTTPError> {
+    pub fn write(&mut self, buf: &[u8], last: bool) -> Result<(), HttpError> {
         self.write_impl(buf, last).map_err(|e| {
             if e.status == HTTPStatus::InternalServerError {
                 self.on_update(record::State::Invalid);
@@ -60,12 +63,12 @@ impl RecordWriter {
         Ok(())
     }
 
-    fn write_impl(&mut self, buf: &[u8], last: bool) -> Result<(), HTTPError> {
+    fn write_impl(&mut self, buf: &[u8], last: bool) -> Result<(), HttpError> {
         let mut writer = &self.file;
 
         self.written_bytes += buf.len() as u64;
         if self.written_bytes > self.content_length {
-            return Err(HTTPError::bad_request(
+            return Err(HttpError::bad_request(
                 "Content is bigger than in content-length",
             ));
         }
@@ -74,7 +77,7 @@ impl RecordWriter {
 
         if last {
             if self.written_bytes < self.content_length {
-                return Err(HTTPError::bad_request(
+                return Err(HttpError::bad_request(
                     "Content is smaller than in content-length",
                 ));
             }
@@ -122,11 +125,11 @@ mod tests {
         BlockManager {}
 
         impl ManageBlock for BlockManager {
-            fn load(&self, begin_time: u64) -> Result<Block, HTTPError>;
-            fn save(&self, block: &Block) -> Result<(), HTTPError>;
-            fn start(&self, begin_time: u64, max_block_size: u64) -> Result<Block, HTTPError>;
-            fn finish(&self, block: &Block) -> Result<(), HTTPError>;
-            fn remove(&mut self, block_id: u64) -> Result<(), HTTPError>;
+            fn load(&self, begin_time: u64) -> Result<Block, HttpError>;
+            fn save(&self, block: &Block) -> Result<(), HttpError>;
+            fn start(&self, begin_time: u64, max_block_size: u64) -> Result<Block, HttpError>;
+            fn finish(&self, block: &Block) -> Result<(), HttpError>;
+            fn remove(&mut self, block_id: u64) -> Result<(), HttpError>;
 
         }
     }
@@ -173,7 +176,7 @@ mod tests {
 
         assert_eq!(
             writer.write(b"1234", true),
-            Err(HTTPError::bad_request(
+            Err(HttpError::bad_request(
                 "Content is smaller than in content-length"
             ))
         );
@@ -200,7 +203,7 @@ mod tests {
 
         assert_eq!(
             writer.write(b"123400000", true),
-            Err(HTTPError::bad_request(
+            Err(HttpError::bad_request(
                 "Content is bigger than in content-length"
             ))
         );

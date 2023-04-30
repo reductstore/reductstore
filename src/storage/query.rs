@@ -8,9 +8,10 @@ mod continuous;
 mod historical;
 
 use crate::storage::query::base::{Query, QueryOptions};
+use std::task::Wake;
 
 /// Build a query.
-pub fn build_query(start: u64, stop: u64, options: QueryOptions) -> Box<dyn Query> {
+pub fn build_query(start: u64, stop: u64, options: QueryOptions) -> Box<dyn Query + Send + Sync> {
     if options.continuous {
         Box::new(continuous::ContinuousQuery::new(start, options))
     } else {
