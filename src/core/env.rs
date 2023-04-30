@@ -73,16 +73,6 @@ impl Env {
         return value;
     }
 
-    /// Get a string from the environment. (See `get` for details)
-    pub fn get_string(&mut self, key: &str, default_value: &str, masked: bool) -> String {
-        self.get(key, String::from(default_value), masked)
-    }
-
-    /// Get an int from the environment. (See `get` for details)
-    pub fn get_int(&mut self, key: &str, default_value: i32, masked: bool) -> i32 {
-        self.get(key, default_value, masked)
-    }
-
     /// Get pretty printed message.
     pub fn message(&self) -> &String {
         &self.message

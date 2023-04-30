@@ -3,6 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::arch::x86_64::_mm256_rcp_ps;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -26,6 +27,7 @@ use crate::auth::token_repository::TokenRepository;
 
 use crate::core::status::{HTTPStatus, HttpError};
 use crate::http_frontend::server_api::ServerApi;
+use crate::http_frontend::token_api::TokenApi;
 use crate::storage::storage::Storage;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
@@ -40,6 +42,7 @@ pub struct HttpServerComponents {
 #[derive(Clone)]
 pub struct HttpServer {
     components: Arc<RwLock<HttpServerComponents>>,
+    //todo: very straight forward, should be grained
     api_base_path: String,
     cert_path: String,
     cert_key_path: String,
@@ -154,14 +157,16 @@ impl Service<Request<IncomingBody>> for HttpServer {
             format!("{}/", self.api_base_path)
         };
 
-        let info_path: String = format!("{}api/v1/info", self.api_base_path);
-        let list_path: String = format!("{}api/v1/list", self.api_base_path);
-        let alive_path: String = format!("{}api/v1/alive", self.api_base_path);
-        let me_path: String = format!("{}api/v1/me", self.api_base_path);
-
         let route = (req.method(), req.uri().path());
 
-        if route == (&Method::GET, &info_path) {
+        // Server API
+
+        let server_info_path: String = format!("{}api/v1/info", self.api_base_path);
+        let server_list_path: String = format!("{}api/v1/list", self.api_base_path);
+        let server_alive_path: String = format!("{}api/v1/alive", self.api_base_path);
+        let servre_me_path: String = format!("{}api/v1/me", self.api_base_path);
+
+        if route == (&Method::GET, &server_info_path) {
             // GET /info
             let resp = HttpServer::process_msg(
                 Arc::clone(&self.components),
@@ -169,8 +174,10 @@ impl Service<Request<IncomingBody>> for HttpServer {
                 req,
                 ServerApi::info,
             );
-            Box::pin(resp)
-        } else if route == (&Method::GET, &list_path) {
+            return Box::pin(resp);
+        }
+
+        if route == (&Method::GET, &server_list_path) {
             // GET /list
             let resp = HttpServer::process_msg(
                 Arc::clone(&self.components),
@@ -178,8 +185,10 @@ impl Service<Request<IncomingBody>> for HttpServer {
                 req,
                 ServerApi::list,
             );
-            Box::pin(resp)
-        } else if route == (&Method::HEAD, &alive_path) {
+            return Box::pin(resp);
+        }
+
+        if route == (&Method::HEAD, &server_alive_path) {
             // HEAD /alive
             let resp = HttpServer::process_msg(
                 Arc::clone(&self.components),
@@ -187,8 +196,9 @@ impl Service<Request<IncomingBody>> for HttpServer {
                 req,
                 ServerApi::info,
             );
-            Box::pin(resp)
-        } else if route == (&Method::GET, &me_path) {
+            return Box::pin(resp);
+        }
+        if route == (&Method::GET, &servre_me_path) {
             // GET /me
             let resp = HttpServer::process_msg(
                 Arc::clone(&self.components),
@@ -196,15 +206,61 @@ impl Service<Request<IncomingBody>> for HttpServer {
                 req,
                 ServerApi::me,
             );
-            Box::pin(resp)
-        } else {
+            return Box::pin(resp);
+        }
+
+        // Token API
+        let token_path: String = format!("{}api/v1/tokens/", self.api_base_path);
+        if route == (&Method::GET, &token_path[0..token_path.len() - 2]) {
+            // GET /tokens
             let resp = HttpServer::process_msg(
                 Arc::clone(&self.components),
-                AnonymousPolicy {},
+                AuthenticatedPolicy {},
                 req,
-                |_, _| async { Err::<TokenRepo, HttpError>(HttpError::not_found("Not found.")) },
+                TokenApi::token_list,
             );
-            Box::pin(resp)
+            return Box::pin(resp);
         }
+
+        if route.0 == &Method::GET && route.1.starts_with(&token_path) {
+            // GET /tokens/:name
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
+                AuthenticatedPolicy {},
+                req,
+                TokenApi::get_token,
+            );
+            return Box::pin(resp);
+        }
+
+        if route.0 == &Method::POST && route.1.starts_with(&token_path) {
+            // POST /tokens/:name
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
+                AuthenticatedPolicy {},
+                req,
+                TokenApi::create_token,
+            );
+            return Box::pin(resp);
+        }
+
+        if route.0 == &Method::DELETE && route.1.starts_with(&token_path) {
+            // DELETE /tokens/:name
+            let resp = HttpServer::process_msg(
+                Arc::clone(&self.components),
+                AuthenticatedPolicy {},
+                req,
+                TokenApi::remove_token,
+            );
+            return Box::pin(resp);
+        }
+
+        let resp = HttpServer::process_msg(
+            Arc::clone(&self.components),
+            AnonymousPolicy {},
+            req,
+            |_, _| async { Err::<TokenRepo, HttpError>(HttpError::not_found("Not found.")) },
+        );
+        Box::pin(resp)
     }
 }
