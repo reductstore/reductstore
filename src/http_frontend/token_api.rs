@@ -90,7 +90,7 @@ mod tests {
     use crate::auth::token_repository::TokenRepository;
     use crate::storage::storage::Storage;
     use bytes::Bytes;
-    use hyper::http::request::Builder;
+
     use std::path::PathBuf;
 
     #[tokio::test]

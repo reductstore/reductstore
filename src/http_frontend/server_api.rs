@@ -108,7 +108,7 @@ mod tests {
             .create_bucket("bucket-2", BucketSettings::default())
             .unwrap();
 
-        let req = Builder::new().body(()).unwrap();
+        let _req = Builder::new().body(()).unwrap();
         Arc::new(RwLock::new(components))
     }
 }
