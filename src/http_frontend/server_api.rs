@@ -8,9 +8,9 @@ use crate::core::status::HttpError;
 use crate::http_frontend::http_server::HttpServerComponents;
 use crate::storage::proto::{BucketInfoList, ServerInfo};
 use axum::extract::State;
-use axum::http::{HeaderMap, Request, StatusCode};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use log::info;
+
 use std::sync::{Arc, RwLock};
 
 pub struct ServerApi {}
@@ -68,29 +68,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_info() {
-        let (components, req) = setup();
+        let components = setup();
         let info = ServerApi::info(State(components)).await.unwrap();
         assert_eq!(info.bucket_count, 2);
     }
 
     #[tokio::test]
     async fn test_list() {
-        let (components, req) = setup();
-
+        let components = setup();
         let list = ServerApi::list(State(components)).await.unwrap();
         assert_eq!(list.buckets.len(), 2);
     }
 
     #[tokio::test]
     async fn test_me() {
-        let (components, req) = setup();
+        let components = setup();
         let token = ServerApi::me(State(components), HeaderMap::new())
             .await
             .unwrap();
         assert_eq!(token.name, "AUTHENTICATION-DISABLED");
     }
 
-    fn setup() -> (Arc<RwLock<HttpServerComponents>>, Request<()>) {
+    fn setup() -> Arc<RwLock<HttpServerComponents>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
         let mut components = HttpServerComponents {
@@ -110,6 +109,6 @@ mod tests {
             .unwrap();
 
         let req = Builder::new().body(()).unwrap();
-        (Arc::new(RwLock::new(components)), req)
+        Arc::new(RwLock::new(components))
     }
 }

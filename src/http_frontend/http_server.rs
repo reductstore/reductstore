@@ -3,23 +3,11 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
-
-use std::future::Future;
-use std::pin::Pin;
-
-use std::sync::{Arc, RwLock};
-
-use bytes::Bytes;
-use log::{debug, error};
-
 use crate::asset::asset_manager::ZipAssetManager;
-use crate::auth::policy::*;
-use crate::auth::proto::TokenRepo;
+
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::TokenRepository;
 
-use crate::core::status::{HTTPStatus, HttpError};
 use crate::storage::storage::Storage;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;

@@ -20,20 +20,18 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::TokenRepository;
 use crate::core::env::Env;
 use crate::core::logger::Logger;
-use crate::core::status::HttpError;
+
 use crate::http_frontend::http_server::HttpServerComponents;
 use crate::http_frontend::server_api::ServerApi;
 use crate::http_frontend::token_api::TokenApi;
 use crate::storage::storage::Storage;
-use axum::http::Response;
+
 use axum::{
     http::StatusCode,
-    response::IntoResponse,
     routing::{delete, get, head, post},
-    Json, Router,
+    Router,
 };
 use log::info;
-use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
@@ -51,7 +49,7 @@ async fn main() {
     let data_path = env.get::<String>("RS_DATA_PATH", "/data".to_string(), false);
     let api_token = env.get::<String>("RS_API_TOKEN", "".to_string(), true);
     let cert_path = env.get::<String>("RS_CERT_PATH", "".to_string(), true);
-    let cert_key_path = env.get::<String>("RS_CERT_KEY_PATH", "".to_string(), true);
+    let _cert_key_path = env.get::<String>("RS_CERT_KEY_PATH", "".to_string(), true);
 
     Logger::init(&log_level);
 
