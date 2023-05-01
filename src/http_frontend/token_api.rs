@@ -3,26 +3,44 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::auth::proto::token::Permissions;
-use http_body_util::BodyExt;
-
-use hyper::Request;
 use prost::Message;
 
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
 use std::fmt::Display;
 use std::sync::{Arc, RwLock};
 
+use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
 use crate::core::status::HttpError;
 use crate::http_frontend::http_server::HttpServerComponents;
 
 pub struct TokenApi {}
 
+impl IntoResponse for TokenRepo {
+    fn into_response(self) -> Response {
+        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+    }
+}
+
+impl IntoResponse for TokenCreateResponse {
+    fn into_response(self) -> Response {
+        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+    }
+}
+
+impl IntoResponse for Token {
+    fn into_response(self) -> Response {
+        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+    }
+}
+
 impl TokenApi {
     // GET /tokens
-    pub async fn token_list<Body>(
-        components: Arc<RwLock<HttpServerComponents>>,
-        _: Request<Body>,
+    pub async fn token_list(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
     ) -> Result<TokenRepo, HttpError> {
         let components = components.write().unwrap();
 
@@ -34,51 +52,33 @@ impl TokenApi {
         Ok(list)
     }
 
-    // POST /tokens/:name
-    pub async fn create_token<Body>(
-        components: Arc<RwLock<HttpServerComponents>>,
-        req: Request<Body>,
-    ) -> Result<TokenCreateResponse, HttpError>
-    where
-        Body: BodyExt,
-        Body::Error: Display,
-    {
-        let name = req.uri().path().split("/").last().unwrap().to_string();
-
-        let data = match req.into_body().collect().await {
-            Ok(body) => body.to_bytes(),
-            Err(e) => return Err(HttpError::bad_request(&e.to_string())),
-        };
-
-        let permissions = match Permissions::decode(data) {
-            Ok(permissions) => permissions,
-            Err(e) => return Err(HttpError::bad_request(&e.to_string())),
-        };
-
+    // POST /tokens/:token_name
+    pub async fn create_token(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        Path(token_name): Path<String>,
+        body: Bytes,
+    ) -> Result<TokenCreateResponse, HttpError> {
+        let permissions = Permissions::decode(body)?;
         let mut components = components.write().unwrap();
-        components.token_repo.create_token(&name, permissions)
+        components.token_repo.create_token(&token_name, permissions)
     }
 
-    // GET /tokens/:name
-    pub async fn get_token<Body>(
-        components: Arc<RwLock<HttpServerComponents>>,
-        req: Request<Body>,
+    // GET /tokens/:token_name
+    pub async fn get_token(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        Path(token_name): Path<String>,
     ) -> Result<Token, HttpError> {
-        let name = req.uri().path().split("/").last().unwrap().to_string();
-
         let components = components.read().unwrap();
-        components.token_repo.find_by_name(&name)
+        components.token_repo.find_by_name(&token_name)
     }
 
     // DELETE /tokens/:name
-    pub async fn remove_token<Body>(
-        components: Arc<RwLock<HttpServerComponents>>,
-        req: Request<Body>,
+    pub async fn remove_token(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        Path(token_name): Path<String>,
     ) -> Result<(), HttpError> {
-        let name = req.uri().path().split("/").last().unwrap().to_string();
-
         let mut components = components.write().unwrap();
-        components.token_repo.remove_token(&name)
+        components.token_repo.remove_token(&token_name)
     }
 }
 

@@ -7,34 +7,46 @@ use crate::auth::proto::Token;
 use crate::core::status::HttpError;
 use crate::http_frontend::http_server::HttpServerComponents;
 use crate::storage::proto::{BucketInfoList, ServerInfo};
-use hyper::Request;
+use axum::extract::State;
+use axum::http::{HeaderMap, Request, StatusCode};
+use axum::response::{IntoResponse, Response};
+use log::info;
 use std::sync::{Arc, RwLock};
 
 pub struct ServerApi {}
 
+impl IntoResponse for ServerInfo {
+    fn into_response(self) -> Response {
+        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+    }
+}
+
+impl IntoResponse for BucketInfoList {
+    fn into_response(self) -> Response {
+        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+    }
+}
+
 impl ServerApi {
     // GET /info
-    pub async fn info<Body>(
-        components: Arc<RwLock<HttpServerComponents>>,
-        _: Request<Body>,
+    pub async fn info(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
     ) -> Result<ServerInfo, HttpError> {
         components.read().unwrap().storage.info()
     }
 
     // GET /list
-    pub async fn list<Body>(
-        components: Arc<RwLock<HttpServerComponents>>,
-        _: Request<Body>,
+    pub async fn list(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
     ) -> Result<BucketInfoList, HttpError> {
         components.read().unwrap().storage.get_bucket_list()
     }
 
-    // GET /me
-    pub async fn me<Body>(
-        components: Arc<RwLock<HttpServerComponents>>,
-        req: Request<Body>,
+    // // GET /me
+    pub async fn me(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        headers: HeaderMap,
     ) -> Result<Token, HttpError> {
-        let headers = req.headers().clone();
         let header = match headers.get("Authorization") {
             Some(header) => header.to_str().ok(),
             None => None,
@@ -57,7 +69,7 @@ mod tests {
     #[tokio::test]
     async fn test_info() {
         let (components, req) = setup();
-        let info = ServerApi::info(components, req).await.unwrap();
+        let info = ServerApi::info(State(components)).await.unwrap();
         assert_eq!(info.bucket_count, 2);
     }
 
@@ -65,14 +77,16 @@ mod tests {
     async fn test_list() {
         let (components, req) = setup();
 
-        let list = ServerApi::list(components, req).await.unwrap();
+        let list = ServerApi::list(State(components)).await.unwrap();
         assert_eq!(list.buckets.len(), 2);
     }
 
     #[tokio::test]
     async fn test_me() {
         let (components, req) = setup();
-        let token = ServerApi::me(components, req).await.unwrap();
+        let token = ServerApi::me(State(components), HeaderMap::new())
+            .await
+            .unwrap();
         assert_eq!(token.name, "AUTHENTICATION-DISABLED");
     }
 

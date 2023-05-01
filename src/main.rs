@@ -20,24 +20,23 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::TokenRepository;
 use crate::core::env::Env;
 use crate::core::logger::Logger;
-use crate::http_frontend::http_server::{HttpServer, HttpServerComponents};
+use crate::core::status::HttpError;
+use crate::http_frontend::http_server::HttpServerComponents;
+use crate::http_frontend::server_api::ServerApi;
+use crate::http_frontend::token_api::TokenApi;
 use crate::storage::storage::Storage;
-use hyper::server::conn::http1;
+use axum::http::Response;
+use axum::{
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{delete, get, head, post},
+    Json, Router,
+};
 use log::info;
 use tokio::net::TcpListener;
 
-fn main() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build runtime");
-
-    // Combine it with a `LocalSet,  which means it can spawn !Send futures...
-    let local = tokio::task::LocalSet::new();
-    local.block_on(&rt, run())
-}
-
-async fn run() {
+#[tokio::main]
+async fn main() {
     // todo: check graceful shutdown
     let version: &str = env!("CARGO_PKG_VERSION");
 
@@ -75,32 +74,46 @@ async fn run() {
         scheme, host, port, api_base_path
     );
 
-    let server = HttpServer::new(
-        Arc::new(RwLock::new(components)),
-        api_base_path,
-        cert_path,
-        cert_key_path,
-    );
-
     let addr = SocketAddr::new(
         IpAddr::from_str(&host).expect("Invalid host address"),
         port as u16,
     );
 
-    let listener = TcpListener::bind(addr)
+    let app = Router::new()
+        // Server API
+        .route(
+            &format!("{}api/v1/info", api_base_path),
+            get(ServerApi::info),
+        )
+        .route(
+            &format!("{}api/v1/list", api_base_path),
+            get(ServerApi::list),
+        )
+        .route(&format!("{}api/v1/me", api_base_path), get(ServerApi::me))
+        .route(
+            &format!("{}api/v1/alive", api_base_path),
+            head(|| async { StatusCode::OK }),
+        )
+        // Token API
+        .route(
+            &format!("{}api/v1/tokens", api_base_path),
+            post(TokenApi::token_list),
+        )
+        .route(
+            &format!("{}api/v1/tokens/:token_name", api_base_path),
+            post(TokenApi::create_token),
+        )
+        .route(
+            &format!("{}api/v1/tokens/:token_name", api_base_path),
+            get(TokenApi::get_token),
+        )
+        .route(
+            &format!("{}api/v1/tokens/:token_name", api_base_path),
+            delete(TokenApi::remove_token),
+        )
+        .with_state(Arc::new(RwLock::new(components)));
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
         .await
-        .expect("Failed to bind to address");
-
-    loop {
-        let (stream, _) = listener
-            .accept()
-            .await
-            .expect("Failed to accept connection");
-        let server = server.clone();
-        tokio::task::spawn_local(async move {
-            if let Err(err) = http1::Builder::new().serve_connection(stream, server).await {
-                println!("Failed to serve connection: {:?}", err);
-            }
-        });
-    }
+        .unwrap();
 }

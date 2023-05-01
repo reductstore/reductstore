@@ -3,6 +3,8 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::core::status::HttpError;
+use prost::DecodeError;
 use prost_wkt_types::Timestamp;
 include!(concat!(env!("OUT_DIR"), "/reduct.proto.storage.rs"));
 
