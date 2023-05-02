@@ -4,17 +4,25 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 
+use crate::asset::asset_manager::ZipAssetManager;
+use crate::auth::token_auth::TokenAuthorization;
+use crate::auth::token_repository::TokenRepository;
 use crate::core::status::HttpError;
+use crate::storage::storage::Storage;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use prost::DecodeError;
 
-// mod server_api;
-// mod token_api;
-// mod http_server;
-pub mod http_server;
+pub mod bucket_api;
 pub mod server_api;
 pub mod token_api;
+
+pub struct HttpServerComponents {
+    pub storage: Storage,
+    pub auth: TokenAuthorization,
+    pub token_repo: TokenRepository,
+    pub console: ZipAssetManager,
+}
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
@@ -32,6 +40,12 @@ impl IntoResponse for HttpError {
 
 impl From<DecodeError> for HttpError {
     fn from(err: DecodeError) -> Self {
-        HttpError::bad_request(&format!("Invalid request: {}", err))
+        HttpError::bad_request(&format!("Failed to serialize data: {}", err))
+    }
+}
+
+impl From<serde_json::Error> for HttpError {
+    fn from(err: serde_json::Error) -> Self {
+        HttpError::bad_request(&format!("Invalid JSON: {}", err))
     }
 }

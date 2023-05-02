@@ -7,7 +7,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use crate::core::status::{HTTPStatus, HttpError};
+use crate::core::status::{HttpError, HttpStatus};
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
 
@@ -48,7 +48,7 @@ impl RecordWriter {
 
     pub fn write(&mut self, buf: &[u8], last: bool) -> Result<(), HttpError> {
         self.write_impl(buf, last).map_err(|e| {
-            if e.status == HTTPStatus::InternalServerError {
+            if e.status == HttpStatus::InternalServerError {
                 self.on_update(record::State::Invalid);
             } else {
                 self.on_update(record::State::Errored);

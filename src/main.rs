@@ -21,14 +21,15 @@ use crate::auth::token_repository::TokenRepository;
 use crate::core::env::Env;
 use crate::core::logger::Logger;
 
-use crate::http_frontend::http_server::HttpServerComponents;
 use crate::http_frontend::server_api::ServerApi;
 use crate::http_frontend::token_api::TokenApi;
+use crate::http_frontend::HttpServerComponents;
 use crate::storage::storage::Storage;
 
+use crate::http_frontend::bucket_api::BucketApi;
 use axum::{
     http::StatusCode,
-    routing::{delete, get, head, post},
+    routing::{delete, get, head, post, put},
     Router,
 };
 use log::info;
@@ -108,6 +109,23 @@ async fn main() {
         .route(
             &format!("{}api/v1/tokens/:token_name", api_base_path),
             delete(TokenApi::remove_token),
+        )
+        // Bucket API
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            get(BucketApi::get_bucket),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            head(BucketApi::head_bucket),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            post(BucketApi::create_bucket),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            put(BucketApi::update_bucket),
         )
         .with_state(Arc::new(RwLock::new(components)));
     axum::Server::bind(&addr)

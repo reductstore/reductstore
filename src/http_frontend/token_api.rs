@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
 use crate::core::status::HttpError;
-use crate::http_frontend::http_server::HttpServerComponents;
+use crate::http_frontend::HttpServerComponents;
 
 pub struct TokenApi {}
 

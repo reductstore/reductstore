@@ -8,7 +8,7 @@ use std::time::SystemTimeError;
 
 /// HTTP status codes.
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
-pub enum HTTPStatus {
+pub enum HttpStatus {
     OK = 200,
     Continue = 100,
     Created = 201,
@@ -58,7 +58,7 @@ pub enum HTTPStatus {
 #[derive(PartialEq, Debug)]
 pub struct HttpError {
     /// The HTTP status code.
-    pub status: HTTPStatus,
+    pub status: HttpStatus,
 
     /// The human readable message.
     pub message: String,
@@ -74,7 +74,7 @@ impl From<std::io::Error> for HttpError {
     fn from(err: std::io::Error) -> Self {
         // An IO error is an internal server error
         HttpError {
-            status: HTTPStatus::InternalServerError,
+            status: HttpStatus::InternalServerError,
             message: err.to_string(),
         }
     }
@@ -84,14 +84,14 @@ impl From<SystemTimeError> for HttpError {
     fn from(err: SystemTimeError) -> Self {
         // A system time error is an internal server error
         HttpError {
-            status: HTTPStatus::InternalServerError,
+            status: HttpStatus::InternalServerError,
             message: err.to_string(),
         }
     }
 }
 
 impl HttpError {
-    pub fn new(status: HTTPStatus, message: &str) -> Self {
+    pub fn new(status: HttpStatus, message: &str) -> Self {
         HttpError {
             status,
             message: message.to_string(),
@@ -108,7 +108,7 @@ impl HttpError {
 
     pub fn ok() -> HttpError {
         HttpError {
-            status: HTTPStatus::OK,
+            status: HttpStatus::OK,
             message: "".to_string(),
         }
     }
@@ -116,7 +116,7 @@ impl HttpError {
     /// Create a no content error.
     pub fn no_content(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::NoContent,
+            status: HttpStatus::NoContent,
             message: msg.to_string(),
         }
     }
@@ -124,7 +124,7 @@ impl HttpError {
     /// Create a not found error.
     pub fn not_found(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::NotFound,
+            status: HttpStatus::NotFound,
             message: msg.to_string(),
         }
     }
@@ -132,7 +132,7 @@ impl HttpError {
     /// Create a conflict error.
     pub fn conflict(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::Conflict,
+            status: HttpStatus::Conflict,
             message: msg.to_string(),
         }
     }
@@ -140,7 +140,7 @@ impl HttpError {
     /// Create a bad request error.
     pub fn bad_request(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::BadRequest,
+            status: HttpStatus::BadRequest,
             message: msg.to_string(),
         }
     }
@@ -148,7 +148,7 @@ impl HttpError {
     /// Create an unauthorized error.
     pub fn unauthorized(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::Unauthorized,
+            status: HttpStatus::Unauthorized,
             message: msg.to_string(),
         }
     }
@@ -156,7 +156,7 @@ impl HttpError {
     /// Create a forbidden error.
     pub fn forbidden(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::Forbidden,
+            status: HttpStatus::Forbidden,
             message: msg.to_string(),
         }
     }
@@ -164,7 +164,7 @@ impl HttpError {
     /// Create an unprocessable entity error.
     pub fn unprocessable_entity(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::UnprocessableEntity,
+            status: HttpStatus::UnprocessableEntity,
             message: msg.to_string(),
         }
     }
@@ -172,7 +172,7 @@ impl HttpError {
     /// Create a too early error.
     pub fn too_early(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::TooEarly,
+            status: HttpStatus::TooEarly,
             message: msg.to_string(),
         }
     }
@@ -180,7 +180,7 @@ impl HttpError {
     /// Create a bad request error.
     pub fn internal_server_error(msg: &str) -> HttpError {
         HttpError {
-            status: HTTPStatus::InternalServerError,
+            status: HttpStatus::InternalServerError,
             message: msg.to_string(),
         }
     }

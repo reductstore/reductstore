@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::{HTTPStatus, HttpError};
+use crate::core::status::{HttpError, HttpStatus};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
@@ -45,13 +45,13 @@ impl Query for ContinuousQuery {
                 Ok((record, last))
             }
             Err(HttpError {
-                status: HTTPStatus::NoContent,
+                status: HttpStatus::NoContent,
                 ..
             }) => {
                 self.query =
                     HistoricalQuery::new(self.last_timestamp + 1, u64::MAX, self.options.clone());
                 Err(HttpError {
-                    status: HTTPStatus::NoContent,
+                    status: HttpStatus::NoContent,
                     message: "No content".to_string(),
                 })
             }
@@ -71,7 +71,7 @@ mod tests {
     use std::thread::sleep;
     use tempfile::tempdir;
 
-    use crate::core::status::HTTPStatus;
+    use crate::core::status::HttpStatus;
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::proto::{record::State as RecordState, Record};
 
@@ -94,7 +94,7 @@ mod tests {
         assert_eq!(
             query.next(&block_indexes, &mut block_manager).err(),
             Some(HttpError {
-                status: HTTPStatus::NoContent,
+                status: HttpStatus::NoContent,
                 message: "No content".to_string(),
             })
         );

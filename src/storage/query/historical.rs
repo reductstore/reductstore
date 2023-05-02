@@ -172,7 +172,7 @@ impl Query for HistoricalQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::status::HTTPStatus;
+    use crate::core::status::HttpStatus;
     use crate::storage::proto::record::Label;
     use crate::storage::reader::DataChunk;
     use prost_wkt_types::Timestamp;
@@ -206,7 +206,7 @@ mod tests {
         {
             let res = query.next(&index, &mut block_manager);
             assert!(res.is_err());
-            assert_eq!(res.err().unwrap().status, HTTPStatus::NoContent);
+            assert_eq!(res.err().unwrap().status, HttpStatus::NoContent);
             assert_eq!(query.state(), &QueryState::Done);
         }
     }
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HTTPStatus::NoContent,
+                status: HttpStatus::NoContent,
                 message: "No content".to_string(),
             })
         );
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HTTPStatus::NoContent,
+                status: HttpStatus::NoContent,
                 message: "No content".to_string(),
             })
         );
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HTTPStatus::NoContent,
+                status: HttpStatus::NoContent,
                 message: "No content".to_string(),
             })
         );
@@ -365,7 +365,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HTTPStatus::NoContent,
+                status: HttpStatus::NoContent,
                 message: "No content".to_string(),
             })
         );
