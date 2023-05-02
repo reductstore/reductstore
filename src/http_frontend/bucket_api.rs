@@ -84,7 +84,7 @@ impl BucketApi {
         settings: BucketSettings,
     ) -> Result<(), HttpError> {
         let mut components = components.write().unwrap();
-        let mut bucket = components.storage.get_bucket(&bucket_name)?;
+        let bucket = components.storage.get_bucket(&bucket_name)?;
         bucket.set_settings(settings)
     }
 }
@@ -103,7 +103,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_bucket() {
-        let mut components = setup();
+        let components = setup();
         let info = BucketApi::get_bucket(State(components), Path("bucket-1".to_string()))
             .await
             .unwrap();
@@ -112,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_head_bucket() {
-        let mut components = setup();
+        let components = setup();
         BucketApi::head_bucket(State(components), Path("bucket-1".to_string()))
             .await
             .unwrap();
@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_bucket() {
-        let mut components = setup();
+        let components = setup();
         BucketApi::create_bucket(
             State(components),
             Path("bucket-2".to_string()),
@@ -132,7 +132,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_bucket() {
-        let mut components = setup();
+        let components = setup();
         BucketApi::update_bucket(
             State(components),
             Path("bucket-1".to_string()),
