@@ -7,24 +7,33 @@ use axum::extract::{BodyStream, Path, Query, State};
 use axum::http::header::HeaderMap;
 
 use axum::body::StreamBody;
-use axum::http::HeaderName;
-use axum::response::IntoResponse;
+use axum::http::{HeaderName, StatusCode};
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
 use futures_util::Stream;
-use log::debug;
+use log::{debug, info};
 use std::collections::HashMap;
 
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerComponents;
 use crate::storage::entry::Labels;
+use crate::storage::proto::QueryInfo;
+use crate::storage::query::base::QueryOptions;
 use crate::storage::reader::RecordReader;
 
 pub struct EntryApi {}
+
+impl IntoResponse for QueryInfo {
+    fn into_response(self) -> Response {
+        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+    }
+}
 
 impl EntryApi {
     // POST /:bucket/:entry?ts=<number>
@@ -167,27 +176,104 @@ impl EntryApi {
                 })
         };
 
+        struct ReaderWrapper {
+            reader: Arc<RwLock<RecordReader>>,
+        }
+
+        /// A wrapper around a `RecordReader` that implements `Stream` with RwLock
+        impl Stream for ReaderWrapper {
+            type Item = Result<Bytes, HttpError>;
+
+            fn poll_next(
+                self: Pin<&mut ReaderWrapper>,
+                _cx: &mut Context<'_>,
+            ) -> Poll<Option<Self::Item>> {
+                if self.reader.read().unwrap().is_done() {
+                    return Poll::Ready(None);
+                }
+                match self.reader.write().unwrap().read() {
+                    Ok(chunk) => Poll::Ready(Some(Ok(Bytes::from(chunk.data)))),
+                    Err(e) => Poll::Ready(Some(Err(e))),
+                }
+            }
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                (0, None)
+            }
+        }
+
         Ok((headers, StreamBody::new(ReaderWrapper { reader })))
     }
-}
 
-struct ReaderWrapper {
-    reader: Arc<RwLock<RecordReader>>,
-}
+    // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
+    pub async fn query(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        Path(path): Path<HashMap<String, String>>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Result<QueryInfo, HttpError> {
+        let bucket_name = path.get("bucket_name").unwrap();
+        let entry_name = path.get("entry_name").unwrap();
 
-impl Stream for ReaderWrapper {
-    type Item = Result<Bytes, HttpError>;
+        let entry_info = {
+            let mut components = components.write().unwrap();
+            let bucket = components.storage.get_bucket(bucket_name)?;
+            bucket.get_or_create_entry(entry_name)?.info()?
+        };
 
-    fn poll_next(self: Pin<&mut ReaderWrapper>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.reader.read().unwrap().is_done() {
-            return Poll::Ready(None);
+        let start = match params.get("start") {
+            Some(start) => start.parse::<u64>().map_err(|_| {
+                HttpError::unprocessable_entity("'start' must be an unix timestamp in microseconds")
+            })?,
+            None => entry_info.oldest_record,
+        };
+
+        let stop = match params.get("stop") {
+            Some(stop) => stop.parse::<u64>().map_err(|_| {
+                HttpError::unprocessable_entity("'stop' must be an unix timestamp in microseconds")
+            })?,
+            None => entry_info.latest_record,
+        };
+
+        let continuous = match params.get("continue") {
+            Some(continue_) => continue_.parse::<bool>().map_err(|_| {
+                HttpError::unprocessable_entity(
+                    "'continue' must be an unix timestamp in microseconds",
+                )
+            })?,
+            None => false,
+        };
+
+        let ttl = match params.get("ttl") {
+            Some(ttl) => ttl.parse::<u64>().map_err(|_| {
+                HttpError::unprocessable_entity("'ttl' must be an unix timestamp in microseconds")
+            })?,
+            None => 5,
+        };
+
+        let mut include = HashMap::new();
+        let mut exclude = HashMap::new();
+
+        for (k, v) in params.iter() {
+            if k.starts_with("include-") {
+                include.insert(k[8..].to_string(), v.to_string());
+            } else if k.starts_with("exclude-") {
+                exclude.insert(k[8..].to_string(), v.to_string());
+            }
         }
-        match self.reader.write().unwrap().read() {
-            Ok(chunk) => Poll::Ready(Some(Ok(Bytes::from(chunk.data)))),
-            Err(e) => Poll::Ready(Some(Err(e))),
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
+
+        let mut components = components.write().unwrap();
+        let bucket = components.storage.get_bucket(bucket_name)?;
+        let entry = bucket.get_or_create_entry(entry_name)?;
+        let id = entry.query(
+            start,
+            stop,
+            QueryOptions {
+                continuous,
+                include,
+                exclude,
+                ttl: Duration::from_secs(ttl),
+            },
+        )?;
+
+        Ok(QueryInfo { id })
     }
 }

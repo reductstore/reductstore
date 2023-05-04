@@ -8,6 +8,6 @@ pub mod proto;
 pub mod storage;
 
 mod block_manager;
-mod query;
+pub mod query;
 pub mod reader;
 mod writer;

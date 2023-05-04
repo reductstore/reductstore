@@ -137,6 +137,10 @@ async fn main() {
             &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
             get(EntryApi::read_record),
         )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
+            get(EntryApi::query),
+        )
         .with_state(Arc::new(RwLock::new(components)));
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
