@@ -12,9 +12,9 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
 use futures_util::Stream;
-use log::{debug, error};
+use log::debug;
 use std::collections::HashMap;
-use std::fmt::format;
+
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
@@ -140,7 +140,7 @@ impl EntryApi {
             ts
         };
 
-        let mut reader = if let Some(ts) = ts {
+        let reader = if let Some(ts) = ts {
             let mut components = components.write().unwrap();
             let bucket = components.storage.get_bucket(bucket_name)?;
             bucket.begin_read(entry_name, ts)?
@@ -178,7 +178,7 @@ struct ReaderWrapper {
 impl Stream for ReaderWrapper {
     type Item = Result<Bytes, HttpError>;
 
-    fn poll_next(self: Pin<&mut ReaderWrapper>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut ReaderWrapper>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.reader.read().unwrap().is_done() {
             return Poll::Ready(None);
         }
