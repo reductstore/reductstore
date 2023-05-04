@@ -6,20 +6,29 @@
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::http::header::HeaderMap;
 
+use axum::body::StreamBody;
+use axum::http::HeaderName;
+use axum::response::IntoResponse;
+use bytes::Bytes;
 use futures_util::stream::StreamExt;
-use log::debug;
+use futures_util::Stream;
+use log::{debug, error};
 use std::collections::HashMap;
+use std::fmt::format;
+use std::pin::Pin;
 use std::sync::{Arc, RwLock};
+use std::task::{Context, Poll};
 
 use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerComponents;
 use crate::storage::entry::Labels;
+use crate::storage::reader::RecordReader;
 
 pub struct EntryApi {}
 
 impl EntryApi {
-    // POST /entries
-    pub async fn write_record1(
+    // POST /:bucket/:entry?ts=<number>
+    pub async fn write_record(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         headers: HeaderMap,
         Path(path): Path<HashMap<String, String>>,
@@ -37,7 +46,7 @@ impl EntryApi {
             Err(_) => {
                 return Err(HttpError::unprocessable_entity(
                     "'ts' must be an unix timestamp in microseconds",
-                ))
+                ));
             }
         };
         debug!("headers: {:?}", headers);
@@ -61,7 +70,12 @@ impl EntryApi {
         let labels = headers
             .iter()
             .filter(|(k, _)| k.as_str().starts_with("x-reduct-label-"))
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+            .map(|(k, v)| {
+                (
+                    k.as_str()[15..].to_string(),
+                    v.to_str().unwrap().to_string(),
+                )
+            })
             .collect::<Labels>();
 
         let writer = {
@@ -86,5 +100,94 @@ impl EntryApi {
 
         writer.write().unwrap().write(vec![].as_ref(), true)?;
         Ok(())
+    }
+
+    // GET /:bucket/:entry?ts=<number>|id=<number>|
+    pub async fn read_record(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        Path(path): Path<HashMap<String, String>>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Result<impl IntoResponse, HttpError> {
+        let bucket_name = path.get("bucket_name").unwrap();
+        let entry_name = path.get("entry_name").unwrap();
+
+        let ts = match params.get("ts") {
+            Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
+                HttpError::unprocessable_entity("'ts' must be an unix timestamp in microseconds")
+            })?),
+            None => None,
+        };
+
+        let query = match params.get("q") {
+            Some(query) => Some(query.parse::<u64>().map_err(|_| {
+                HttpError::unprocessable_entity("'query' must be an unix timestamp in microseconds")
+            })?),
+            None => None,
+        };
+
+        let ts = if ts.is_none() && query.is_none() {
+            let mut components = components.write().unwrap();
+            Some(
+                components
+                    .storage
+                    .get_bucket(bucket_name)?
+                    .info()?
+                    .info
+                    .unwrap()
+                    .latest_record,
+            )
+        } else {
+            ts
+        };
+
+        let mut reader = if let Some(ts) = ts {
+            let mut components = components.write().unwrap();
+            let bucket = components.storage.get_bucket(bucket_name)?;
+            bucket.begin_read(entry_name, ts)?
+        } else {
+            let mut components = components.write().unwrap();
+            let bucket = components.storage.get_bucket(bucket_name)?;
+            let entry = bucket.get_or_create_entry(entry_name)?;
+            entry.next(query.unwrap())?.0
+        };
+
+        let headers = {
+            let reader = reader.read().unwrap();
+            reader
+                .labels()
+                .iter()
+                .fold(HeaderMap::new(), |mut headers, (k, v)| {
+                    headers.insert(
+                        format!("x-reduct-label-{}", k)
+                            .parse::<HeaderName>()
+                            .unwrap(),
+                        v.parse().unwrap(),
+                    );
+                    headers
+                })
+        };
+
+        Ok((headers, StreamBody::new(ReaderWrapper { reader })))
+    }
+}
+
+struct ReaderWrapper {
+    reader: Arc<RwLock<RecordReader>>,
+}
+
+impl Stream for ReaderWrapper {
+    type Item = Result<Bytes, HttpError>;
+
+    fn poll_next(self: Pin<&mut ReaderWrapper>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.reader.read().unwrap().is_done() {
+            return Poll::Ready(None);
+        }
+        match self.reader.write().unwrap().read() {
+            Ok(chunk) => Poll::Ready(Some(Ok(Bytes::from(chunk.data)))),
+            Err(e) => Poll::Ready(Some(Err(e))),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
     }
 }

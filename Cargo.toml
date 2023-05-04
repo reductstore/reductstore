@@ -31,7 +31,7 @@ tokio = { version = "1.28.0", features = ["full"] }
 hyper = { version = "0.14.26", features = ["full"] }
 tower = "0.4.12"
 futures-util = "0.3.28"
-
+tokio-util = "0.7.8"
 [build-dependencies]
 prost-build = "0.11"
 prost-wkt-build = "0.4"

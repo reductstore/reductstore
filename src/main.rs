@@ -131,7 +131,11 @@ async fn main() {
         // Entry API
         .route(
             &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            post(EntryApi::write_record1),
+            post(EntryApi::write_record),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
+            get(EntryApi::read_record),
         )
         .with_state(Arc::new(RwLock::new(components)));
     axum::Server::bind(&addr)

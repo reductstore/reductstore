@@ -5,10 +5,15 @@
 
 use crate::core::status::HttpError;
 use crate::storage::proto::{ts_to_us, Block};
+use futures_util::Stream;
+use log::error;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::{Arc, RwLock};
+use std::task::{Context, Poll};
 
 pub struct RecordReader {
     file: File,

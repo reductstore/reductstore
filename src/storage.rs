@@ -9,5 +9,5 @@ pub mod storage;
 
 mod block_manager;
 mod query;
-mod reader;
+pub mod reader;
 mod writer;

@@ -12,6 +12,7 @@ use crate::storage::storage::Storage;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use prost::DecodeError;
+use serde::de::StdError;
 
 pub mod bucket_api;
 pub mod entry_api;
@@ -48,5 +49,11 @@ impl From<DecodeError> for HttpError {
 impl From<serde_json::Error> for HttpError {
     fn from(err: serde_json::Error) -> Self {
         HttpError::unprocessable_entity(&format!("Invalid JSON: {}", err))
+    }
+}
+
+impl StdError for HttpError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        None
     }
 }
