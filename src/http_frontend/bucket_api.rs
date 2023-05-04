@@ -16,7 +16,7 @@ use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerComponents;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::BucketSettings;
-use crate::storage::proto::{BucketInfo, FullBucketInfo};
+use crate::storage::proto::FullBucketInfo;
 
 pub struct BucketApi {}
 

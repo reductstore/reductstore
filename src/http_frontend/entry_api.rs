@@ -3,16 +3,13 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use axum::body::Full;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::http::header::HeaderMap;
-use axum::http::response::Builder;
-use axum::response::Response;
+
 use futures_util::stream::StreamExt;
 use log::debug;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tokio::time::sleep;
 
 use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerComponents;
