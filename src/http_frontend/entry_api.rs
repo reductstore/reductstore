@@ -12,7 +12,7 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
 use futures_util::Stream;
-use log::{debug, info};
+use log::debug;
 use std::collections::HashMap;
 
 use std::pin::Pin;
