@@ -30,6 +30,7 @@ axum = "0.6.18"
 tokio = { version = "1.28.0", features = ["full"] }
 hyper = { version = "0.14.26", features = ["full"] }
 tower = "0.4.12"
+futures-util = "0.3.28"
 
 [build-dependencies]
 prost-build = "0.11"

@@ -27,6 +27,7 @@ use crate::http_frontend::HttpServerComponents;
 use crate::storage::storage::Storage;
 
 use crate::http_frontend::bucket_api::BucketApi;
+use crate::http_frontend::entry_api::EntryApi;
 use axum::{
     http::StatusCode,
     routing::{delete, get, head, post, put},
@@ -126,6 +127,11 @@ async fn main() {
         .route(
             &format!("{}api/v1/b/:bucket_name", api_base_path),
             put(BucketApi::update_bucket),
+        )
+        // Entry API
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
+            post(EntryApi::write_record1),
         )
         .with_state(Arc::new(RwLock::new(components)));
     axum::Server::bind(&addr)

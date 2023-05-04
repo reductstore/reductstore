@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 use crate::core::status::HttpError;
 use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::bucket_settings::QuotaType;
-use crate::storage::proto::{BucketInfo, BucketSettings};
+use crate::storage::proto::{BucketInfo, BucketSettings, EntryInfo, FullBucketInfo};
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
 
@@ -142,22 +142,28 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub fn info(&self) -> Result<BucketInfo, HttpError> {
+    pub fn info(&self) -> Result<FullBucketInfo, HttpError> {
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
+        let mut entries: Vec<EntryInfo> = vec![];
         for entry in self.entries.values() {
             let info = entry.info()?;
+            entries.push(info.clone());
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
             latest_record = latest_record.max(info.latest_record);
         }
-        Ok(BucketInfo {
-            name: self.name.clone(),
-            size,
-            entry_count: self.entries.len() as u64,
-            oldest_record,
-            latest_record,
+        Ok(FullBucketInfo {
+            info: Some(BucketInfo {
+                name: self.name.clone(),
+                size,
+                entry_count: self.entries.len() as u64,
+                oldest_record,
+                latest_record,
+            }),
+            settings: Some(self.settings.clone()),
+            entries,
         })
     }
 
@@ -212,7 +218,7 @@ impl Bucket {
         match QuotaType::from_i32(self.settings.quota_type.unwrap()).unwrap() {
             QuotaType::None => Ok(()),
             QuotaType::Fifo => {
-                let mut size = self.info()?.size + content_size;
+                let mut size = self.info()?.info.unwrap().size + content_size;
                 while size > self.settings.quota_size() {
                     debug!(
                         "Need more space.  Try to remove an oldest block from bucket '{}'",
@@ -252,7 +258,7 @@ impl Bucket {
                         ));
                     }
 
-                    size = self.info()?.size + content_size;
+                    size = self.info()?.info.unwrap().size + content_size;
                 }
 
                 // Remove empty entries

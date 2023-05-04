@@ -3,27 +3,50 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::HttpError;
-use crate::http_frontend::HttpServerComponents;
-use crate::storage::proto::{BucketInfo, BucketSettings};
+use std::sync::{Arc, RwLock};
+
 use axum::async_trait;
 use axum::extract::{FromRequest, Path, State};
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
-use std::sync::{Arc, RwLock};
+use serde_json::{json, Value};
+
+use crate::core::status::HttpError;
+use crate::http_frontend::HttpServerComponents;
+use crate::storage::proto::bucket_settings::QuotaType;
+use crate::storage::proto::BucketSettings;
+use crate::storage::proto::{BucketInfo, FullBucketInfo};
 
 pub struct BucketApi {}
 
-impl IntoResponse for BucketInfo {
+impl IntoResponse for FullBucketInfo {
     fn into_response(self) -> Response {
-        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+        // Work around for string enum
+        let mut body = serde_json::to_value(&self).unwrap();
+        *body
+            .get_mut("settings")
+            .unwrap()
+            .get_mut("quota_type")
+            .unwrap() = json!(
+            QuotaType::from_i32(self.settings.unwrap().quota_type.unwrap())
+                .unwrap()
+                .as_str_name()
+        );
+
+        (StatusCode::OK, body.to_string()).into_response()
     }
 }
 
 impl IntoResponse for BucketSettings {
     fn into_response(self) -> Response {
-        (StatusCode::OK, "").into_response()
+        // Work around for string enum
+        let mut body = serde_json::to_value(&self).unwrap();
+        *body.get_mut("quota_type").unwrap() = json!(QuotaType::from_i32(self.quota_type.unwrap())
+            .unwrap()
+            .as_str_name());
+
+        (StatusCode::OK, body.to_string()).into_response()
     }
 }
 
@@ -40,8 +63,17 @@ where
         let bytes = Bytes::from_request(req, state)
             .await
             .map_err(IntoResponse::into_response)?;
-        let settings =
-            serde_json::from_slice(&bytes).map_err(|e| HttpError::from(e).into_response())?;
+        let settings = if bytes.is_empty() {
+            BucketSettings::default()
+        } else {
+            let mut json: Value =
+                serde_json::from_slice(&bytes).map_err(|e| HttpError::from(e).into_response())?;
+            json.get_mut("quota_type").map(|v| {
+                *v = json!(QuotaType::from_str_name(v.as_str().unwrap()));
+            });
+
+            serde_json::from_value(json).map_err(|e| HttpError::from(e).into_response())?
+        };
         Ok(settings)
     }
 }
@@ -51,7 +83,7 @@ impl BucketApi {
     pub async fn get_bucket(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(bucket_name): Path<String>,
-    ) -> Result<BucketInfo, HttpError> {
+    ) -> Result<FullBucketInfo, HttpError> {
         let mut components = components.write().unwrap();
         components.storage.get_bucket(&bucket_name)?.info()
     }
@@ -73,7 +105,9 @@ impl BucketApi {
         settings: BucketSettings,
     ) -> Result<(), HttpError> {
         let mut components = components.write().unwrap();
-        components.storage.create_bucket(&bucket_name, settings)?;
+        components
+            .storage
+            .create_bucket(&bucket_name, settings.into())?;
         Ok(())
     }
 
@@ -85,7 +119,7 @@ impl BucketApi {
     ) -> Result<(), HttpError> {
         let mut components = components.write().unwrap();
         let bucket = components.storage.get_bucket(&bucket_name)?;
-        bucket.set_settings(settings)
+        bucket.set_settings(settings.into())
     }
 }
 

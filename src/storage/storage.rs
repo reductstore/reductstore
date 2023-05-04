@@ -59,7 +59,7 @@ impl Storage {
         let mut latest_record = 0u64;
 
         for bucket in self.buckets.values() {
-            let bucket = bucket.info()?;
+            let bucket = bucket.info()?.info.unwrap();
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
             latest_record = latest_record.max(bucket.latest_record);
@@ -147,7 +147,7 @@ impl Storage {
     pub fn get_bucket_list(&self) -> Result<BucketInfoList, HttpError> {
         let mut buckets = Vec::new();
         for bucket in self.buckets.values() {
-            buckets.push(bucket.info()?);
+            buckets.push(bucket.info()?.info.unwrap());
         }
 
         Ok(BucketInfoList { buckets })

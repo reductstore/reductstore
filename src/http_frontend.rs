@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Response};
 use prost::DecodeError;
 
 pub mod bucket_api;
+pub mod entry_api;
 pub mod server_api;
 pub mod token_api;
 
@@ -40,12 +41,12 @@ impl IntoResponse for HttpError {
 
 impl From<DecodeError> for HttpError {
     fn from(err: DecodeError) -> Self {
-        HttpError::bad_request(&format!("Failed to serialize data: {}", err))
+        HttpError::unprocessable_entity(&format!("Failed to serialize data: {}", err))
     }
 }
 
 impl From<serde_json::Error> for HttpError {
     fn from(err: serde_json::Error) -> Self {
-        HttpError::bad_request(&format!("Invalid JSON: {}", err))
+        HttpError::unprocessable_entity(&format!("Invalid JSON: {}", err))
     }
 }
