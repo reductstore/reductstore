@@ -389,13 +389,13 @@ mod tests {
         });
 
         write(&mut bucket, "test-1", 0, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().size, 4);
+        assert_eq!(bucket.info().unwrap().info.unwrap().size, 4);
 
         write(&mut bucket, "test-2", 1, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().size, 8);
+        assert_eq!(bucket.info().unwrap().info.unwrap().size, 8);
 
         write(&mut bucket, "test-3", 2, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().size, 8);
+        assert_eq!(bucket.info().unwrap().info.unwrap().size, 8);
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).err(),

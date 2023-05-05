@@ -50,7 +50,7 @@ def test_read_write_entries_big_blob_ok(base_url, session, bucket):
     assert resp.status_code == 200
     assert resp.content == huge_data
 
-    assert resp.headers['Content-Type'] == "application/octet-stream"
+    assert resp.headers['content-type'] == "application/octet-stream"
     assert resp.headers['x-reduct-time'] == str(ts)
     assert resp.headers['x-reduct-last'] == '1'
 

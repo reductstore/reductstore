@@ -16,6 +16,7 @@ use serde::de::StdError;
 
 pub mod bucket_api;
 pub mod entry_api;
+pub mod middleware;
 pub mod server_api;
 pub mod token_api;
 

@@ -12,19 +12,45 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use crate::http_frontend::HttpServerComponents;
+use crate::storage::proto::bucket_settings::QuotaType;
+use axum::headers;
+use axum::headers::HeaderMapExt;
+use serde_json::json;
 use std::sync::{Arc, RwLock};
 
 pub struct ServerApi {}
 
 impl IntoResponse for ServerInfo {
     fn into_response(self) -> Response {
-        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+
+        let mut body = serde_json::to_value(&self).unwrap();
+        *body
+            .get_mut("defaults")
+            .unwrap()
+            .get_mut("bucket")
+            .unwrap()
+            .get_mut("quota_type")
+            .unwrap() = json!(QuotaType::from_i32(
+            self.defaults.unwrap().bucket.unwrap().quota_type.unwrap()
+        )
+        .unwrap()
+        .as_str_name());
+        (StatusCode::OK, headers, body.to_string()).into_response()
     }
 }
 
 impl IntoResponse for BucketInfoList {
     fn into_response(self) -> Response {
-        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+        (
+            StatusCode::OK,
+            headers,
+            serde_json::to_string(&self).unwrap(),
+        )
+            .into_response()
     }
 }
 

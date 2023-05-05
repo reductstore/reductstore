@@ -12,28 +12,32 @@ pub mod storage;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
+use axum::handler::Handler;
+use axum::{
+    http::StatusCode,
+    middleware,
+    routing::{delete, get, head, post, put},
+    Router, ServiceExt,
+};
+use log::info;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
+use tower::layer;
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::TokenRepository;
+use crate::storage::storage::Storage;
+
 use crate::core::env::Env;
 use crate::core::logger::Logger;
 
+use crate::http_frontend::bucket_api::BucketApi;
+use crate::http_frontend::entry_api::EntryApi;
+use crate::http_frontend::middleware::default_headers;
 use crate::http_frontend::server_api::ServerApi;
 use crate::http_frontend::token_api::TokenApi;
 use crate::http_frontend::HttpServerComponents;
-use crate::storage::storage::Storage;
-
-use crate::http_frontend::bucket_api::BucketApi;
-use crate::http_frontend::entry_api::EntryApi;
-use axum::{
-    http::StatusCode,
-    routing::{delete, get, head, post, put},
-    Router,
-};
-use log::info;
 
 #[tokio::main]
 async fn main() {
@@ -128,6 +132,10 @@ async fn main() {
             &format!("{}api/v1/b/:bucket_name", api_base_path),
             put(BucketApi::update_bucket),
         )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            delete(BucketApi::remove_bucket),
+        )
         // Entry API
         .route(
             &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
@@ -141,7 +149,9 @@ async fn main() {
             &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
             get(EntryApi::query),
         )
+        .layer(middleware::from_fn(default_headers))
         .with_state(Arc::new(RwLock::new(components)));
+
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await

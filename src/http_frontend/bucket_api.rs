@@ -3,13 +3,16 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use axum::async_trait;
 use axum::extract::{FromRequest, Path, State};
+use axum::headers::HeaderMapExt;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::{async_trait, headers};
 use bytes::Bytes;
+use hyper::HeaderMap;
 use serde_json::{json, Value};
 
 use crate::core::status::HttpError;
@@ -34,7 +37,9 @@ impl IntoResponse for FullBucketInfo {
                 .as_str_name()
         );
 
-        (StatusCode::OK, body.to_string()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+        (StatusCode::OK, headers, body.to_string()).into_response()
     }
 }
 
@@ -46,7 +51,9 @@ impl IntoResponse for BucketSettings {
             .unwrap()
             .as_str_name());
 
-        (StatusCode::OK, body.to_string()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+        (StatusCode::OK, headers, body.to_string()).into_response()
     }
 }
 
@@ -68,9 +75,15 @@ where
         } else {
             let mut json: Value =
                 serde_json::from_slice(&bytes).map_err(|e| HttpError::from(e).into_response())?;
-            json.get_mut("quota_type").map(|v| {
-                *v = json!(QuotaType::from_str_name(v.as_str().unwrap()));
-            });
+            match json.get_mut("quota_type") {
+                Some(quota_type) => {
+                    let val = QuotaType::from_str_name(quota_type.as_str().unwrap()).ok_or(
+                        HttpError::unprocessable_entity("Invalid quota type").into_response(),
+                    )? as i32;
+                    *quota_type = json!(val);
+                }
+                None => {}
+            }
 
             serde_json::from_value(json).map_err(|e| HttpError::from(e).into_response())?
         };
@@ -121,6 +134,16 @@ impl BucketApi {
         let bucket = components.storage.get_bucket(&bucket_name)?;
         bucket.set_settings(settings.into())
     }
+
+    // DELETE /b/:bucket_name
+    pub async fn remove_bucket(
+        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        Path(bucket_name): Path<String>,
+    ) -> Result<(), HttpError> {
+        let mut components = components.write().unwrap();
+        components.storage.remove_bucket(&bucket_name)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -132,6 +155,7 @@ mod tests {
     use crate::http_frontend::HttpServerComponents;
     use crate::storage::proto::BucketSettings;
     use crate::storage::storage::Storage;
+    use mockall::Any;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
 
@@ -141,7 +165,7 @@ mod tests {
         let info = BucketApi::get_bucket(State(components), Path("bucket-1".to_string()))
             .await
             .unwrap();
-        assert_eq!(info.name, "bucket-1");
+        assert_eq!(info.info.unwrap().name, "bucket-1");
     }
 
     #[tokio::test]
@@ -174,6 +198,16 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_remove_bucket() {
+        {
+            let mut components = setup();
+            BucketApi::remove_bucket(State(components), Path("bucket-1".to_string()))
+                .await
+                .unwrap();
+        }
     }
 
     fn setup() -> Arc<RwLock<HttpServerComponents>> {
