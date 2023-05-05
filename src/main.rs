@@ -22,7 +22,6 @@ use axum::{
 use log::info;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
-use tower::layer;
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;

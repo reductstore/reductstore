@@ -3,18 +3,11 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use axum::headers::{ContentType, HeaderMapExt, Server};
-use axum::http::{response::Response, Request, StatusCode};
-use std::fmt::format;
-use std::task::{Context, Poll};
+use axum::http::Request;
 
 use crate::core::status::HttpError;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use axum::TypedHeader;
-use futures_util::future::BoxFuture;
-use hyper::Body;
-use tower::Service;
 
 pub async fn default_headers<B>(
     request: Request<B>,

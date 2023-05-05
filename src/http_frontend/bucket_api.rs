@@ -3,7 +3,6 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use axum::extract::{FromRequest, Path, State};
@@ -155,7 +154,7 @@ mod tests {
     use crate::http_frontend::HttpServerComponents;
     use crate::storage::proto::BucketSettings;
     use crate::storage::storage::Storage;
-    use mockall::Any;
+
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
 
@@ -203,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn test_remove_bucket() {
         {
-            let mut components = setup();
+            let components = setup();
             BucketApi::remove_bucket(State(components), Path("bucket-1".to_string()))
                 .await
                 .unwrap();
