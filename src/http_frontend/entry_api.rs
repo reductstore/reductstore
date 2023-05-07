@@ -140,40 +140,51 @@ impl EntryApi {
                 components
                     .storage
                     .get_bucket(bucket_name)?
+                    .get_entry(entry_name)?
                     .info()?
-                    .info
-                    .unwrap()
                     .latest_record,
             )
         } else {
             ts
         };
 
-        let reader = if let Some(ts) = ts {
+        let (reader, last) = if let Some(ts) = ts {
             let mut components = components.write().unwrap();
             let bucket = components.storage.get_bucket(bucket_name)?;
-            bucket.begin_read(entry_name, ts)?
+            (bucket.begin_read(entry_name, ts)?, true)
         } else {
             let mut components = components.write().unwrap();
             let bucket = components.storage.get_bucket(bucket_name)?;
-            let entry = bucket.get_or_create_entry(entry_name)?;
-            entry.next(query.unwrap())?.0
+            let entry = bucket.get_entry(entry_name)?;
+            entry.next(query.unwrap())?
         };
 
         let headers = {
             let reader = reader.read().unwrap();
-            reader
-                .labels()
-                .iter()
-                .fold(HeaderMap::new(), |mut headers, (k, v)| {
-                    headers.insert(
-                        format!("x-reduct-label-{}", k)
-                            .parse::<HeaderName>()
-                            .unwrap(),
-                        v.parse().unwrap(),
-                    );
-                    headers
-                })
+            let mut headers = HeaderMap::new();
+            for (k, v) in reader.labels() {
+                headers.insert(
+                    format!("x-reduct-label-{}", k)
+                        .parse::<HeaderName>()
+                        .unwrap(),
+                    v.parse().unwrap(),
+                );
+            }
+
+            headers.insert(
+                "content-type",
+                reader.content_type().to_string().parse().unwrap(),
+            );
+            headers.insert(
+                "content-length",
+                reader.content_length().to_string().parse().unwrap(),
+            );
+            headers.insert(
+                "x-reduct-time",
+                reader.timestamp().to_string().parse().unwrap(),
+            );
+            headers.insert("x-reduct-last", u8::from(last).to_string().parse().unwrap());
+            headers
         };
 
         struct ReaderWrapper {
@@ -216,7 +227,7 @@ impl EntryApi {
         let entry_info = {
             let mut components = components.write().unwrap();
             let bucket = components.storage.get_bucket(bucket_name)?;
-            bucket.get_or_create_entry(entry_name)?.info()?
+            bucket.get_entry(entry_name)?.info()?
         };
 
         let start = match params.get("start") {
@@ -230,10 +241,10 @@ impl EntryApi {
             Some(stop) => stop.parse::<u64>().map_err(|_| {
                 HttpError::unprocessable_entity("'stop' must be an unix timestamp in microseconds")
             })?,
-            None => entry_info.latest_record,
+            None => entry_info.latest_record + 1,
         };
 
-        let continuous = match params.get("continue") {
+        let continuous = match params.get("continuous") {
             Some(continue_) => continue_.parse::<bool>().map_err(|_| {
                 HttpError::unprocessable_entity(
                     "'continue' must be an unix timestamp in microseconds",

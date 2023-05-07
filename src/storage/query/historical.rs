@@ -10,14 +10,13 @@ use std::time::Instant;
 
 use crate::core::status::HttpError;
 use crate::storage::block_manager::{BlockManager, ManageBlock};
-use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
+use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
 
 pub struct HistoricalQuery {
     start_time: u64,
     stop_time: u64,
-    next_record: usize,
     block: Option<Block>,
     last_update: Instant,
     options: QueryOptions,
@@ -29,7 +28,6 @@ impl HistoricalQuery {
         HistoricalQuery {
             start_time,
             stop_time,
-            next_record: 0,
             block: None,
             last_update: Instant::now(),
             options,
@@ -48,10 +46,15 @@ impl Query for HistoricalQuery {
 
         let find_first_block = |start| -> u64 {
             let start_block_id = block_index.range(&start..).next();
-            if start_block_id.is_some() && start <= *start_block_id.unwrap() {
-                start
+            if start_block_id.is_some() && start >= *start_block_id.unwrap() {
+                start_block_id.unwrap().clone()
             } else {
-                block_index.range(..&start).rev().next().unwrap().clone()
+                block_index
+                    .range(..&start)
+                    .rev()
+                    .next()
+                    .unwrap_or(&0)
+                    .clone()
             }
         };
 
@@ -65,33 +68,8 @@ impl Query for HistoricalQuery {
             }
         };
 
-        if let Some(block) = self.block.as_ref() {
-            // We have a block, so we can just read the next record.
-            let record_reader = block_manager.begin_read(block, self.next_record)?;
-            self.next_record += 1;
-            let last = if self.next_record >= block.records.len() {
-                self.start_time = ts_to_us(block.latest_record_time.as_ref().unwrap()) + 1;
-                self.block = None;
-                self.next_record = 0;
-                check_next_block(self.start_time, self.stop_time)
-            } else {
-                false
-            };
-
-            return Ok((record_reader, last));
-        }
-
-        let mut records: Vec<Record> = Vec::new();
-        let mut block = Block::default();
-        let start = find_first_block(self.start_time);
-        for block_id in block_index.range(start..self.stop_time) {
-            block = block_manager.load(*block_id)?;
-
-            if block.invalid {
-                continue;
-            }
-
-            let found_records: Vec<Record> = block
+        let filter_records = |block: &Block| -> Vec<Record> {
+            block
                 .records
                 .iter()
                 .filter(|record| {
@@ -125,11 +103,30 @@ impl Query for HistoricalQuery {
                     }
                 })
                 .map(|record| record.clone())
-                .collect();
+                .collect()
+        };
 
+        let mut records: Vec<Record> = Vec::new();
+        let mut block = Block::default();
+        let start = find_first_block(self.start_time);
+        for block_id in block_index.range(start..self.stop_time) {
+            block = if let Some(block) = &self.block {
+                if block.begin_time == Some(us_to_ts(block_id)) {
+                    block.clone()
+                } else {
+                    block_manager.load(*block_id)?
+                }
+            } else {
+                block_manager.load(*block_id)?
+            };
+
+            if block.invalid {
+                continue;
+            }
+
+            let found_records = filter_records(&block);
             records.extend(found_records);
-
-            if !records.is_empty() || self.options.include.is_empty() {
+            if !records.is_empty() {
                 break;
             }
         }
@@ -146,9 +143,9 @@ impl Query for HistoricalQuery {
         let last = if records.len() > 1 {
             // Only one record in current block check next one
             self.block = Some(block.clone());
-            self.next_record = 1;
             false
         } else {
+            self.block = None;
             check_next_block(self.start_time, self.stop_time)
         };
 
@@ -192,7 +189,7 @@ mod tests {
     fn test_query_ok_1_rec() {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (mut block_manager, index) = setup();
+        let (mut block_manager, index) = setup_2_blocks();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -215,7 +212,7 @@ mod tests {
     fn test_query_ok_2_recs() {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
 
-        let (mut block_manager, index) = setup();
+        let (mut block_manager, index) = setup_2_blocks();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -251,7 +248,7 @@ mod tests {
     fn test_query_ok_3_recs() {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
 
-        let (mut block_manager, index) = setup();
+        let (mut block_manager, index) = setup_2_blocks();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -305,7 +302,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (mut block_manager, index) = setup();
+        let (mut block_manager, index) = setup_2_blocks();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -340,7 +337,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (mut block_manager, index) = setup();
+        let (mut block_manager, index) = setup_2_blocks();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -372,7 +369,7 @@ mod tests {
         assert_eq!(query.state(), &QueryState::Done);
     }
 
-    fn setup() -> (BlockManager, BTreeSet<u64>) {
+    fn setup_2_blocks() -> (BlockManager, BTreeSet<u64>) {
         let dir = tempdir().unwrap().into_path();
         let mut block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();

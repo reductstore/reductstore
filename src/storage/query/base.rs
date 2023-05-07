@@ -63,8 +63,8 @@ pub struct QueryOptions {
     pub continuous: bool,
 }
 
-impl QueryOptions {
-    pub fn default() -> QueryOptions {
+impl Default for QueryOptions {
+    fn default() -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(60),
             include: HashMap::new(),

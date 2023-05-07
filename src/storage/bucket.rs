@@ -115,6 +115,15 @@ impl Bucket {
         }
     }
 
+    /// Get or create an entry in the bucket
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key of the entry
+    ///
+    /// # Returns
+    ///
+    /// * `&mut Entry` - The entry or an HTTPError
     pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, HttpError> {
         if !self.entries.contains_key(key) {
             let entry = Entry::new(
@@ -129,6 +138,25 @@ impl Bucket {
         }
 
         Ok(self.entries.get_mut(key).unwrap())
+    }
+
+    /// Get an entry in the bucket
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the entry
+    ///
+    /// # Returns
+    ///
+    /// * `&mut Entry` - The entry or an HTTPError
+    pub fn get_entry(&mut self, name: &str) -> Result<&mut Entry, HttpError> {
+        let entry = self.entries.get_mut(name).ok_or_else(|| {
+            HttpError::not_found(&format!(
+                "Entry '{}' not found in bucket '{}'",
+                name, self.name
+            ))
+        })?;
+        Ok(entry)
     }
 
     /// Remove a Bucket from disk
@@ -210,7 +238,7 @@ impl Bucket {
         name: &str,
         time: u64,
     ) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
-        let entry = self.get_or_create_entry(name)?;
+        let entry = self.get_entry(name)?;
         entry.begin_read(time)
     }
 
@@ -399,7 +427,9 @@ mod tests {
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).err(),
-            Some(HttpError::not_found("No record with timestamp 0"))
+            Some(HttpError::not_found(
+                "Entry 'test-1' not found in bucket 'test'"
+            ))
         );
     }
 

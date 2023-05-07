@@ -99,6 +99,11 @@ impl RecordReader {
         &self.content_type
     }
 
+    /// Get the content length of the record.
+    pub fn content_length(&self) -> u64 {
+        self.content_length
+    }
+
     /// Test if the record has been fully read.
     pub fn is_done(&self) -> bool {
         self.written_bytes == self.content_length

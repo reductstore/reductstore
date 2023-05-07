@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
-    last_timestamp: u64,
+    next_start: u64,
     options: QueryOptions,
 }
 
@@ -27,7 +27,7 @@ impl ContinuousQuery {
 
         ContinuousQuery {
             query: HistoricalQuery::new(start, u64::MAX, options.clone()),
-            last_timestamp: 0,
+            next_start: start,
             options,
         }
     }
@@ -41,15 +41,14 @@ impl Query for ContinuousQuery {
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
         match self.query.next(block_indexes, block_manager) {
             Ok((record, last)) => {
-                self.last_timestamp = record.read().unwrap().timestamp();
+                self.next_start = record.read().unwrap().timestamp() + 1;
                 Ok((record, last))
             }
             Err(HttpError {
                 status: HttpStatus::NoContent,
                 ..
             }) => {
-                self.query =
-                    HistoricalQuery::new(self.last_timestamp + 1, u64::MAX, self.options.clone());
+                self.query = HistoricalQuery::new(self.next_start, u64::MAX, self.options.clone());
                 Err(HttpError {
                     status: HttpStatus::NoContent,
                     message: "No content".to_string(),
@@ -89,8 +88,15 @@ mod tests {
         );
         {
             let (reader, _) = query.next(&block_indexes, &mut block_manager).unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 0);
+            assert_eq!(reader.read().unwrap().timestamp(), 1000);
         }
+        assert_eq!(
+            query.next(&block_indexes, &mut block_manager).err(),
+            Some(HttpError {
+                status: HttpStatus::NoContent,
+                message: "No content".to_string(),
+            })
+        );
         assert_eq!(
             query.next(&block_indexes, &mut block_manager).err(),
             Some(HttpError {
@@ -112,7 +118,7 @@ mod tests {
         block.records.push(Record {
             timestamp: Some(Timestamp {
                 seconds: 0,
-                nanos: 0,
+                nanos: 1000000,
             }),
             begin: 0,
             end: 10,

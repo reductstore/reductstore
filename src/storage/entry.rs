@@ -231,12 +231,18 @@ impl Entry {
             return not_found_err;
         }
 
-        if &time > self.block_index.last().unwrap() || &time < self.block_index.first().unwrap() {
+        if &time < self.block_index.first().unwrap() {
             return not_found_err;
         }
 
-        let block_id = self.block_index.range(time..).next().unwrap();
-        let block = self.block_manager.load(*block_id)?;
+        let block_id = self.block_index.range(time..).next();
+        let block_id = if block_id.is_some() && time <= *block_id.unwrap() {
+            block_id
+        } else {
+            self.block_index.range(..time).rev().next().clone()
+        };
+
+        let block = self.block_manager.load(*block_id.unwrap())?;
 
         let record_index = block
             .records
@@ -615,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn test_begin_read_ok() {
+    fn test_begin_read_ok1() {
         let (_, mut entry) = setup_default();
         {
             let writer = entry
@@ -628,6 +634,36 @@ mod tests {
                 .unwrap();
         }
         let reader = entry.begin_read(1000000).unwrap();
+        let chunk = reader.write().unwrap().read().unwrap();
+        assert_eq!(chunk.data, "0123456789".as_bytes());
+        assert!(chunk.last);
+    }
+
+    #[test]
+    fn test_begin_read_ok2() {
+        let (_, mut entry) = setup_default();
+
+        {
+            let writer = entry
+                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+                .unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write("0123456789".as_bytes(), true)
+                .unwrap();
+        }
+        {
+            let writer = entry
+                .begin_write(1010000, 10, "text/plain".to_string(), Labels::new())
+                .unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write("0123456789".as_bytes(), true)
+                .unwrap();
+        }
+        let reader = entry.begin_read(1010000).unwrap();
         let chunk = reader.write().unwrap().read().unwrap();
         assert_eq!(chunk.data, "0123456789".as_bytes());
         assert!(chunk.last);
