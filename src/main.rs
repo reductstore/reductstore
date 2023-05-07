@@ -56,7 +56,7 @@ async fn main() {
     let data_path = env.get::<String>("RS_DATA_PATH", "/data".to_string(), false);
     let api_token = env.get::<String>("RS_API_TOKEN", "".to_string(), true);
     let cert_path = env.get::<String>("RS_CERT_PATH", "".to_string(), true);
-    let _cert_key_path = env.get::<String>("RS_CERT_KEY_PATH", "".to_string(), true);
+    let cert_key_path = env.get::<String>("RS_CERT_KEY_PATH", "".to_string(), true);
 
     Logger::init(&log_level);
 
@@ -159,12 +159,9 @@ async fn main() {
             .await
             .unwrap();
     } else {
-        let config = RustlsConfig::from_pem_file(
-            "examples/self-signed-certs/cert.pem",
-            "examples/self-signed-certs/key.pem",
-        )
-        .await
-        .unwrap();
+        let config = RustlsConfig::from_pem_file(cert_path, cert_key_path)
+            .await
+            .unwrap();
         axum_server::bind_rustls(addr, config)
             .serve(app.into_make_service())
             .await
