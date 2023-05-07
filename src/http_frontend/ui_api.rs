@@ -7,8 +7,8 @@
 use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerComponents;
 use axum::extract::State;
-use axum::headers;
-use axum::headers::{HeaderMap, HeaderMapExt};
+
+use axum::headers::HeaderMap;
 use axum::http::header::{CONTENT_TYPE, LOCATION};
 use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::IntoResponse;
