@@ -3,18 +3,16 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use prost::Message;
-
 use axum::extract::{FromRequest, Path, State};
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::{async_trait, extract, headers};
+use axum::{async_trait, headers};
 use bytes::Bytes;
 
 use crate::auth::policy::FullAccessPolicy;
 use axum::headers::HeaderMapExt;
 use hyper::HeaderMap;
-use serde_json::json;
+
 use std::sync::{Arc, RwLock};
 
 use crate::auth::proto::token::Permissions;
@@ -146,7 +144,6 @@ mod tests {
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepository;
     use crate::storage::storage::Storage;
-    use bytes::Bytes;
 
     use axum::headers::Authorization;
     use std::path::PathBuf;

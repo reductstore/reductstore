@@ -12,12 +12,11 @@ pub mod storage;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
-use axum::handler::Handler;
 use axum::{
     http::StatusCode,
     middleware,
     routing::{delete, get, head, post, put},
-    Router, ServiceExt,
+    Router,
 };
 use log::info;
 use std::str::FromStr;
