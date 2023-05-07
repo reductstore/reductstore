@@ -34,7 +34,7 @@ ReductStore will be available on port http://127.0.01:8383 and store data in the
 
 To build the storage from source code, you need:
 
-* GCC 11.2 or higher
+* GCC 1 1.2 or higher
 * CMake 18 or higher
 * conan
 
