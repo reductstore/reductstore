@@ -288,3 +288,5 @@ impl EntryApi {
         Ok(QueryInfo { id })
     }
 }
+
+//todo: test in API tests, but not in unit tests

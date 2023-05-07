@@ -38,7 +38,7 @@ jobs:
         with:
           context: .
           tags: ${{github.repository}}:latest
-          outputs: type=docker,dest=/tmp/image_${{ matrix.build_type }}.tar
+          outputs: type=docker,dest=/tmp/image.tar
 
       - name: Upload artifact
         uses: actions/upload-artifact@v2
