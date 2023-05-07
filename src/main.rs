@@ -38,6 +38,7 @@ use crate::http_frontend::entry_api::EntryApi;
 use crate::http_frontend::middleware::default_headers;
 use crate::http_frontend::server_api::ServerApi;
 use crate::http_frontend::token_api::TokenApi;
+use crate::http_frontend::ui_api::UiApi;
 use crate::http_frontend::HttpServerComponents;
 
 #[tokio::main]
@@ -66,7 +67,8 @@ async fn main() {
         storage: Storage::new(PathBuf::from(data_path.clone())),
         auth: TokenAuthorization::new(&api_token),
         token_repo: TokenRepository::new(PathBuf::from(data_path), &api_token),
-        console: ZipAssetManager::new(""),
+        console: ZipAssetManager::new(include_bytes!("asset/console.zip")),
+        base_path: api_base_path.clone(),
     };
 
     let scheme = if cert_path.is_empty() {
@@ -150,6 +152,9 @@ async fn main() {
             &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
             get(EntryApi::query),
         )
+        // UI
+        .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
+        .fallback(get(UiApi::show_ui))
         .layer(middleware::from_fn(default_headers))
         .with_state(Arc::new(RwLock::new(components)));
 

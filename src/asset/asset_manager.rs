@@ -28,18 +28,12 @@ impl ZipAssetManager {
     /// # Returns
     ///
     /// The asset manager.
-    pub fn new(zipped_content: &str) -> ZipAssetManager {
+    pub fn new(zipped_content: &[u8]) -> ZipAssetManager {
         if zipped_content.len() == 0 {
             return ZipAssetManager { path: None };
         }
 
-        // Convert hex string to binary and extract zip archive into a temporary directory
-        if zipped_content.len() % 2 != 0 {
-            panic!("Hex string must have even length");
-        }
-
-        let binary = hex::decode(zipped_content).expect("Could not decode hex string");
-        let cursor = Cursor::new(binary);
+        let cursor = Cursor::new(zipped_content);
 
         // Create a zip archive from the binary
         let mut archive = ZipArchive::new(cursor).unwrap();
@@ -108,11 +102,6 @@ impl ZipAssetManager {
     }
 }
 
-/// Create a new asset manager. (C++ wrapper)
-pub fn new_asset_manager(zipped_content: &str) -> Box<ZipAssetManager> {
-    Box::new(ZipAssetManager::new(zipped_content))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_empty_asset_manager() {
-        let asset_manager = ZipAssetManager::new("");
+        let asset_manager = ZipAssetManager::new(&[]);
         assert!(
             asset_manager.read("test") == Err(HttpError::not_found("No static files supported"))
         );

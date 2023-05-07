@@ -198,7 +198,8 @@ mod tests {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: TokenRepository::new(PathBuf::from(data_path), "init-token"),
-            console: ZipAssetManager::new(""),
+            console: ZipAssetManager::new(&[]),
+            base_path: "/".to_string(),
         };
 
         components

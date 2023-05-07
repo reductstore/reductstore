@@ -19,12 +19,14 @@ pub mod entry_api;
 pub mod middleware;
 pub mod server_api;
 pub mod token_api;
+pub mod ui_api;
 
 pub struct HttpServerComponents {
     pub storage: Storage,
     pub auth: TokenAuthorization,
     pub token_repo: TokenRepository,
     pub console: ZipAssetManager,
+    pub base_path: String,
 }
 
 impl IntoResponse for HttpError {
