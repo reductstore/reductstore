@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrite static asset management in Rust, [PR-252](https://github.com/reductstore/reductstore/pull/252)
 - Rewrite token authentication module in Rust, [PR-255](https://github.com/reductstore/reductstore/pull/255)
 - Rewrite storage module in Rust, [PR-257](https://github.com/reductstore/reductstore/pull/257)
+- Rewrite HTTP layer in Rust, [PR-259](https://github.com/reductstore/reductstore/pull/259)
 
 ### Removed
 

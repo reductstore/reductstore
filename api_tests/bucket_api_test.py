@@ -12,8 +12,8 @@ def test__create_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['settings'] == {"max_block_records": "1024", "max_block_size": "64000000",
-                                "quota_type": "NONE", "quota_size": '0'}
+    assert data['settings'] == {"max_block_records": 1024, "max_block_size": 64000000,
+                                "quota_type": "NONE", "quota_size": 0}
     assert data['info']['name'] == bucket_name
     assert len(data['entries']) == 0
 
@@ -49,8 +49,8 @@ def test__create_bucket_custom(base_url, session, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['settings'] == {"max_block_records": "1024", "max_block_size": "500", "quota_type": "NONE",
-                                "quota_size": "0"}
+    assert data['settings'] == {"max_block_records": 1024, "max_block_size": 500, "quota_type": "NONE",
+                                "quota_size": 0}
 
 
 def test__create_twice_bucket(base_url, session, bucket_name):
@@ -96,27 +96,27 @@ def test__get_bucket_stats(base_url, session, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['entries'] == [{'block_count': '1',
-                                'latest_record': '1000000',
+    assert data['entries'] == [{'block_count': 1,
+                                'latest_record': 1000000,
                                 'name': 'entry_1',
-                                'oldest_record': '1000000',
-                                'record_count': '1',
-                                'size': '8'},
-                               {'block_count': '1',
-                                'latest_record': '2000000',
+                                'oldest_record': 1000000,
+                                'record_count': 1,
+                                'size': 8},
+                               {'block_count': 1,
+                                'latest_record': 2000000,
                                 'name': 'entry_2',
-                                'oldest_record': '2000000',
-                                'record_count': '1',
-                                'size': '11'}]
-    assert data['info'] == dict(name=bucket_name, entry_count='2', size='19', latest_record='2000000',
-                                oldest_record='1000000')
+                                'oldest_record': 2000000,
+                                'record_count': 1,
+                                'size': 11}]
+    assert data['info'] == dict(name=bucket_name, entry_count=2, size=19, latest_record=2000000,
+                                oldest_record=1000000)
 
 
 def test__update_bucket_ok(base_url, session, bucket_name):
     """Should update setting of the bucket"""
     session.post(f'{base_url}/b/{bucket_name}')
 
-    new_settings: dict = {"max_block_size": '1000', "quota_type": "FIFO"}
+    new_settings: dict = {"max_block_size": 1000, "quota_type": "FIFO"}
     resp = session.put(f'{base_url}/b/{bucket_name}',
                        json=new_settings)
     assert resp.status_code == 200
@@ -125,7 +125,7 @@ def test__update_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 200
     data = json.loads(resp.content)
 
-    new_settings.update({"quota_size": '0', 'max_block_records': '1024'})
+    new_settings.update({"quota_size": 0, 'max_block_records': 1024})
     assert data['settings'] == new_settings
 
 

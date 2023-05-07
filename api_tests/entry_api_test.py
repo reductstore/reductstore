@@ -50,7 +50,7 @@ def test_read_write_entries_big_blob_ok(base_url, session, bucket):
     assert resp.status_code == 200
     assert resp.content == huge_data
 
-    assert resp.headers['Content-Type'] == "application/octet-stream"
+    assert resp.headers['content-type'] == "application/octet-stream"
     assert resp.headers['x-reduct-time'] == str(ts)
     assert resp.headers['x-reduct-last'] == '1'
 
@@ -74,7 +74,7 @@ def test_read_bad_ts(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry?ts=XXXX')
 
     assert resp.status_code == 422
-    assert 'XXX' in resp.headers["x-reduct-error"]
+    assert "'ts' must be an unix timestamp in microseconds" in resp.headers["x-reduct-error"]
 
 
 def test_read_bad_no_entry(base_url, session, bucket):
@@ -112,7 +112,7 @@ def test_write_bad_ts(base_url, session, bucket):
     """Should return 422 if ts is bad"""
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts=XXXX')
     assert resp.status_code == 422
-    assert 'XXX' in resp.headers["x-reduct-error"]
+    assert "'ts' must be an unix timestamp in microseconds" in resp.headers["x-reduct-error"]
 
 
 def test_get_record_ok(base_url, session, bucket):
@@ -134,8 +134,10 @@ def test_latest_record(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 404
 
-    session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data1")
-    session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 10}', data="some_data2")
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data1")
+    assert resp.status_code == 200
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts + 10}', data="some_data2")
+    assert resp.status_code == 200
 
     resp = session.get(f'{base_url}/b/{bucket}/entry')
     assert resp.status_code == 200
@@ -251,10 +253,10 @@ def test_query_entry_next(base_url, session, bucket):
     assert resp.status_code == 200
     assert resp.content == b"some_data"
     assert resp.headers['x-reduct-time'] == '1100'
-    assert resp.headers['x-reduct-last'] == '1'
+    assert resp.headers['x-reduct-last'] == '0'
 
     resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
-    assert resp.status_code == 404
+    assert resp.status_code == 204
 
 
 def test_query_ttl(base_url, session, bucket):
@@ -281,14 +283,6 @@ def test_query_with_include_and_exclude(base_url, session, bucket):
                         headers={'x-reduct-label-foo': 'baz'})
     assert resp.status_code == 200
 
-    resp = session.get(f'{base_url}/b/{bucket}/entry/q?include-foo=bar')
-    assert resp.status_code == 200
-    query_id = int(json.loads(resp.content)["id"])
-
-    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
-    assert resp.status_code == 200
-    assert resp.content == b"some_data1"
-
     resp = session.get(f'{base_url}/b/{bucket}/entry/q?exclude-foo=bar')
     assert resp.status_code == 200
     query_id = int(json.loads(resp.content)["id"])
@@ -296,6 +290,14 @@ def test_query_with_include_and_exclude(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?include-foo=bar')
+    assert resp.status_code == 200
+    query_id = int(json.loads(resp.content)["id"])
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry?q={query_id}')
+    assert resp.status_code == 200
+    assert resp.content == b"some_data1"
 
 
 def test_query_entry_no_next(base_url, session, bucket):

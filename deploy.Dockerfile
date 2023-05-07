@@ -15,7 +15,7 @@ COPY conanfile.txt .
 COPY src src
 COPY rust rust
 COPY CMakeLists.txt .
-COPY VERSION VERSION
+COPY version version
 
 WORKDIR /build
 
