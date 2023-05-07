@@ -5,35 +5,82 @@
 
 use prost::Message;
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::{FromRequest, Path, State};
+use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::{async_trait, extract, headers};
 use bytes::Bytes;
 
+use crate::auth::policy::FullAccessPolicy;
+use axum::headers::HeaderMapExt;
+use hyper::HeaderMap;
+use serde_json::json;
 use std::sync::{Arc, RwLock};
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
 use crate::core::status::HttpError;
+use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerComponents;
 
 pub struct TokenApi {}
 
 impl IntoResponse for TokenRepo {
     fn into_response(self) -> Response {
-        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+
+        (
+            StatusCode::OK,
+            headers,
+            serde_json::to_string(&self).unwrap(),
+        )
+            .into_response()
     }
 }
 
 impl IntoResponse for TokenCreateResponse {
     fn into_response(self) -> Response {
-        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+
+        (
+            StatusCode::OK,
+            headers,
+            serde_json::to_string(&self).unwrap(),
+        )
+            .into_response()
     }
 }
 
 impl IntoResponse for Token {
     fn into_response(self) -> Response {
-        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+
+        (
+            StatusCode::OK,
+            headers,
+            serde_json::to_string(&self).unwrap(),
+        )
+            .into_response()
+    }
+}
+
+#[async_trait]
+impl<S, B> FromRequest<S, B> for Permissions
+where
+    Bytes: FromRequest<S, B>,
+    B: Send + 'static,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
+        let bytes = Bytes::from_request(req, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        serde_json::from_slice(&*bytes).map_err(|e| HttpError::from(e).into_response())
     }
 }
 
@@ -41,7 +88,9 @@ impl TokenApi {
     // GET /tokens
     pub async fn token_list(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        headers: HeaderMap,
     ) -> Result<TokenRepo, HttpError> {
+        check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
         let components = components.write().unwrap();
 
         let mut list = TokenRepo::default();
@@ -56,9 +105,11 @@ impl TokenApi {
     pub async fn create_token(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(token_name): Path<String>,
-        body: Bytes,
+        headers: HeaderMap,
+        permissions: Permissions,
     ) -> Result<TokenCreateResponse, HttpError> {
-        let permissions = Permissions::decode(body)?;
+        check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
+
         let mut components = components.write().unwrap();
         components.token_repo.create_token(&token_name, permissions)
     }
@@ -67,7 +118,10 @@ impl TokenApi {
     pub async fn get_token(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(token_name): Path<String>,
+        headers: HeaderMap,
     ) -> Result<Token, HttpError> {
+        check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
+
         let components = components.read().unwrap();
         components.token_repo.find_by_name(&token_name)
     }
@@ -76,7 +130,10 @@ impl TokenApi {
     pub async fn remove_token(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(token_name): Path<String>,
+        headers: HeaderMap,
     ) -> Result<(), HttpError> {
+        check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
+
         let mut components = components.write().unwrap();
         components.token_repo.remove_token(&token_name)
     }
@@ -91,12 +148,15 @@ mod tests {
     use crate::storage::storage::Storage;
     use bytes::Bytes;
 
+    use axum::headers::Authorization;
     use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_token_list() {
         let components = setup();
-        let list = TokenApi::token_list(State(components)).await.unwrap();
+        let list = TokenApi::token_list(State(components), auth_headers())
+            .await
+            .unwrap();
         assert_eq!(list.tokens.len(), 1);
         assert_eq!(list.tokens[0].name, "test");
     }
@@ -107,7 +167,8 @@ mod tests {
         let token = TokenApi::create_token(
             State(components),
             Path("new-token".to_string()),
-            Bytes::new(),
+            auth_headers(),
+            Permissions::default(),
         )
         .await
         .unwrap();
@@ -117,16 +178,19 @@ mod tests {
     #[tokio::test]
     async fn test_get_token() {
         let components = setup();
-        let token = TokenApi::get_token(State(components), Path("test".to_string()))
-            .await
-            .unwrap();
+        let token =
+            TokenApi::get_token(State(components), Path("test".to_string()), auth_headers())
+                .await
+                .unwrap();
         assert_eq!(token.name, "test");
     }
 
     #[tokio::test]
     async fn test_remove_token() {
         let components = setup();
-        let token = TokenApi::remove_token(State(components), Path("test".to_string())).await;
+        let token =
+            TokenApi::remove_token(State(components), Path("test".to_string()), auth_headers())
+                .await;
         assert!(token.is_ok());
     }
 
@@ -146,5 +210,11 @@ mod tests {
             .unwrap();
 
         Arc::new(RwLock::new(components))
+    }
+
+    fn auth_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(Authorization::bearer("init-token").unwrap());
+        headers
     }
 }

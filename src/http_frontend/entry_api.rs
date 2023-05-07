@@ -15,12 +15,16 @@ use futures_util::Stream;
 use log::debug;
 use std::collections::HashMap;
 
+use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
+use axum::headers;
+use axum::headers::HeaderMapExt;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use crate::core::status::HttpError;
+use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerComponents;
 use crate::storage::entry::Labels;
 use crate::storage::proto::QueryInfo;
@@ -31,7 +35,15 @@ pub struct EntryApi {}
 
 impl IntoResponse for QueryInfo {
     fn into_response(self) -> Response {
-        (StatusCode::OK, serde_json::to_string(&self).unwrap()).into_response()
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+
+        (
+            StatusCode::OK,
+            headers,
+            serde_json::to_string(&self).unwrap(),
+        )
+            .into_response()
     }
 }
 
@@ -44,6 +56,15 @@ impl EntryApi {
         Query(params): Query<HashMap<String, String>>,
         mut stream: BodyStream,
     ) -> Result<(), HttpError> {
+        let bucket = path.get("bucket_name").unwrap();
+        check_permissions(
+            Arc::clone(&components),
+            headers.clone(),
+            WriteAccessPolicy {
+                bucket: bucket.clone(),
+            },
+        )?;
+
         if !params.contains_key("ts") {
             return Err(HttpError::unprocessable_entity(
                 "'ts' parameter is required",
@@ -58,7 +79,6 @@ impl EntryApi {
                 ));
             }
         };
-        debug!("headers: {:?}", headers);
         let content_size = headers
             .get("content-length")
             .ok_or(HttpError::unprocessable_entity(
@@ -89,9 +109,7 @@ impl EntryApi {
 
         let writer = {
             let mut components = components.write().unwrap();
-            let bucket = components
-                .storage
-                .get_bucket(path.get("bucket_name").unwrap())?;
+            let bucket = components.storage.get_bucket(bucket)?;
             bucket.begin_write(
                 path.get("entry_name").unwrap(),
                 ts,
@@ -116,9 +134,17 @@ impl EntryApi {
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
+        headers: HeaderMap,
     ) -> Result<impl IntoResponse, HttpError> {
         let bucket_name = path.get("bucket_name").unwrap();
         let entry_name = path.get("entry_name").unwrap();
+        check_permissions(
+            Arc::clone(&components),
+            headers,
+            ReadAccessPolicy {
+                bucket: bucket_name.clone(),
+            },
+        )?;
 
         let ts = match params.get("ts") {
             Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
@@ -220,9 +246,18 @@ impl EntryApi {
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
+        headers: HeaderMap,
     ) -> Result<QueryInfo, HttpError> {
         let bucket_name = path.get("bucket_name").unwrap();
         let entry_name = path.get("entry_name").unwrap();
+
+        check_permissions(
+            Arc::clone(&components),
+            headers,
+            ReadAccessPolicy {
+                bucket: bucket_name.clone(),
+            },
+        )?;
 
         let entry_info = {
             let mut components = components.write().unwrap();

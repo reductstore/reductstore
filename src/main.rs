@@ -100,7 +100,7 @@ async fn main() {
         // Token API
         .route(
             &format!("{}api/v1/tokens", api_base_path),
-            post(TokenApi::token_list),
+            get(TokenApi::token_list),
         )
         .route(
             &format!("{}api/v1/tokens/:token_name", api_base_path),

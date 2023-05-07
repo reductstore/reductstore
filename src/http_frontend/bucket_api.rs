@@ -5,6 +5,7 @@
 
 use std::sync::{Arc, RwLock};
 
+use crate::auth::policy::{AuthenticatedPolicy, FullAccessPolicy};
 use axum::extract::{FromRequest, Path, State};
 use axum::headers::HeaderMapExt;
 use axum::http::{Request, StatusCode};
@@ -15,6 +16,7 @@ use hyper::HeaderMap;
 use serde_json::{json, Value};
 
 use crate::core::status::HttpError;
+use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerComponents;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::BucketSettings;
@@ -95,7 +97,9 @@ impl BucketApi {
     pub async fn get_bucket(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(bucket_name): Path<String>,
+        headers: HeaderMap,
     ) -> Result<FullBucketInfo, HttpError> {
+        check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
         let mut components = components.write().unwrap();
         components.storage.get_bucket(&bucket_name)?.info()
     }
@@ -104,7 +108,9 @@ impl BucketApi {
     pub async fn head_bucket(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(bucket_name): Path<String>,
+        headers: HeaderMap,
     ) -> Result<(), HttpError> {
+        check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
         let mut components = components.write().unwrap();
         components.storage.get_bucket(&bucket_name)?;
         Ok(())
@@ -114,8 +120,10 @@ impl BucketApi {
     pub async fn create_bucket(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(bucket_name): Path<String>,
+        headers: HeaderMap,
         settings: BucketSettings,
     ) -> Result<(), HttpError> {
+        check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
         let mut components = components.write().unwrap();
         components
             .storage
@@ -127,8 +135,10 @@ impl BucketApi {
     pub async fn update_bucket(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(bucket_name): Path<String>,
+        headers: HeaderMap,
         settings: BucketSettings,
     ) -> Result<(), HttpError> {
+        check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
         let mut components = components.write().unwrap();
         let bucket = components.storage.get_bucket(&bucket_name)?;
         bucket.set_settings(settings.into())
@@ -138,7 +148,9 @@ impl BucketApi {
     pub async fn remove_bucket(
         State(components): State<Arc<RwLock<HttpServerComponents>>>,
         Path(bucket_name): Path<String>,
+        headers: HeaderMap,
     ) -> Result<(), HttpError> {
+        check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
         let mut components = components.write().unwrap();
         components.storage.remove_bucket(&bucket_name)?;
         Ok(())
@@ -161,18 +173,26 @@ mod tests {
     #[tokio::test]
     async fn test_get_bucket() {
         let components = setup();
-        let info = BucketApi::get_bucket(State(components), Path("bucket-1".to_string()))
-            .await
-            .unwrap();
+        let info = BucketApi::get_bucket(
+            State(components),
+            Path("bucket-1".to_string()),
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(info.info.unwrap().name, "bucket-1");
     }
 
     #[tokio::test]
     async fn test_head_bucket() {
         let components = setup();
-        BucketApi::head_bucket(State(components), Path("bucket-1".to_string()))
-            .await
-            .unwrap();
+        BucketApi::head_bucket(
+            State(components),
+            Path("bucket-1".to_string()),
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -181,6 +201,7 @@ mod tests {
         BucketApi::create_bucket(
             State(components),
             Path("bucket-2".to_string()),
+            HeaderMap::new(),
             BucketSettings::default(),
         )
         .await
@@ -193,6 +214,7 @@ mod tests {
         BucketApi::update_bucket(
             State(components),
             Path("bucket-1".to_string()),
+            HeaderMap::new(),
             BucketSettings::default(),
         )
         .await
@@ -203,9 +225,13 @@ mod tests {
     async fn test_remove_bucket() {
         {
             let components = setup();
-            BucketApi::remove_bucket(State(components), Path("bucket-1".to_string()))
-                .await
-                .unwrap();
+            BucketApi::remove_bucket(
+                State(components),
+                Path("bucket-1".to_string()),
+                HeaderMap::new(),
+            )
+            .await
+            .unwrap();
         }
     }
 
