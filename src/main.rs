@@ -18,6 +18,9 @@ use axum::{
     routing::{delete, get, head, post, put},
     Router,
 };
+
+use axum_server::tls_rustls::RustlsConfig;
+
 use log::info;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
@@ -150,8 +153,21 @@ async fn main() {
         .layer(middleware::from_fn(default_headers))
         .with_state(Arc::new(RwLock::new(components)));
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    if cert_path.is_empty() {
+        axum_server::bind(addr)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    } else {
+        let config = RustlsConfig::from_pem_file(
+            "examples/self-signed-certs/cert.pem",
+            "examples/self-signed-certs/key.pem",
+        )
         .await
         .unwrap();
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    };
 }
