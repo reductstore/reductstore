@@ -24,9 +24,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("Failed to download Web Console");
     if resp.status_code() != 200.into() {
         if resp.status_code() == 302.into() {
-            let resp =
-                http_req::request::get(&resp.headers().get("location").unwrap(), &mut writer)
-                    .expect("Failed to download Web Console");
+            http_req::request::get(&resp.headers().get("location").unwrap(), &mut writer)
+                .expect("Failed to download Web Console");
         } else {
             panic!("Failed to download Web Console: {}", resp.reason());
         }

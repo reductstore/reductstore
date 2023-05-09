@@ -66,6 +66,7 @@ impl Query for ContinuousQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
     use prost_wkt_types::Timestamp;
     use std::thread::sleep;
     use tempfile::tempdir;
@@ -73,6 +74,7 @@ mod tests {
     use crate::core::status::HttpStatus;
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::proto::{record::State as RecordState, Record};
+    use crate::storage::writer::Chunk;
 
     #[test]
     fn test_query() {
@@ -136,7 +138,11 @@ mod tests {
 
         {
             let writer = block_manager.begin_write(&block, 0).unwrap();
-            writer.write().unwrap().write(b"0123456789", true).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
         }
 
         block_manager.finish(&block).unwrap();

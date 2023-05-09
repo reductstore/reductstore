@@ -398,6 +398,8 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
+    use crate::storage::writer::Chunk;
+    use crate::storage::writer::Chunk::Data;
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
@@ -405,8 +407,8 @@ mod tests {
     #[test]
     fn test_restore() {
         let (options, mut entry) = setup_default();
-        write_record(&mut entry, 1, 10).unwrap();
-        write_record(&mut entry, 2000010, 10).unwrap();
+        write_stub_record(&mut entry, 1).unwrap();
+        write_stub_record(&mut entry, 2000010).unwrap();
 
         let records = entry.block_manager.load(1).unwrap().records.clone();
         assert_eq!(records.len(), 2);
@@ -448,8 +450,8 @@ mod tests {
             max_block_records: 10000,
         });
 
-        write_record(&mut entry, 1, 10).unwrap();
-        write_record(&mut entry, 2000010, 10).unwrap();
+        write_stub_record(&mut entry, 1).unwrap();
+        write_stub_record(&mut entry, 2000010).unwrap();
 
         assert_eq!(
             entry.block_manager.load(1).unwrap().records[0],
@@ -483,9 +485,9 @@ mod tests {
             max_block_records: 1,
         });
 
-        write_record(&mut entry, 1, 10).unwrap();
-        write_record(&mut entry, 2, 10).unwrap();
-        write_record(&mut entry, 2000010, 10).unwrap();
+        write_stub_record(&mut entry, 1).unwrap();
+        write_stub_record(&mut entry, 2).unwrap();
+        write_stub_record(&mut entry, 2000010).unwrap();
 
         assert_eq!(
             entry.block_manager.load(1).unwrap().records[0],
@@ -516,9 +518,9 @@ mod tests {
     fn test_begin_write_belated_record() {
         let (_, mut entry) = setup_default();
 
-        write_record(&mut entry, 1000000, 10).unwrap();
-        write_record(&mut entry, 3000000, 10).unwrap();
-        write_record(&mut entry, 2000000, 10).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
+        write_stub_record(&mut entry, 3000000).unwrap();
+        write_stub_record(&mut entry, 2000000).unwrap();
 
         let records = entry.block_manager.load(1000000).unwrap().records.clone();
         assert_eq!(records.len(), 3);
@@ -531,8 +533,8 @@ mod tests {
     fn test_begin_write_belated_first() {
         let (_, mut entry) = setup_default();
 
-        write_record(&mut entry, 3000000, 10).unwrap();
-        write_record(&mut entry, 1000000, 10).unwrap();
+        write_stub_record(&mut entry, 3000000).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
 
         let records = entry.block_manager.load(1000000).unwrap().records.clone();
         assert_eq!(records.len(), 1);
@@ -543,8 +545,8 @@ mod tests {
     fn test_begin_write_existing_record() {
         let (_, mut entry) = setup_default();
 
-        write_record(&mut entry, 1000000, 10).unwrap();
-        let err = write_record(&mut entry, 1000000, 10);
+        write_stub_record(&mut entry, 1000000).unwrap();
+        let err = write_stub_record(&mut entry, 1000000);
         assert_eq!(
             err.err(),
             Some(HttpError::conflict(
@@ -568,7 +570,7 @@ mod tests {
     fn test_begin_read_early() {
         let (_, mut entry) = setup_default();
 
-        write_record(&mut entry, 1000000, 10).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),
@@ -580,7 +582,7 @@ mod tests {
     fn test_begin_read_late() {
         let (_, mut entry) = setup_default();
 
-        write_record(&mut entry, 1000000, 10).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
         let writer = entry.begin_read(2000000);
         assert_eq!(
             writer.err(),
@@ -595,7 +597,11 @@ mod tests {
             let writer = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write().unwrap().write(&vec![0; 5], false).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Data(Bytes::from(vec![0; 5])))
+                .unwrap();
         }
         let reader = entry.begin_read(1000000);
         assert_eq!(
@@ -610,8 +616,8 @@ mod tests {
     fn test_begin_read_not_found() {
         let (_, mut entry) = setup_default();
 
-        write_record(&mut entry, 1000000, 10).unwrap();
-        write_record(&mut entry, 3000000, 10).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
+        write_stub_record(&mut entry, 3000000).unwrap();
 
         let reader = entry.begin_read(2000000);
         assert_eq!(
@@ -623,50 +629,22 @@ mod tests {
     #[test]
     fn test_begin_read_ok1() {
         let (_, mut entry) = setup_default();
-        {
-            let writer = entry
-                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-                .unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write("0123456789".as_bytes(), true)
-                .unwrap();
-        }
+        write_stub_record(&mut entry, 1000000).unwrap();
         let reader = entry.begin_read(1000000).unwrap();
         let chunk = reader.write().unwrap().read().unwrap();
-        assert_eq!(chunk.data, "0123456789".as_bytes());
-        assert!(chunk.last);
+        assert_eq!(chunk.unwrap(), "0123456789".as_bytes());
     }
 
     #[test]
     fn test_begin_read_ok2() {
         let (_, mut entry) = setup_default();
 
-        {
-            let writer = entry
-                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-                .unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write("0123456789".as_bytes(), true)
-                .unwrap();
-        }
-        {
-            let writer = entry
-                .begin_write(1010000, 10, "text/plain".to_string(), Labels::new())
-                .unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write("0123456789".as_bytes(), true)
-                .unwrap();
-        }
+        write_stub_record(&mut entry, 1000000).unwrap();
+        write_stub_record(&mut entry, 1010000).unwrap();
+
         let reader = entry.begin_read(1010000).unwrap();
         let chunk = reader.write().unwrap().read().unwrap();
-        assert_eq!(chunk.data, "0123456789".as_bytes());
-        assert!(chunk.last);
+        assert_eq!(chunk.unwrap(), "0123456789".as_bytes());
     }
 
     #[test]
@@ -676,34 +654,25 @@ mod tests {
         data[0] = 1;
         data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
 
-        {
-            let writer = entry
-                .begin_write(
-                    1000000,
-                    data.len() as u64,
-                    "text/plain".to_string(),
-                    Labels::new(),
-                )
-                .unwrap();
-            writer.write().unwrap().write(&data, true).unwrap();
-        }
-        let reader = entry.begin_read(1000000).unwrap();
-        let chunk = reader.write().unwrap().read().unwrap();
-        assert_eq!(chunk.data, data[0..DEFAULT_MAX_READ_CHUNK as usize]);
-        assert!(!chunk.last);
+        write_record(&mut entry, 1000000, data.clone()).unwrap();
 
-        let chunk = reader.write().unwrap().read().unwrap();
-        assert_eq!(chunk.data, data[DEFAULT_MAX_READ_CHUNK as usize..]);
-        assert!(chunk.last);
+        let reader = entry.begin_read(1000000).unwrap();
+        let mut wr = reader.write().unwrap();
+        let chunk = wr.read().unwrap();
+        assert!(chunk.unwrap().to_vec() == data[0..DEFAULT_MAX_READ_CHUNK as usize]);
+        let chunk = wr.read().unwrap();
+        assert!(chunk.unwrap().to_vec() == data[DEFAULT_MAX_READ_CHUNK as usize..]);
+        let chunk = wr.read().unwrap();
+        assert_eq!(chunk, None);
     }
 
     #[test]
     fn test_historical_query() {
         let (_, mut entry) = setup_default();
 
-        write_record(&mut entry, 1000000, 10).unwrap();
-        write_record(&mut entry, 2000000, 10).unwrap();
-        write_record(&mut entry, 3000000, 10).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
+        write_stub_record(&mut entry, 2000000).unwrap();
+        write_stub_record(&mut entry, 3000000).unwrap();
 
         let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
 
@@ -733,7 +702,7 @@ mod tests {
     #[test]
     fn test_continuous_query() {
         let (_, mut entry) = setup_default();
-        write_record(&mut entry, 1000000, 10).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
 
         let id = entry
             .query(
@@ -757,7 +726,7 @@ mod tests {
             Some(HttpError::no_content("No content"))
         );
 
-        write_record(&mut entry, 2000000, 10).unwrap();
+        write_stub_record(&mut entry, 2000000).unwrap();
         {
             let (reader, _) = entry.next(id).unwrap();
             assert_eq!(reader.read().unwrap().timestamp(), 2000000);
@@ -777,9 +746,9 @@ mod tests {
             max_block_records: 10000,
         });
 
-        write_record(&mut entry, 1000000, 10).unwrap();
-        write_record(&mut entry, 2000000, 10).unwrap();
-        write_record(&mut entry, 3000000, 10).unwrap();
+        write_stub_record(&mut entry, 1000000).unwrap();
+        write_stub_record(&mut entry, 2000000).unwrap();
+        write_stub_record(&mut entry, 3000000).unwrap();
 
         let info = entry.info().unwrap();
         assert_eq!(info.name, "entry");
@@ -803,14 +772,21 @@ mod tests {
         })
     }
 
-    fn write_record(entry: &mut Entry, time: u64, content_size: usize) -> Result<(), HttpError> {
+    fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), HttpError> {
         let writer = entry.begin_write(
             time,
-            content_size as u64,
+            data.len() as u64,
             "text/plain".to_string(),
             Labels::new(),
         )?;
-        let ret = writer.write().unwrap().write(&vec![0; content_size], true);
-        ret
+        let x = writer
+            .write()
+            .unwrap()
+            .write(Chunk::Last(Bytes::from(data)));
+        x
+    }
+
+    fn write_stub_record(entry: &mut Entry, time: u64) -> Result<(), HttpError> {
+        write_record(entry, time, b"0123456789".to_vec())
     }
 }

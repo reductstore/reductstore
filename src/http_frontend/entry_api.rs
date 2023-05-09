@@ -30,6 +30,7 @@ use crate::storage::entry::Labels;
 use crate::storage::proto::QueryInfo;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::reader::RecordReader;
+use crate::storage::writer::Chunk;
 
 pub struct EntryApi {}
 
@@ -122,10 +123,10 @@ impl EntryApi {
         while let Some(chunk) = stream.next().await {
             let mut writer = writer.write().unwrap();
             let chunk = chunk.unwrap();
-            writer.write(chunk.as_ref(), false).unwrap();
+            writer.write(Chunk::Data(chunk)).unwrap();
         }
 
-        writer.write().unwrap().write(vec![].as_ref(), true)?;
+        writer.write().unwrap().write(Chunk::Last(Bytes::new()))?;
         Ok(())
     }
 
@@ -229,7 +230,7 @@ impl EntryApi {
                     return Poll::Ready(None);
                 }
                 match self.reader.write().unwrap().read() {
-                    Ok(chunk) => Poll::Ready(Some(Ok(Bytes::from(chunk.data)))),
+                    Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
                     Err(e) => Poll::Ready(Some(Err(e))),
                 }
             }

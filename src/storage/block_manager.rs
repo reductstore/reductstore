@@ -270,6 +270,7 @@ impl ManageBlock for BlockManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::writer::Chunk;
     use tempfile::tempdir;
 
     #[test]
@@ -365,7 +366,7 @@ mod tests {
             writer
                 .write()
                 .unwrap()
-                .write("hello".as_bytes(), true)
+                .write(Chunk::Last(Bytes::from("hello")))
                 .unwrap();
         }
 

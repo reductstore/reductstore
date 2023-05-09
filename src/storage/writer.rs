@@ -3,6 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use bytes::Bytes;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -22,7 +23,18 @@ pub struct RecordWriter {
 }
 
 unsafe impl Send for RecordWriter {}
+
 unsafe impl Sync for RecordWriter {}
+
+/// Chunk is a chunk of data to write into a record.
+pub enum Chunk {
+    /// chunk of data to write into a record
+    Data(Bytes),
+    /// last chunk of data to write into a record
+    Last(Bytes),
+    /// error while writing a record. The writer marks the record as errored and it will be ignored
+    Error,
+}
 
 impl RecordWriter {
     pub fn new(
@@ -46,8 +58,19 @@ impl RecordWriter {
         })
     }
 
-    pub fn write(&mut self, buf: &[u8], last: bool) -> Result<(), HttpError> {
-        self.write_impl(buf, last).map_err(|e| {
+    pub fn write(&mut self, chunk: Chunk) -> Result<(), HttpError> {
+        let (data, last) = match chunk {
+            Chunk::Data(data) => (data, false),
+            Chunk::Last(data) => (data, true),
+            Chunk::Error => {
+                self.on_update(record::State::Errored);
+                return Err(HttpError::internal_server_error(
+                    "Error while writing a record",
+                ));
+            }
+        };
+
+        self.write_impl(data, last).map_err(|e| {
             if e.status == HttpStatus::InternalServerError {
                 self.on_update(record::State::Invalid);
             } else {
@@ -63,7 +86,7 @@ impl RecordWriter {
         Ok(())
     }
 
-    fn write_impl(&mut self, buf: &[u8], last: bool) -> Result<(), HttpError> {
+    fn write_impl(&mut self, buf: Bytes, last: bool) -> Result<(), HttpError> {
         let mut writer = &self.file;
 
         self.written_bytes += buf.len() as u64;
@@ -73,7 +96,7 @@ impl RecordWriter {
             ));
         }
 
-        writer.write_all(buf)?;
+        writer.write_all(buf.as_ref())?;
 
         if last {
             if self.written_bytes < self.content_length {
@@ -151,8 +174,8 @@ mod tests {
             .returning(move |_| Ok(same_block.clone()));
 
         let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
-        writer.write(b"67890", false).unwrap();
-        writer.write(b"12345", true).unwrap();
+        writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
+        writer.write(Chunk::Last(Bytes::from("12345"))).unwrap();
     }
 
     #[test]
@@ -172,10 +195,10 @@ mod tests {
             .returning(move |_| Ok(same_block.clone()));
 
         let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
-        writer.write(b"67890", false).unwrap();
+        writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
 
         assert_eq!(
-            writer.write(b"1234", true),
+            writer.write(Chunk::Last(Bytes::from("1234"))),
             Err(HttpError::bad_request(
                 "Content is smaller than in content-length"
             ))
@@ -199,10 +222,10 @@ mod tests {
             .returning(move |_| Ok(same_block.clone()));
 
         let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
-        writer.write(b"67890", false).unwrap();
+        writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
 
         assert_eq!(
-            writer.write(b"123400000", true),
+            writer.write(Chunk::Last(Bytes::from("123400000"))),
             Err(HttpError::bad_request(
                 "Content is bigger than in content-length"
             ))

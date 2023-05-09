@@ -159,6 +159,8 @@ mod tests {
     use super::*;
     use crate::storage::entry::Labels;
     use crate::storage::proto::bucket_settings::QuotaType;
+    use crate::storage::writer::Chunk;
+    use bytes::Bytes;
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -206,21 +208,33 @@ mod tests {
             let writer = entry
                 .begin_write(1000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write().unwrap().write(b"0123456789", true).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
             let writer = entry
                 .begin_write(2000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write().unwrap().write(b"0123456789", true).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
             let writer = entry
                 .begin_write(5000, 10, "text/plain".to_string(), Labels::new())
                 .unwrap();
-            writer.write().unwrap().write(b"0123456789", true).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
         }
 
         let mut storage = Storage::new(path);

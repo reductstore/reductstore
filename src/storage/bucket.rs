@@ -362,6 +362,7 @@ impl Bucket {
 mod tests {
     use super::*;
     use crate::storage::entry::Labels;
+    use crate::storage::writer::Chunk;
     use tempfile::tempdir;
 
     #[test]
@@ -437,7 +438,7 @@ mod tests {
         bucket: &mut Bucket,
         entry_name: &str,
         time: u64,
-        content: &[u8],
+        content: &'static [u8],
     ) -> Result<(), HttpError> {
         let writer = bucket.begin_write(
             entry_name,
@@ -446,14 +447,17 @@ mod tests {
             "".to_string(),
             Labels::new(),
         )?;
-        writer.write().unwrap().write(content, true)?;
+        writer
+            .write()
+            .unwrap()
+            .write(Chunk::Last(Bytes::from(content)))?;
         Ok(())
     }
 
     fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, HttpError> {
         let reader = bucket.begin_read(entry_name, time)?;
-        let data = reader.write().unwrap().read()?.data;
-        Ok(data)
+        let data = reader.write().unwrap().read()?.unwrap();
+        Ok(data.to_vec())
     }
 
     fn setup() -> (Bucket, BucketSettings, PathBuf) {
