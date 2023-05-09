@@ -399,7 +399,7 @@ mod tests {
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
     use crate::storage::writer::Chunk;
-    use crate::storage::writer::Chunk::Data;
+
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
