@@ -78,10 +78,12 @@ where
                 serde_json::from_slice(&bytes).map_err(|e| HttpError::from(e).into_response())?;
             match json.get_mut("quota_type") {
                 Some(quota_type) => {
-                    let val = QuotaType::from_str_name(quota_type.as_str().unwrap()).ok_or(
-                        HttpError::unprocessable_entity("Invalid quota type").into_response(),
-                    )? as i32;
-                    *quota_type = json!(val);
+                    if !quota_type.is_null() {
+                        let val = QuotaType::from_str_name(quota_type.as_str().unwrap()).ok_or(
+                            HttpError::unprocessable_entity("Invalid quota type").into_response(),
+                        )? as i32;
+                        *quota_type = json!(val);
+                    }
                 }
                 None => {}
             }
