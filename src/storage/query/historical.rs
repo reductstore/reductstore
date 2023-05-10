@@ -170,10 +170,13 @@ impl Query for HistoricalQuery {
 mod tests {
     use super::*;
     use crate::core::status::HttpStatus;
+    use crate::storage::proto::record;
     use crate::storage::proto::record::Label;
-    use crate::storage::reader::DataChunk;
+    use crate::storage::writer::Chunk;
+    use bytes::Bytes;
     use prost_wkt_types::Timestamp;
     use std::collections::HashMap;
+
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -194,11 +197,9 @@ mod tests {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.write().unwrap().read().unwrap(),
-                DataChunk {
-                    data: Vec::from("0123456789"),
-                    last: true,
-                }
+                Some(Bytes::from("0123456789"))
             );
+            assert!(reader.write().unwrap().read().unwrap().is_none())
         }
         {
             let res = query.next(&index, &mut block_manager);
@@ -214,24 +215,22 @@ mod tests {
 
         let (mut block_manager, index) = setup_2_blocks();
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
-            assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                DataChunk {
-                    data: Vec::from("0123456789"),
-                    last: true,
-                }
-            );
+            {
+                let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+                assert_eq!(
+                    reader.write().unwrap().read().unwrap(),
+                    Some(Bytes::from("0123456789"))
+                );
+                assert!(reader.write().unwrap().read().unwrap().is_none())
+            }
         }
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.write().unwrap().read().unwrap(),
-                DataChunk {
-                    data: Vec::from("0123456789"),
-                    last: true,
-                }
+                Some(Bytes::from("0123456789"))
             );
+            assert!(reader.write().unwrap().read().unwrap().is_none())
         }
 
         assert_eq!(
@@ -253,31 +252,25 @@ mod tests {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.write().unwrap().read().unwrap(),
-                DataChunk {
-                    data: Vec::from("0123456789"),
-                    last: true,
-                }
+                Some(Bytes::from("0123456789"))
             );
+            assert!(reader.write().unwrap().read().unwrap().is_none())
         }
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.write().unwrap().read().unwrap(),
-                DataChunk {
-                    data: Vec::from("0123456789"),
-                    last: true,
-                }
+                Some(Bytes::from("0123456789"))
             );
+            assert!(reader.write().unwrap().read().unwrap().is_none())
         }
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
                 reader.write().unwrap().read().unwrap(),
-                DataChunk {
-                    data: Vec::from("0123456789"),
-                    last: true,
-                }
+                Some(Bytes::from("0123456789"))
             );
+            assert!(reader.write().unwrap().read().unwrap().is_none())
         }
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
@@ -369,6 +362,24 @@ mod tests {
         assert_eq!(query.state(), &QueryState::Done);
     }
 
+    #[test]
+    fn test_ignoring_errored_records() {
+        let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
+
+        let (mut block_manager, index) = setup_2_blocks();
+        let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
+        block.records[0].state = record::State::Errored as i32;
+        block_manager.save(&block).unwrap();
+
+        assert_eq!(
+            query.next(&index, &mut block_manager).err(),
+            Some(HttpError {
+                status: HttpStatus::NoContent,
+                message: "No content".to_string(),
+            })
+        );
+    }
+
     fn setup_2_blocks() -> (BlockManager, BTreeSet<u64>) {
         let dir = tempdir().unwrap().into_path();
         let mut block_manager = BlockManager::new(dir);
@@ -426,12 +437,20 @@ mod tests {
         {
             let writer = block_manager.begin_write(&block, 0).unwrap();
 
-            writer.write().unwrap().write(b"0123456789", true).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
         }
 
         {
             let writer = block_manager.begin_write(&block, 1).unwrap();
-            writer.write().unwrap().write(b"0123456789", true).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
         }
 
         block_manager.finish(&block).unwrap();
@@ -468,7 +487,11 @@ mod tests {
 
         {
             let writer = block_manager.begin_write(&block, 0).unwrap();
-            writer.write().unwrap().write(b"0123456789", true).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
         }
 
         block_manager.finish(&block).unwrap();

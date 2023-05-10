@@ -6,6 +6,7 @@
 use crate::core::status::HttpError;
 use crate::storage::proto::{ts_to_us, Block};
 
+use bytes::Bytes;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
@@ -19,12 +20,6 @@ pub struct RecordReader {
     timestamp: u64,
     labels: HashMap<String, String>,
     content_type: String,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct DataChunk {
-    pub data: Vec<u8>,
-    pub last: bool,
 }
 
 impl RecordReader {
@@ -71,17 +66,18 @@ impl RecordReader {
     ///
     /// # Returns
     ///
-    /// * `DataChunk` - The next chunk of data.
+    /// * `Option<Bytes>` - The next chunk of data. If it is None, the record is finished.
     /// * `HTTPError` - If the data cannot be read.
-    pub fn read(&mut self) -> Result<DataChunk, HttpError> {
+    pub fn read(&mut self) -> Result<Option<Bytes>, HttpError> {
+        if self.is_done() {
+            return Ok(None);
+        }
+
         let buffer_size = std::cmp::min(self.chunk_size, self.content_length - self.written_bytes);
         let mut buf = vec![0u8; buffer_size as usize];
         let read = self.file.read(&mut *buf)?;
         self.written_bytes += read as u64;
-        Ok(DataChunk {
-            data: buf[..read].to_vec(),
-            last: self.written_bytes == self.content_length,
-        })
+        Ok(Some(Bytes::from(buf)))
     }
 
     /// Get the timestamp of the record.
@@ -150,12 +146,12 @@ mod tests {
         {
             let mut reader = RecordReader::new(path.clone(), &block, 0, 5).unwrap();
             let chunk = reader.read().unwrap();
-            assert_eq!(chunk.data, "12345".as_bytes());
-            assert_eq!(chunk.last, false);
+            assert_eq!(chunk.unwrap(), "12345".as_bytes());
+            let chunk = reader.read().unwrap();
+            assert_eq!(chunk.unwrap(), "67890".as_bytes());
 
             let chunk = reader.read().unwrap();
-            assert_eq!(chunk.data, "67890".as_bytes());
-            assert_eq!(chunk.last, true);
+            assert!(chunk.is_none());
         }
     }
 }

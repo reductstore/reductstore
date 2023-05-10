@@ -11,6 +11,7 @@ use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerComponents;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
+use log::{debug, error};
 
 pub async fn default_headers<B>(
     request: Request<B>,
@@ -23,6 +24,26 @@ pub async fn default_headers<B>(
             .parse()
             .unwrap(),
     );
+    Ok(response)
+}
+
+pub async fn print_statuses<B>(
+    request: Request<B>,
+    next: Next<B>,
+) -> Result<impl IntoResponse, HttpError> {
+    let msg = format!(
+        "{} {}",
+        request.method(),
+        request.uri().path_and_query().unwrap()
+    );
+
+    let response = next.run(request).await;
+    if response.status().as_u16() >= 500 {
+        error!("{} [{}]", msg, response.status());
+    } else {
+        debug!("{} [{}]", msg, response.status());
+    }
+
     Ok(response)
 }
 

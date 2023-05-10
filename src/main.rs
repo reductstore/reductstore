@@ -35,7 +35,7 @@ use crate::core::logger::Logger;
 
 use crate::http_frontend::bucket_api::BucketApi;
 use crate::http_frontend::entry_api::EntryApi;
-use crate::http_frontend::middleware::default_headers;
+use crate::http_frontend::middleware::{default_headers, print_statuses};
 use crate::http_frontend::server_api::ServerApi;
 use crate::http_frontend::token_api::TokenApi;
 use crate::http_frontend::ui_api::UiApi;
@@ -50,7 +50,7 @@ async fn main() {
 
     let mut env = Env::new();
 
-    let log_level = env.get::<String>("LOG_LEVEL", "INFO".to_string(), false);
+    let log_level = env.get::<String>("RS_LOG_LEVEL", "INFO".to_string(), false);
     let host = env.get::<String>("RS_HOST", "0.0.0.0".to_string(), false);
     let port = env.get::<i32>("RS_PORT", 8383, false);
     let api_base_path = env.get::<String>("RS_API_BASE_PATH", "/".to_string(), false);
@@ -156,6 +156,7 @@ async fn main() {
         .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
         .fallback(get(UiApi::show_ui))
         .layer(middleware::from_fn(default_headers))
+        .layer(middleware::from_fn(print_statuses))
         .with_state(Arc::new(RwLock::new(components)));
 
     if cert_path.is_empty() {
