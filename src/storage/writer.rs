@@ -64,9 +64,8 @@ impl RecordWriter {
             Chunk::Last(data) => (data, true),
             Chunk::Error => {
                 self.on_update(record::State::Errored);
-                return Err(HttpError::internal_server_error(
-                    "Error while writing a record",
-                ));
+                self.content_length = self.written_bytes; // we make it done
+                return Ok(());
             }
         };
 
@@ -117,7 +116,7 @@ impl RecordWriter {
 
     fn on_update(&mut self, state: record::State) {
         let mut block = match self.block_manager.load(self.block_id) {
-            Ok(block) => block.clone(), // TODO: a block may have many labels and could be expensive
+            Ok(block) => block,
             Err(e) => {
                 log::error!("Failed to load block: {}", e);
                 return;
@@ -230,6 +229,26 @@ mod tests {
                 "Content is bigger than in content-length"
             ))
         );
+    }
+
+    #[test]
+    fn test_errored_chunk() {
+        let (path, mut block_manager, block) = setup();
+
+        block_manager
+            .expect_save()
+            .withf(|block| block.records[0].state == record::State::Errored as i32)
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let same_block = block.clone();
+        block_manager
+            .expect_load()
+            .times(1)
+            .returning(move |_| Ok(same_block.clone()));
+
+        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        writer.write(Chunk::Error).unwrap();
     }
 
     fn setup() -> (PathBuf, MockBlockManager, Block) {

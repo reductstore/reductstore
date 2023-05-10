@@ -134,7 +134,7 @@ impl Entry {
 
         let (block, record_type) =
             if block.begin_time.is_some() && ts_to_us(block.begin_time.as_ref().unwrap()) >= time {
-                debug!("Timestamp {} is belated. Finding proper block", time);
+                debug!("Timestamp {} is belated. Looking for a block", time);
                 // The timestamp is belated. We need to find the proper block to write to.
 
                 if *self.block_index.first().unwrap() > time {
@@ -142,11 +142,6 @@ impl Entry {
                     debug!("Timestamp {} is the earliest. Creating a new block", time);
                     (self.start_new_block(time)?, RecordType::BelatedFirst)
                 } else {
-                    // The timestamp is in the middle. We need to find the proper block.
-                    debug!(
-                        "Timestamp {} is in the middle. Finding the proper block",
-                        time
-                    );
                     let block_id = self.block_index.range(time..).next().unwrap();
                     let block = self.block_manager.load(*block_id)?;
                     // check if the record already exists

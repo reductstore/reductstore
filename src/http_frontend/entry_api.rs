@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
 use axum::headers;
 use axum::headers::HeaderMapExt;
+use log::error;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
@@ -122,8 +123,15 @@ impl EntryApi {
 
         while let Some(chunk) = stream.next().await {
             let mut writer = writer.write().unwrap();
-            let chunk = chunk.unwrap();
-            writer.write(Chunk::Data(chunk)).unwrap();
+            let chunk = match chunk {
+                Ok(chunk) => chunk,
+                Err(e) => {
+                    writer.write(Chunk::Error)?;
+                    error!("Error while receiving data: {}", e);
+                    return Err(HttpError::from(e));
+                }
+            };
+            writer.write(Chunk::Data(chunk))?;
         }
 
         writer.write().unwrap().write(Chunk::Last(Bytes::new()))?;

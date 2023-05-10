@@ -60,3 +60,9 @@ impl StdError for HttpError {
         None
     }
 }
+
+impl From<axum::Error> for HttpError {
+    fn from(err: axum::Error) -> Self {
+        HttpError::internal_server_error(&format!("Internal server error: {}", err))
+    }
+}

@@ -170,11 +170,13 @@ impl Query for HistoricalQuery {
 mod tests {
     use super::*;
     use crate::core::status::HttpStatus;
+    use crate::storage::proto::record;
     use crate::storage::proto::record::Label;
     use crate::storage::writer::Chunk;
     use bytes::Bytes;
     use prost_wkt_types::Timestamp;
     use std::collections::HashMap;
+    use std::process::id;
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -358,6 +360,24 @@ mod tests {
             })
         );
         assert_eq!(query.state(), &QueryState::Done);
+    }
+
+    #[test]
+    fn test_ignoring_errored_records() {
+        let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
+
+        let (mut block_manager, index) = setup_2_blocks();
+        let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
+        block.records[0].state = record::State::Errored as i32;
+        block_manager.save(&block).unwrap();
+
+        assert_eq!(
+            query.next(&index, &mut block_manager).err(),
+            Some(HttpError {
+                status: HttpStatus::NoContent,
+                message: "No content".to_string(),
+            })
+        );
     }
 
     fn setup_2_blocks() -> (BlockManager, BTreeSet<u64>) {
