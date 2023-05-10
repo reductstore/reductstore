@@ -19,6 +19,17 @@ def test__create_bucket_ok(base_url, session, bucket_name):
 
     assert resp.headers['Content-Type'] == "application/json"
 
+def test__create_bucket_quota_type_null(base_url, session, bucket_name):
+    """Should create a bucket if quota_type is null"""
+    resp = session.post(f'{base_url}/b/{bucket_name}', json={"quota_type": None})
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket_name}')
+    assert resp.status_code == 200
+
+    data = json.loads(resp.content)
+    assert data['settings']['quota_type'] == "NONE"
+
 
 @requires_env("API_TOKEN")
 def test__create_bucket_with_full_access_token(base_url, session, bucket_name, token_without_permissions):
