@@ -8,7 +8,7 @@ use prost::Message;
 use prost_wkt_types::Timestamp;
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
@@ -30,6 +30,30 @@ pub struct BlockManager {
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
+
+/// Find the first block id that contains data for a given timestamp  in indexes
+///
+/// # Arguments
+///
+/// * `block_index` - Block index to search in.
+/// * `start` - Timestamp to search for.
+///
+/// # Returns
+///
+/// * `u64` - Block id.
+pub fn find_first_block(block_index: &BTreeSet<u64>, start: &u64) -> u64 {
+    let start_block_id = block_index.range(start..).next();
+    if start_block_id.is_some() && start >= start_block_id.unwrap() {
+        start_block_id.unwrap().clone()
+    } else {
+        block_index
+            .range(..start)
+            .rev()
+            .next()
+            .unwrap_or(&0)
+            .clone()
+    }
+}
 
 impl BlockManager {
     pub fn new(path: PathBuf) -> Self {
@@ -223,7 +247,6 @@ impl ManageBlock for BlockManager {
         })?;
         let mut file = std::fs::File::create(path)?;
         file.write_all(&buf)?;
-
         Ok(())
     }
 

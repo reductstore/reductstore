@@ -38,10 +38,15 @@ pub async fn print_statuses<B>(
     );
 
     let response = next.run(request).await;
+    let err_msg = match response.headers().get("x-reduct-error") {
+        Some(msg) => msg.to_str().unwrap(),
+        None => "",
+    };
+
     if response.status().as_u16() >= 500 {
-        error!("{} [{}]", msg, response.status());
+        error!("{} [{}] {}", msg, response.status(), err_msg);
     } else {
-        debug!("{} [{}]", msg, response.status());
+        debug!("{} [{}] {}", msg, response.status(), err_msg);
     }
 
     Ok(response)

@@ -4,13 +4,15 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::core::status::HttpError;
-use crate::storage::block_manager::{BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT};
+use crate::storage::block_manager::{
+    find_first_block, BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT,
+};
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, EntryInfo, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
-use log::debug;
+use log::{debug, error, info};
 use prost::bytes::Bytes;
 use prost::Message;
 
@@ -72,13 +74,16 @@ impl Entry {
                 continue;
             }
 
-            let buf = std::fs::read(path)?;
-            let block = Block::decode(Bytes::from(buf)).map_err(|e| {
-                HttpError::internal_server_error(&format!(
-                    "Failed to decode block descriptor: {}",
-                    e
-                ))
-            })?;
+            let buf = std::fs::read(path.clone())?;
+            let block = match Block::decode(Bytes::from(buf)) {
+                Ok(block) => block,
+                Err(err) => {
+                    error!("Failed to decode block {:?}: {}", path, err);
+                    info!("Removing block {:?}", path);
+                    fs::remove_file(path)?;
+                    continue;
+                }
+            };
 
             record_count += block.records.len() as u64;
             size += block.size;
@@ -132,36 +137,37 @@ impl Entry {
             self.block_manager.load(*self.block_index.last().unwrap())?
         };
 
-        let (block, record_type) =
-            if block.begin_time.is_some() && ts_to_us(block.begin_time.as_ref().unwrap()) >= time {
-                debug!("Timestamp {} is belated. Looking for a block", time);
-                // The timestamp is belated. We need to find the proper block to write to.
+        let (block, record_type) = if block.latest_record_time.is_some()
+            && ts_to_us(block.latest_record_time.as_ref().unwrap()) >= time
+        {
+            debug!("Timestamp {} is belated. Looking for a block", time);
+            // The timestamp is belated. We need to find the proper block to write to.
 
-                if *self.block_index.first().unwrap() > time {
-                    // The timestamp is the earliest. We need to create a new block.
-                    debug!("Timestamp {} is the earliest. Creating a new block", time);
-                    (self.start_new_block(time)?, RecordType::BelatedFirst)
-                } else {
-                    let block_id = self.block_index.range(time..).next().unwrap();
-                    let block = self.block_manager.load(*block_id)?;
-                    // check if the record already exists
-                    let proto_time = Some(us_to_ts(&time));
-                    if block
-                        .records
-                        .iter()
-                        .any(|record| record.timestamp == proto_time)
-                    {
-                        return Err(HttpError::conflict(&format!(
-                            "A record with timestamp {} already exists",
-                            time
-                        )));
-                    }
-                    (block, RecordType::Belated)
-                }
+            if *self.block_index.first().unwrap() > time {
+                // The timestamp is the earliest. We need to create a new block.
+                debug!("Timestamp {} is the earliest. Creating a new block", time);
+                (self.start_new_block(time)?, RecordType::BelatedFirst)
             } else {
-                // The timestamp is the latest. We can just append to the latest block.
-                (block, RecordType::Latest)
-            };
+                let block_id = find_first_block(&self.block_index, &time);
+                let block = self.block_manager.load(block_id)?;
+                // check if the record already exists
+                let proto_time = Some(us_to_ts(&time));
+                if block
+                    .records
+                    .iter()
+                    .any(|record| record.timestamp == proto_time)
+                {
+                    return Err(HttpError::conflict(&format!(
+                        "A record with timestamp {} already exists",
+                        time
+                    )));
+                }
+                (block, RecordType::Belated)
+            }
+        } else {
+            // The timestamp is the latest. We can just append to the latest block.
+            (block, RecordType::Latest)
+        };
 
         let has_no_space = block.size + content_size > self.settings.max_block_size;
         let has_too_many_records =
@@ -541,6 +547,7 @@ mod tests {
         let (_, mut entry) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
+        write_stub_record(&mut entry, 2000000).unwrap();
         let err = write_stub_record(&mut entry, 1000000);
         assert_eq!(
             err.err(),

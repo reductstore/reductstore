@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use crate::core::status::HttpError;
-use crate::storage::block_manager::{BlockManager, ManageBlock};
+use crate::storage::block_manager::{find_first_block, BlockManager, ManageBlock};
 use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
@@ -44,22 +44,8 @@ impl Query for HistoricalQuery {
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
         self.last_update = Instant::now();
 
-        let find_first_block = |start| -> u64 {
-            let start_block_id = block_index.range(&start..).next();
-            if start_block_id.is_some() && start >= *start_block_id.unwrap() {
-                start_block_id.unwrap().clone()
-            } else {
-                block_index
-                    .range(..&start)
-                    .rev()
-                    .next()
-                    .unwrap_or(&0)
-                    .clone()
-            }
-        };
-
         let check_next_block = |start, stop| -> bool {
-            let start = find_first_block(start);
+            let start = find_first_block(block_index, start);
             let next_block_id = block_index.range(start..stop).next();
             if let Some(next_block_id) = next_block_id {
                 next_block_id >= &stop
@@ -108,7 +94,7 @@ impl Query for HistoricalQuery {
 
         let mut records: Vec<Record> = Vec::new();
         let mut block = Block::default();
-        let start = find_first_block(self.start_time);
+        let start = find_first_block(block_index, &self.start_time);
         for block_id in block_index.range(start..self.stop_time) {
             block = if let Some(block) = &self.block {
                 if block.begin_time == Some(us_to_ts(block_id)) {
@@ -146,7 +132,7 @@ impl Query for HistoricalQuery {
             false
         } else {
             self.block = None;
-            check_next_block(self.start_time, self.stop_time)
+            check_next_block(&self.start_time, self.stop_time)
         };
 
         let record_idx = block

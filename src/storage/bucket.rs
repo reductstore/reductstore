@@ -292,7 +292,7 @@ impl Bucket {
                 // Remove empty entries
                 let mut entries_to_remove: Vec<String> = Vec::new();
                 for entry in self.entries.values_mut() {
-                    if entry.info().unwrap().size == 0 {
+                    if entry.info()?.size == 0 {
                         remove_dir_all(self.path.join(entry.name()))?;
                         entries_to_remove.push(entry.name().to_string());
                     }
