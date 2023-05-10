@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - GET /api/v1/me endpoint for disabled authentication, [PR-245](https://github.com/reductstore/reductstore/pull/245)
+- Error handling when a client closes a connection, [PR-263](https://github.com/reductstore/reductstore/pull/263)
 
 ## [1.3.2] - 2023-03-10
 
