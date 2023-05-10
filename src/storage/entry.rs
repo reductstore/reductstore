@@ -547,6 +547,7 @@ mod tests {
         let (_, mut entry) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
+        write_stub_record(&mut entry, 2000000).unwrap();
         let err = write_stub_record(&mut entry, 1000000);
         assert_eq!(
             err.err(),
