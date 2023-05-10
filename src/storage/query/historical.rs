@@ -176,7 +176,7 @@ mod tests {
     use bytes::Bytes;
     use prost_wkt_types::Timestamp;
     use std::collections::HashMap;
-    use std::process::id;
+
     use std::time::Duration;
     use tempfile::tempdir;
 
