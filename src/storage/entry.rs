@@ -236,14 +236,10 @@ impl Entry {
             return not_found_err;
         }
 
-        let block_id = self.block_index.range(time..).next();
-        let block_id = if block_id.is_some() && time <= *block_id.unwrap() {
-            block_id
-        } else {
-            self.block_index.range(..time).rev().next().clone()
-        };
+        let _block_id = self.block_index.range(time..).next();
+        let block_id = find_first_block(&self.block_index, &time);
 
-        let block = self.block_manager.load(*block_id.unwrap())?;
+        let block = self.block_manager.load(block_id)?;
 
         let record_index = block
             .records
@@ -759,6 +755,24 @@ mod tests {
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1000000);
         assert_eq!(info.latest_record, 3000000);
+    }
+
+    #[test]
+    fn test_search() {
+        let (_, mut entry) = setup(EntrySettings {
+            max_block_size: 10000,
+            max_block_records: 5,
+        });
+
+        let step = 100000;
+        for i in 0..100 {
+            write_stub_record(&mut entry, i * step).unwrap();
+        }
+
+        let reader = entry.begin_read(30 * step).unwrap();
+        let wr = reader.write().unwrap();
+
+        assert_eq!(wr.timestamp(), 3000000);
     }
 
     fn setup(options: EntrySettings) -> (EntrySettings, Entry) {
