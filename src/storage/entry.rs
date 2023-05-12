@@ -236,7 +236,7 @@ impl Entry {
             return not_found_err;
         }
 
-        let block_id = self.block_index.range(time..).next();
+        let _block_id = self.block_index.range(time..).next();
         let block_id = find_first_block(&self.block_index, &time);
 
         let block = self.block_manager.load(block_id)?;
@@ -770,7 +770,7 @@ mod tests {
         }
 
         let reader = entry.begin_read(30 * step).unwrap();
-        let mut wr = reader.write().unwrap();
+        let wr = reader.write().unwrap();
 
         assert_eq!(wr.timestamp(), 3000000);
     }

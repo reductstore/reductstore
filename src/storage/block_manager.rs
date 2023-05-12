@@ -8,7 +8,7 @@ use prost::Message;
 use prost_wkt_types::Timestamp;
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
