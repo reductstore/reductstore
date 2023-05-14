@@ -21,6 +21,7 @@ use axum::{
 
 use axum_server::tls_rustls::RustlsConfig;
 
+use axum_server::Handle;
 use log::info;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
@@ -159,8 +160,12 @@ async fn main() {
         .layer(middleware::from_fn(print_statuses))
         .with_state(Arc::new(RwLock::new(components)));
 
+    let handle = Handle::new();
+    tokio::spawn(shutdown(handle.clone()));
+
     if cert_path.is_empty() {
         axum_server::bind(addr)
+            .handle(handle)
             .serve(app.into_make_service())
             .await
             .unwrap();
@@ -169,8 +174,15 @@ async fn main() {
             .await
             .unwrap();
         axum_server::bind_rustls(addr, config)
+            .handle(handle)
             .serve(app.into_make_service())
             .await
             .unwrap();
     };
+}
+
+async fn shutdown(handle: Handle) {
+    tokio::signal::ctrl_c().await.unwrap();
+    info!("Ctrl-C received, shutting down...");
+    handle.shutdown();
 }

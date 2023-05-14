@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow null quota type in bucket settings, [PR-264](https://github.com/reductstore/reductstore/pull/264)
 - Writing belated data, [PR-265](https://github.com/reductstore/reductstore/pull/265)
 - Fix searching record by timestamp, [PR-266](https://github.com/reductstore/reductstore/pull/266)
+- Graceful shutdown, [PR-267](https://github.com/reductstore/reductstore/pull/267)
 
 ## [1.3.2] - 2023-03-10
 
