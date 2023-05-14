@@ -28,7 +28,6 @@ pub type Labels = HashMap<String, String>;
 /// Entry is a time series in a bucket.
 pub struct Entry {
     name: String,
-    path: PathBuf,
     settings: EntrySettings,
     block_index: BTreeSet<u64>,
     block_manager: BlockManager,
@@ -49,7 +48,6 @@ impl Entry {
         fs::create_dir_all(path.join(name))?;
         Ok(Self {
             name: name.to_string(),
-            path: path.clone(),
             settings,
             block_index: BTreeSet::new(),
             block_manager: BlockManager::new(path.join(name)),
@@ -92,7 +90,6 @@ impl Entry {
 
         Ok(Self {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
-            path: path.clone(),
             settings: options,
             block_index,
             block_manager: BlockManager::new(path),
@@ -403,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_restore() {
-        let (options, mut entry) = setup_default();
+        let (options, mut entry, path) = setup_default();
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
@@ -433,7 +430,7 @@ mod tests {
             }
         );
 
-        let entry = Entry::restore(entry.path.join(entry.name), options).unwrap();
+        let entry = Entry::restore(path.join(entry.name), options).unwrap();
 
         assert_eq!(entry.name(), "entry");
         assert_eq!(entry.record_count, 2);
@@ -442,7 +439,7 @@ mod tests {
 
     #[test]
     fn test_begin_write_new_block_size() {
-        let (_, mut entry) = setup(EntrySettings {
+        let (_, mut entry, _) = setup(EntrySettings {
             max_block_size: 10,
             max_block_records: 10000,
         });
@@ -477,7 +474,7 @@ mod tests {
 
     #[test]
     fn test_begin_write_new_block_records() {
-        let (_, mut entry) = setup(EntrySettings {
+        let (_, mut entry, _) = setup(EntrySettings {
             max_block_size: 10000,
             max_block_records: 1,
         });
@@ -513,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_begin_write_belated_record() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 3000000).unwrap();
@@ -528,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_begin_write_belated_first() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 3000000).unwrap();
         write_stub_record(&mut entry, 1000000).unwrap();
@@ -540,7 +537,7 @@ mod tests {
 
     #[test]
     fn test_begin_write_existing_record() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
@@ -556,7 +553,7 @@ mod tests {
     // Test begin_read
     #[test]
     fn test_begin_read_empty() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),
@@ -566,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_begin_read_early() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
         let writer = entry.begin_read(1000);
@@ -578,7 +575,7 @@ mod tests {
 
     #[test]
     fn test_begin_read_late() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
         let writer = entry.begin_read(2000000);
@@ -590,7 +587,7 @@ mod tests {
 
     #[test]
     fn test_begin_read_still_written() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
         {
             let writer = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -612,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_begin_read_not_found() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 3000000).unwrap();
@@ -626,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_begin_read_ok1() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
         write_stub_record(&mut entry, 1000000).unwrap();
         let reader = entry.begin_read(1000000).unwrap();
         let chunk = reader.write().unwrap().read().unwrap();
@@ -635,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_begin_read_ok2() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 1010000).unwrap();
@@ -647,7 +644,7 @@ mod tests {
 
     #[test]
     fn test_begin_read_ok_in_chunks() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
         let mut data = vec![0; DEFAULT_MAX_READ_CHUNK as usize + 1];
         data[0] = 1;
         data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
@@ -666,7 +663,7 @@ mod tests {
 
     #[test]
     fn test_historical_query() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
 
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
@@ -699,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_continuous_query() {
-        let (_, mut entry) = setup_default();
+        let (_, mut entry, _) = setup_default();
         write_stub_record(&mut entry, 1000000).unwrap();
 
         let id = entry
@@ -739,7 +736,7 @@ mod tests {
 
     #[test]
     fn test_info() {
-        let (_, mut entry) = setup(EntrySettings {
+        let (_, mut entry, _) = setup(EntrySettings {
             max_block_size: 10000,
             max_block_records: 10000,
         });
@@ -759,7 +756,7 @@ mod tests {
 
     #[test]
     fn test_search() {
-        let (_, mut entry) = setup(EntrySettings {
+        let (_, mut entry, _) = setup(EntrySettings {
             max_block_size: 10000,
             max_block_records: 5,
         });
@@ -775,13 +772,13 @@ mod tests {
         assert_eq!(wr.timestamp(), 3000000);
     }
 
-    fn setup(options: EntrySettings) -> (EntrySettings, Entry) {
-        let path = tempfile::tempdir().unwrap();
-        let entry = Entry::new("entry", path.into_path(), options.clone()).unwrap();
-        (options, entry)
+    fn setup(options: EntrySettings) -> (EntrySettings, Entry, PathBuf) {
+        let path = tempfile::tempdir().unwrap().into_path();
+        let entry = Entry::new("entry", path.clone(), options.clone()).unwrap();
+        (options, entry, path)
     }
 
-    fn setup_default() -> (EntrySettings, Entry) {
+    fn setup_default() -> (EntrySettings, Entry, PathBuf) {
         setup(EntrySettings {
             max_block_size: 10000,
             max_block_records: 10000,
