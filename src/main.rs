@@ -161,7 +161,8 @@ async fn main() {
         .with_state(Arc::new(RwLock::new(components)));
 
     let handle = Handle::new();
-    tokio::spawn(shutdown(handle.clone()));
+    tokio::spawn(shutdown_ctrl_c(handle.clone()));
+    tokio::spawn(shutdown_signal(handle.clone()));
 
     if cert_path.is_empty() {
         axum_server::bind(addr)
@@ -181,8 +182,17 @@ async fn main() {
     };
 }
 
-async fn shutdown(handle: Handle) {
+async fn shutdown_ctrl_c(handle: Handle) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
+    handle.shutdown();
+}
+
+async fn shutdown_signal(handle: Handle) {
+    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .unwrap()
+        .recv()
+        .await;
+    info!("SIGTERM received, shutting down...");
     handle.shutdown();
 }
