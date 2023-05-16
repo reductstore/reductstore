@@ -7,12 +7,11 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use prost_wkt_types::Timestamp;
 
-use log::{debug, info};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::sync::{Arc, RwLock, Weak};
 
 use crate::core::status::HttpError;
 use crate::storage::proto::*;
@@ -384,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_start_writing() {
-        let mut bm = setup();
+        let bm = setup();
 
         let block_id = 1;
         let mut block = bm.start(block_id, 1024).unwrap().clone();
@@ -417,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_remove_with_writers() {
-        let mut bm = setup();
+        let bm = setup();
         let block_id = 1;
 
         {

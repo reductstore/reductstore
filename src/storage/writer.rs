@@ -4,7 +4,6 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use bytes::Bytes;
-use futures_util::TryFutureExt;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;

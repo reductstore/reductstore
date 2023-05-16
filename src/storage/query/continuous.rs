@@ -68,7 +68,7 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use prost_wkt_types::Timestamp;
-    use std::ops::Deref;
+
     use std::thread::sleep;
     use tempfile::tempdir;
 
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn test_query() {
-        let (mut block_manager, block_indexes) = setup();
+        let (block_manager, block_indexes) = setup();
         let mut block_manager = block_manager.write().unwrap();
 
         let mut query = ContinuousQuery::new(
@@ -116,7 +116,7 @@ mod tests {
 
     fn setup() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
         let dir = tempdir().unwrap().into_path();
-        let mut block_manager = BlockManager::new(dir);
+        let block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();
 
         block.records.push(Record {

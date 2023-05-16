@@ -178,7 +178,7 @@ mod tests {
     fn test_query_ok_1_rec() {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
         let mut block_manager = block_manager.write().unwrap();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
@@ -200,7 +200,7 @@ mod tests {
     fn test_query_ok_2_recs() {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -236,7 +236,7 @@ mod tests {
     fn test_query_ok_3_recs() {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -287,7 +287,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -325,7 +325,7 @@ mod tests {
             },
         );
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -363,7 +363,7 @@ mod tests {
     fn test_ignoring_errored_records() {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
         let mut block_manager = block_manager.write().unwrap();
 
         let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
@@ -381,7 +381,7 @@ mod tests {
 
     fn setup_2_blocks() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
         let dir = tempdir().unwrap().into_path();
-        let mut block_manager = BlockManager::new(dir);
+        let block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();
 
         block.records.push(Record {
