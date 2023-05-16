@@ -82,14 +82,14 @@ mod tests {
     use crate::auth::token_repository::TokenRepository;
     use crate::storage::storage::Storage;
     use axum::body::HttpBody;
-    use hyper::header::CONTENT_LENGTH;
+
     use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_img_decoding() {
         let components = setup();
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
-        let mut response = UiApi::show_ui(State(components), request)
+        let response = UiApi::show_ui(State(components), request)
             .await
             .unwrap()
             .into_response();
@@ -100,7 +100,7 @@ mod tests {
     fn setup() -> Arc<RwLock<HttpServerComponents>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut components = HttpServerComponents {
+        let components = HttpServerComponents {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
             token_repo: TokenRepository::new(PathBuf::from(data_path), ""),

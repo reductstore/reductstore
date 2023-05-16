@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use bytes::Bytes;
-use log::{debug, info, trace};
+use log::{debug, trace};
 use std::fs::File;
 use std::io::{Cursor, Read};
 use tempfile::{tempdir, TempDir};
