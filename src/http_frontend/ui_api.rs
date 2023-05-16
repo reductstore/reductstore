@@ -14,6 +14,7 @@ use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use hyper::Body;
+use log::debug;
 use mime_guess::mime;
 use std::sync::{Arc, RwLock};
 
@@ -49,7 +50,10 @@ impl UiApi {
 
         let content = match components.read().unwrap().console.read(&path) {
             Ok(content) => Ok(content),
-            Err(_) => components.read().unwrap().console.read("index.html"),
+            Err(err) => {
+                debug!("Failed to read {}: {}", path, err);
+                components.read().unwrap().console.read("index.html")
+            }
         };
 
         let mime = mime_guess::from_path(&path)
@@ -58,9 +62,52 @@ impl UiApi {
             .to_string();
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_str(&mime).unwrap());
-        Ok((
-            headers,
-            content?.replace("/ui/", &format!("{}ui/", base_path)),
-        ))
+
+        let content = if mime == mime::TEXT_HTML.to_string() {
+            let content = String::from_utf8(content?.to_vec()).unwrap();
+            let content = content.replace("/ui/", &format!("{}ui/", base_path));
+            Bytes::from(content)
+        } else {
+            content?
+        };
+        Ok((headers, content))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::asset::asset_manager::ZipAssetManager;
+    use crate::auth::token_auth::TokenAuthorization;
+    use crate::auth::token_repository::TokenRepository;
+    use crate::storage::storage::Storage;
+    use axum::body::HttpBody;
+
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn test_img_decoding() {
+        let components = setup();
+        let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
+        let response = UiApi::show_ui(State(components), request)
+            .await
+            .unwrap()
+            .into_response();
+        assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/png");
+        assert_eq!(response.body().size_hint().lower(), 7037);
+    }
+
+    fn setup() -> Arc<RwLock<HttpServerComponents>> {
+        let data_path = tempfile::tempdir().unwrap().into_path();
+
+        let components = HttpServerComponents {
+            storage: Storage::new(PathBuf::from(data_path.clone())),
+            auth: TokenAuthorization::new(""),
+            token_repo: TokenRepository::new(PathBuf::from(data_path), ""),
+            console: ZipAssetManager::new(include_bytes!("../asset/console.zip")),
+            base_path: "/".to_string(),
+        };
+
+        Arc::new(RwLock::new(components))
     }
 }
