@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix searching record by timestamp, [PR-266](https://github.com/reductstore/reductstore/pull/266)
 - Graceful shutdown, [PR-267](https://github.com/reductstore/reductstore/pull/267)
 - Access to a block descriptor from several threads, [PR-268](https://github.com/reductstore/reductstore/pull/268)
+- Handling unix SIGTERM signal, [PR-269](https://github.com/reductstore/reductstore/pull/269)
 
 ## [1.3.2] - 2023-03-10
 
