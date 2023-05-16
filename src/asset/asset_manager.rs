@@ -3,7 +3,8 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use log::{debug, trace};
+use bytes::Bytes;
+use log::{debug, info, trace};
 use std::fs::File;
 use std::io::{Cursor, Read};
 use tempfile::{tempdir, TempDir};
@@ -76,7 +77,7 @@ impl ZipAssetManager {
     /// # Returns
     ///
     /// The file content as string.
-    pub fn read(&self, relative_path: &str) -> Result<String, HttpError> {
+    pub fn read(&self, relative_path: &str) -> Result<Bytes, HttpError> {
         if self.path.is_none() {
             // TODO: When C++ is gone, use trait and emtpy implementation
             return Err(HttpError::not_found("No static files supported"));
@@ -94,10 +95,10 @@ impl ZipAssetManager {
 
         // read file
         let mut file = File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
+        let mut content = Vec::new();
+        file.read_to_end(&mut content)?;
 
-        Ok(contents)
+        Ok(Bytes::from(content))
     }
 }
 

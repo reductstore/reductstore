@@ -14,6 +14,7 @@ use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use hyper::Body;
+use log::debug;
 use mime_guess::mime;
 use std::sync::{Arc, RwLock};
 
@@ -49,7 +50,10 @@ impl UiApi {
 
         let content = match components.read().unwrap().console.read(&path) {
             Ok(content) => Ok(content),
-            Err(_) => components.read().unwrap().console.read("index.html"),
+            Err(err) => {
+                debug!("Failed to read {}: {}", path, err);
+                components.read().unwrap().console.read("index.html")
+            }
         };
 
         let mime = mime_guess::from_path(&path)
@@ -58,9 +62,14 @@ impl UiApi {
             .to_string();
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_str(&mime).unwrap());
-        Ok((
-            headers,
-            content?.replace("/ui/", &format!("{}ui/", base_path)),
-        ))
+
+        let content = if mime == mime::TEXT_HTML.to_string() {
+            let content = String::from_utf8(content?.to_vec()).unwrap();
+            let content = content.replace("/ui/", &format!("{}ui/", base_path));
+            Bytes::from(content)
+        } else {
+            content?
+        };
+        Ok((headers, content))
     }
 }
