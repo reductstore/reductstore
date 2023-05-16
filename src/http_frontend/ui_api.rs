@@ -73,3 +73,41 @@ impl UiApi {
         Ok((headers, content))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::asset::asset_manager::ZipAssetManager;
+    use crate::auth::token_auth::TokenAuthorization;
+    use crate::auth::token_repository::TokenRepository;
+    use crate::storage::storage::Storage;
+    use axum::body::HttpBody;
+    use hyper::header::CONTENT_LENGTH;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn test_img_decoding() {
+        let components = setup();
+        let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
+        let mut response = UiApi::show_ui(State(components), request)
+            .await
+            .unwrap()
+            .into_response();
+        assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/png");
+        assert_eq!(response.body().size_hint().lower(), 7037);
+    }
+
+    fn setup() -> Arc<RwLock<HttpServerComponents>> {
+        let data_path = tempfile::tempdir().unwrap().into_path();
+
+        let mut components = HttpServerComponents {
+            storage: Storage::new(PathBuf::from(data_path.clone())),
+            auth: TokenAuthorization::new(""),
+            token_repo: TokenRepository::new(PathBuf::from(data_path), ""),
+            console: ZipAssetManager::new(include_bytes!("../asset/console.zip")),
+            base_path: "/".to_string(),
+        };
+
+        Arc::new(RwLock::new(components))
+    }
+}
