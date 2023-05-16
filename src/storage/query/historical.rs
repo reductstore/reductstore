@@ -178,7 +178,8 @@ mod tests {
     fn test_query_ok_1_rec() {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
+        let mut block_manager = block_manager.write().unwrap();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -199,7 +200,9 @@ mod tests {
     fn test_query_ok_2_recs() {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
+        let mut block_manager = block_manager.write().unwrap();
+
         {
             {
                 let (reader, _) = query.next(&index, &mut block_manager).unwrap();
@@ -233,9 +236,12 @@ mod tests {
     fn test_query_ok_3_recs() {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
+        let mut block_manager = block_manager.write().unwrap();
+
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+
             assert_eq!(
                 reader.write().unwrap().read().unwrap(),
                 Some(Bytes::from("0123456789"))
@@ -281,7 +287,9 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
+        let mut block_manager = block_manager.write().unwrap();
+
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -316,7 +324,10 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (mut block_manager, index) = setup_2_blocks();
+
+        let (block_manager, index) = setup_2_blocks();
+        let mut block_manager = block_manager.write().unwrap();
+
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -352,7 +363,9 @@ mod tests {
     fn test_ignoring_errored_records() {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (mut block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = setup_2_blocks();
+        let mut block_manager = block_manager.write().unwrap();
+
         let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
         block.records[0].state = record::State::Errored as i32;
         block_manager.save(&block).unwrap();
@@ -366,9 +379,9 @@ mod tests {
         );
     }
 
-    fn setup_2_blocks() -> (BlockManager, BTreeSet<u64>) {
+    fn setup_2_blocks() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
         let dir = tempdir().unwrap().into_path();
-        let mut block_manager = BlockManager::new(dir);
+        let block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();
 
         block.records.push(Record {
@@ -420,9 +433,9 @@ mod tests {
         block.size = 20;
         block_manager.save(&block).unwrap();
 
+        let block_manager = Arc::new(RwLock::new(block_manager));
         {
-            let writer = block_manager.begin_write(&block, 0).unwrap();
-
+            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
             writer
                 .write()
                 .unwrap()
@@ -431,7 +444,7 @@ mod tests {
         }
 
         {
-            let writer = block_manager.begin_write(&block, 1).unwrap();
+            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 1).unwrap();
             writer
                 .write()
                 .unwrap()
@@ -439,9 +452,9 @@ mod tests {
                 .unwrap();
         }
 
-        block_manager.finish(&block).unwrap();
+        block_manager.write().unwrap().finish(&block).unwrap();
 
-        let mut block = block_manager.start(1000, 10).unwrap();
+        let mut block = block_manager.write().unwrap().start(1000, 10).unwrap();
 
         block.records.push(Record {
             timestamp: Some(Timestamp {
@@ -469,10 +482,10 @@ mod tests {
             nanos: 1000_000,
         });
         block.size = 10;
-        block_manager.save(&block).unwrap();
+        block_manager.write().unwrap().save(&block).unwrap();
 
         {
-            let writer = block_manager.begin_write(&block, 0).unwrap();
+            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
             writer
                 .write()
                 .unwrap()
@@ -480,7 +493,7 @@ mod tests {
                 .unwrap();
         }
 
-        block_manager.finish(&block).unwrap();
+        block_manager.write().unwrap().finish(&block).unwrap();
         (block_manager, BTreeSet::from([0, 1000]))
     }
 }

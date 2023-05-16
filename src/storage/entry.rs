@@ -30,7 +30,7 @@ pub struct Entry {
     name: String,
     settings: EntrySettings,
     block_index: BTreeSet<u64>,
-    block_manager: BlockManager,
+    block_manager: Arc<RwLock<BlockManager>>,
     record_count: u64,
     size: u64,
     queries: HashMap<u64, Box<dyn Query + Send + Sync>>,
@@ -50,7 +50,7 @@ impl Entry {
             name: name.to_string(),
             settings,
             block_index: BTreeSet::new(),
-            block_manager: BlockManager::new(path.join(name)),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path.join(name)))),
             record_count: 0,
             size: 0,
             queries: HashMap::new(),
@@ -92,7 +92,7 @@ impl Entry {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
             settings: options,
             block_index,
-            block_manager: BlockManager::new(path),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
             record_count,
             size,
             queries: HashMap::new(),
@@ -131,7 +131,8 @@ impl Entry {
         let block = if self.block_index.is_empty() {
             self.start_new_block(time)?
         } else {
-            self.block_manager.load(*self.block_index.last().unwrap())?
+            let bm = self.block_manager.read().unwrap();
+            bm.load(*self.block_index.last().unwrap())?
         };
 
         let (block, record_type) = if block.latest_record_time.is_some()
@@ -146,7 +147,8 @@ impl Entry {
                 (self.start_new_block(time)?, RecordType::BelatedFirst)
             } else {
                 let block_id = find_first_block(&self.block_index, &time);
-                let block = self.block_manager.load(block_id)?;
+                let bm = self.block_manager.read().unwrap();
+                let block = bm.load(block_id)?;
                 // check if the record already exists
                 let proto_time = Some(us_to_ts(&time));
                 if block
@@ -175,7 +177,7 @@ impl Entry {
         {
             // We need to create a new block.
             debug!("Creating a new block");
-            self.block_manager.finish(&block)?;
+            self.block_manager.write().unwrap().finish(&block)?;
             self.start_new_block(time)?
         } else {
             // We can just append to the latest block.
@@ -203,9 +205,12 @@ impl Entry {
             block.latest_record_time = Some(us_to_ts(&time));
         }
 
-        self.block_manager.save(&block)?;
-        self.block_manager
-            .begin_write(&block, block.records.len() - 1)
+        self.block_manager.write().unwrap().save(&block)?;
+        BlockManager::begin_write(
+            Arc::clone(&self.block_manager),
+            &block,
+            block.records.len() - 1,
+        )
     }
 
     /// Starts a new record read.
@@ -236,7 +241,10 @@ impl Entry {
         let _block_id = self.block_index.range(time..).next();
         let block_id = find_first_block(&self.block_index, &time);
 
-        let block = self.block_manager.load(block_id)?;
+        let block = {
+            let bm = self.block_manager.read().unwrap();
+            bm.load(block_id)?
+        };
 
         let record_index = block
             .records
@@ -262,7 +270,10 @@ impl Entry {
             )));
         }
 
-        self.block_manager.begin_read(&block, record_index.unwrap())
+        self.block_manager
+            .write()
+            .unwrap()
+            .begin_read(&block, record_index.unwrap())
     }
 
     /// Query records for a time range.
@@ -303,7 +314,7 @@ impl Entry {
             .queries
             .get_mut(&query_id)
             .ok_or_else(|| HttpError::not_found(&format!("Query {} not found", query_id)))?;
-        query.next(&self.block_index, &mut self.block_manager)
+        query.next(&self.block_index, &mut self.block_manager.write().unwrap())
     }
 
     /// Returns stats about the entry.
@@ -311,7 +322,11 @@ impl Entry {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
             (0, 0)
         } else {
-            let latest_block = self.block_manager.load(*self.block_index.last().unwrap())?;
+            let latest_block = self
+                .block_manager
+                .read()
+                .unwrap()
+                .load(*self.block_index.last().unwrap())?;
             let latest_record = if latest_block.records.is_empty() {
                 0
             } else {
@@ -351,11 +366,14 @@ impl Entry {
 
         let oldest_block_id = *self.block_index.first().unwrap();
 
-        let block = self.block_manager.load(oldest_block_id)?;
+        let block = self.block_manager.read().unwrap().load(oldest_block_id)?;
         self.size -= block.size;
         self.record_count -= block.records.len() as u64;
 
-        self.block_manager.remove(oldest_block_id)?;
+        self.block_manager
+            .write()
+            .unwrap()
+            .remove(oldest_block_id)?;
         self.block_index.remove(&oldest_block_id);
 
         Ok(())
@@ -376,6 +394,8 @@ impl Entry {
     fn start_new_block(&mut self, time: u64) -> Result<Block, HttpError> {
         let block = self
             .block_manager
+            .write()
+            .unwrap()
             .start(time, self.settings.max_block_size)?;
         self.block_index
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));
@@ -404,7 +424,8 @@ mod tests {
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
-        let records = entry.block_manager.load(1).unwrap().records.clone();
+        let bm = entry.block_manager.read().unwrap();
+        let records = bm.load(1).unwrap().records.clone();
         assert_eq!(records.len(), 2);
         assert_eq!(
             records[0],
@@ -447,8 +468,10 @@ mod tests {
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
+        let bm = entry.block_manager.read().unwrap();
+
         assert_eq!(
-            entry.block_manager.load(1).unwrap().records[0],
+            bm.load(1).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -460,7 +483,7 @@ mod tests {
         );
 
         assert_eq!(
-            entry.block_manager.load(2000010).unwrap().records[0],
+            bm.load(2000010).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 0,
@@ -483,8 +506,9 @@ mod tests {
         write_stub_record(&mut entry, 2).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
+        let bm = entry.block_manager.read().unwrap();
         assert_eq!(
-            entry.block_manager.load(1).unwrap().records[0],
+            bm.load(1).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -496,7 +520,7 @@ mod tests {
         );
 
         assert_eq!(
-            entry.block_manager.load(2000010).unwrap().records[0],
+            bm.load(2000010).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 0,
@@ -516,7 +540,8 @@ mod tests {
         write_stub_record(&mut entry, 3000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
 
-        let records = entry.block_manager.load(1000000).unwrap().records.clone();
+        let bm = entry.block_manager.read().unwrap();
+        let records = bm.load(1000000).unwrap().records.clone();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
         assert_eq!(records[1].timestamp, Some(us_to_ts(&3000000)));
@@ -530,7 +555,8 @@ mod tests {
         write_stub_record(&mut entry, 3000000).unwrap();
         write_stub_record(&mut entry, 1000000).unwrap();
 
-        let records = entry.block_manager.load(1000000).unwrap().records.clone();
+        let bm = entry.block_manager.read().unwrap();
+        let records = bm.load(1000000).unwrap().records.clone();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
     }

@@ -7,6 +7,7 @@ use bytes::Bytes;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 use crate::core::status::{HttpError, HttpStatus};
 use crate::storage::block_manager::ManageBlock;
@@ -19,7 +20,7 @@ pub struct RecordWriter {
     content_length: u64,
     record_index: usize,
     block_id: u64,
-    block_manager: Box<dyn ManageBlock + Send>,
+    block_manager: Arc<RwLock<dyn ManageBlock>>,
 }
 
 unsafe impl Send for RecordWriter {}
@@ -37,13 +38,16 @@ pub enum Chunk {
 }
 
 impl RecordWriter {
-    pub fn new(
+    pub fn new<T>(
         path: PathBuf,
         block: &Block,
         record_index: usize,
         content_length: u64,
-        block_manager: Box<dyn ManageBlock + Send>,
-    ) -> Result<RecordWriter, HttpError> {
+        block_manager: Arc<RwLock<T>>,
+    ) -> Result<RecordWriter, HttpError>
+    where
+        T: ManageBlock + 'static,
+    {
         let mut file = OpenOptions::new().write(true).create(true).open(path)?;
         let offset = block.records[record_index].begin;
         file.seek(SeekFrom::Start(offset))?;
@@ -115,7 +119,7 @@ impl RecordWriter {
     }
 
     fn on_update(&mut self, state: record::State) {
-        let mut block = match self.block_manager.load(self.block_id) {
+        let mut block = match self.block_manager.read().unwrap().load(self.block_id) {
             Ok(block) => block,
             Err(e) => {
                 log::error!("Failed to load block: {}", e);
@@ -127,6 +131,8 @@ impl RecordWriter {
         block.invalid = state == record::State::Invalid;
 
         self.block_manager
+            .write()
+            .unwrap()
             .save(&block)
             .map_err(|e| {
                 log::error!("Failed to save block: {}", e);
@@ -172,7 +178,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
         writer.write(Chunk::Last(Bytes::from("12345"))).unwrap();
     }
@@ -193,7 +200,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
 
         assert_eq!(
@@ -220,7 +228,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
 
         assert_eq!(
@@ -247,7 +256,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Error).unwrap();
     }
 

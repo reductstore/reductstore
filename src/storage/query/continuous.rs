@@ -68,6 +68,7 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use prost_wkt_types::Timestamp;
+
     use std::thread::sleep;
     use tempfile::tempdir;
 
@@ -78,7 +79,8 @@ mod tests {
 
     #[test]
     fn test_query() {
-        let (mut block_manager, block_indexes) = setup();
+        let (block_manager, block_indexes) = setup();
+        let mut block_manager = block_manager.write().unwrap();
 
         let mut query = ContinuousQuery::new(
             0,
@@ -112,9 +114,9 @@ mod tests {
         assert_eq!(query.state(), &QueryState::Expired);
     }
 
-    fn setup() -> (BlockManager, BTreeSet<u64>) {
+    fn setup() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
         let dir = tempdir().unwrap().into_path();
-        let mut block_manager = BlockManager::new(dir);
+        let block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();
 
         block.records.push(Record {
@@ -136,8 +138,9 @@ mod tests {
         block.size = 10;
         block_manager.save(&block).unwrap();
 
+        let bm_ref = Arc::new(RwLock::new(block_manager));
         {
-            let writer = block_manager.begin_write(&block, 0).unwrap();
+            let writer = BlockManager::begin_write(Arc::clone(&bm_ref), &block, 0).unwrap();
             writer
                 .write()
                 .unwrap()
@@ -145,7 +148,7 @@ mod tests {
                 .unwrap();
         }
 
-        block_manager.finish(&block).unwrap();
-        (block_manager, BTreeSet::from([0]))
+        bm_ref.write().unwrap().finish(&block).unwrap();
+        (Arc::clone(&bm_ref), BTreeSet::from([0]))
     }
 }
