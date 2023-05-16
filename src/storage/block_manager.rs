@@ -7,11 +7,12 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use prost_wkt_types::Timestamp;
 
+use log::{debug, info};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 
 use crate::core::status::HttpError;
 use crate::storage::proto::*;
@@ -21,11 +22,16 @@ use crate::storage::writer::RecordWriter;
 pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
 
 /// Helper class for basic operations on blocks.
-
+///
+/// ## Notes
+///
+/// It is not thread safe and may cause data corruption if used from multiple threads,
+/// because it does not lock the block descriptor file. Use it with RwLock<BlockManager>
 pub struct BlockManager {
     path: PathBuf,
     readers: HashMap<u64, Vec<Weak<RwLock<RecordReader>>>>,
     writers: HashMap<u64, Vec<Weak<RwLock<RecordWriter>>>>,
+    file_mutex: RwLock<()>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -61,6 +67,7 @@ impl BlockManager {
             path,
             readers: HashMap::new(),
             writers: HashMap::new(),
+            file_mutex: RwLock::new(()),
         }
     }
 
@@ -68,6 +75,7 @@ impl BlockManager {
     ///
     /// # Arguments
     ///
+    /// * `block_manager` - Block manager to update state of record
     /// * `block` - Block to write to.
     /// * `record` - Record to write.
     ///
@@ -75,12 +83,12 @@ impl BlockManager {
     ///
     /// * `Ok(RecordWriter)` - weak reference to the record writer.
     pub fn begin_write(
-        &mut self,
+        block_manager: Arc<RwLock<BlockManager>>,
         block: &Block,
         record_index: usize,
     ) -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
         let ts = block.begin_time.clone().unwrap();
-        let path = self.path_to_data(&ts);
+        let path = block_manager.read().unwrap().path_to_data(&ts);
 
         let content_length = block.records[record_index].end - block.records[record_index].begin;
         let writer = Arc::new(RwLock::new(RecordWriter::new(
@@ -88,21 +96,23 @@ impl BlockManager {
             block,
             record_index,
             content_length,
-            Box::new(Self::new(self.path.clone())),
+            Arc::clone(&block_manager),
         )?));
 
-        let block_id = ts_to_us(&ts);
-        match self.writers.entry(block_id) {
-            Entry::Occupied(mut e) => {
-                e.get_mut().push(Arc::downgrade(&writer));
+        {
+            let mut bm = block_manager.write().unwrap();
+            let block_id = ts_to_us(&ts);
+            match bm.writers.entry(block_id) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().push(Arc::downgrade(&writer));
+                }
+                Entry::Vacant(e) => {
+                    e.insert(vec![Arc::downgrade(&writer)]);
+                }
             }
-            Entry::Vacant(e) => {
-                e.insert(vec![Arc::downgrade(&writer)]);
-            }
+
+            bm.clean_readers_or_writers(block_id);
         }
-
-        self.clean_readers_or_writers(block_id);
-
         Ok(writer)
     }
 
@@ -232,6 +242,8 @@ pub trait ManageBlock {
 
 impl ManageBlock for BlockManager {
     fn load(&self, block_id: u64) -> Result<Block, HttpError> {
+        let _guard = self.file_mutex.read().unwrap();
+
         let proto_ts = us_to_ts(&block_id);
         let buf = std::fs::read(self.path_to_desc(&proto_ts))?;
         Block::decode(Bytes::from(buf)).map_err(|e| {
@@ -240,13 +252,16 @@ impl ManageBlock for BlockManager {
     }
 
     fn save(&self, block: &Block) -> Result<(), HttpError> {
+        let _guard = self.file_mutex.write().unwrap();
+
         let path = self.path_to_desc(block.begin_time.as_ref().unwrap());
         let mut buf = BytesMut::new();
         block.encode(&mut buf).map_err(|e| {
             HttpError::internal_server_error(&format!("Failed to encode block descriptor: {}", e))
         })?;
-        let mut file = std::fs::File::create(path)?;
+        let mut file = std::fs::File::create(path.clone())?;
         file.write_all(&buf)?;
+
         Ok(())
     }
 
@@ -264,6 +279,7 @@ impl ManageBlock for BlockManager {
     }
 
     fn finish(&self, block: &Block) -> Result<(), HttpError> {
+        let _guard = self.file_mutex.write().unwrap();
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -280,6 +296,8 @@ impl ManageBlock for BlockManager {
                 block_id
             )));
         }
+
+        let _guard = self.file_mutex.write().unwrap();
 
         let proto_ts = us_to_ts(&block_id);
         let path = self.path_to_data(&proto_ts);
