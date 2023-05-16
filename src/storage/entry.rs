@@ -424,7 +424,8 @@ mod tests {
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
-        let records = entry.block_manager.load(1).unwrap().records.clone();
+        let bm = entry.block_manager.read().unwrap();
+        let records = bm.load(1).unwrap().records.clone();
         assert_eq!(records.len(), 2);
         assert_eq!(
             records[0],
@@ -467,8 +468,10 @@ mod tests {
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
+        let bm = entry.block_manager.read().unwrap();
+
         assert_eq!(
-            entry.block_manager.load(1).unwrap().records[0],
+            bm.load(1).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -480,7 +483,7 @@ mod tests {
         );
 
         assert_eq!(
-            entry.block_manager.load(2000010).unwrap().records[0],
+            bm.load(2000010).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 0,
@@ -503,8 +506,9 @@ mod tests {
         write_stub_record(&mut entry, 2).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
+        let bm = entry.block_manager.read().unwrap();
         assert_eq!(
-            entry.block_manager.load(1).unwrap().records[0],
+            bm.load(1).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -516,7 +520,7 @@ mod tests {
         );
 
         assert_eq!(
-            entry.block_manager.load(2000010).unwrap().records[0],
+            bm.load(2000010).unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 0,
@@ -536,7 +540,8 @@ mod tests {
         write_stub_record(&mut entry, 3000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
 
-        let records = entry.block_manager.load(1000000).unwrap().records.clone();
+        let bm = entry.block_manager.read().unwrap();
+        let records = bm.load(1000000).unwrap().records.clone();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
         assert_eq!(records[1].timestamp, Some(us_to_ts(&3000000)));
@@ -550,7 +555,8 @@ mod tests {
         write_stub_record(&mut entry, 3000000).unwrap();
         write_stub_record(&mut entry, 1000000).unwrap();
 
-        let records = entry.block_manager.load(1000000).unwrap().records.clone();
+        let bm = entry.block_manager.read().unwrap();
+        let records = bm.load(1000000).unwrap().records.clone();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
     }

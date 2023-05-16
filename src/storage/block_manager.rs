@@ -402,8 +402,9 @@ mod tests {
 
         bm.save(&block).unwrap();
 
+        let bm_ref = Arc::new(RwLock::new(bm));
         {
-            let writer = bm.begin_write(&block, 0).unwrap();
+            let writer = BlockManager::begin_write(Arc::clone(&bm_ref), &block, 0).unwrap();
             writer
                 .write()
                 .unwrap()
@@ -411,7 +412,7 @@ mod tests {
                 .unwrap();
         }
 
-        bm.finish(&block).unwrap();
+        bm_ref.read().unwrap().finish(&block).unwrap();
     }
 
     #[test]
@@ -433,11 +434,12 @@ mod tests {
                 content_type: "".to_string(),
             });
 
-            let writer = bm.begin_write(&block, 0).unwrap();
+            let bm_ref = Arc::new(RwLock::new(bm));
+            let writer = BlockManager::begin_write(Arc::clone(&bm_ref), &block, 0).unwrap();
             assert!(!writer.read().unwrap().is_done());
 
             assert_eq!(
-                bm.remove(block_id).err(),
+                bm_ref.write().unwrap().remove(block_id).err(),
                 Some(HttpError::internal_server_error(&format!(
                     "Cannot remove block {} because it is still in use",
                     block_id

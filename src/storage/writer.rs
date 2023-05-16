@@ -179,7 +179,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
         writer.write(Chunk::Last(Bytes::from("12345"))).unwrap();
     }
@@ -200,7 +201,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
 
         assert_eq!(
@@ -227,7 +229,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Data(Bytes::from("67890"))).unwrap();
 
         assert_eq!(
@@ -254,7 +257,8 @@ mod tests {
             .times(1)
             .returning(move |_| Ok(same_block.clone()));
 
-        let mut writer = RecordWriter::new(path, &block, 0, 10, Box::new(block_manager)).unwrap();
+        let bm_ref = Arc::new(RwLock::new(block_manager));
+        let mut writer = RecordWriter::new(path, &block, 0, 10, bm_ref).unwrap();
         writer.write(Chunk::Error).unwrap();
     }
 
