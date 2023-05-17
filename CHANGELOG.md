@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [PR-248](https://github.com/reductstore/reductstore/pull/248)
 - Build ARM64 Docker image
 - Integration of Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
-
+- Print build commit and date in logs, [PR-271](https://github.com/reductstore/reductstore/pull/271)
 ### Changed
 
 - New public Docker repository `reduct/store`, [PR-246](https://github.com/reductstore/reductstore/pull/246)
