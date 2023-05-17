@@ -1,6 +1,5 @@
 extern crate core;
 
-use core::time;
 use std::fs;
 use std::time::SystemTime;
 
