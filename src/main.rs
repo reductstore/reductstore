@@ -44,10 +44,16 @@ use crate::http_frontend::HttpServerComponents;
 
 #[tokio::main]
 async fn main() {
-    // todo: check graceful shutdown
     let version: &str = env!("CARGO_PKG_VERSION");
 
-    info!("ReductStore {}", version);
+    Logger::init("INFO");
+    info!(
+        "ReductStore {} [{} at {}]",
+        version,
+        env!("COMMIT"),
+        env!("BUILD_TIME")
+    );
+    info!("License: MPL-2.0");
 
     let mut env = Env::new();
 

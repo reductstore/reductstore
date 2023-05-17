@@ -40,6 +40,7 @@ mime_guess = "2.0.3"
 prost-build = "0.11"
 prost-wkt-build = "0.4"
 http_req = "0.9.1"
+chrono = "0.4.24"
 
 [dev-dependencies]
 mockall = "0.11.4"

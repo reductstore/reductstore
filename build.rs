@@ -1,10 +1,15 @@
+extern crate core;
+
+use core::time;
 use std::fs;
+use std::time::SystemTime;
 
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // build protos
     prost_build::Config::new()
         .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
@@ -16,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .expect("Failed to compile protos");
 
+    // download web console
     let mut writer = vec![];
     let resp = http_req::request::get(
         "https://github.com/reductstore/web-console/releases/download/v1.2.0/web-console.build.zip",
@@ -32,5 +38,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     fs::write("src/asset/console.zip", writer).expect("Failed to write console.zip");
 
+    // get build time and commit
+    let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let commit = std::process::Command::new("git")
+        .args(&["rev-parse", "--short", "HEAD"])
+        .output()
+        .expect("Failed to get commit")
+        .stdout;
+    let commit = String::from_utf8(commit).expect("Failed to get commit");
+
+    println!("cargo:rustc-env=BUILD_TIME={}", build_time);
+    println!("cargo:rustc-env=COMMIT={}", commit);
     Ok(())
 }
