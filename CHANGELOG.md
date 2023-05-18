@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Access to a block descriptor from several threads, [PR-268](https://github.com/reductstore/reductstore/pull/268)
 - Handling unix SIGTERM signal, [PR-269](https://github.com/reductstore/reductstore/pull/269)
 - Encoding non-text assets of Web Console, [PR-270](https://github.com/reductstore/reductstore/pull/270)
+- Pass hash commit into docker image, [PR-272](https://github.com/reductstore/reductstore/pull/272)
 
 ## [1.3.2] - 2023-03-10
 

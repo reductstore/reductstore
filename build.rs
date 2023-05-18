@@ -1,7 +1,7 @@
 extern crate core;
 
-use std::fs;
 use std::time::SystemTime;
+use std::{env, fs};
 
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
@@ -40,12 +40,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let commit = std::process::Command::new("git")
+    let commit = match std::process::Command::new("git")
         .args(&["rev-parse", "--short", "HEAD"])
         .output()
-        .expect("Failed to get commit")
-        .stdout;
-    let commit = String::from_utf8(commit).expect("Failed to get commit");
+    {
+        Ok(output) => String::from_utf8(output.stdout).expect("Failed to get commit"),
+        Err(_) => env::var("GIT_COMMIT").unwrap_or("unknown".to_string()),
+    };
 
     println!("cargo:rustc-env=BUILD_TIME={}", build_time);
     println!("cargo:rustc-env=COMMIT={}", commit);
