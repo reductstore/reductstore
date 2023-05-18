@@ -24,34 +24,18 @@ architectures:
 parts:
   reductstore:
     # See 'snapcraft plugins'
-    plugin: cmake
+    plugin: rust
     source: .
     source-type: local
-    cmake-parameters:
-    - -DCMAKE_BUILD_TYPE=Release
-    - -DREDUCT_BUILD_TEST=OFF
-    - -DREDUCT_BUILD_BENCHMARKS=OFF
-    override-build: |
-      pip3 install conan==1.58
-      curl https://sh.rustup.rs -sSf | sh -s -- -y
-      source "$HOME/.cargo/env"
-      snapcraftctl build
 
     override-pull: |
         craftctl default
-        VERSION=$(cat ./VERSION)
-        echo "Version: $VERSION"
-        craftctl set version="${VERSION}-git$(git rev-parse --short HEAD)"
+        cargo install cargo-get
+        craftctl set version="$(cargo-get version)-git$(git rev-parse --short HEAD)"
 
     build-packages:
-      - g++
-      - make
-      - python3-pip
-      - curl
-
-
-    stage-packages:
-      - libstdc++6
+      - protobuf-compiler
+      - libssl-dev
   hooks:
     plugin: dump
     source: snap/local/hooks

@@ -100,7 +100,6 @@ jobs:
 
   build_snap:
     runs-on: ubuntu-latest
-    if: ${{false}}
     name: Build snap package
     needs:
       - api_tests
