@@ -42,7 +42,7 @@ jobs:
           context: .
           tags: ${{github.repository}}:latest
           outputs: type=docker,dest=/tmp/image.tar
-          args: GIT_COMMIT=${{env.GITHUB_SHA}}
+          build-args: GIT_COMMIT=${{env.GITHUB_SHA}}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v2
