@@ -19,7 +19,8 @@ COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY build.rs build.rs
 
-RUN cargo build --release
+ARG GIT_COMMIT=unspecified
+RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release
 
 FROM ubuntu:22.04
 
