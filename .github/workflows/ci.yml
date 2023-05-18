@@ -51,10 +51,6 @@ jobs:
     needs:
       - rust-fmt
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        build_type: [ "", "--release" ]
-
     steps:
       - uses: actions/checkout@v3
       - name: Install latest Rust and dependencies
@@ -63,7 +59,7 @@ jobs:
           curl https://sh.rustup.rs -sSf | sh -s -- -y
 
       - name: Run Tests
-        run: cargo test ${{ matrix.build_type }}
+        run: cargo test
 
   api_tests:
     name: API Tests
@@ -102,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Build snap package
     needs:
-      - api_tests
+      - rust-fmt
     steps:
       - uses: actions/checkout@v3
       - uses: snapcore/action-build@v1
@@ -130,6 +126,7 @@ jobs:
         arch: [amd64, arm64]
     needs:
       - build_snap
+      - api_tests
     steps:
       - uses: actions/download-artifact@v3
         with:
