@@ -12,4 +12,4 @@ export RS_API_TOKEN=$(api_token)
 export RS_CERT_PATH=$(cert_path)
 export RS_CERT_KEY_PATH=$(cert_key_path)
 
-$SNAP/usr/local/bin/reductstore
+$SNAP/bin/reductstore

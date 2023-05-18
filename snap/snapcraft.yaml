@@ -17,41 +17,32 @@ confinement: strict # use 'strict' once you have the right plugs and slots
 grade: stable # must be 'stable' to release into candidate/stable channels
 
 architectures:
-- build-on: amd64
-  build-for: amd64
-- build-on: amd64
-  build-for: arm64
+  - build-on: amd64
+    build-for: amd64
+  - build-on: amd64
+    build-for: arm64
 parts:
   reductstore:
     # See 'snapcraft plugins'
-    plugin: cmake
+    plugin: rust
     source: .
     source-type: local
-    cmake-parameters:
-    - -DCMAKE_BUILD_TYPE=Release
-    - -DREDUCT_BUILD_TEST=OFF
-    - -DREDUCT_BUILD_BENCHMARKS=OFF
+
+    override-pull: |
+      craftctl default
+      cargo install cargo-get
+      craftctl set version="$(~/.cargo/bin/cargo-get version)-git$(git rev-parse --short HEAD)"
     override-build: |
-      pip3 install conan==1.58
       curl https://sh.rustup.rs -sSf | sh -s -- -y
       source "$HOME/.cargo/env"
       snapcraftctl build
 
-    override-pull: |
-        craftctl default
-        VERSION=$(cat ./VERSION)
-        echo "Version: $VERSION"
-        craftctl set version="${VERSION}-git$(git rev-parse --short HEAD)"
-
     build-packages:
-      - g++
-      - make
-      - python3-pip
-      - curl
-
-
-    stage-packages:
-      - libstdc++6
+      - cargo
+      - protobuf-compiler
+      - libssl-dev
+      - pkg-config
+      - libprotobuf-dev
   hooks:
     plugin: dump
     source: snap/local/hooks

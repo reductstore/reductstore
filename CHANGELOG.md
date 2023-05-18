@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build ARM64 Docker image
 - Integration of Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
 - Print build commit and date in logs, [PR-271](https://github.com/reductstore/reductstore/pull/271)
+
 ### Changed
 
 - New public Docker repository `reduct/store`, [PR-246](https://github.com/reductstore/reductstore/pull/246)
@@ -39,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handling unix SIGTERM signal, [PR-269](https://github.com/reductstore/reductstore/pull/269)
 - Encoding non-text assets of Web Console, [PR-270](https://github.com/reductstore/reductstore/pull/270)
 - Pass hash commit into docker image, [PR-272](https://github.com/reductstore/reductstore/pull/272)
+- Build snap package in CI, [PR-273](https://github.com/reductstore/reductstore/pull/273)
 
 ## [1.3.2] - 2023-03-10
 
