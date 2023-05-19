@@ -190,7 +190,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ matrix.platform }}
-          build-args: GIT_COMMIT=${{env.GITHUB_SHA}},CARGO_TARGET=${{matrix.cargo_target}},GCC_COMPILER=${{matrix.gcc_compiler}}
+          build-args: |
+            GIT_COMMIT=${{env.GITHUB_SHA}}
+            CARGO_TARGET=${{matrix.cargo_target}}
+            GCC_COMPILER=${{matrix.gcc_compiler}}
 
 
   make_release:
