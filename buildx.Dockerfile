@@ -34,7 +34,7 @@ RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET}
 
 RUN mkdir /data
 
-FROM --platform=${TARGETPLATFORM} ubuntu:22.04
+FROM ubuntu:22.04
 
 ARG CARGO_TARGET
 COPY --from=builder /src/target/${CARGO_TARGET}/release/reductstore /usr/local/bin/reductstore
