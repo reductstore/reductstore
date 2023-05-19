@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 ARG CARGO_TARGET=x86_64-unknown-linux-gnu
 
-FROM --platform=$BUILDPLATFORM ubuntu:22.04 AS  builder
+FROM --platform=${BUILDPLATFORM} ubuntu:22.04 AS  builder
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 ARG CARGO_TARGET
@@ -34,7 +34,7 @@ RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET}
 
 RUN mkdir /data
 
-FROM --platform=$TARGETPLATFORM ubuntu:22.04
+FROM --platform=${TARGETPLATFORM} ubuntu:22.04
 
 ARG CARGO_TARGET
 COPY --from=builder /src/target/${CARGO_TARGET}/release/reductstore /usr/local/bin/reductstore
