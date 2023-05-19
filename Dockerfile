@@ -15,6 +15,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /src
 
 COPY src src
+COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY build.rs build.rs
