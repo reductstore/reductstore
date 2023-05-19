@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build ARM64 Docker image
 - Integration of Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
 - Print build commit and date in logs, [PR-271](https://github.com/reductstore/reductstore/pull/271)
+- Re-build ARM64 Docker image for Rust, [PR-274](https://github.com/reductstore/reductstore/pull/274)
 
 ### Changed
 
