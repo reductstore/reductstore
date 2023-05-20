@@ -191,7 +191,6 @@ jobs:
         with:
           context: .
           file: buildx.Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ matrix.platform }}
           build-args: |
