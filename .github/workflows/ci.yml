@@ -15,6 +15,10 @@ on:
       - docs/**
       - README.md
       - CHANGELOG.md
+
+env:
+  REGISTRY_IMAGE: reduct/store
+
 jobs:
   rust-fmt:
     runs-on: ubuntu-latest
@@ -179,7 +183,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
         with:
-          images: reduct/store
+          images: ${{ env.REGISTRY_IMAGE }}
 
       - name: Build and push Docker image to GitHub repo
         uses: docker/build-push-action@v4
@@ -194,7 +198,7 @@ jobs:
             GIT_COMMIT=${{env.GITHUB_SHA}}
             CARGO_TARGET=${{matrix.cargo_target}}
             GCC_COMPILER=${{matrix.gcc_compiler}}
-          outputs: type=image,name=reduct/store,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
