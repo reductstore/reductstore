@@ -183,6 +183,7 @@ jobs:
 
       - name: Build and push Docker image to GitHub repo
         uses: docker/build-push-action@v4
+        id: build
         with:
           context: .
           file: buildx.Dockerfile
@@ -195,6 +196,8 @@ jobs:
             CARGO_TARGET=${{matrix.cargo_target}}
             GCC_COMPILER=${{matrix.gcc_compiler}}
                 outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
       - name: Export digest
         run: |
           mkdir -p /tmp/digests
