@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(
             info,
             ServerInfo {
-                version: "1.4.0".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
                 bucket_count: 0,
                 usage: 0,
                 uptime: 1,
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(
             storage.info().unwrap(),
             ServerInfo {
-                version: "1.4.0".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
                 bucket_count: 1,
                 usage: 30,
                 uptime: 0,
