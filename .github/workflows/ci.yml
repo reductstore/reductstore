@@ -38,7 +38,7 @@ jobs:
         run: cargo install cargo-get
       - name: Check tag
         run: |
-          if [ "$(cargo get version)" != "${{github.ref#refs/tags/}}" ]; then
+          if [ "v$(cargo get version)" != "${GITHUB_REF#refs/*/}" ]; then
             echo "Tag does not match version in Cargo.toml"
             exit 1
           fi
