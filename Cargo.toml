@@ -4,7 +4,15 @@ version = "1.4.0"
 authors = ["Alexey Timin <atimin@reduct.store>"]
 edition = "2021"
 rust-version = "1.66.0"
-
+license-file = "LICENSE"
+description = "ReductStore is a time series database designed specifically for storing and managing large amounts of blob data."
+homepage = "https://reduct.store"
+documentation = "https://docs.reduct.store"
+repository = "https://github.com/reductstore/reductstore"
+readme = "README.md"
+keywords = ["database", "time-series", "blob", "storage", "reductstore"]
+categories = ["database", "storage"]
+include = ["src/**/*", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 
 [lib]
 crate-type = ["staticlib"]

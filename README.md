@@ -40,7 +40,12 @@ The easiest way to start is to use Docker image:
 docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 ```
 
-or you can use the demo instance https://play.reduct.store/ with API token `reduct`.
+or you can use cargo:
+
+```shell
+cargo install reductstore
+RS_DATA_PATH=./data reductstore
+```
 
 See [Getting Started](https://docs.reduct.store/) and [Download](https://www.reduct.store/download) pages for deail.
 
