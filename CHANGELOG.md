@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
 ### Added
 
 - Continuous query `GET /api/v1/:bucket/:entry/q?continuous=true|false`,
@@ -15,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration of Rust, [PR-251](https://github.com/reductstore/reductstore/pull/251)
 - Print build commit and date in logs, [PR-271](https://github.com/reductstore/reductstore/pull/271)
 - Re-build ARM64 Docker image for Rust, [PR-274](https://github.com/reductstore/reductstore/pull/274)
+- Publish crate to crates.io, [PR-275](https://github.com/reductstore/reductstore/pull/275)
 
 ### Changed
 
