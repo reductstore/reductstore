@@ -4,8 +4,6 @@ description: Here you can learn how to start working with ReductStore
 
 # 💡 Getting Started
 
-The current version supports Linux OS, MacOS and was tested on an AMD64 platform with EXT4 and XFS file systems.
-
 ### Start With Docker
 
 The easiest way to start using ReductStore is to run Docker image:
@@ -30,40 +28,13 @@ sudo snap install reductstore
 
 ReductStore will be available on port http://127.0.01:8383 and store data in the `/var/snap/reductstore/common/data` directory.
 
-### Build Manually
+### Start With Cargo
 
-To build the storage from source code, you need:
-
-* GCC 1 1.2 or higher
-* CMake 18 or higher
-* conan
-
-On Ubuntu 21.10 or higher:
+You can also install the database with cargo:
 
 ```
-sudo apt install build-essential cmake python3-pip
-sudo pip3 install conan
-```
-
-On Macos
-
-```
-brew install gcc@11 python cmake
-pip install conan
-```
-
-After all the requirements are installed, you can build the storage:
-
-```
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-cmake --build . -- -j
-```
-
-Finally, you can launch the storage:
-
-```
-RS_DATA_PATH=./data bin/reductstore
+cargo install reductstore
+RS_DATA_PATH=./data reductstore
 ```
 
 ## Configuration
