@@ -20,7 +20,7 @@ env:
   REGISTRY_IMAGE: reduct/store
 
 jobs:
-  rust-fmt:
+  rust_fmt:
     runs-on: ubuntu-latest
     name: Rust Linter
     steps:
@@ -28,25 +28,11 @@ jobs:
       - name: Check code
         run: cargo fmt --all -- --check
 
-  check_tag:
-    runs-on: ubuntu-latest
-    name: Check tag
-    steps:
-      - uses: actions/checkout@v3
-      - name: Check tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          cargo install cargo-get
-          if [ "v$(cargo get version)" != "${GITHUB_REF#refs/*/}" ]; then
-            echo "Tag does not match version in Cargo.toml"
-            exit 1
-          fi
-
   build:
     name: Build Linux Docker image
     runs-on: ubuntu-latest
     needs:
-      - rust-fmt
+      - rust_fmt
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
@@ -67,7 +53,7 @@ jobs:
   unit_tests:
     name: Unit Tests
     needs:
-      - rust-fmt
+      - rust_fmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -117,7 +103,7 @@ jobs:
     name: Build snap package
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     needs:
-      - rust-fmt
+      - rust_fmt
     steps:
       - uses: actions/checkout@v3
       - uses: snapcore/action-build@v1
@@ -136,6 +122,20 @@ jobs:
           name: reductstore
           path: "*.snap"
 
+  check_tag:
+    runs-on: ubuntu-latest
+    name: Check tag
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cargo install cargo-get
+          if [ "v$(cargo get version)" != "${GITHUB_REF#refs/*/}" ]; then
+            echo "Tag does not match version in Cargo.toml"
+            exit 1
+          fi
+
   publish_snap:
     name: Publish snap package
     runs-on: ubuntu-latest
@@ -145,6 +145,7 @@ jobs:
     needs:
       - build_snap
       - api_tests
+      - check_tag
     steps:
       - uses: actions/download-artifact@v3
         with:
