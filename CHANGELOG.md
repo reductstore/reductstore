@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.4.0-alpha.1] - 2023-05-22
+
 ### Added
 
 - Continuous query `GET /api/v1/:bucket/:entry/q?continuous=true|false`,
@@ -407,7 +409,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.1...HEAD
+
+[1.4.0-alpha.1]: [1.3.2]: https://github.com/reductstore/reductstore/compare/v1.3.2...v1.4.0-alpha.1
 
 [1.3.2]: https://github.com/reductstore/reductstore/compare/v1.3.1...v1.3.2
 
