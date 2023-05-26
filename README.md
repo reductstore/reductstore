@@ -1,6 +1,3 @@
-
-
-
 # ReductStore
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
@@ -43,6 +40,7 @@ docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 or you can use cargo:
 
 ```shell
+apt install libssl-dev protobuf-compiler pkg-config
 cargo install reductstore
 RS_DATA_PATH=./data reductstore
 ```

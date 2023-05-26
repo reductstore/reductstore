@@ -30,9 +30,16 @@ ReductStore will be available on port http://127.0.01:8383 and store data in the
 
 ### Start With Cargo
 
+**Build Requirements:**
+
+* Minimal Rust version: 1.66.0
+* OpenSSL 3 or later
+* Protobuf 3.17.3 or later
+
 You can also install the database with cargo:
 
 ```
+sudo apt install libssl-dev protobuf-compiler pkg-config
 cargo install reductstore
 RS_DATA_PATH=./data reductstore
 ```

@@ -74,7 +74,8 @@ async fn main() {
         storage: Storage::new(PathBuf::from(data_path.clone())),
         auth: TokenAuthorization::new(&api_token),
         token_repo: TokenRepository::new(PathBuf::from(data_path), &api_token),
-        console: ZipAssetManager::new(include_bytes!("asset/console.zip")),
+        console: ZipAssetManager::new(include_bytes!(
+            concat!(env!("OUT_DIR"), "/console.zip"))),
         base_path: api_base_path.clone(),
     };
 
