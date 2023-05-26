@@ -304,6 +304,10 @@ impl ManageTokens for TokenRepository {
     }
 
     fn remove_token(&mut self, name: &str) -> Result<(), HttpError> {
+        if name == INIT_TOKEN_NAME {
+            return Err(HttpError::bad_request("Cannot remove init token"));
+        }
+
         if self.repo.remove(name).is_none() {
             Err(HttpError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
@@ -755,6 +759,17 @@ mod tests {
         let token = repo.remove_token("test").unwrap();
 
         assert_eq!(token, ());
+    }
+
+    #[test]
+    pub fn test_remove_init_token() {
+        let mut repo = setup("init-token");
+        let token = repo.remove_token("init-token");
+
+        assert_eq!(
+            token,
+            Err(HttpError::bad_request("Cannot remove init token"))
+        );
     }
 
     #[test]
