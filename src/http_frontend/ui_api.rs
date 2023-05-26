@@ -104,7 +104,7 @@ mod tests {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
             token_repo: TokenRepository::new(PathBuf::from(data_path), ""),
-            console: ZipAssetManager::new(include_bytes!("../asset/console.zip")),
+            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
         };
 

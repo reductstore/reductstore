@@ -12,7 +12,7 @@ repository = "https://github.com/reductstore/reductstore"
 readme = "README.md"
 keywords = ["database", "time-series", "blob", "storage", "reductstore"]
 categories = ["database", "storage"]
-include = ["src/**/*", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
+include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LICENSE"]
 
 [lib]
 crate-type = ["staticlib"]

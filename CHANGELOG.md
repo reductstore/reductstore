@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cargo package, [PR-278](https://github.com/reductstore/reductstore/pull/278)
 
 ## [1.4.0-alpha.1] - 2023-05-22
 
