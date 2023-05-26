@@ -17,7 +17,6 @@ use std::sync::{Arc, RwLock};
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
-use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerComponents;

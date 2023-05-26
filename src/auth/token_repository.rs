@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use log::{debug, warn};
+use log::debug;
 use prost::bytes::Bytes;
 use prost::Message;
 use prost_wkt_types::Timestamp;

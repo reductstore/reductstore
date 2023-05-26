@@ -14,7 +14,6 @@ use serde_json::json;
 
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::auth::proto::Token;
-use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerComponents;
