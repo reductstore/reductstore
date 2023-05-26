@@ -142,7 +142,7 @@ mod tests {
     use super::*;
     use crate::asset::asset_manager::ZipAssetManager;
     use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::TokenRepository;
+    use crate::auth::token_repository::create_token_repository;
     use crate::storage::storage::Storage;
 
     use axum::headers::Authorization;
@@ -154,8 +154,9 @@ mod tests {
         let list = TokenApi::token_list(State(components), auth_headers())
             .await
             .unwrap();
-        assert_eq!(list.tokens.len(), 1);
-        assert_eq!(list.tokens[0].name, "test");
+        assert_eq!(list.tokens.len(), 2);
+        assert_eq!(list.tokens[0].name, "init-token");
+        assert_eq!(list.tokens[1].name, "test");
     }
 
     #[tokio::test]
@@ -197,7 +198,7 @@ mod tests {
         let mut components = HttpServerComponents {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new("inti-token"),
-            token_repo: TokenRepository::new(PathBuf::from(data_path), "init-token"),
+            token_repo: create_token_repository(data_path.clone(), "init-token"),
             console: ZipAssetManager::new(&[]),
             base_path: "/".to_string(),
         };

@@ -79,7 +79,7 @@ mod tests {
     use super::*;
     use crate::asset::asset_manager::ZipAssetManager;
     use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::TokenRepository;
+    use crate::auth::token_repository::create_token_repository;
     use crate::storage::storage::Storage;
     use axum::body::HttpBody;
 
@@ -103,7 +103,7 @@ mod tests {
         let components = HttpServerComponents {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
-            token_repo: TokenRepository::new(PathBuf::from(data_path), ""),
+            token_repo: create_token_repository(data_path.clone(), ""),
             console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
         };
