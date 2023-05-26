@@ -35,7 +35,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             panic!("Failed to download Web Console: {}", resp.reason());
         }
     }
-    fs::write(format!("{}/console.zip", env::var("OUT_DIR").unwrap()), writer).expect("Failed to write console.zip");
+    fs::write(
+        format!("{}/console.zip", env::var("OUT_DIR").unwrap()),
+        writer,
+    )
+    .expect("Failed to write console.zip");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
