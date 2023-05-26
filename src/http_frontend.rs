@@ -6,7 +6,7 @@
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
-use crate::auth::token_repository::TokenRepository;
+use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;
@@ -24,7 +24,7 @@ pub mod ui_api;
 pub struct HttpServerComponents {
     pub storage: Storage,
     pub auth: TokenAuthorization,
-    pub token_repo: TokenRepository,
+    pub token_repo: Box<dyn ManageTokens + Send + Sync>,
     pub console: ZipAssetManager,
     pub base_path: String,
 }

@@ -14,6 +14,7 @@ use serde_json::json;
 
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::auth::proto::Token;
+use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerComponents;
@@ -101,7 +102,7 @@ mod tests {
 
     use crate::asset::asset_manager::ZipAssetManager;
     use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::TokenRepository;
+    use crate::auth::token_repository::create_token_repository;
     use crate::storage::proto::BucketSettings;
     use crate::storage::storage::Storage;
 
@@ -140,7 +141,7 @@ mod tests {
         let mut components = HttpServerComponents {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
-            token_repo: TokenRepository::new(PathBuf::from(data_path), ""),
+            token_repo: create_token_repository(data_path.clone(), ""),
             console: ZipAssetManager::new(&[]),
             base_path: "/".to_string(),
         };

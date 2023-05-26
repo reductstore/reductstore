@@ -28,7 +28,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
-use crate::auth::token_repository::TokenRepository;
+use crate::auth::token_repository::create_token_repository;
 use crate::storage::storage::Storage;
 
 use crate::core::env::Env;
@@ -73,7 +73,7 @@ async fn main() {
     let components = HttpServerComponents {
         storage: Storage::new(PathBuf::from(data_path.clone())),
         auth: TokenAuthorization::new(&api_token),
-        token_repo: TokenRepository::new(PathBuf::from(data_path), &api_token),
+        token_repo: create_token_repository(PathBuf::from(data_path), &api_token),
         console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
         base_path: api_base_path.clone(),
     };

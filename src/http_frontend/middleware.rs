@@ -65,7 +65,7 @@ where
         headers
             .get("Authorization")
             .map(|header| header.to_str().unwrap()),
-        &components.token_repo,
+        components.token_repo.as_ref(),
         policy,
     )?;
     Ok(())
