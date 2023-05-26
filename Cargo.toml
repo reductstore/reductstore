@@ -1,6 +1,6 @@
 [package]
 name = "reductstore"
-version = "1.4.0-alpha.1"
+version = "1.4.0-alpha.2"
 authors = ["Alexey Timin <atimin@reduct.store>"]
 edition = "2021"
 rust-version = "1.66.0"
