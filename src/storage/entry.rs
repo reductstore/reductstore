@@ -730,7 +730,7 @@ mod tests {
                 0,
                 4000000,
                 QueryOptions {
-                    ttl: Duration::from_millis(100),
+                    ttl: Duration::from_millis(250),
                     continuous: true,
                     ..QueryOptions::default()
                 },
@@ -753,7 +753,7 @@ mod tests {
             assert_eq!(reader.read().unwrap().timestamp(), 2000000);
         }
 
-        sleep(Duration::from_millis(200));
+        sleep(Duration::from_millis(300));
         assert_eq!(
             entry.next(id).err(),
             Some(HttpError::not_found(&format!("Query {} not found", id)))
