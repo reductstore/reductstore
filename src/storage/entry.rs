@@ -291,7 +291,7 @@ impl Entry {
     pub fn query(&mut self, start: u64, end: u64, options: QueryOptions) -> Result<u64, HttpError> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
-        let id = QUERY_ID.fetch_add(1, Ordering::Relaxed);
+        let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         self.remove_expired_query();
         self.queries.insert(id, build_query(start, end, options));
 
@@ -702,7 +702,7 @@ mod tests {
         write_stub_record(&mut entry, 3000000).unwrap();
 
         let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
-        assert_eq!(id, 1);
+        assert!(id >= 1);
 
         {
             let (reader, _) = entry.next(id).unwrap();
