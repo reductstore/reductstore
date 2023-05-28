@@ -281,7 +281,7 @@ impl ManageTokens for TokenRepository {
                 name: item.1.name.clone(),
                 value: "".to_string(),
                 created_at: item.1.created_at.clone(),
-                permissions: item.1.permissions.clone(),
+                permissions: None,
             })
             .collect())
     }
@@ -675,6 +675,7 @@ mod tests {
         assert_eq!(token_list.len(), 2);
         assert_eq!(token_list[1].name, "test");
         assert_eq!(token_list[1].value, "");
+        assert_eq!(token_list[1].permissions, None);
     }
 
     #[test]
