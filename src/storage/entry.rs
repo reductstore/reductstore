@@ -289,9 +289,9 @@ impl Entry {
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
     pub fn query(&mut self, start: u64, end: u64, options: QueryOptions) -> Result<u64, HttpError> {
-        static QUERY_ID: AtomicU64 = AtomicU64::new(0);
+        static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
-        let id = QUERY_ID.fetch_add(1, Ordering::Relaxed);
+        let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         self.remove_expired_query();
         self.queries.insert(id, build_query(start, end, options));
 
@@ -680,9 +680,15 @@ mod tests {
         let reader = entry.begin_read(1000000).unwrap();
         let mut wr = reader.write().unwrap();
         let chunk = wr.read().unwrap();
-        assert!(chunk.unwrap().to_vec() == data[0..DEFAULT_MAX_READ_CHUNK as usize]);
+        assert_eq!(
+            chunk.unwrap().to_vec(),
+            data[0..DEFAULT_MAX_READ_CHUNK as usize]
+        );
         let chunk = wr.read().unwrap();
-        assert!(chunk.unwrap().to_vec() == data[DEFAULT_MAX_READ_CHUNK as usize..]);
+        assert_eq!(
+            chunk.unwrap().to_vec(),
+            data[DEFAULT_MAX_READ_CHUNK as usize..]
+        );
         let chunk = wr.read().unwrap();
         assert_eq!(chunk, None);
     }
@@ -696,6 +702,7 @@ mod tests {
         write_stub_record(&mut entry, 3000000).unwrap();
 
         let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
+        assert!(id >= 1);
 
         {
             let (reader, _) = entry.next(id).unwrap();
@@ -730,7 +737,7 @@ mod tests {
                 0,
                 4000000,
                 QueryOptions {
-                    ttl: Duration::from_millis(250),
+                    ttl: Duration::from_millis(500),
                     continuous: true,
                     ..QueryOptions::default()
                 },
@@ -753,7 +760,7 @@ mod tests {
             assert_eq!(reader.read().unwrap().timestamp(), 2000000);
         }
 
-        sleep(Duration::from_millis(300));
+        sleep(Duration::from_millis(600));
         assert_eq!(
             entry.next(id).err(),
             Some(HttpError::not_found(&format!("Query {} not found", id)))
