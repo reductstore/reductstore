@@ -194,11 +194,19 @@ async fn shutdown_ctrl_c(handle: Handle) {
     handle.shutdown();
 }
 
+#[cfg(unix)]
 async fn shutdown_signal(handle: Handle) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
         .await;
     info!("SIGTERM received, shutting down...");
+    handle.shutdown();
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal(handle: Handle) {
+    tokio::signal::ctrl_c().await.unwrap();
+    info!("Ctrl-C received, shutting down...");
     handle.shutdown();
 }
