@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0-alpha.3] - 2023-05-29
 
 ### Fixed
 
@@ -422,7 +422,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.3...HEAD
+
+[1.4.0-alpha.3]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.2...v1.4.0-alpha.3
 
 [1.4.0-alpha.2]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.1...v1.4.0-alpha.2
 
