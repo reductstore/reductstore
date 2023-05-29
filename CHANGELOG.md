@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First query ID is 1, [PR-281](https://github.com/reductstore/reductstore/pull/281)
 - Showing permissions in `GET /api/v1/tokens`, [PR-282](https://github.com/reductstore/reductstore/pull/282)
 - Remove removed bucket from token permissions, [PR-283](https://github.com/reductstore/reductstore/pull/283)
+- Build on Windows and macOS, [PR-284](https://github.com/reductstore/reductstore/pull/284)
 
 ## [1.4.0-alpha.2] - 2023-05-26
 
