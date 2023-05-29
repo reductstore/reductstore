@@ -51,19 +51,37 @@ jobs:
           path: /tmp/image.tar
 
   unit_tests:
-    name: Unit Tests
+    name: Build and Run Unit Tests
     needs:
       - rust_fmt
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+          os: [ ubuntu-latest, macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - name: Install latest Rust and dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y build-essential curl protobuf-compiler
-          curl https://sh.rustup.rs -sSf | sh -s -- -y
+      - uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
 
       - name: Run Tests
-        run: cargo test
+        run: cargo test --release
+
+      - name: Build binary
+        run: cargo build --release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v2
+        with:
+          name: reductstore-${{ matrix.os }}
+          path: target/release/reductstore${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
   api_tests:
     name: API Tests
@@ -141,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [amd64, arm64]
+        arch: [ amd64, arm64 ]
     needs:
       - build_snap
       - api_tests
@@ -169,15 +187,15 @@ jobs:
       - check_tag
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     strategy:
-        matrix:
-            platform: [ linux/amd64, linux/arm64 ]
-            include:
-                - platform: linux/amd64
-                  cargo_target: x86_64-unknown-linux-gnu
-                  gcc_compiler: gcc-11
-                - platform: linux/arm64
-                  cargo_target: aarch64-unknown-linux-gnu
-                  gcc_compiler: gcc-aarch64-linux-gnu
+      matrix:
+        platform: [ linux/amd64, linux/arm64 ]
+        include:
+          - platform: linux/amd64
+            cargo_target: x86_64-unknown-linux-gnu
+            gcc_compiler: gcc-11
+          - platform: linux/arm64
+            cargo_target: aarch64-unknown-linux-gnu
+            gcc_compiler: gcc-aarch64-linux-gnu
 
     steps:
       - uses: actions/checkout@v3
@@ -285,8 +303,7 @@ jobs:
       - api_tests
       - check_tag # Only publish on tags
     name: Make release
-#    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
-    if: ${{ false }}
+    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions/create-release@v1
@@ -303,14 +320,11 @@ jobs:
       - name: Download Linux artifact
         uses: actions/download-artifact@v2
         with:
-          name: image
+          name: reductstore-ubuntu-latest
           path: /tmp/
       - name: Load Linux image and get binary
         run: |
-          docker load --input /tmp/image_Release.tar
-          docker image ls -a
-          id=$(docker create ${{github.repository}})
-          docker cp $id:/usr/local/bin/reductstore reductstore
+          cd /tmp
           tar -czvf reductstore.linux-amd64.tar.gz reductstore
       - name: Upload Linux artifact
         uses: actions/upload-release-asset@v1
@@ -318,13 +332,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: reductstore.linux-amd64.tar.gz
+          asset_path: /tmp/reductstore.linux-amd64.tar.gz
           asset_name: reductstore.linux-amd64.tar.gz
           asset_content_type: application/gzip
       - name: Download Macos artifact
         uses: actions/download-artifact@v2
         with:
-          name: macos_binary
+          name: reductstore-macos-latest
           path: /tmp/
       - name: Archive MacOs binary
         run: |
@@ -343,7 +357,7 @@ jobs:
       - name: Download Windows artifact
         uses: actions/download-artifact@v2
         with:
-          name: windows_binary
+          name: reductstore-windows-latest
           path: /tmp/
       - name: Archive Windows binary
         run: |
