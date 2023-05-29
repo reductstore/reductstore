@@ -70,7 +70,16 @@ jobs:
           override: true
 
       - name: Run Tests
-        run: cargo test
+        run: cargo test --release
+
+      - name: Build binary
+        run: cargo build --release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v2
+        with:
+          name: reductstore
+          path: target/release/reductstore
 
   api_tests:
     name: API Tests
