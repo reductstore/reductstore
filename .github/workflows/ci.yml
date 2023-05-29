@@ -78,8 +78,8 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v2
         with:
-          name: reductstore
-          path: target/release/reductstore
+          name: reductstore-${{ matrix.os }}
+          path: target/release/reductstore${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
   api_tests:
     name: API Tests
