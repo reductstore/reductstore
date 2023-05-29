@@ -323,14 +323,16 @@ jobs:
           name: reductstore-ubuntu-latest
           path: /tmp/
       - name: Load Linux image and get binary
-        run: tar -czvf reductstore.linux-amd64.tar.gz reductstore
+        run: |
+          cd /tmp
+          tar -czvf reductstore.linux-amd64.tar.gz reductstore
       - name: Upload Linux artifact
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: reductstore.linux-amd64.tar.gz
+          asset_path: /tmp/reductstore.linux-amd64.tar.gz
           asset_name: reductstore.linux-amd64.tar.gz
           asset_content_type: application/gzip
       - name: Download Macos artifact
