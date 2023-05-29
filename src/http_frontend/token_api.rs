@@ -145,6 +145,8 @@ mod tests {
     use crate::auth::token_repository::create_token_repository;
     use crate::storage::storage::Storage;
 
+    use crate::http_frontend::bucket_api::BucketApi;
+    use crate::storage::proto::BucketSettings;
     use axum::headers::Authorization;
     use std::path::PathBuf;
 
@@ -192,6 +194,39 @@ mod tests {
         assert!(token.is_ok());
     }
 
+    #[tokio::test]
+    async fn test_remove_bucket_from_permission() {
+        let components = setup();
+        let token = TokenApi::get_token(
+            State(Arc::clone(&components)),
+            Path("test".to_string()),
+            auth_headers(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            token.permissions.unwrap().read,
+            vec!["bucket-1".to_string(), "bucket-2".to_string()]
+        );
+
+        BucketApi::remove_bucket(
+            State(Arc::clone(&components)),
+            Path("bucket-1".to_string()),
+            auth_headers(),
+        )
+        .await
+        .unwrap();
+
+        let token =
+            TokenApi::get_token(State(components), Path("test".to_string()), auth_headers())
+                .await
+                .unwrap();
+        assert_eq!(
+            token.permissions.unwrap().read,
+            vec!["bucket-2".to_string()]
+        );
+    }
+
     fn setup() -> Arc<RwLock<HttpServerComponents>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
@@ -204,8 +239,21 @@ mod tests {
         };
 
         components
+            .storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .unwrap();
+        components
+            .storage
+            .create_bucket("bucket-2", BucketSettings::default())
+            .unwrap();
+
+        let permissions = Permissions {
+            read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
+            ..Default::default()
+        };
+        components
             .token_repo
-            .create_token("test", Permissions::default())
+            .create_token("test", permissions)
             .unwrap();
 
         Arc::new(RwLock::new(components))

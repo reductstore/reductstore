@@ -155,6 +155,9 @@ impl BucketApi {
         check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
         let mut components = components.write().unwrap();
         components.storage.remove_bucket(&bucket_name)?;
+        components
+            .token_repo
+            .remove_bucket_from_tokens(&bucket_name)?;
         Ok(())
     }
 }
