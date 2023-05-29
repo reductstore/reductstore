@@ -80,6 +80,16 @@ pub trait ManageTokens {
     ///
     /// `Ok(())` if the token was removed successfully
     fn remove_token(&mut self, name: &str) -> Result<(), HttpError>;
+
+    /// Remove a bucket from all tokens and save the repository
+    /// to the file system
+    ///
+    /// # Arguments
+    /// `bucket` - The name of the bucket
+    ///
+    /// # Returns
+    /// `Ok(())` if the bucket was removed successfully
+    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HttpError>;
 }
 
 /// The TokenRepository trait is used to store and retrieve tokens.
@@ -157,25 +167,6 @@ impl TokenRepository {
             .repo
             .insert(init_token.name.clone(), init_token);
         token_repository
-    }
-
-    /// Remove a bucket from all tokens and save the repository
-    /// to the file system
-    ///
-    /// # Arguments
-    /// `bucket` - The name of the bucket
-    ///
-    /// # Returns
-    /// `Ok(())` if the bucket was removed successfully
-    pub fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HttpError> {
-        for token in self.repo.values_mut() {
-            if let Some(permissions) = &mut token.permissions {
-                permissions.read.retain(|b| b != bucket);
-                permissions.write.retain(|b| b != bucket);
-            }
-        }
-
-        self.save_repo()
     }
 
     /// Save the token repository to the file system
@@ -316,6 +307,17 @@ impl ManageTokens for TokenRepository {
             self.save_repo()
         }
     }
+
+    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HttpError> {
+        for token in self.repo.values_mut() {
+            if let Some(permissions) = &mut token.permissions {
+                permissions.read.retain(|b| b != bucket);
+                permissions.write.retain(|b| b != bucket);
+            }
+        }
+
+        self.save_repo()
+    }
 }
 
 /// A repository that doesn't require authentication
@@ -362,6 +364,10 @@ impl ManageTokens for NoAuthRepository {
     }
 
     fn remove_token(&mut self, _name: &str) -> Result<(), HttpError> {
+        Ok(())
+    }
+
+    fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), HttpError> {
         Ok(())
     }
 }
