@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Update web console to 1.2.2, [PR-287](https://github.com/reductstore/reductstore/pull/287)
+
 ### Fixed
 
 - Parsing non-string quota type, [PR-286](https://github.com/reductstore/reductstore/pull/286)
