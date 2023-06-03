@@ -79,10 +79,19 @@ where
             match json.get_mut("quota_type") {
                 Some(quota_type) => {
                     if !quota_type.is_null() {
-                        let val = QuotaType::from_str_name(quota_type.as_str().unwrap()).ok_or(
-                            HttpError::unprocessable_entity("Invalid quota type").into_response(),
-                        )? as i32;
-                        *quota_type = json!(val);
+                        if let Some(quota_as_str) = quota_type.as_str() {
+                            let val = QuotaType::from_str_name(quota_as_str).ok_or(
+                                HttpError::unprocessable_entity("Invalid quota type")
+                                    .into_response(),
+                            )? as i32;
+                            *quota_type = json!(val);
+                        } else {
+                            return Err(HttpError::unprocessable_entity(&format!(
+                                "Failed to parse quota type: {:}",
+                                quota_type
+                            ))
+                            .into_response());
+                        }
                     }
                 }
                 None => {}
@@ -172,6 +181,8 @@ mod tests {
     use crate::storage::proto::BucketSettings;
     use crate::storage::storage::Storage;
 
+    use axum::http::Method;
+    use hyper::Body;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
 
@@ -238,6 +249,26 @@ mod tests {
             .await
             .unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn test_bucket_settings_quota_parsing() {
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/b/bucket-1")
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"quota_type": 1}"#))
+            .unwrap();
+        let resp = BucketSettings::from_request(req, &()).await.err().unwrap();
+        assert_eq!(resp.status(), 422);
+        assert_eq!(
+            resp.headers()
+                .get("x-reduct-error")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "Failed to parse quota type: 1"
+        );
     }
 
     fn setup() -> Arc<RwLock<HttpServerComponents>> {
