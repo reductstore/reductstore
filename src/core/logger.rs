@@ -27,12 +27,10 @@ impl Log for Logger {
                     file
                 } else {
                     // Absolute path to crate, remove path to registry
-                    file.split_once("src/")
-                        .unwrap()
-                        .1
-                        .split_once("/")
-                        .unwrap()
-                        .1
+                    match file.split_once("src/") {
+                        Some((_, file)) => file.split_once("/").unwrap().1,
+                        None => file,
+                    }
                 }
             } else {
                 "(unknown)"
