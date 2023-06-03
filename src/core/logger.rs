@@ -20,19 +20,24 @@ impl Log for Logger {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             let now: DateTime<Utc> = Utc::now();
-            let file = record.file().unwrap();
-            let file = if file.starts_with("src/") {
-                // Local path
-                file
+
+            let file = if let Some(file) = record.file() {
+                if file.starts_with("src/") {
+                    // Local path
+                    file
+                } else {
+                    // Absolute path to crate, remove path to registry
+                    file.split_once("src/")
+                        .unwrap()
+                        .1
+                        .split_once("/")
+                        .unwrap()
+                        .1
+                }
             } else {
-                // Absolute path to crate, remove path to registry
-                file.split_once("src/")
-                    .unwrap()
-                    .1
-                    .split_once("/")
-                    .unwrap()
-                    .1
+                "(unknown)"
             };
+
             println!(
                 "{} ({:>5}) [{}] -- {:}:{:} {:?}",
                 now.format("%Y-%m-%d %H:%M:%S.%3f"),
