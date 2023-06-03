@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Parsing non-string quota type, [PR-286](https://github.com/reductstore/reductstore/pull/286)
+- Show file paths in logs without registry path, [PR-288](https://github.com/reductstore/reductstore/pull/288)
 
 ## [1.4.0-alpha.3] - 2023-05-29
 
