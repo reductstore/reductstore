@@ -19,17 +19,26 @@ impl Log for Logger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            //  std::cout << fmt::format(fmt::fg(color), "{}.{:03d} ({:>5}) {:>7} -- {}:{} {}", ss.str(), milliseconds,
-            //                                reinterpret_cast<uint16_t &>(thid), level_str, file, line, msg)
-            //                 << std::endl;
-
             let now: DateTime<Utc> = Utc::now();
+            let file = record.file().unwrap();
+            let file = if file.starts_with("src/") {
+                // Local path
+                file
+            } else {
+                // Absolute path to crate, remove path to registry
+                file.split_once("src/")
+                    .unwrap()
+                    .1
+                    .split_once("/")
+                    .unwrap()
+                    .1
+            };
             println!(
                 "{} ({:>5}) [{}] -- {:}:{:} {:?}",
                 now.format("%Y-%m-%d %H:%M:%S.%3f"),
                 thread_id::get() % 100000,
                 record.level(),
-                record.file().unwrap(),
+                file,
                 record.line().unwrap(),
                 record.args()
             );
