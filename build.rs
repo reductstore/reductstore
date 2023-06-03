@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // download web console
     let mut writer = vec![];
     let resp = http_req::request::get(
-        "https://github.com/reductstore/web-console/releases/download/v1.2.0/web-console.build.zip",
+        "https://github.com/reductstore/web-console/releases/download/v1.2.2/web-console.build.zip",
         &mut writer,
     )
     .expect("Failed to download Web Console");
