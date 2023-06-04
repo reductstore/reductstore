@@ -349,14 +349,9 @@ mod tests {
     use crate::storage::storage::Storage;
     use axum::body::Empty;
     use axum::extract::FromRequest;
-    use axum::http::{HeaderValue, Request};
-    use bytes::Buf;
-    use futures_util::stream::{self, Stream};
-    use futures_util::StreamExt;
-    use serde::de::Unexpected::Str;
+    use axum::http::Request;
+
     use std::path::PathBuf;
-    use std::ptr::hash;
-    use std::str::FromStr;
 
     #[tokio::test]
     async fn test_write_with_label_ok() {
