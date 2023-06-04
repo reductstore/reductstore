@@ -98,16 +98,22 @@ impl EntryApi {
             .map_or("application/octet-stream", |v| v.to_str().unwrap())
             .to_string();
 
-        let labels = headers
-            .iter()
-            .filter(|(k, _)| k.as_str().starts_with("x-reduct-label-"))
-            .map(|(k, v)| {
-                (
-                    k.as_str()[15..].to_string(),
-                    v.to_str().unwrap().to_string(),
-                )
-            })
-            .collect::<Labels>();
+        let mut labels = Labels::new();
+        for (k, v) in headers.iter() {
+            if k.as_str().starts_with("x-reduct-label-") {
+                let key = k.as_str()[15..].to_string();
+                let value = match v.to_str() {
+                    Ok(value) => value.to_string(),
+                    Err(_) => {
+                        return Err(HttpError::unprocessable_entity(&format!(
+                            "Label values for {} must be valid UTF-8 strings",
+                            k
+                        )));
+                    }
+                };
+                labels.insert(key, value);
+            }
+        }
 
         let writer = {
             let mut components = components.write().unwrap();
@@ -333,4 +339,91 @@ impl EntryApi {
     }
 }
 
-//todo: test in API tests, but not in unit tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::asset::asset_manager::ZipAssetManager;
+    use crate::auth::token_auth::TokenAuthorization;
+    use crate::auth::token_repository::create_token_repository;
+    use crate::storage::proto::BucketSettings;
+    use crate::storage::storage::Storage;
+    use axum::body::Empty;
+    use axum::extract::FromRequest;
+    use axum::http::{HeaderValue, Request};
+    use bytes::Buf;
+    use futures_util::stream::{self, Stream};
+    use futures_util::StreamExt;
+    use serde::de::Unexpected::Str;
+    use std::path::PathBuf;
+    use std::ptr::hash;
+    use std::str::FromStr;
+
+    #[tokio::test]
+    async fn test_write_with_label_ok() {
+        let (components, headers, body, path) = setup().await;
+
+        let mut headers = headers;
+        headers.insert("x-reduct-label-x", "y".parse().unwrap());
+        EntryApi::write_record(
+            State(Arc::clone(&components)),
+            headers,
+            path,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "0".to_string(),
+            )])),
+            body,
+        )
+        .await
+        .unwrap();
+
+        let record = components
+            .write()
+            .unwrap()
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .begin_read("entry-1", 0)
+            .unwrap();
+
+        assert_eq!(
+            record.read().unwrap().labels().get("x"),
+            Some(&"y".to_string())
+        );
+    }
+
+    async fn setup() -> (
+        Arc<RwLock<HttpServerComponents>>,
+        HeaderMap,
+        BodyStream,
+        Path<HashMap<String, String>>,
+    ) {
+        let data_path = tempfile::tempdir().unwrap().into_path();
+
+        let mut components = HttpServerComponents {
+            storage: Storage::new(PathBuf::from(data_path.clone())),
+            auth: TokenAuthorization::new(""),
+            token_repo: create_token_repository(data_path.clone(), ""),
+            console: ZipAssetManager::new(&[]),
+            base_path: "/".to_string(),
+        };
+
+        components
+            .storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .unwrap();
+
+        let emtpy_stream: Empty<Bytes> = Empty::new();
+        let request = Request::builder().body(emtpy_stream).unwrap();
+        let body = BodyStream::from_request(request, &()).await.unwrap();
+
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", "0".parse().unwrap());
+
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "bucket-1".to_string()),
+            ("entry_name".to_string(), "entry-1".to_string()),
+        ]));
+        (Arc::new(RwLock::new(components)), headers, body, path)
+    }
+}
