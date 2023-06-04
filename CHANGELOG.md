@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Panic when an invalid utf-8 received as a label value, [PR-290](https://github.com/reductstore/reductstore/pull/290)
+
 ## [1.4.0-beta.1] - 2023-06-03
 
 ### Changed
