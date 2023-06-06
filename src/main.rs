@@ -13,11 +13,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use axum::{
+    http::header::{HeaderMap, HeaderValue},
     http::StatusCode,
     middleware,
     routing::{delete, get, head, post, put},
     Router,
 };
+use tower_default_headers::DefaultHeadersLayer;
 
 use axum_server::tls_rustls::RustlsConfig;
 
@@ -93,7 +95,10 @@ async fn main() {
         port as u16,
     );
 
-    let app = Router::new()
+    let mut headers = HeaderMap::new();
+    headers.insert("x-reduct-api", HeaderValue::from_static(version));
+
+    let app = Router::new()       
         // Server API
         .route(
             &format!("{}api/v1/info", api_base_path),
@@ -162,6 +167,7 @@ async fn main() {
         // UI
         .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
         .fallback(get(UiApi::show_ui))
+        .layer(DefaultHeadersLayer::new(headers))
         .layer(middleware::from_fn(default_headers))
         .layer(middleware::from_fn(print_statuses))
         .with_state(Arc::new(RwLock::new(components)));
