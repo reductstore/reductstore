@@ -17,8 +17,8 @@ use std::collections::HashMap;
 
 use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
 use axum::headers;
-use axum::headers::HeaderMapExt;
-use log::error;
+use axum::headers::{Expect, Header, HeaderMapExt};
+use log::{debug, error};
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
@@ -31,7 +31,7 @@ use crate::storage::entry::Labels;
 use crate::storage::proto::QueryInfo;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::Chunk;
+use crate::storage::writer::{Chunk, RecordWriter};
 
 pub struct EntryApi {}
 
@@ -67,81 +67,97 @@ impl EntryApi {
             },
         )?;
 
-        if !params.contains_key("ts") {
-            return Err(HttpError::unprocessable_entity(
-                "'ts' parameter is required",
-            ));
-        }
-
-        let ts = match params.get("ts").unwrap().parse::<u64>() {
-            Ok(ts) => ts,
-            Err(_) => {
+        let check_request_and_get_writer = || -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
+            if !params.contains_key("ts") {
                 return Err(HttpError::unprocessable_entity(
-                    "'ts' must be an unix timestamp in microseconds",
+                    "'ts' parameter is required",
                 ));
             }
-        };
-        let content_size = headers
-            .get("content-length")
-            .ok_or(HttpError::unprocessable_entity(
-                "content-length header is required",
-            ))?
-            .to_str()
-            .unwrap()
-            .parse::<u64>()
-            .map_err(|_| {
-                HttpError::unprocessable_entity("content-length header must be a number")
-            })?;
 
-        let content_type = headers
-            .get("content-type")
-            .map_or("application/octet-stream", |v| v.to_str().unwrap())
-            .to_string();
-
-        let mut labels = Labels::new();
-        for (k, v) in headers.iter() {
-            if k.as_str().starts_with("x-reduct-label-") {
-                let key = k.as_str()[15..].to_string();
-                let value = match v.to_str() {
-                    Ok(value) => value.to_string(),
-                    Err(_) => {
-                        return Err(HttpError::unprocessable_entity(&format!(
-                            "Label values for {} must be valid UTF-8 strings",
-                            k
-                        )));
-                    }
-                };
-                labels.insert(key, value);
-            }
-        }
-
-        let writer = {
-            let mut components = components.write().unwrap();
-            let bucket = components.storage.get_bucket(bucket)?;
-            bucket.begin_write(
-                path.get("entry_name").unwrap(),
-                ts,
-                content_size,
-                content_type,
-                labels,
-            )?
-        };
-
-        while let Some(chunk) = stream.next().await {
-            let mut writer = writer.write().unwrap();
-            let chunk = match chunk {
-                Ok(chunk) => chunk,
-                Err(e) => {
-                    writer.write(Chunk::Error)?;
-                    error!("Error while receiving data: {}", e);
-                    return Err(HttpError::from(e));
+            let ts = match params.get("ts").unwrap().parse::<u64>() {
+                Ok(ts) => ts,
+                Err(_) => {
+                    return Err(HttpError::unprocessable_entity(
+                        "'ts' must be an unix timestamp in microseconds",
+                    ));
                 }
             };
-            writer.write(Chunk::Data(chunk))?;
-        }
+            let content_size = headers
+                .get("content-length")
+                .ok_or(HttpError::unprocessable_entity(
+                    "content-length header is required",
+                ))?
+                .to_str()
+                .unwrap()
+                .parse::<u64>()
+                .map_err(|_| {
+                    HttpError::unprocessable_entity("content-length header must be a number")
+                })?;
 
-        writer.write().unwrap().write(Chunk::Last(Bytes::new()))?;
-        Ok(())
+            let content_type = headers
+                .get("content-type")
+                .map_or("application/octet-stream", |v| v.to_str().unwrap())
+                .to_string();
+
+            let mut labels = Labels::new();
+            for (k, v) in headers.iter() {
+                if k.as_str().starts_with("x-reduct-label-") {
+                    let key = k.as_str()[15..].to_string();
+                    let value = match v.to_str() {
+                        Ok(value) => value.to_string(),
+                        Err(_) => {
+                            return Err(HttpError::unprocessable_entity(&format!(
+                                "Label values for {} must be valid UTF-8 strings",
+                                k
+                            )));
+                        }
+                    };
+                    labels.insert(key, value);
+                }
+            }
+
+            let writer = {
+                let mut components = components.write().unwrap();
+                let bucket = components.storage.get_bucket(bucket)?;
+                bucket.begin_write(
+                    path.get("entry_name").unwrap(),
+                    ts,
+                    content_size,
+                    content_type,
+                    labels,
+                )?
+            };
+            Ok(writer)
+        };
+
+        match check_request_and_get_writer() {
+            Ok(writer) => {
+                while let Some(chunk) = stream.next().await {
+                    let mut writer = writer.write().unwrap();
+                    let chunk = match chunk {
+                        Ok(chunk) => chunk,
+                        Err(e) => {
+                            writer.write(Chunk::Error)?;
+                            error!("Error while receiving data: {}", e);
+                            return Err(HttpError::from(e));
+                        }
+                    };
+                    writer.write(Chunk::Data(chunk))?;
+                }
+
+                writer.write().unwrap().write(Chunk::Last(Bytes::new()))?;
+                Ok(())
+            }
+            Err(e) => {
+                // drain the stream in the case if a client doesn't support Expect: 100-continue
+                if !headers.contains_key(Expect::name()) {
+                    debug!("draining the stream");
+                    while let Some(_) = stream.next().await {}
+                }
+
+                Err(e)
+            }
+        }
     }
 
     // GET /:bucket/:entry?ts=<number>|id=<number>|
