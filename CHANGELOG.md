@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.0-beta.2] - 2023-06-09
+## [1.4.0] - 2023-06-09
 
 ### Fixed
 
@@ -444,9 +444,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.4.0-beta.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.4.0...HEAD
 
-[1.4.0-beta.2]: https://github.com/reductstore/reductstore/compare/v1.4.0-beta.1...v1.4.0-beta.2
+[1.4.0]: https://github.com/reductstore/reductstore/compare/v1.4.0-beta.1...v1.4.0
 
 [1.4.0-beta.1]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.2...v1.4.0-beta.1
 

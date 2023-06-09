@@ -23,12 +23,6 @@ more [here](https://docs.reduct.store/).
 * Embedded Web Console
 * Support Linux, MacOS and Windows
 
-
-## Project Status
-
-The project is currently in the development stage. However, its last C++ version, 1.3.2, is already being used in production and shows good performance. Version 1.4.0 was rewritten in Rust, but we have experienced some regressions. Therefore, please do not use the `main` branch for any serious purposes. Currently, the Rust version is available as the `reduct/store:main` Docker image.
-
-
 ## Get started
 
 The easiest way to start is to use Docker image:
