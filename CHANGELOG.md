@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0-beta.2] - 2023-06-09
+
 ### Fixed
 
 - Panic when an invalid utf-8 received as a label value, [PR-290](https://github.com/reductstore/reductstore/pull/290)
-- Writing record for clients which don't support for Expect header, [PR-293](https://github.com/reductstore/reductstore/pull/293)
+- Writing record for clients which don't support for Expect
+  header, [PR-293](https://github.com/reductstore/reductstore/pull/293)
 
 ## [1.4.0-beta.1] - 2023-06-03
 
@@ -441,9 +444,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.4.0-beta.2...HEAD
 
-[1.4.0-alpha.3]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.2...v1.4.0-alpha.3
+[1.4.0-beta.2]: https://github.com/reductstore/reductstore/compare/v1.4.0-beta.1...v1.4.0-beta.2
+
+[1.4.0-beta.1]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.2...v1.4.0-beta.1
 
 [1.4.0-alpha.2]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.1...v1.4.0-alpha.2
 
