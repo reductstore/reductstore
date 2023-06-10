@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Enchancement
+- header added to get quick version number in Major.Minor format, [PR-291](https://github.com/reductstore/reductstore/pull/291)
+
 ### Fixed
 
 - Panic when an invalid utf-8 received as a label value, [PR-290](https://github.com/reductstore/reductstore/pull/290)
