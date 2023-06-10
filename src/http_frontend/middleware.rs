@@ -24,9 +24,10 @@ pub async fn default_headers<B>(
         format!("ReductStore {}", version).parse().unwrap(),
     );
 
+    let tokens : Vec<&str> = version.splitn(3, ".").collect();
     response
         .headers_mut()
-        .insert("x-reduct-api", format!("{}", version).parse().unwrap());
+        .insert("x-reduct-api", format!("{}.{}", tokens[0], tokens[1]).parse().unwrap());
     Ok(response)
 }
 
