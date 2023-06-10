@@ -3,10 +3,9 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use axum::body::StreamBody;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::http::header::HeaderMap;
-
-use axum::body::StreamBody;
 use axum::http::{HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
@@ -27,6 +26,7 @@ use std::time::Duration;
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerComponents;
+use crate::storage::bucket::Bucket;
 use crate::storage::entry::Labels;
 use crate::storage::proto::QueryInfo;
 use crate::storage::query::base::QueryOptions;
@@ -184,14 +184,16 @@ impl EntryApi {
             None => None,
         };
 
-        let query = match params.get("q") {
-            Some(query) => Some(query.parse::<u64>().map_err(|_| {
-                HttpError::unprocessable_entity("'query' must be an unix timestamp in microseconds")
-            })?),
+        let query_id = match params.get("q") {
+            Some(query) => Some(
+                query
+                    .parse::<u64>()
+                    .map_err(|_| HttpError::unprocessable_entity("'query' must be a number"))?,
+            ),
             None => None,
         };
 
-        let ts = if ts.is_none() && query.is_none() {
+        let ts = if ts.is_none() && query_id.is_none() {
             let mut components = components.write().unwrap();
             Some(
                 components
@@ -205,71 +207,16 @@ impl EntryApi {
             ts
         };
 
-        let (reader, last) = if let Some(ts) = ts {
-            let mut components = components.write().unwrap();
-            let bucket = components.storage.get_bucket(bucket_name)?;
-            (bucket.begin_read(entry_name, ts)?, true)
-        } else {
-            let mut components = components.write().unwrap();
-            let bucket = components.storage.get_bucket(bucket_name)?;
-            let entry = bucket.get_entry(entry_name)?;
-            entry.next(query.unwrap())?
-        };
-
-        let headers = {
-            let reader = reader.read().unwrap();
-            let mut headers = HeaderMap::new();
-            for (k, v) in reader.labels() {
-                headers.insert(
-                    format!("x-reduct-label-{}", k)
-                        .parse::<HeaderName>()
-                        .unwrap(),
-                    v.parse().unwrap(),
-                );
-            }
-
-            headers.insert(
-                "content-type",
-                reader.content_type().to_string().parse().unwrap(),
-            );
-            headers.insert(
-                "content-length",
-                reader.content_length().to_string().parse().unwrap(),
-            );
-            headers.insert(
-                "x-reduct-time",
-                reader.timestamp().to_string().parse().unwrap(),
-            );
-            headers.insert("x-reduct-last", u8::from(last).to_string().parse().unwrap());
-            headers
-        };
-
-        struct ReaderWrapper {
-            reader: Arc<RwLock<RecordReader>>,
-        }
-
-        /// A wrapper around a `RecordReader` that implements `Stream` with RwLock
-        impl Stream for ReaderWrapper {
-            type Item = Result<Bytes, HttpError>;
-
-            fn poll_next(
-                self: Pin<&mut ReaderWrapper>,
-                _cx: &mut Context<'_>,
-            ) -> Poll<Option<Self::Item>> {
-                if self.reader.read().unwrap().is_done() {
-                    return Poll::Ready(None);
-                }
-                match self.reader.write().unwrap().read() {
-                    Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                    Err(e) => Poll::Ready(Some(Err(e))),
-                }
-            }
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                (0, None)
-            }
-        }
-
-        Ok((headers, StreamBody::new(ReaderWrapper { reader })))
+        Self::fetch_and_response_single_record(
+            components
+                .write()
+                .unwrap()
+                .storage
+                .get_bucket(bucket_name)?,
+            entry_name,
+            ts,
+            query_id,
+        )
     }
 
     // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
@@ -353,6 +300,78 @@ impl EntryApi {
 
         Ok(QueryInfo { id })
     }
+
+    fn fetch_and_response_single_record(
+        bucket: &mut Bucket,
+        entry_name: &str,
+        ts: Option<u64>,
+        query_id: Option<u64>,
+    ) -> Result<impl IntoResponse, HttpError> {
+        let make_headers = |reader: &Arc<RwLock<RecordReader>>, last| {
+            let mut headers = HeaderMap::new();
+
+            let reader = reader.read().unwrap();
+            for (k, v) in reader.labels() {
+                headers.insert(
+                    format!("x-reduct-label-{}", k)
+                        .parse::<HeaderName>()
+                        .unwrap(),
+                    v.parse().unwrap(),
+                );
+            }
+
+            headers.insert(
+                "content-type",
+                reader.content_type().to_string().parse().unwrap(),
+            );
+            headers.insert(
+                "content-length",
+                reader.content_length().to_string().parse().unwrap(),
+            );
+            headers.insert(
+                "x-reduct-time",
+                reader.timestamp().to_string().parse().unwrap(),
+            );
+            headers.insert("x-reduct-last", u8::from(last).to_string().parse().unwrap());
+            headers
+        };
+
+        let (reader, last) = if let Some(ts) = ts {
+            let reader = bucket.begin_read(entry_name, ts)?;
+            (reader, true)
+        } else {
+            bucket.next(entry_name, query_id.unwrap())?
+        };
+
+        let headers = make_headers(&reader, last);
+
+        struct ReaderWrapper {
+            reader: Arc<RwLock<RecordReader>>,
+        }
+
+        /// A wrapper around a `RecordReader` that implements `Stream` with RwLock
+        impl Stream for ReaderWrapper {
+            type Item = Result<Bytes, HttpError>;
+
+            fn poll_next(
+                self: Pin<&mut ReaderWrapper>,
+                _cx: &mut Context<'_>,
+            ) -> Poll<Option<Self::Item>> {
+                if self.reader.read().unwrap().is_done() {
+                    return Poll::Ready(None);
+                }
+                match self.reader.write().unwrap().read() {
+                    Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
+                    Err(e) => Poll::Ready(Some(Err(e))),
+                }
+            }
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                (0, None)
+            }
+        }
+
+        Ok((headers, StreamBody::new(ReaderWrapper { reader })))
+    }
 }
 
 #[cfg(test)]
@@ -381,7 +400,7 @@ mod tests {
             path,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
-                "0".to_string(),
+                "1".to_string(),
             )])),
             body,
         )
@@ -394,13 +413,79 @@ mod tests {
             .storage
             .get_bucket("bucket-1")
             .unwrap()
-            .begin_read("entry-1", 0)
+            .begin_read("entry-1", 1)
             .unwrap();
 
         assert_eq!(
             record.read().unwrap().labels().get("x"),
             Some(&"y".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_single_read_ts() {
+        let (components, headers, body, path) = setup().await;
+
+        let response = EntryApi::read_record(
+            State(Arc::clone(&components)),
+            path,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "0".to_string(),
+            )])),
+            headers,
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let headers = response.headers();
+        assert_eq!(headers["x-reduct-time"], "0");
+        assert_eq!(headers["content-type"], "text/plain");
+        assert_eq!(headers["content-length"], "0");
+    }
+
+    #[tokio::test]
+    async fn test_single_read_query() {
+        let (components, headers, body, path) = setup().await;
+
+        let query_id = components
+            .write()
+            .unwrap()
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .get_entry("entry-1")
+            .unwrap()
+            .query(
+                0,
+                1,
+                QueryOptions {
+                    continuous: false,
+                    include: HashMap::new(),
+                    exclude: HashMap::new(),
+                    ttl: Duration::from_secs(1),
+                },
+            )
+            .unwrap();
+
+        let response = EntryApi::read_record(
+            State(Arc::clone(&components)),
+            path,
+            Query(HashMap::from_iter(vec![(
+                "q".to_string(),
+                query_id.to_string(),
+            )])),
+            headers,
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let headers = response.headers();
+        assert_eq!(headers["x-reduct-time"], "0");
+        assert_eq!(headers["content-type"], "text/plain");
+        assert_eq!(headers["content-length"], "0");
     }
 
     async fn setup() -> (
@@ -422,6 +507,12 @@ mod tests {
         components
             .storage
             .create_bucket("bucket-1", BucketSettings::default())
+            .unwrap()
+            .begin_write("entry-1", 0, 0, "text/plain".to_string(), Labels::new())
+            .unwrap()
+            .write()
+            .unwrap()
+            .write(Chunk::Last(Bytes::new()))
             .unwrap();
 
         let emtpy_stream: Empty<Bytes> = Empty::new();
