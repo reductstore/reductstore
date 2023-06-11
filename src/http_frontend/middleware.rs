@@ -18,12 +18,16 @@ pub async fn default_headers<B>(
     next: Next<B>,
 ) -> Result<impl IntoResponse, HttpError> {
     let mut response = next.run(request).await;
+    let version: &str = env!("CARGO_PKG_VERSION");
     response.headers_mut().insert(
         "Server",
-        format!("ReductStore {}", env!("CARGO_PKG_VERSION"))
-            .parse()
-            .unwrap(),
+        format!("ReductStore {}", version).parse().unwrap(),
     );
+
+    let tokens : Vec<&str> = version.splitn(3, ".").collect();
+    response
+        .headers_mut()
+        .insert("x-reduct-api", format!("{}.{}", tokens[0], tokens[1]).parse().unwrap());
     Ok(response)
 }
 
