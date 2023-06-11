@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
 use axum::headers;
 use axum::headers::{Expect, Header, HeaderMapExt, HeaderValue};
-use hyper::Body;
+
 use log::{debug, error};
 use std::pin::Pin;
 use std::str::FromStr;
@@ -375,7 +375,7 @@ impl EntryApi {
         let mut headers = HeaderMap::new();
         let mut readers = Vec::new();
         loop {
-            let reader = match bucket.next(entry_name, query_id) {
+            let _reader = match bucket.next(entry_name, query_id) {
                 Ok((reader, _)) => {
                     {
                         let reader_lock = reader.read().unwrap();
@@ -563,7 +563,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_read_ts() {
-        let (components, headers, body, path) = setup().await;
+        let (components, headers, _body, path) = setup().await;
 
         let response = EntryApi::read_single_record(
             State(Arc::clone(&components)),
@@ -586,7 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_read_query() {
-        let (components, headers, body, path) = setup().await;
+        let (components, headers, _body, path) = setup().await;
 
         let query_id = query_records(&components);
 
@@ -634,7 +634,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batched_read() {
-        let (components, headers, body, path) = setup().await;
+        let (components, headers, _body, path) = setup().await;
 
         let query_id = query_records(&components);
 
