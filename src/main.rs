@@ -159,6 +159,10 @@ async fn main() {
             &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
             get(EntryApi::query),
         )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name/batch", api_base_path),
+            get(EntryApi::read_batched_records),
+        )
         // UI
         .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
         .fallback(get(UiApi::show_ui))

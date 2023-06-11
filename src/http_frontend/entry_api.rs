@@ -246,7 +246,7 @@ impl EntryApi {
             None => {
                 return Err(HttpError::unprocessable_entity(
                     "'q' parameter is required for batched reads",
-                ))
+                ));
             }
         };
 
@@ -348,24 +348,34 @@ impl EntryApi {
         entry_name: &str,
         query_id: u64,
     ) -> Result<impl IntoResponse, HttpError> {
-        const MAX_HEADER_SIZE: u64 = 14_000;
-        const MAX_BODY_SIZE: u64 = 16_000_000;
+        const MAX_HEADER_SIZE: u64 = 6_000; // many http servers have a default limit of 8kb
+        const MAX_BODY_SIZE: u64 = 16_000_000; // 16mb just not to be too big
+        const MAX_RECORDS: usize = 85; // some clients have a limit of 100 headers
 
         let make_header = |reader: &RecordReader| {
             let name =
                 HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
-            let value: HeaderValue = vec![
+
+            let mut meta_data = vec![
                 format!("content-length={}", reader.content_length()),
                 format!("content-type={}", reader.content_type()),
-                reader
+            ];
+            meta_data.append(
+                &mut reader
                     .labels()
                     .iter()
-                    .map(|(k, v)| format!("label-{}={}", k, v))
+                    .map(|(k, v)| {
+                        if v.contains(",") {
+                            format!("label-{}=\"{}\"", k, v)
+                        } else {
+                            format!("label-{}={}", k, v)
+                        }
+                    })
                     .collect(),
-            ]
-            .join(",")
-            .parse()
-            .unwrap();
+            );
+            meta_data.sort();
+
+            let value: HeaderValue = meta_data.join(",").parse().unwrap();
 
             (name, value)
         };
@@ -374,6 +384,7 @@ impl EntryApi {
         let mut body_size = 0u64;
         let mut headers = HeaderMap::new();
         let mut readers = Vec::new();
+        let mut last = false;
         loop {
             let _reader = match bucket.next(entry_name, query_id) {
                 Ok((reader, _)) => {
@@ -388,7 +399,10 @@ impl EntryApi {
                     }
                     readers.push(reader);
 
-                    if header_size > MAX_HEADER_SIZE || body_size > MAX_BODY_SIZE {
+                    if header_size > MAX_HEADER_SIZE
+                        || body_size > MAX_BODY_SIZE
+                        || readers.len() > MAX_RECORDS
+                    {
                         // This is not correct, because we should check sizes before adding the record
                         // but we can't know the size in advance and after next() we can't go back
                         break;
@@ -399,6 +413,7 @@ impl EntryApi {
                         return Err(err);
                     } else {
                         if err.status() == HttpStatus::NoContent as i32 {
+                            last = true;
                             break;
                         } else {
                             return Err(err);
@@ -407,6 +422,10 @@ impl EntryApi {
                 }
             };
         }
+
+        headers.insert("content-length", body_size.to_string().parse().unwrap());
+        headers.insert("content-type", "application/octet-stream".parse().unwrap());
+        headers.insert("x-reduct-last", last.to_string().parse().unwrap());
 
         struct ReadersWrapper {
             readers: Vec<Arc<RwLock<RecordReader>>>,
@@ -654,8 +673,11 @@ mod tests {
         let headers = response.headers();
         assert_eq!(
             headers["x-reduct-time-0"],
-            "content-length=0,content-type=text/plain,label-x=y"
+            "content-length=0,content-type=text/plain,label-b=\"[a,b]\",label-x=y"
         );
+        assert_eq!(headers["content-type"], "application/octet-stream");
+        assert_eq!(headers["content-length"], "0");
+        assert_eq!(headers["x-reduct-last"], "true");
     }
 
     async fn setup() -> (
@@ -674,7 +696,10 @@ mod tests {
             base_path: "/".to_string(),
         };
 
-        let labels = HashMap::from_iter(vec![("x".to_string(), "y".to_string())]);
+        let labels = HashMap::from_iter(vec![
+            ("x".to_string(), "y".to_string()),
+            ("b".to_string(), "[a,b]".to_string()),
+        ]);
         components
             .storage
             .create_bucket("bucket-1", BucketSettings::default())
