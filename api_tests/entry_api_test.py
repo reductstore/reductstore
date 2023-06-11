@@ -1,4 +1,5 @@
 import json
+from time import sleep
 
 import numpy as np
 import pytest
@@ -449,7 +450,6 @@ def test_read_batched_max_header_size(base_url, session, bucket):
 
 def test_read_batched_max_header_size(base_url, session, bucket):
     """Should have query id in params"""
-
     ts = 1000
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data1")
     assert resp.status_code == 200
@@ -457,3 +457,26 @@ def test_read_batched_max_header_size(base_url, session, bucket):
     resp = session.get(f'{base_url}/b/{bucket}/entry/batch')
     assert resp.status_code == 422
     assert resp.headers['x-reduct-error'] == "'q' parameter is required for batched reads"
+
+
+def test_read_batched_continuous_query(base_url, session, bucket):
+    """Should read batched records in continuous mode"""
+    ts = 1000
+    resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data1")
+    assert resp.status_code == 200
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/q?ttl=1&continuous=true')
+    assert resp.status_code == 200
+    query_id = int(json.loads(resp.content)["id"])
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
+    assert resp.status_code == 200
+    assert resp.headers['x-reduct-last'] == 'true'
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
+    assert resp.status_code == 204
+
+    sleep(1.1)
+
+    resp = session.get(f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
+    assert resp.status_code == 404
