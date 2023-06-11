@@ -448,7 +448,7 @@ def test_read_batched_max_header_size(base_url, session, bucket):
     assert resp.status_code == 404
 
 
-def test_read_batched_max_header_size(base_url, session, bucket):
+def test_read_batched_query_required(base_url, session, bucket):
     """Should have query id in params"""
     ts = 1000
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data1")
