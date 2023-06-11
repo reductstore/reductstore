@@ -5,7 +5,7 @@ description: HTTP methods to manage access tokens.
 # Token API
 
 {% hint style="info" %}
-The storage engine uses the token authentication when the`RS_API_TOKEN` envirnoment is set. You should use it as a full access token to create other tokens with different permission by using the Token API
+The database uses the token authentication when the`RS_API_TOKEN` environment is set. You should use it as a full access token to create other tokens with different permission by using the Token API
 {% endhint %}
 
 {% swagger method="get" path="" baseUrl="/api/v1/tokens" summary="Get a list of tokens" %}
@@ -27,19 +27,11 @@ The method returns a list of tokens with names and creation dates. To use this m
 {% endswagger-response %}
 
 {% swagger-response status="401: Unauthorized" description="Access token is empty or invalid" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="403: Forbidden" description="Access token doesn" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 {% endswagger %}
 
@@ -67,27 +59,15 @@ Name of token to show
 {% endswagger-response %}
 
 {% swagger-response status="401: Unauthorized" description="Access token is empty or invalid" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="403: Forbidden" description="Access token doesn" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="404: Not Found" description="Token with the given name doesn" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 {% endswagger %}
 
@@ -122,35 +102,19 @@ A list of bucket names for write access. Default: []
 {% endswagger-response %}
 
 {% swagger-response status="401: Unauthorized" description="Access token is empty or invalid" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="403: Forbidden" description="Access token doesn" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="409: Conflict" description="Token with the same name already exists" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="422: Unprocessable Entity" description="Speciefied bucket doesn" %}
-```javascript
-{
-    // Response
-}
-```
+
 {% endswagger-response %}
 {% endswagger %}
 
@@ -172,26 +136,14 @@ Name of new token
 {% endswagger-response %}
 
 {% swagger-response status="401: Unauthorized" description="Access token is empty or invalid" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="403: Forbidden" description="Access token doesn" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 
 {% swagger-response status="404: Not Found" description="Token with the given name doesn" %}
-```javascript
-{
-    "detail": "error_message"
-}
-```
+
 {% endswagger-response %}
 {% endswagger %}
