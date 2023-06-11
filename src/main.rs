@@ -153,7 +153,7 @@ async fn main() {
         )
         .route(
             &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            get(EntryApi::read_record),
+            get(EntryApi::read_single_record),
         )
         .route(
             &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
