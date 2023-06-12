@@ -209,10 +209,6 @@ fn fetch_and_response_batched_records(
                 return Poll::Ready(None);
             }
 
-            if self.readers.is_empty() {
-                return Poll::Ready(None);
-            }
-
             if self.readers[0].read().unwrap().is_done() {
                 self.readers.remove(0);
             }
@@ -615,15 +611,66 @@ mod tests {
     use futures_util::StreamExt;
 
     use futures_util::stream;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use std::path::PathBuf;
 
-    #[tokio::test]
-    async fn test_write_with_label_ok() {
-        let (components, headers, body, path) = setup().await;
+    #[fixture]
+    fn components() -> Arc<RwLock<HttpServerComponents>> {
+        let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut headers = headers;
+        let mut components = HttpServerComponents {
+            storage: Storage::new(PathBuf::from(data_path.clone())),
+            auth: TokenAuthorization::new(""),
+            token_repo: create_token_repository(data_path.clone(), ""),
+            console: ZipAssetManager::new(&[]),
+            base_path: "/".to_string(),
+        };
+
+        let labels = HashMap::from_iter(vec![
+            ("x".to_string(), "y".to_string()),
+            ("b".to_string(), "[a,b]".to_string()),
+        ]);
+        components
+            .storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .unwrap()
+            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
+            .unwrap()
+            .write()
+            .unwrap()
+            .write(Chunk::Last(Bytes::from("Hey!!!")))
+            .unwrap();
+        Arc::new(RwLock::new(components))
+    }
+
+    #[fixture]
+    fn headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-label-x", "y".parse().unwrap());
+        headers
+    }
+
+    #[fixture]
+    fn path() -> Path<HashMap<String, String>> {
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "bucket-1".to_string()),
+            ("entry_name".to_string(), "entry-1".to_string()),
+        ]));
+        path
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_with_label_ok(
+        components: Arc<RwLock<HttpServerComponents>>,
+        headers: HeaderMap,
+        path: Path<HashMap<String, String>>,
+    ) {
+        let emtpy_stream: Empty<Bytes> = Empty::new();
+        let request = Request::builder().body(emtpy_stream).unwrap();
+        let body = BodyStream::from_request(request, &()).await.unwrap();
+
         EntryApi::write_record(
             State(Arc::clone(&components)),
             headers,
@@ -656,9 +703,12 @@ mod tests {
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
     #[tokio::test]
-    async fn test_single_read_ts(#[case] method: String, #[case] body: String) {
-        let (components, headers, _body, path) = setup().await;
-
+    async fn test_single_read_ts(
+        components: Arc<RwLock<HttpServerComponents>>,
+        path: Path<HashMap<String, String>>,
+        #[case] method: String,
+        #[case] body: String,
+    ) {
         let mut response = EntryApi::read_single_record(
             State(Arc::clone(&components)),
             path,
@@ -666,7 +716,7 @@ mod tests {
                 "ts".to_string(),
                 "0".to_string(),
             )])),
-            headers,
+            HeaderMap::new(),
             MethodExtractor::new(&method),
         )
         .await
@@ -688,9 +738,12 @@ mod tests {
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
     #[tokio::test]
-    async fn test_single_read_query(#[case] method: String, #[case] body: String) {
-        let (components, headers, _body, path) = setup().await;
-
+    async fn test_single_read_query(
+        components: Arc<RwLock<HttpServerComponents>>,
+        path: Path<HashMap<String, String>>,
+        #[case] method: String,
+        #[case] body: String,
+    ) {
         let query_id = query_records(&components);
 
         let mut response = EntryApi::read_single_record(
@@ -700,7 +753,7 @@ mod tests {
                 "q".to_string(),
                 query_id.to_string(),
             )])),
-            headers,
+            HeaderMap::new(),
             MethodExtractor::new(&method),
         )
         .await
@@ -745,9 +798,12 @@ mod tests {
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
     #[tokio::test]
-    async fn test_batched_read(#[case] method: String, #[case] body: String) {
-        let (components, headers, _body, path) = setup().await;
-
+    async fn test_batched_read(
+        components: Arc<RwLock<HttpServerComponents>>,
+        path: Path<HashMap<String, String>>,
+        #[case] method: String,
+        #[case] body: String,
+    ) {
         let query_id = query_records(&components);
 
         let mut response = EntryApi::read_batched_records(
@@ -757,7 +813,7 @@ mod tests {
                 "q".to_string(),
                 query_id.to_string(),
             )])),
-            headers,
+            HeaderMap::new(),
             MethodExtractor::new(method.as_str()),
         )
         .await
@@ -777,50 +833,5 @@ mod tests {
             response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
             Bytes::from(body)
         );
-    }
-
-    async fn setup() -> (
-        Arc<RwLock<HttpServerComponents>>,
-        HeaderMap,
-        BodyStream,
-        Path<HashMap<String, String>>,
-    ) {
-        let data_path = tempfile::tempdir().unwrap().into_path();
-
-        let mut components = HttpServerComponents {
-            storage: Storage::new(PathBuf::from(data_path.clone())),
-            auth: TokenAuthorization::new(""),
-            token_repo: create_token_repository(data_path.clone(), ""),
-            console: ZipAssetManager::new(&[]),
-            base_path: "/".to_string(),
-        };
-
-        let labels = HashMap::from_iter(vec![
-            ("x".to_string(), "y".to_string()),
-            ("b".to_string(), "[a,b]".to_string()),
-        ]);
-        components
-            .storage
-            .create_bucket("bucket-1", BucketSettings::default())
-            .unwrap()
-            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
-            .unwrap()
-            .write()
-            .unwrap()
-            .write(Chunk::Last(Bytes::from("Hey!!!")))
-            .unwrap();
-
-        let emtpy_stream: Empty<Bytes> = Empty::new();
-        let request = Request::builder().body(emtpy_stream).unwrap();
-        let body = BodyStream::from_request(request, &()).await.unwrap();
-
-        let mut headers = HeaderMap::new();
-        headers.insert("content-length", "0".parse().unwrap());
-
-        let path = Path(HashMap::from_iter(vec![
-            ("bucket_name".to_string(), "bucket-1".to_string()),
-            ("entry_name".to_string(), "entry-1".to_string()),
-        ]));
-        (Arc::new(RwLock::new(components)), headers, body, path)
     }
 }
