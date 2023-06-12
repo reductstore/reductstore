@@ -5,7 +5,7 @@
 
 use axum::async_trait;
 use axum::body::StreamBody;
-use axum::extract::{BodyStream, FromRef, FromRequest, Path, Query, State};
+use axum::extract::{BodyStream, FromRequest, Path, Query, State};
 use axum::http::header::HeaderMap;
 use axum::http::{HeaderName, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -608,9 +608,7 @@ mod tests {
     use axum::body::{Empty, HttpBody};
     use axum::extract::FromRequest;
     use axum::http::Request;
-    use futures_util::StreamExt;
 
-    use futures_util::stream;
     use rstest::{fixture, rstest};
     use std::path::PathBuf;
 
