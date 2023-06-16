@@ -70,7 +70,7 @@ A value of a label assigned to the record
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name " summary="Get a record from an entry" %}
+{% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name " summary="Get a record from an entry" fullWidth="false" %}
 {% swagger-description %}
 The method finds a record for the given timestamp and sends its content in the HTTP response body. It also sends additional information in headers:
 
@@ -132,6 +132,16 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 {% endswagger-response %}
 {% endswagger %}
 
+{% swagger method="head" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name  " summary="Get only meta information about record" %}
+{% swagger-description %}
+The endpoint works exactly as 
+
+`GET /api/v1/b/:bucket_name/:entry_name`
+
+ but returns only headers with meta information with a body.
+{% endswagger-description %}
+{% endswagger %}
+
 {% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name/batch " summary="Get a bulk of records from an entry" %}
 {% swagger-description %}
 Since version 1.5, ReductStore provides a way to read a multiple records in a request. This can improve latency when you have many small records to read. The endpoint sorts all the records by time and concatenates them into a blob and sends it in the body. The meta information is sent for each record as a separate header `x-reduct-time-<timestamp>` which has a value as a CSV row. An example:
@@ -176,6 +186,16 @@ Name of entry
 {% swagger-response status="422: Unprocessable Entity" description="Bad timestamp" %}
 
 {% endswagger-response %}
+{% endswagger %}
+
+{% swagger method="head" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/batch  " summary="Get only meta information  in bulk" %}
+{% swagger-description %}
+The endpoint works exactly as 
+
+`GET /api/v1/b/:bucket_name/:entry_name/batch`
+
+ but returns only headers with meta information with a body.
+{% endswagger-description %}
 {% endswagger %}
 
 {% swagger method="get" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/q " summary="Query records for a time interval" %}
