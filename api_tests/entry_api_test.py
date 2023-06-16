@@ -400,7 +400,8 @@ def test_write_with_content_type_header(base_url, session, bucket):
     assert resp.headers['content-type'] == 'application/json'
 
 
-def test_read_batched_records(base_url, session, bucket):
+@pytest.mark.parametrize("method, expected_content", [("GET", b"some_data1some_data2"), ("HEAD", b"")])
+def test_read_batched_records(base_url, session, bucket, method, expected_content):
     """Should read batched records and send metadata in headers"""
     ts = 1000
     resp = session.post(f'{base_url}/b/{bucket}/entry?ts={ts}', data="some_data1")
@@ -414,9 +415,9 @@ def test_read_batched_records(base_url, session, bucket):
     assert resp.status_code == 200
     query_id = int(json.loads(resp.content)["id"])
 
-    resp = session.get(f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
+    resp = session.request(method, f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
     assert resp.status_code == 200
-    assert resp.content == b"some_data1some_data2"
+    assert resp.content == expected_content
     assert resp.headers['content-type'] == 'application/octet-stream'
     assert resp.headers['content-length'] == '20'
     assert resp.headers['x-reduct-time-1000'] == 'content-length=10,content-type=application/octet-stream'

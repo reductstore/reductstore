@@ -3,10 +3,11 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use axum::async_trait;
 use axum::body::StreamBody;
-use axum::extract::{BodyStream, Path, Query, State};
+use axum::extract::{BodyStream, FromRequest, Path, Query, State};
 use axum::http::header::HeaderMap;
-use axum::http::{HeaderName, StatusCode};
+use axum::http::{HeaderName, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
@@ -36,6 +37,281 @@ use crate::storage::reader::RecordReader;
 use crate::storage::writer::{Chunk, RecordWriter};
 
 pub struct EntryApi {}
+
+pub struct MethodExtractor {
+    name: String,
+}
+
+impl MethodExtractor {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl<S, B> FromRequest<S, B> for MethodExtractor
+where
+    S: Send + Sync + 'static,
+    B: Send + Sync + 'static,
+{
+    type Rejection = HttpError;
+
+    async fn from_request(req: Request<B>, _: &S) -> Result<Self, Self::Rejection> {
+        let method = req.method().to_string();
+        Ok(MethodExtractor { name: method })
+    }
+}
+
+fn check_and_extract_ts_or_query_id(
+    components: &Arc<RwLock<HttpServerComponents>>,
+    params: HashMap<String, String>,
+    bucket_name: &String,
+    entry_name: &String,
+) -> Result<(Option<u64>, Option<u64>), HttpError> {
+    let ts = match params.get("ts") {
+        Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
+            HttpError::unprocessable_entity("'ts' must be an unix timestamp in microseconds")
+        })?),
+        None => None,
+    };
+
+    let query_id = match params.get("q") {
+        Some(query) => Some(
+            query
+                .parse::<u64>()
+                .map_err(|_| HttpError::unprocessable_entity("'query' must be a number"))?,
+        ),
+        None => None,
+    };
+
+    let ts = if ts.is_none() && query_id.is_none() {
+        let mut components = components.write().unwrap();
+        Some(
+            components
+                .storage
+                .get_bucket(bucket_name)?
+                .get_entry(entry_name)?
+                .info()?
+                .latest_record,
+        )
+    } else {
+        ts
+    };
+    Ok((query_id, ts))
+}
+
+fn fetch_and_response_batched_records(
+    bucket: &mut Bucket,
+    entry_name: &str,
+    query_id: u64,
+    empty_body: bool,
+) -> Result<impl IntoResponse, HttpError> {
+    const MAX_HEADER_SIZE: u64 = 6_000; // many http servers have a default limit of 8kb
+    const MAX_BODY_SIZE: u64 = 16_000_000; // 16mb just not to be too big
+    const MAX_RECORDS: usize = 85; // some clients have a limit of 100 headers
+
+    let make_header = |reader: &RecordReader| {
+        let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
+
+        let mut meta_data = vec![
+            format!("content-length={}", reader.content_length()),
+            format!("content-type={}", reader.content_type()),
+        ];
+        meta_data.append(
+            &mut reader
+                .labels()
+                .iter()
+                .map(|(k, v)| {
+                    if v.contains(",") {
+                        format!("label-{}=\"{}\"", k, v)
+                    } else {
+                        format!("label-{}={}", k, v)
+                    }
+                })
+                .collect(),
+        );
+        meta_data.sort();
+
+        let value: HeaderValue = meta_data.join(",").parse().unwrap();
+
+        (name, value)
+    };
+
+    let mut header_size = 0u64;
+    let mut body_size = 0u64;
+    let mut headers = HeaderMap::new();
+    let mut readers = Vec::new();
+    let mut last = false;
+    loop {
+        let _reader = match bucket.next(entry_name, query_id) {
+            Ok((reader, _)) => {
+                {
+                    let reader_lock = reader.read().unwrap();
+
+                    let (name, value) = make_header(&reader_lock);
+                    header_size += (name.as_str().len() + value.to_str().unwrap().len() + 2) as u64;
+                    body_size += reader_lock.content_length();
+                    headers.insert(name, value);
+                }
+                readers.push(reader);
+
+                if header_size > MAX_HEADER_SIZE
+                    || body_size > MAX_BODY_SIZE
+                    || readers.len() > MAX_RECORDS
+                {
+                    // This is not correct, because we should check sizes before adding the record
+                    // but we can't know the size in advance and after next() we can't go back
+                    break;
+                }
+            }
+            Err(err) => {
+                if readers.is_empty() {
+                    return Err(err);
+                } else {
+                    if err.status() == HttpStatus::NoContent as i32 {
+                        last = true;
+                        break;
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }
+        };
+    }
+
+    headers.insert("content-length", body_size.to_string().parse().unwrap());
+    headers.insert("content-type", "application/octet-stream".parse().unwrap());
+    headers.insert("x-reduct-last", last.to_string().parse().unwrap());
+
+    struct ReadersWrapper {
+        readers: Vec<Arc<RwLock<RecordReader>>>,
+        empty_body: bool,
+    }
+
+    impl Stream for ReadersWrapper {
+        type Item = Result<Bytes, HttpError>;
+
+        fn poll_next(
+            mut self: Pin<&mut ReadersWrapper>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Self::Item>> {
+            if self.empty_body {
+                return Poll::Ready(None);
+            }
+
+            if self.readers.is_empty() {
+                return Poll::Ready(None);
+            }
+
+            if self.readers[0].read().unwrap().is_done() {
+                self.readers.remove(0);
+            }
+
+            match self.readers[0].write().unwrap().read() {
+                Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
+                Err(e) => Poll::Ready(Some(Err(e))),
+            }
+        }
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (0, None)
+        }
+    }
+
+    Ok((
+        headers,
+        StreamBody::new(ReadersWrapper {
+            readers,
+            empty_body,
+        }),
+    ))
+}
+
+fn fetch_and_response_single_record(
+    bucket: &mut Bucket,
+    entry_name: &str,
+    ts: Option<u64>,
+    query_id: Option<u64>,
+    empty_body: bool,
+) -> Result<impl IntoResponse, HttpError> {
+    let make_headers = |reader: &Arc<RwLock<RecordReader>>, last| {
+        let mut headers = HeaderMap::new();
+
+        let reader = reader.read().unwrap();
+        for (k, v) in reader.labels() {
+            headers.insert(
+                format!("x-reduct-label-{}", k)
+                    .parse::<HeaderName>()
+                    .unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+
+        headers.insert(
+            "content-type",
+            reader.content_type().to_string().parse().unwrap(),
+        );
+        headers.insert(
+            "content-length",
+            reader.content_length().to_string().parse().unwrap(),
+        );
+        headers.insert(
+            "x-reduct-time",
+            reader.timestamp().to_string().parse().unwrap(),
+        );
+        headers.insert("x-reduct-last", u8::from(last).to_string().parse().unwrap());
+        headers
+    };
+
+    let (reader, last) = if let Some(ts) = ts {
+        let reader = bucket.begin_read(entry_name, ts)?;
+        (reader, true)
+    } else {
+        bucket.next(entry_name, query_id.unwrap())?
+    };
+
+    let headers = make_headers(&reader, last);
+
+    struct ReaderWrapper {
+        reader: Arc<RwLock<RecordReader>>,
+        empty_body: bool,
+    }
+
+    /// A wrapper around a `RecordReader` that implements `Stream` with RwLock
+    impl Stream for ReaderWrapper {
+        type Item = Result<Bytes, HttpError>;
+
+        fn poll_next(
+            self: Pin<&mut ReaderWrapper>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Self::Item>> {
+            if self.empty_body {
+                return Poll::Ready(None);
+            }
+
+            if self.reader.read().unwrap().is_done() {
+                return Poll::Ready(None);
+            }
+            match self.reader.write().unwrap().read() {
+                Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
+                Err(e) => Poll::Ready(Some(Err(e))),
+            }
+        }
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (0, None)
+        }
+    }
+
+    Ok((
+        headers,
+        StreamBody::new(ReaderWrapper { reader, empty_body }),
+    ))
+}
 
 impl IntoResponse for QueryInfo {
     fn into_response(self) -> Response {
@@ -168,6 +444,7 @@ impl EntryApi {
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
         headers: HeaderMap,
+        method: MethodExtractor,
     ) -> Result<impl IntoResponse, HttpError> {
         let bucket_name = path.get("bucket_name").unwrap();
         let entry_name = path.get("entry_name").unwrap();
@@ -179,37 +456,10 @@ impl EntryApi {
             },
         )?;
 
-        let ts = match params.get("ts") {
-            Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
-                HttpError::unprocessable_entity("'ts' must be an unix timestamp in microseconds")
-            })?),
-            None => None,
-        };
+        let (query_id, ts) =
+            check_and_extract_ts_or_query_id(&components, params, bucket_name, entry_name)?;
 
-        let query_id = match params.get("q") {
-            Some(query) => Some(
-                query
-                    .parse::<u64>()
-                    .map_err(|_| HttpError::unprocessable_entity("'query' must be a number"))?,
-            ),
-            None => None,
-        };
-
-        let ts = if ts.is_none() && query_id.is_none() {
-            let mut components = components.write().unwrap();
-            Some(
-                components
-                    .storage
-                    .get_bucket(bucket_name)?
-                    .get_entry(entry_name)?
-                    .info()?
-                    .latest_record,
-            )
-        } else {
-            ts
-        };
-
-        Self::fetch_and_response_single_record(
+        fetch_and_response_single_record(
             components
                 .write()
                 .unwrap()
@@ -218,6 +468,7 @@ impl EntryApi {
             entry_name,
             ts,
             query_id,
+            method.name() == "HEAD",
         )
     }
 
@@ -227,6 +478,7 @@ impl EntryApi {
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
         headers: HeaderMap,
+        method: MethodExtractor,
     ) -> Result<impl IntoResponse, HttpError> {
         let bucket_name = path.get("bucket_name").unwrap();
         let entry_name = path.get("entry_name").unwrap();
@@ -250,7 +502,7 @@ impl EntryApi {
             }
         };
 
-        Self::fetch_and_response_batched_records(
+        fetch_and_response_batched_records(
             components
                 .write()
                 .unwrap()
@@ -258,6 +510,7 @@ impl EntryApi {
                 .get_bucket(bucket_name)?,
             entry_name,
             query_id,
+            method.name == "HEAD",
         )
     }
 
@@ -342,194 +595,6 @@ impl EntryApi {
 
         Ok(QueryInfo { id })
     }
-
-    fn fetch_and_response_batched_records(
-        bucket: &mut Bucket,
-        entry_name: &str,
-        query_id: u64,
-    ) -> Result<impl IntoResponse, HttpError> {
-        const MAX_HEADER_SIZE: u64 = 6_000; // many http servers have a default limit of 8kb
-        const MAX_BODY_SIZE: u64 = 16_000_000; // 16mb just not to be too big
-        const MAX_RECORDS: usize = 85; // some clients have a limit of 100 headers
-
-        let make_header = |reader: &RecordReader| {
-            let name =
-                HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
-
-            let mut meta_data = vec![
-                format!("content-length={}", reader.content_length()),
-                format!("content-type={}", reader.content_type()),
-            ];
-            meta_data.append(
-                &mut reader
-                    .labels()
-                    .iter()
-                    .map(|(k, v)| {
-                        if v.contains(",") {
-                            format!("label-{}=\"{}\"", k, v)
-                        } else {
-                            format!("label-{}={}", k, v)
-                        }
-                    })
-                    .collect(),
-            );
-            meta_data.sort();
-
-            let value: HeaderValue = meta_data.join(",").parse().unwrap();
-
-            (name, value)
-        };
-
-        let mut header_size = 0u64;
-        let mut body_size = 0u64;
-        let mut headers = HeaderMap::new();
-        let mut readers = Vec::new();
-        let mut last = false;
-        loop {
-            let _reader = match bucket.next(entry_name, query_id) {
-                Ok((reader, _)) => {
-                    {
-                        let reader_lock = reader.read().unwrap();
-
-                        let (name, value) = make_header(&reader_lock);
-                        header_size +=
-                            (name.as_str().len() + value.to_str().unwrap().len() + 2) as u64;
-                        body_size += reader_lock.content_length();
-                        headers.insert(name, value);
-                    }
-                    readers.push(reader);
-
-                    if header_size > MAX_HEADER_SIZE
-                        || body_size > MAX_BODY_SIZE
-                        || readers.len() > MAX_RECORDS
-                    {
-                        // This is not correct, because we should check sizes before adding the record
-                        // but we can't know the size in advance and after next() we can't go back
-                        break;
-                    }
-                }
-                Err(err) => {
-                    if readers.is_empty() {
-                        return Err(err);
-                    } else {
-                        if err.status() == HttpStatus::NoContent as i32 {
-                            last = true;
-                            break;
-                        } else {
-                            return Err(err);
-                        }
-                    }
-                }
-            };
-        }
-
-        headers.insert("content-length", body_size.to_string().parse().unwrap());
-        headers.insert("content-type", "application/octet-stream".parse().unwrap());
-        headers.insert("x-reduct-last", last.to_string().parse().unwrap());
-
-        struct ReadersWrapper {
-            readers: Vec<Arc<RwLock<RecordReader>>>,
-        }
-
-        impl Stream for ReadersWrapper {
-            type Item = Result<Bytes, HttpError>;
-
-            fn poll_next(
-                mut self: Pin<&mut ReadersWrapper>,
-                _cx: &mut Context<'_>,
-            ) -> Poll<Option<Self::Item>> {
-                if self.readers.is_empty() {
-                    return Poll::Ready(None);
-                }
-
-                if self.readers[0].read().unwrap().is_done() {
-                    self.readers.remove(0);
-                }
-
-                match self.readers[0].write().unwrap().read() {
-                    Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                    Err(e) => Poll::Ready(Some(Err(e))),
-                }
-            }
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                (0, None)
-            }
-        }
-
-        Ok((headers, StreamBody::new(ReadersWrapper { readers })))
-    }
-
-    fn fetch_and_response_single_record(
-        bucket: &mut Bucket,
-        entry_name: &str,
-        ts: Option<u64>,
-        query_id: Option<u64>,
-    ) -> Result<impl IntoResponse, HttpError> {
-        let make_headers = |reader: &Arc<RwLock<RecordReader>>, last| {
-            let mut headers = HeaderMap::new();
-
-            let reader = reader.read().unwrap();
-            for (k, v) in reader.labels() {
-                headers.insert(
-                    format!("x-reduct-label-{}", k)
-                        .parse::<HeaderName>()
-                        .unwrap(),
-                    v.parse().unwrap(),
-                );
-            }
-
-            headers.insert(
-                "content-type",
-                reader.content_type().to_string().parse().unwrap(),
-            );
-            headers.insert(
-                "content-length",
-                reader.content_length().to_string().parse().unwrap(),
-            );
-            headers.insert(
-                "x-reduct-time",
-                reader.timestamp().to_string().parse().unwrap(),
-            );
-            headers.insert("x-reduct-last", u8::from(last).to_string().parse().unwrap());
-            headers
-        };
-
-        let (reader, last) = if let Some(ts) = ts {
-            let reader = bucket.begin_read(entry_name, ts)?;
-            (reader, true)
-        } else {
-            bucket.next(entry_name, query_id.unwrap())?
-        };
-
-        let headers = make_headers(&reader, last);
-
-        struct ReaderWrapper {
-            reader: Arc<RwLock<RecordReader>>,
-        }
-
-        /// A wrapper around a `RecordReader` that implements `Stream` with RwLock
-        impl Stream for ReaderWrapper {
-            type Item = Result<Bytes, HttpError>;
-
-            fn poll_next(
-                self: Pin<&mut ReaderWrapper>,
-                _cx: &mut Context<'_>,
-            ) -> Poll<Option<Self::Item>> {
-                if self.reader.read().unwrap().is_done() {
-                    return Poll::Ready(None);
-                }
-                match self.reader.write().unwrap().read() {
-                    Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                    Err(e) => Poll::Ready(Some(Err(e))),
-                }
-            }
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                (0, None)
-            }
-        }
-
-        Ok((headers, StreamBody::new(ReaderWrapper { reader })))
-    }
 }
 
 #[cfg(test)]
@@ -540,18 +605,70 @@ mod tests {
     use crate::auth::token_repository::create_token_repository;
     use crate::storage::proto::BucketSettings;
     use crate::storage::storage::Storage;
-    use axum::body::Empty;
+    use axum::body::{Empty, HttpBody};
     use axum::extract::FromRequest;
     use axum::http::Request;
 
+    use rstest::{fixture, rstest};
     use std::path::PathBuf;
 
-    #[tokio::test]
-    async fn test_write_with_label_ok() {
-        let (components, headers, body, path) = setup().await;
+    #[fixture]
+    fn components() -> Arc<RwLock<HttpServerComponents>> {
+        let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut headers = headers;
+        let mut components = HttpServerComponents {
+            storage: Storage::new(PathBuf::from(data_path.clone())),
+            auth: TokenAuthorization::new(""),
+            token_repo: create_token_repository(data_path.clone(), ""),
+            console: ZipAssetManager::new(&[]),
+            base_path: "/".to_string(),
+        };
+
+        let labels = HashMap::from_iter(vec![
+            ("x".to_string(), "y".to_string()),
+            ("b".to_string(), "[a,b]".to_string()),
+        ]);
+        components
+            .storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .unwrap()
+            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
+            .unwrap()
+            .write()
+            .unwrap()
+            .write(Chunk::Last(Bytes::from("Hey!!!")))
+            .unwrap();
+        Arc::new(RwLock::new(components))
+    }
+
+    #[fixture]
+    fn headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-label-x", "y".parse().unwrap());
+        headers
+    }
+
+    #[fixture]
+    fn path() -> Path<HashMap<String, String>> {
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "bucket-1".to_string()),
+            ("entry_name".to_string(), "entry-1".to_string()),
+        ]));
+        path
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_with_label_ok(
+        components: Arc<RwLock<HttpServerComponents>>,
+        headers: HeaderMap,
+        path: Path<HashMap<String, String>>,
+    ) {
+        let emtpy_stream: Empty<Bytes> = Empty::new();
+        let request = Request::builder().body(emtpy_stream).unwrap();
+        let body = BodyStream::from_request(request, &()).await.unwrap();
+
         EntryApi::write_record(
             State(Arc::clone(&components)),
             headers,
@@ -580,18 +697,25 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[case("GET", "Hey!!!")]
+    #[case("HEAD", "")]
     #[tokio::test]
-    async fn test_single_read_ts() {
-        let (components, headers, _body, path) = setup().await;
-
-        let response = EntryApi::read_single_record(
+    async fn test_single_read_ts(
+        components: Arc<RwLock<HttpServerComponents>>,
+        path: Path<HashMap<String, String>>,
+        #[case] method: String,
+        #[case] body: String,
+    ) {
+        let mut response = EntryApi::read_single_record(
             State(Arc::clone(&components)),
             path,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
                 "0".to_string(),
             )])),
-            headers,
+            HeaderMap::new(),
+            MethodExtractor::new(&method),
         )
         .await
         .unwrap()
@@ -600,23 +724,35 @@ mod tests {
         let headers = response.headers();
         assert_eq!(headers["x-reduct-time"], "0");
         assert_eq!(headers["content-type"], "text/plain");
-        assert_eq!(headers["content-length"], "0");
+        assert_eq!(headers["content-length"], "6");
+
+        assert_eq!(
+            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            Bytes::from(body)
+        );
     }
 
+    #[rstest]
+    #[case("GET", "Hey!!!")]
+    #[case("HEAD", "")]
     #[tokio::test]
-    async fn test_single_read_query() {
-        let (components, headers, _body, path) = setup().await;
-
+    async fn test_single_read_query(
+        components: Arc<RwLock<HttpServerComponents>>,
+        path: Path<HashMap<String, String>>,
+        #[case] method: String,
+        #[case] body: String,
+    ) {
         let query_id = query_records(&components);
 
-        let response = EntryApi::read_single_record(
+        let mut response = EntryApi::read_single_record(
             State(Arc::clone(&components)),
             path,
             Query(HashMap::from_iter(vec![(
                 "q".to_string(),
                 query_id.to_string(),
             )])),
-            headers,
+            HeaderMap::new(),
+            MethodExtractor::new(&method),
         )
         .await
         .unwrap()
@@ -625,7 +761,12 @@ mod tests {
         let headers = response.headers();
         assert_eq!(headers["x-reduct-time"], "0");
         assert_eq!(headers["content-type"], "text/plain");
-        assert_eq!(headers["content-length"], "0");
+        assert_eq!(headers["content-length"], "6");
+
+        assert_eq!(
+            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            Bytes::from(body)
+        );
     }
 
     fn query_records(components: &Arc<RwLock<HttpServerComponents>>) -> u64 {
@@ -651,20 +792,27 @@ mod tests {
         query_id
     }
 
+    #[rstest]
+    #[case("GET", "Hey!!!")]
+    #[case("HEAD", "")]
     #[tokio::test]
-    async fn test_batched_read() {
-        let (components, headers, _body, path) = setup().await;
-
+    async fn test_batched_read(
+        components: Arc<RwLock<HttpServerComponents>>,
+        path: Path<HashMap<String, String>>,
+        #[case] method: String,
+        #[case] body: String,
+    ) {
         let query_id = query_records(&components);
 
-        let response = EntryApi::read_batched_records(
+        let mut response = EntryApi::read_batched_records(
             State(Arc::clone(&components)),
             path,
             Query(HashMap::from_iter(vec![(
                 "q".to_string(),
                 query_id.to_string(),
             )])),
-            headers,
+            HeaderMap::new(),
+            MethodExtractor::new(method.as_str()),
         )
         .await
         .unwrap()
@@ -673,55 +821,15 @@ mod tests {
         let headers = response.headers();
         assert_eq!(
             headers["x-reduct-time-0"],
-            "content-length=0,content-type=text/plain,label-b=\"[a,b]\",label-x=y"
+            "content-length=6,content-type=text/plain,label-b=\"[a,b]\",label-x=y"
         );
         assert_eq!(headers["content-type"], "application/octet-stream");
-        assert_eq!(headers["content-length"], "0");
+        assert_eq!(headers["content-length"], "6");
         assert_eq!(headers["x-reduct-last"], "true");
-    }
 
-    async fn setup() -> (
-        Arc<RwLock<HttpServerComponents>>,
-        HeaderMap,
-        BodyStream,
-        Path<HashMap<String, String>>,
-    ) {
-        let data_path = tempfile::tempdir().unwrap().into_path();
-
-        let mut components = HttpServerComponents {
-            storage: Storage::new(PathBuf::from(data_path.clone())),
-            auth: TokenAuthorization::new(""),
-            token_repo: create_token_repository(data_path.clone(), ""),
-            console: ZipAssetManager::new(&[]),
-            base_path: "/".to_string(),
-        };
-
-        let labels = HashMap::from_iter(vec![
-            ("x".to_string(), "y".to_string()),
-            ("b".to_string(), "[a,b]".to_string()),
-        ]);
-        components
-            .storage
-            .create_bucket("bucket-1", BucketSettings::default())
-            .unwrap()
-            .begin_write("entry-1", 0, 0, "text/plain".to_string(), labels)
-            .unwrap()
-            .write()
-            .unwrap()
-            .write(Chunk::Last(Bytes::new()))
-            .unwrap();
-
-        let emtpy_stream: Empty<Bytes> = Empty::new();
-        let request = Request::builder().body(emtpy_stream).unwrap();
-        let body = BodyStream::from_request(request, &()).await.unwrap();
-
-        let mut headers = HeaderMap::new();
-        headers.insert("content-length", "0".parse().unwrap());
-
-        let path = Path(HashMap::from_iter(vec![
-            ("bucket_name".to_string(), "bucket-1".to_string()),
-            ("entry_name".to_string(), "entry-1".to_string()),
-        ]));
-        (Arc::new(RwLock::new(components)), headers, body, path)
+        assert_eq!(
+            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            Bytes::from(body)
+        );
     }
 }
