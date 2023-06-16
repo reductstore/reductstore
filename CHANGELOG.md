@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `x-reduct-api` header to get quick version number in Major.Minor format, [PR-291](https://github.com/reductstore/reductstore/pull/291)
-- `GET /api/v1/:bucket/:entry/batch` endpoint to read a bunch of records, [PR-294](https://github.com/reductstore/reductstore/pull/294)
+- `x-reduct-api` header to get quick version number in Major.Minor
+  format, [PR-291](https://github.com/reductstore/reductstore/pull/291)
+- `GET /api/v1/:bucket/:entry/batch` endpoint to read a bunch of
+  records, [PR-294](https://github.com/reductstore/reductstore/pull/294)
+- `HEAD /api/v1/b/:bucket_name/:entry_name` and `HEAD /api/v1/b/:bucket_name/:entry_name/batch`
+  endpoints, [PR-296]https://github.com/reductstore/reductstore/pull/296)
 
 ## [1.4.0] - 2023-06-09
 
