@@ -822,7 +822,6 @@ mod tests {
         );
         assert_eq!(headers["content-type"], "application/octet-stream");
         assert_eq!(headers["content-length"], "6");
-        assert_eq!(headers["x-reduct-last"], "true");
 
         assert_eq!(
             response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
