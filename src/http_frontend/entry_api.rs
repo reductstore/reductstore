@@ -147,7 +147,6 @@ fn fetch_and_response_batched_records(
     let mut body_size = 0u64;
     let mut headers = HeaderMap::new();
     let mut readers = Vec::new();
-    let mut last = false;
     loop {
         let _reader = match bucket.next(entry_name, query_id) {
             Ok((reader, _)) => {
@@ -175,7 +174,6 @@ fn fetch_and_response_batched_records(
                     return Err(err);
                 } else {
                     if err.status() == HttpStatus::NoContent as i32 {
-                        last = true;
                         break;
                     } else {
                         return Err(err);
@@ -187,7 +185,6 @@ fn fetch_and_response_batched_records(
 
     headers.insert("content-length", body_size.to_string().parse().unwrap());
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
-    headers.insert("x-reduct-last", last.to_string().parse().unwrap());
 
     struct ReadersWrapper {
         readers: Vec<Arc<RwLock<RecordReader>>>,
@@ -825,7 +822,6 @@ mod tests {
         );
         assert_eq!(headers["content-type"], "application/octet-stream");
         assert_eq!(headers["content-length"], "6");
-        assert_eq!(headers["x-reduct-last"], "true");
 
         assert_eq!(
             response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
