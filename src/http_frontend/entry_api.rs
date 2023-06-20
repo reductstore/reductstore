@@ -120,8 +120,8 @@ fn fetch_and_response_batched_records(
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
 
         let mut meta_data = vec![
-            format!("content-length={}", reader.content_length()),
-            format!("content-type={}", reader.content_type()),
+            reader.content_length().to_string(),
+            reader.content_type().clone(),
         ];
         meta_data.append(
             &mut reader
@@ -129,15 +129,13 @@ fn fetch_and_response_batched_records(
                 .iter()
                 .map(|(k, v)| {
                     if v.contains(",") {
-                        format!("label-{}=\"{}\"", k, v)
+                        format!("{}=\"{}\"", k, v)
                     } else {
-                        format!("label-{}={}", k, v)
+                        format!("{}={}", k, v)
                     }
                 })
                 .collect(),
         );
-        meta_data.sort();
-
         let value: HeaderValue = meta_data.join(",").parse().unwrap();
 
         (name, value)
@@ -819,10 +817,7 @@ mod tests {
         .into_response();
 
         let headers = response.headers();
-        assert_eq!(
-            headers["x-reduct-time-0"],
-            "content-length=6,content-type=text/plain,label-b=\"[a,b]\",label-x=y"
-        );
+        assert_eq!(headers["x-reduct-time-0"], "6,text/plain,b=\"[a,b]\",x=y");
         assert_eq!(headers["content-type"], "application/octet-stream");
         assert_eq!(headers["content-length"], "6");
         assert_eq!(headers["x-reduct-last"], "true");
