@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `HEAD /api/v1/b/:bucket_name/:entry_name` and `HEAD /api/v1/b/:bucket_name/:entry_name/batch`
   endpoints, [PR-296]https://github.com/reductstore/reductstore/pull/296)
 
+### Changed
+
+- Concise format for headers in `GET /api/v1/:bucket/:entry/batch` response, [PR-298](https://github.com/reductstore/reductstore/pull/298)
+
 ## [1.4.0] - 2023-06-09
 
 ### Fixed
