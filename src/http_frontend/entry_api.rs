@@ -123,19 +123,21 @@ fn fetch_and_response_batched_records(
             reader.content_length().to_string(),
             reader.content_type().clone(),
         ];
-        meta_data.append(
-            &mut reader
-                .labels()
-                .iter()
-                .map(|(k, v)| {
-                    if v.contains(",") {
-                        format!("{}=\"{}\"", k, v)
-                    } else {
-                        format!("{}={}", k, v)
-                    }
-                })
-                .collect(),
-        );
+
+        let mut labels: Vec<String> = reader
+            .labels()
+            .iter()
+            .map(|(k, v)| {
+                if v.contains(",") {
+                    format!("{}=\"{}\"", k, v)
+                } else {
+                    format!("{}={}", k, v)
+                }
+            })
+            .collect();
+        labels.sort();
+
+        meta_data.append(&mut labels);
         let value: HeaderValue = meta_data.join(",").parse().unwrap();
 
         (name, value)
