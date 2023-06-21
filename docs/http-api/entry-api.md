@@ -134,7 +134,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 
 {% swagger method="head" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name  " summary="Get only meta information about record" %}
 {% swagger-description %}
-The endpoint works exactly as 
+The endpoint works exactly as
 
 `GET /api/v1/b/:bucket_name/:entry_name`
 
@@ -146,7 +146,10 @@ The endpoint works exactly as
 {% swagger-description %}
 Since version 1.5, ReductStore provides a way to read a multiple records in a request. This can improve latency when you have many small records to read. The endpoint sorts all the records by time and concatenates them into a blob and sends it in the body. The meta information is sent for each record as a separate header `x-reduct-time-<timestamp>` which has a value as a CSV row. An example:
 
-`x-reduct-time-192312381273: content-type=text/plain,content-length=100,label-x=y,label-a="[a,b]"`
+`x-reduct-time-192312381273: 100,text/plain,x=y,a="[a,b]"`
+
+The first value is content-length, the second one is content-type, then labels as key=value pairs. If there is a comma in the value, it is escaped with double quotes.
+
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -190,7 +193,7 @@ Name of entry
 
 {% swagger method="head" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/batch  " summary="Get only meta information  in bulk" %}
 {% swagger-description %}
-The endpoint works exactly as 
+The endpoint works exactly as
 
 `GET /api/v1/b/:bucket_name/:entry_name/batch`
 
