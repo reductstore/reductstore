@@ -420,8 +420,8 @@ def test_read_batched_records(base_url, session, bucket, method, expected_conten
     assert resp.content == expected_content
     assert resp.headers['content-type'] == 'application/octet-stream'
     assert resp.headers['content-length'] == '20'
-    assert resp.headers['x-reduct-time-1000'] == 'content-length=10,content-type=application/octet-stream'
-    assert resp.headers['x-reduct-time-1100'] == 'content-length=10,content-type=text/plain,label-x="[a,b]"'
+    assert resp.headers['x-reduct-time-1000'] == '10,application/octet-stream'
+    assert resp.headers['x-reduct-time-1100'] == '10,text/plain,x="[a,b]"'
     assert resp.headers['x-reduct-last'] == 'true'
 
 
@@ -437,12 +437,12 @@ def test_read_batched_max_header_size(base_url, session, bucket):
 
     resp = session.get(f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
     assert resp.status_code == 200
-    assert sum(header.startswith('x-reduct-time-') for header in resp.headers) == 84
+    assert sum(header.startswith('x-reduct-time-') for header in resp.headers) == 86
     assert resp.headers['x-reduct-last'] == 'false'
 
     resp = session.get(f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
     assert resp.status_code == 200
-    assert sum(header.startswith('x-reduct-time-') for header in resp.headers) == 16
+    assert sum(header.startswith('x-reduct-time-') for header in resp.headers) == 14
     assert resp.headers['x-reduct-last'] == 'true'
 
     resp = session.get(f'{base_url}/b/{bucket}/entry/batch?q={query_id}')
