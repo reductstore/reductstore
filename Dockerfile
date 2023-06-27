@@ -31,5 +31,4 @@ EXPOSE 8383
 
 RUN mkdir /data
 
-ENV PATH=/usr/local/bin/
 CMD ["reductstore"]

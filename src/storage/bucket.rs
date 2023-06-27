@@ -243,13 +243,25 @@ impl Bucket {
     }
 
     fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HttpError> {
+        // remove empty entries first
+        for name in self
+            .entries
+            .iter()
+            .filter(|entry| entry.1.info().unwrap().size == 0)
+            .map(|entry| entry.0.clone())
+            .collect::<Vec<String>>()
+        {
+            debug!("Remove empty entry '{}'", name);
+            self.remove_entry(&name)?;
+        }
+
         match QuotaType::from_i32(self.settings.quota_type.unwrap()).unwrap() {
             QuotaType::None => Ok(()),
             QuotaType::Fifo => {
                 let mut size = self.info()?.info.unwrap().size + content_size;
                 while size > self.settings.quota_size() {
                     debug!(
-                        "Need more space.  Try to remove an oldest block from bucket '{}'",
+                        "Need more space. Remove an oldest block from bucket '{}'",
                         self.name()
                     );
 
@@ -265,6 +277,7 @@ impl Bucket {
 
                     let mut success = false;
                     for entry in candidates {
+                        debug!("Remove an oldest block from entry '{}'", entry.name());
                         match entry.try_remove_oldest_block() {
                             Ok(_) => {
                                 success = true;
@@ -322,6 +335,13 @@ impl Bucket {
             });
         }
         self.save_settings()?;
+        Ok(())
+    }
+
+    fn remove_entry(&mut self, name: &str) -> Result<(), HttpError> {
+        let path = self.path.join(name);
+        remove_dir_all(path)?;
+        self.entries.remove(name);
         Ok(())
     }
 
