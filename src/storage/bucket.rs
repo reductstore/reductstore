@@ -159,16 +159,6 @@ impl Bucket {
         Ok(entry)
     }
 
-    /// Remove a Bucket from disk
-    ///
-    /// # Returns
-    ///
-    /// * `Result<(), HTTPError>` - The result or an HTTPError
-    pub fn remove(&self) -> Result<(), HttpError> {
-        std::fs::remove_dir_all(&self.path)?;
-        Ok(())
-    }
-
     /// Return bucket stats
     pub fn info(&self) -> Result<FullBucketInfo, HttpError> {
         let mut size = 0;
@@ -243,18 +233,6 @@ impl Bucket {
     }
 
     fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HttpError> {
-        // remove empty entries first
-        for name in self
-            .entries
-            .iter()
-            .filter(|entry| entry.1.info().unwrap().size == 0)
-            .map(|entry| entry.0.clone())
-            .collect::<Vec<String>>()
-        {
-            debug!("Remove empty entry '{}'", name);
-            self.remove_entry(&name)?;
-        }
-
         match QuotaType::from_i32(self.settings.quota_type.unwrap()).unwrap() {
             QuotaType::None => Ok(()),
             QuotaType::Fifo => {
@@ -265,20 +243,30 @@ impl Bucket {
                         self.name()
                     );
 
-                    let mut candidates: Vec<&mut Entry> = self
+                    let mut candidates: Vec<&Entry> = self
                         .entries
-                        .iter_mut()
+                        .iter()
                         .map(|entry| entry.1)
-                        .collect::<Vec<&mut Entry>>();
+                        .collect::<Vec<&Entry>>();
                     candidates.sort_by_key(|entry| match entry.info() {
                         Ok(info) => info.oldest_record,
                         Err(_) => u64::MAX, //todo: handle error
                     });
 
+                    let candidates = candidates
+                        .iter()
+                        .map(|entry| entry.name().to_string())
+                        .collect::<Vec<String>>();
+
                     let mut success = false;
-                    for entry in candidates {
-                        debug!("Remove an oldest block from entry '{}'", entry.name());
-                        match entry.try_remove_oldest_block() {
+                    for name in candidates {
+                        debug!("Remove an oldest block from entry '{}'", name);
+                        match self
+                            .entries
+                            .get_mut(&name)
+                            .unwrap()
+                            .try_remove_oldest_block()
+                        {
                             Ok(_) => {
                                 success = true;
                                 break;
@@ -286,8 +274,7 @@ impl Bucket {
                             Err(e) => {
                                 debug!(
                                     "Failed to remove oldest block from entry '{}': {}",
-                                    entry.name(),
-                                    e
+                                    name, e
                                 );
                             }
                         }
@@ -303,16 +290,16 @@ impl Bucket {
                 }
 
                 // Remove empty entries
-                let mut entries_to_remove: Vec<String> = Vec::new();
-                for entry in self.entries.values_mut() {
-                    if entry.info()?.size == 0 {
-                        remove_dir_all(self.path.join(entry.name()))?;
-                        entries_to_remove.push(entry.name().to_string());
-                    }
+                for name in self
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.1.info().unwrap().size == 0)
+                    .map(|entry| entry.0.clone())
+                    .collect::<Vec<String>>()
+                {
+                    debug!("Remove empty entry '{}'", name);
+                    self.remove_entry(&name)?;
                 }
-                self.entries
-                    .retain(|_, entry| !entries_to_remove.contains(&entry.name().to_string()));
-
                 Ok(())
             }
         }
@@ -338,6 +325,7 @@ impl Bucket {
         Ok(())
     }
 
+    /// Save bucket settings to file
     fn remove_entry(&mut self, name: &str) -> Result<(), HttpError> {
         let path = self.path.join(name);
         remove_dir_all(path)?;
@@ -450,6 +438,27 @@ mod tests {
             read(&mut bucket, "test-1", 0).err(),
             Some(HttpError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_blob_bigger_than_quota() {
+        let (mut bucket, _) = setup_with(BucketSettings {
+            max_block_size: Some(5),
+            quota_type: Some(i32::from(QuotaType::Fifo)),
+            quota_size: Some(10),
+            max_block_records: Some(100),
+        });
+
+        write(&mut bucket, "test-1", 0, b"test").unwrap();
+        assert_eq!(bucket.info().unwrap().info.unwrap().size, 4);
+
+        let result = write(&mut bucket, "test-2", 1, b"0123456789___");
+        assert_eq!(
+            result.err(),
+            Some(HttpError::internal_server_error(
+                "Failed to keep quota of 'test'"
             ))
         );
     }
