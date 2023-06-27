@@ -361,7 +361,7 @@ impl Entry {
     /// HTTTPError - The error if any.
     pub fn try_remove_oldest_block(&mut self) -> Result<(), HttpError> {
         if self.block_index.is_empty() {
-            return Ok(());
+            return Err(HttpError::internal_server_error("No block to remove"));
         }
 
         let oldest_block_id = *self.block_index.first().unwrap();
@@ -803,6 +803,15 @@ mod tests {
         let wr = reader.write().unwrap();
 
         assert_eq!(wr.timestamp(), 3000000);
+    }
+
+    #[test]
+    fn test_try_remove_block_from_empty_entry() {
+        let (_, mut entry, _) = setup_default();
+        assert_eq!(
+            entry.try_remove_oldest_block(),
+            Err(HttpError::internal_server_error("No block to remove"))
+        );
     }
 
     fn setup(options: EntrySettings) -> (EntrySettings, Entry, PathBuf) {

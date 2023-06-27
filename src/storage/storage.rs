@@ -5,6 +5,7 @@
 
 use log::info;
 use std::collections::BTreeMap;
+use std::fs::remove_dir_all;
 use std::path::PathBuf;
 
 use std::time::Instant;
@@ -134,8 +135,8 @@ impl Storage {
     /// * HTTPError - An error if the bucket doesn't exist
     pub fn remove_bucket(&mut self, name: &str) -> Result<(), HttpError> {
         match self.buckets.remove(name) {
-            Some(bucket) => {
-                bucket.remove()?;
+            Some(_) => {
+                remove_dir_all(&self.data_path.join(name))?;
                 Ok(())
             }
             None => Err(HttpError::not_found(
