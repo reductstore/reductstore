@@ -1430,7 +1430,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.5.0-dev"
+version = "1.5.0"
 dependencies = [
  "axum",
  "axum-server",
