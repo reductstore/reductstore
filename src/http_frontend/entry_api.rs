@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use crate::core::status::{HttpError, HttpStatus};
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerComponents;
+use crate::http_frontend::HttpServerState;
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::Labels;
 use crate::storage::proto::QueryInfo;
@@ -69,7 +69,7 @@ where
 }
 
 fn check_and_extract_ts_or_query_id(
-    components: &Arc<RwLock<HttpServerComponents>>,
+    components: &Arc<RwLock<HttpServerState>>,
     params: HashMap<String, String>,
     bucket_name: &String,
     entry_name: &String,
@@ -330,7 +330,7 @@ impl IntoResponse for QueryInfo {
 impl EntryApi {
     // POST /:bucket/:entry?ts=<number>
     pub async fn write_record(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         headers: HeaderMap,
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
@@ -440,7 +440,7 @@ impl EntryApi {
 
     // GET /:bucket/:entry?ts=<number>|q=<number>|
     pub async fn read_single_record(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
         headers: HeaderMap,
@@ -474,7 +474,7 @@ impl EntryApi {
 
     // GET /:bucket/:entry/batch?q=<number>
     pub async fn read_batched_records(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
         headers: HeaderMap,
@@ -516,7 +516,7 @@ impl EntryApi {
 
     // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
     pub async fn query(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(path): Path<HashMap<String, String>>,
         Query(params): Query<HashMap<String, String>>,
         headers: HeaderMap,
@@ -613,10 +613,10 @@ mod tests {
     use std::path::PathBuf;
 
     #[fixture]
-    fn components() -> Arc<RwLock<HttpServerComponents>> {
+    fn components() -> Arc<RwLock<HttpServerState>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut components = HttpServerComponents {
+        let mut components = HttpServerState {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
             token_repo: create_token_repository(data_path.clone(), ""),
@@ -661,7 +661,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<RwLock<HttpServerComponents>>,
+        components: Arc<RwLock<HttpServerState>>,
         headers: HeaderMap,
         path: Path<HashMap<String, String>>,
     ) {
@@ -702,7 +702,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_ts(
-        components: Arc<RwLock<HttpServerComponents>>,
+        components: Arc<RwLock<HttpServerState>>,
         path: Path<HashMap<String, String>>,
         #[case] method: String,
         #[case] body: String,
@@ -737,7 +737,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_query(
-        components: Arc<RwLock<HttpServerComponents>>,
+        components: Arc<RwLock<HttpServerState>>,
         path: Path<HashMap<String, String>>,
         #[case] method: String,
         #[case] body: String,
@@ -769,7 +769,7 @@ mod tests {
         );
     }
 
-    fn query_records(components: &Arc<RwLock<HttpServerComponents>>) -> u64 {
+    fn query_records(components: &Arc<RwLock<HttpServerState>>) -> u64 {
         let query_id = components
             .write()
             .unwrap()
@@ -797,7 +797,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_batched_read(
-        components: Arc<RwLock<HttpServerComponents>>,
+        components: Arc<RwLock<HttpServerState>>,
         path: Path<HashMap<String, String>>,
         #[case] method: String,
         #[case] body: String,

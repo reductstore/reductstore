@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerComponents;
+use crate::http_frontend::HttpServerState;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::BucketSettings;
 use crate::storage::proto::FullBucketInfo;
@@ -106,7 +106,7 @@ where
 impl BucketApi {
     // GET /b/:bucket_name
     pub async fn get_bucket(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(bucket_name): Path<String>,
         headers: HeaderMap,
     ) -> Result<FullBucketInfo, HttpError> {
@@ -117,7 +117,7 @@ impl BucketApi {
 
     // HEAD /b/:bucket_name
     pub async fn head_bucket(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(bucket_name): Path<String>,
         headers: HeaderMap,
     ) -> Result<(), HttpError> {
@@ -129,7 +129,7 @@ impl BucketApi {
 
     // POST /b/:bucket_name
     pub async fn create_bucket(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(bucket_name): Path<String>,
         headers: HeaderMap,
         settings: BucketSettings,
@@ -144,7 +144,7 @@ impl BucketApi {
 
     // PUT /b/:bucket_name
     pub async fn update_bucket(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(bucket_name): Path<String>,
         headers: HeaderMap,
         settings: BucketSettings,
@@ -157,7 +157,7 @@ impl BucketApi {
 
     // DELETE /b/:bucket_name
     pub async fn remove_bucket(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(bucket_name): Path<String>,
         headers: HeaderMap,
     ) -> Result<(), HttpError> {
@@ -177,7 +177,7 @@ mod tests {
     use crate::asset::asset_manager::ZipAssetManager;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::create_token_repository;
-    use crate::http_frontend::HttpServerComponents;
+    use crate::http_frontend::HttpServerState;
     use crate::storage::proto::BucketSettings;
     use crate::storage::storage::Storage;
 
@@ -271,10 +271,10 @@ mod tests {
         );
     }
 
-    fn setup() -> Arc<RwLock<HttpServerComponents>> {
+    fn setup() -> Arc<RwLock<HttpServerState>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut components = HttpServerComponents {
+        let mut components = HttpServerState {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
             token_repo: create_token_repository(data_path.clone(), ""),

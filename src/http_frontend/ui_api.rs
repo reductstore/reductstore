@@ -5,7 +5,7 @@
 //
 
 use crate::core::status::HttpError;
-use crate::http_frontend::HttpServerComponents;
+use crate::http_frontend::HttpServerState;
 use axum::extract::State;
 
 use axum::headers::HeaderMap;
@@ -22,7 +22,7 @@ pub struct UiApi {}
 
 impl UiApi {
     pub async fn redirect_to_index(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
     ) -> impl IntoResponse {
         let base_path = components.read().unwrap().base_path.clone();
         let mut headers = HeaderMap::new();
@@ -31,7 +31,7 @@ impl UiApi {
     }
 
     pub async fn show_ui(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         request: Request<Body>,
     ) -> Result<impl IntoResponse, HttpError> {
         let base_path = components.read().unwrap().base_path.clone();
@@ -97,10 +97,10 @@ mod tests {
         assert_eq!(response.body().size_hint().lower(), 7037);
     }
 
-    fn setup() -> Arc<RwLock<HttpServerComponents>> {
+    fn setup() -> Arc<RwLock<HttpServerState>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let components = HttpServerComponents {
+        let components = HttpServerState {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
             token_repo: create_token_repository(data_path.clone(), ""),

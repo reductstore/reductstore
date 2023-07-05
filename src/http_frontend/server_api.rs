@@ -16,7 +16,7 @@ use crate::auth::policy::AuthenticatedPolicy;
 use crate::auth::proto::Token;
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerComponents;
+use crate::http_frontend::HttpServerState;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfoList, ServerInfo};
 
@@ -59,7 +59,7 @@ impl IntoResponse for BucketInfoList {
 impl ServerApi {
     // GET /info
     pub async fn info(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         headers: HeaderMap,
     ) -> Result<ServerInfo, HttpError> {
         check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
@@ -68,7 +68,7 @@ impl ServerApi {
 
     // GET /list
     pub async fn list(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         headers: HeaderMap,
     ) -> Result<BucketInfoList, HttpError> {
         check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
@@ -77,7 +77,7 @@ impl ServerApi {
 
     // // GET /me
     pub async fn me(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         headers: HeaderMap,
     ) -> Result<Token, HttpError> {
         check_permissions(
@@ -134,10 +134,10 @@ mod tests {
         assert_eq!(token.name, "AUTHENTICATION-DISABLED");
     }
 
-    fn setup() -> Arc<RwLock<HttpServerComponents>> {
+    fn setup() -> Arc<RwLock<HttpServerState>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut components = HttpServerComponents {
+        let mut components = HttpServerState {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new(""),
             token_repo: create_token_repository(data_path.clone(), ""),

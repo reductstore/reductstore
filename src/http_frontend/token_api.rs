@@ -19,7 +19,7 @@ use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerComponents;
+use crate::http_frontend::HttpServerState;
 
 pub struct TokenApi {}
 
@@ -85,7 +85,7 @@ where
 impl TokenApi {
     // GET /tokens
     pub async fn token_list(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         headers: HeaderMap,
     ) -> Result<TokenRepo, HttpError> {
         check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
@@ -101,7 +101,7 @@ impl TokenApi {
 
     // POST /tokens/:token_name
     pub async fn create_token(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(token_name): Path<String>,
         headers: HeaderMap,
         permissions: Permissions,
@@ -114,7 +114,7 @@ impl TokenApi {
 
     // GET /tokens/:token_name
     pub async fn get_token(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(token_name): Path<String>,
         headers: HeaderMap,
     ) -> Result<Token, HttpError> {
@@ -126,7 +126,7 @@ impl TokenApi {
 
     // DELETE /tokens/:name
     pub async fn remove_token(
-        State(components): State<Arc<RwLock<HttpServerComponents>>>,
+        State(components): State<Arc<RwLock<HttpServerState>>>,
         Path(token_name): Path<String>,
         headers: HeaderMap,
     ) -> Result<(), HttpError> {
@@ -227,10 +227,10 @@ mod tests {
         );
     }
 
-    fn setup() -> Arc<RwLock<HttpServerComponents>> {
+    fn setup() -> Arc<RwLock<HttpServerState>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut components = HttpServerComponents {
+        let mut components = HttpServerState {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: create_token_repository(data_path.clone(), "init-token"),

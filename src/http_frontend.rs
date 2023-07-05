@@ -8,20 +8,29 @@ use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
+use crate::http_frontend::bucket_api::BucketApi;
+use crate::http_frontend::entry_api::EntryApi;
+use crate::http_frontend::middleware::{default_headers, print_statuses};
+use crate::http_frontend::server_api::ServerApi;
+use crate::http_frontend::token_api::TokenApi;
+use crate::http_frontend::ui_api::UiApi;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, head, post, put};
+use axum::{middleware::from_fn, Router};
 use prost::DecodeError;
 use serde::de::StdError;
+use std::sync::{Arc, RwLock};
 
-pub mod bucket_api;
-pub mod entry_api;
-pub mod middleware;
-pub mod server_api;
-pub mod token_api;
-pub mod ui_api;
+mod bucket_api;
+mod entry_api;
+mod middleware;
+mod server_api;
+mod token_api;
+mod ui_api;
 
-pub struct HttpServerComponents {
+pub struct HttpServerState {
     pub storage: Storage,
     pub auth: TokenAuthorization,
     pub token_repo: Box<dyn ManageTokens + Send + Sync>,
@@ -65,4 +74,92 @@ impl From<axum::Error> for HttpError {
     fn from(err: axum::Error) -> Self {
         HttpError::internal_server_error(&format!("Internal server error: {}", err))
     }
+}
+
+pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> Router {
+    let app = Router::new()
+        // Server API
+        .route(
+            &format!("{}api/v1/info", api_base_path),
+            get(ServerApi::info),
+        )
+        .route(
+            &format!("{}api/v1/list", api_base_path),
+            get(ServerApi::list),
+        )
+        .route(&format!("{}api/v1/me", api_base_path), get(ServerApi::me))
+        .route(
+            &format!("{}api/v1/alive", api_base_path),
+            head(|| async { StatusCode::OK }),
+        )
+        // Token API
+        .route(
+            &format!("{}api/v1/tokens", api_base_path),
+            get(TokenApi::token_list),
+        )
+        .route(
+            &format!("{}api/v1/tokens/:token_name", api_base_path),
+            post(TokenApi::create_token),
+        )
+        .route(
+            &format!("{}api/v1/tokens/:token_name", api_base_path),
+            get(TokenApi::get_token),
+        )
+        .route(
+            &format!("{}api/v1/tokens/:token_name", api_base_path),
+            delete(TokenApi::remove_token),
+        )
+        // Bucket API
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            get(BucketApi::get_bucket),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            head(BucketApi::head_bucket),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            post(BucketApi::create_bucket),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            put(BucketApi::update_bucket),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name", api_base_path),
+            delete(BucketApi::remove_bucket),
+        )
+        // Entry API
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
+            post(EntryApi::write_record),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
+            get(EntryApi::read_single_record),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
+            head(EntryApi::read_single_record),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
+            get(EntryApi::query),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name/batch", api_base_path),
+            get(EntryApi::read_batched_records),
+        )
+        .route(
+            &format!("{}api/v1/b/:bucket_name/:entry_name/batch", api_base_path),
+            head(EntryApi::read_batched_records),
+        )
+        // UI
+        .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
+        .fallback(get(UiApi::show_ui))
+        .layer(from_fn(default_headers))
+        .layer(from_fn(print_statuses))
+        .with_state(Arc::new(RwLock::new(components)));
+    app
 }

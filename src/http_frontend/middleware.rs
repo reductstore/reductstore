@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::auth::policy::Policy;
 use crate::core::status::HttpError;
-use crate::http_frontend::HttpServerComponents;
+use crate::http_frontend::HttpServerState;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error};
@@ -58,7 +58,7 @@ pub async fn print_statuses<B>(
 }
 
 pub fn check_permissions<P>(
-    components: Arc<RwLock<HttpServerComponents>>,
+    components: Arc<RwLock<HttpServerState>>,
     headers: HeaderMap,
     policy: P,
 ) -> Result<(), HttpError>
