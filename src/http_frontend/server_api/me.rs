@@ -32,13 +32,13 @@ pub async fn me(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::server_api::tests::tmp_components;
+    use crate::http_frontend::server_api::tests::components;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_me(tmp_components: Arc<RwLock<HttpServerState>>) {
-        let token = me(State(tmp_components), HeaderMap::new()).await.unwrap();
+    async fn test_me(components: Arc<RwLock<HttpServerState>>) {
+        let token = me(State(components), HeaderMap::new()).await.unwrap();
         assert_eq!(token.name, "AUTHENTICATION-DISABLED");
     }
 }

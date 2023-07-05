@@ -78,11 +78,7 @@ mod tests {
     use super::*;
 
     #[fixture]
-    pub(crate) fn tmp_components() -> Arc<RwLock<HttpServerState>> {
-        setup()
-    }
-
-    fn setup() -> Arc<RwLock<HttpServerState>> {
+    pub(crate) fn components() -> Arc<RwLock<HttpServerState>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
         let mut components = HttpServerState {
