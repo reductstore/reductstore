@@ -9,7 +9,6 @@ mod me;
 
 use std::sync::{Arc, RwLock};
 
-use axum::extract::State;
 use axum::headers;
 use axum::headers::HeaderMapExt;
 use axum::http::{HeaderMap, StatusCode};
@@ -17,10 +16,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, head};
 use serde_json::json;
 
-use crate::auth::policy::AuthenticatedPolicy;
-use crate::auth::proto::Token;
-use crate::core::status::HttpError;
-use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfoList, ServerInfo};
