@@ -609,7 +609,7 @@ mod tests {
     use axum::extract::FromRequest;
     use axum::http::Request;
 
-    use rstest::{fixture, rstest};
+    use rstest::*;
     use std::path::PathBuf;
 
     #[fixture]

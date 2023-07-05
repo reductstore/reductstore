@@ -11,7 +11,7 @@ use crate::core::status::HttpError;
 use crate::http_frontend::bucket_api::BucketApi;
 use crate::http_frontend::entry_api::EntryApi;
 use crate::http_frontend::middleware::{default_headers, print_statuses};
-use crate::http_frontend::server_api::ServerApi;
+use crate::http_frontend::server_api::create_server_api_routes;
 use crate::http_frontend::token_api::TokenApi;
 use crate::http_frontend::ui_api::UiApi;
 use crate::storage::storage::Storage;
@@ -79,19 +79,7 @@ impl From<axum::Error> for HttpError {
 pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> Router {
     let app = Router::new()
         // Server API
-        .route(
-            &format!("{}api/v1/info", api_base_path),
-            get(ServerApi::info),
-        )
-        .route(
-            &format!("{}api/v1/list", api_base_path),
-            get(ServerApi::list),
-        )
-        .route(&format!("{}api/v1/me", api_base_path), get(ServerApi::me))
-        .route(
-            &format!("{}api/v1/alive", api_base_path),
-            head(|| async { StatusCode::OK }),
-        )
+        .merge(create_server_api_routes(api_base_path))
         // Token API
         .route(
             &format!("{}api/v1/tokens", api_base_path),

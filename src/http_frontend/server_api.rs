@@ -3,6 +3,10 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod info;
+mod list;
+mod me;
+
 use std::sync::{Arc, RwLock};
 
 use axum::extract::State;
@@ -10,6 +14,7 @@ use axum::headers;
 use axum::headers::HeaderMapExt;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{get, head};
 use serde_json::json;
 
 use crate::auth::policy::AuthenticatedPolicy;
@@ -19,8 +24,6 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfoList, ServerInfo};
-
-pub struct ServerApi {}
 
 impl IntoResponse for ServerInfo {
     fn into_response(self) -> Response {
@@ -56,41 +59,15 @@ impl IntoResponse for BucketInfoList {
     }
 }
 
-impl ServerApi {
-    // GET /info
-    pub async fn info(
-        State(components): State<Arc<RwLock<HttpServerState>>>,
-        headers: HeaderMap,
-    ) -> Result<ServerInfo, HttpError> {
-        check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
-        components.read().unwrap().storage.info()
-    }
-
-    // GET /list
-    pub async fn list(
-        State(components): State<Arc<RwLock<HttpServerState>>>,
-        headers: HeaderMap,
-    ) -> Result<BucketInfoList, HttpError> {
-        check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
-        components.read().unwrap().storage.get_bucket_list()
-    }
-
-    // // GET /me
-    pub async fn me(
-        State(components): State<Arc<RwLock<HttpServerState>>>,
-        headers: HeaderMap,
-    ) -> Result<Token, HttpError> {
-        check_permissions(
-            Arc::clone(&components),
-            headers.clone(),
-            AuthenticatedPolicy {},
-        )?;
-        let header = match headers.get("Authorization") {
-            Some(header) => header.to_str().ok(),
-            None => None,
-        };
-        components.read().unwrap().token_repo.validate_token(header)
-    }
+pub fn create_server_api_routes(api_base_path: &str) -> axum::Router<Arc<RwLock<HttpServerState>>> {
+    axum::Router::new()
+        .route(&format!("{}/list", api_base_path), get(list::list))
+        .route(&format!("{}/me", api_base_path), get(me::me))
+        .route(&format!("{}/info", api_base_path), get(info::info))
+        .route(
+            &format!("{}api/v1/alive", api_base_path),
+            head(|| async { StatusCode::OK }),
+        )
 }
 
 #[cfg(test)]
@@ -98,6 +75,7 @@ mod tests {
     use std::path::PathBuf;
 
     use hyper::http::request::Builder;
+    use rstest::fixture;
 
     use crate::asset::asset_manager::ZipAssetManager;
     use crate::auth::token_auth::TokenAuthorization;
@@ -107,31 +85,9 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_info() {
-        let components = setup();
-        let info = ServerApi::info(State(components), HeaderMap::new())
-            .await
-            .unwrap();
-        assert_eq!(info.bucket_count, 2);
-    }
-
-    #[tokio::test]
-    async fn test_list() {
-        let components = setup();
-        let list = ServerApi::list(State(components), HeaderMap::new())
-            .await
-            .unwrap();
-        assert_eq!(list.buckets.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_me() {
-        let components = setup();
-        let token = ServerApi::me(State(components), HeaderMap::new())
-            .await
-            .unwrap();
-        assert_eq!(token.name, "AUTHENTICATION-DISABLED");
+    #[fixture]
+    pub(crate) fn tmp_components() -> Arc<RwLock<HttpServerState>> {
+        setup()
     }
 
     fn setup() -> Arc<RwLock<HttpServerState>> {
