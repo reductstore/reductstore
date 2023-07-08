@@ -26,18 +26,12 @@ pub async fn remove_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::storage::Storage;
 
     use crate::http_frontend::bucket_api::BucketApi;
     use crate::http_frontend::token_api::get::get_token;
     use crate::http_frontend::token_api::tests::{components, headers};
-    use crate::storage::proto::BucketSettings;
-    use axum::headers::Authorization;
+
     use rstest::rstest;
-    use std::path::PathBuf;
 
     #[rstest]
     #[tokio::test]

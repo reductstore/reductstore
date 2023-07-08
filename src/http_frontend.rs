@@ -12,7 +12,7 @@ use crate::http_frontend::bucket_api::BucketApi;
 use crate::http_frontend::entry_api::EntryApi;
 use crate::http_frontend::middleware::{default_headers, print_statuses};
 use crate::http_frontend::server_api::create_server_api_routes;
-use crate::http_frontend::token_api::{create_token_api_routes, TokenApi};
+use crate::http_frontend::token_api::create_token_api_routes;
 use crate::http_frontend::ui_api::UiApi;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;

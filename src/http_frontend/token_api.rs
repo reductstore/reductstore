@@ -8,30 +8,27 @@ mod get;
 mod list;
 mod remove;
 
-use axum::extract::{FromRequest, Path, State};
+use axum::extract::FromRequest;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{async_trait, headers};
 use bytes::Bytes;
 
-use crate::auth::policy::FullAccessPolicy;
 use axum::headers::HeaderMapExt;
 use hyper::HeaderMap;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use std::sync::{Arc, RwLock};
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
 use crate::core::status::HttpError;
-use crate::http_frontend::middleware::check_permissions;
+
 use crate::http_frontend::token_api::create::create_token;
 use crate::http_frontend::token_api::get::get_token;
 use crate::http_frontend::token_api::list::list;
 use crate::http_frontend::token_api::remove::remove_token;
 use crate::http_frontend::HttpServerState;
-
-pub struct TokenApi {}
 
 impl IntoResponse for TokenRepo {
     fn into_response(self) -> Response {
@@ -97,7 +94,7 @@ pub fn create_token_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
         .route("/", get(list))
         .route("/:token_name", post(create_token))
         .route("/:token_name", get(get_token))
-        .route("/:token_name", post(remove_token))
+        .route("/:token_name", delete(remove_token))
 }
 
 #[cfg(test)]
@@ -111,55 +108,13 @@ mod tests {
     use crate::http_frontend::bucket_api::BucketApi;
     use crate::http_frontend::token_api::get::get_token;
     use crate::storage::proto::BucketSettings;
+    use axum::extract::{Path, State};
     use axum::headers::Authorization;
     use rstest::fixture;
     use std::path::PathBuf;
 
-    #[tokio::test]
-    async fn test_remove_token() {
-        let components = setup();
-        let token = remove_token(State(components), Path("test".to_string()), auth_headers()).await;
-        assert!(token.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_remove_bucket_from_permission() {
-        let components = setup();
-        let token = get_token(
-            State(Arc::clone(&components)),
-            Path("test".to_string()),
-            auth_headers(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            token.permissions.unwrap().read,
-            vec!["bucket-1".to_string(), "bucket-2".to_string()]
-        );
-
-        BucketApi::remove_bucket(
-            State(Arc::clone(&components)),
-            Path("bucket-1".to_string()),
-            auth_headers(),
-        )
-        .await
-        .unwrap();
-
-        let token = get_token(State(components), Path("test".to_string()), auth_headers())
-            .await
-            .unwrap();
-        assert_eq!(
-            token.permissions.unwrap().read,
-            vec!["bucket-2".to_string()]
-        );
-    }
-
     #[fixture]
     pub(crate) fn components() -> Arc<RwLock<HttpServerState>> {
-        setup()
-    }
-
-    fn setup() -> Arc<RwLock<HttpServerState>> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
         let mut components = HttpServerState {
@@ -193,10 +148,6 @@ mod tests {
 
     #[fixture]
     pub(crate) fn headers() -> HeaderMap {
-        auth_headers()
-    }
-
-    fn auth_headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
         headers
