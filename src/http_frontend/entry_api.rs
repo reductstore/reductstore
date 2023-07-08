@@ -46,6 +46,12 @@ impl MethodExtractor {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+        }
+    }
 }
 
 #[async_trait]

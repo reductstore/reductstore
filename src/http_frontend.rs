@@ -12,7 +12,7 @@ use crate::http_frontend::bucket_api::BucketApi;
 use crate::http_frontend::entry_api::EntryApi;
 use crate::http_frontend::middleware::{default_headers, print_statuses};
 use crate::http_frontend::server_api::create_server_api_routes;
-use crate::http_frontend::token_api::TokenApi;
+use crate::http_frontend::token_api::{create_token_api_routes, TokenApi};
 use crate::http_frontend::ui_api::UiApi;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;
@@ -84,21 +84,9 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
             create_server_api_routes(),
         )
         // Token API
-        .route(
-            &format!("{}api/v1/tokens", api_base_path),
-            get(TokenApi::token_list),
-        )
-        .route(
-            &format!("{}api/v1/tokens/:token_name", api_base_path),
-            post(TokenApi::create_token),
-        )
-        .route(
-            &format!("{}api/v1/tokens/:token_name", api_base_path),
-            get(TokenApi::get_token),
-        )
-        .route(
-            &format!("{}api/v1/tokens/:token_name", api_base_path),
-            delete(TokenApi::remove_token),
+        .nest(
+            &format!("{}api/v1/tokens/", api_base_path),
+            create_token_api_routes(),
         )
         // Bucket API
         .route(
