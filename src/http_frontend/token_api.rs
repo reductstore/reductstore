@@ -105,10 +105,8 @@ mod tests {
     use crate::auth::token_repository::create_token_repository;
     use crate::storage::storage::Storage;
 
-    use crate::http_frontend::bucket_api::BucketApi;
-    use crate::http_frontend::token_api::get::get_token;
     use crate::storage::proto::BucketSettings;
-    use axum::extract::{Path, State};
+
     use axum::headers::Authorization;
     use rstest::fixture;
     use std::path::PathBuf;
