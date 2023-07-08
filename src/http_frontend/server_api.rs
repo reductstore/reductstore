@@ -54,15 +54,12 @@ impl IntoResponse for BucketInfoList {
     }
 }
 
-pub fn create_server_api_routes(api_base_path: &str) -> axum::Router<Arc<RwLock<HttpServerState>>> {
+pub fn create_server_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
     axum::Router::new()
-        .route(&format!("{}/list", api_base_path), get(list::list))
-        .route(&format!("{}/me", api_base_path), get(me::me))
-        .route(&format!("{}/info", api_base_path), get(info::info))
-        .route(
-            &format!("{}api/v1/alive", api_base_path),
-            head(|| async { StatusCode::OK }),
-        )
+        .route("/list", get(list::list))
+        .route("/me", get(me::me))
+        .route("/info", get(info::info))
+        .route("/alive", head(|| async { StatusCode::OK }))
 }
 
 #[cfg(test)]

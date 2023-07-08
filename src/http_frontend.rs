@@ -79,7 +79,10 @@ impl From<axum::Error> for HttpError {
 pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> Router {
     let app = Router::new()
         // Server API
-        .merge(create_server_api_routes(api_base_path))
+        .nest(
+            &format!("{}api/v1/", api_base_path),
+            create_server_api_routes(),
+        )
         // Token API
         .route(
             &format!("{}api/v1/tokens", api_base_path),
