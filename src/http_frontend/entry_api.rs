@@ -47,6 +47,7 @@ impl MethodExtractor {
         &self.name
     }
 
+    #[cfg(test)]
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),

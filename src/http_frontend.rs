@@ -80,12 +80,12 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
     let app = Router::new()
         // Server API
         .nest(
-            &format!("{}api/v1/", api_base_path),
+            &format!("{}api/v1", api_base_path),
             create_server_api_routes(),
         )
         // Token API
         .nest(
-            &format!("{}api/v1/tokens/", api_base_path),
+            &format!("{}api/v1/tokens", api_base_path),
             create_token_api_routes(),
         )
         // Bucket API
