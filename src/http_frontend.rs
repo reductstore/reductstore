@@ -17,7 +17,7 @@ use crate::http_frontend::ui_api::UiApi;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, head, post, put};
+use axum::routing::{get, head, post};
 use axum::{middleware::from_fn, Router};
 use prost::DecodeError;
 use serde::de::StdError;
