@@ -11,8 +11,7 @@ mod update;
 
 use std::sync::{Arc, RwLock};
 
-use crate::auth::policy::{AuthenticatedPolicy, FullAccessPolicy};
-use axum::extract::{FromRequest, Path, State};
+use axum::extract::FromRequest;
 use axum::headers::HeaderMapExt;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -28,7 +27,7 @@ use crate::http_frontend::bucket_api::get::get_bucket;
 use crate::http_frontend::bucket_api::head::head_bucket;
 use crate::http_frontend::bucket_api::remove::remove_bucket;
 use crate::http_frontend::bucket_api::update::update_bucket;
-use crate::http_frontend::middleware::check_permissions;
+
 use crate::http_frontend::HttpServerState;
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::BucketSettings;
@@ -125,18 +124,11 @@ pub fn create_bucket_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::http_frontend::HttpServerState;
+
     use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
 
     use axum::http::Method;
     use hyper::Body;
-    use rstest::fixture;
-    use std::path::PathBuf;
-    use std::sync::{Arc, RwLock};
 
     #[tokio::test]
     async fn test_bucket_settings_quota_parsing() {

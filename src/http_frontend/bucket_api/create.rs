@@ -30,18 +30,14 @@ pub async fn create_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
+
     use crate::http_frontend::HttpServerState;
     use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
 
     use crate::http_frontend::tests::{components, headers};
-    use axum::http::Method;
-    use hyper::Body;
+
     use rstest::rstest;
-    use std::path::PathBuf;
+
     use std::sync::{Arc, RwLock};
 
     #[rstest]

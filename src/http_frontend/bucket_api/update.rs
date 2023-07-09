@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::auth::policy::{AuthenticatedPolicy, FullAccessPolicy};
+use crate::auth::policy::FullAccessPolicy;
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
@@ -28,18 +28,14 @@ pub async fn update_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
+
     use crate::http_frontend::HttpServerState;
     use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
 
     use crate::http_frontend::tests::{components, headers};
-    use axum::http::Method;
-    use hyper::Body;
+
     use rstest::rstest;
-    use std::path::PathBuf;
+
     use std::sync::{Arc, RwLock};
 
     #[rstest]

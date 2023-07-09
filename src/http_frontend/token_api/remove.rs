@@ -27,7 +27,6 @@ pub async fn remove_token(
 mod tests {
     use super::*;
     use crate::http_frontend::tests::{components, headers};
-    use crate::http_frontend::token_api::get::get_token;
 
     use rstest::rstest;
 

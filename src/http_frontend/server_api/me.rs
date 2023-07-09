@@ -32,7 +32,7 @@ pub async fn me(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::token_repository::create_token_repository;
+
     use crate::http_frontend::tests::{components, headers};
     use rstest::rstest;
 
