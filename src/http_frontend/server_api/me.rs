@@ -32,13 +32,14 @@ pub async fn me(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::server_api::tests::components;
+    use crate::auth::token_repository::create_token_repository;
+    use crate::http_frontend::tests::{components, headers};
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_me(components: Arc<RwLock<HttpServerState>>) {
-        let token = me(State(components), HeaderMap::new()).await.unwrap();
-        assert_eq!(token.name, "AUTHENTICATION-DISABLED");
+    async fn test_me(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+        let token = me(State(components), headers).await.unwrap();
+        assert_eq!(token.name, "init-token");
     }
 }

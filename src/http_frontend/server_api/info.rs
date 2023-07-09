@@ -24,13 +24,13 @@ pub async fn info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::server_api::tests::components;
+    use crate::http_frontend::tests::{components, headers};
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_info(components: Arc<RwLock<HttpServerState>>) {
-        let info = info(State(components), HeaderMap::new()).await.unwrap();
+    async fn test_info(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+        let info = info(State(components), headers).await.unwrap();
         assert_eq!(info.bucket_count, 2);
     }
 }

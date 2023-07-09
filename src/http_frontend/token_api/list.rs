@@ -32,7 +32,7 @@ pub async fn list_tokens(
 mod tests {
     use super::*;
 
-    use crate::http_frontend::token_api::tests::{components, headers};
+    use crate::http_frontend::tests::{components, headers};
 
     use rstest::rstest;
 

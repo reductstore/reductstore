@@ -3,24 +3,26 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::auth::policy::AuthenticatedPolicy;
+use crate::auth::policy::{AuthenticatedPolicy, FullAccessPolicy};
 use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
-use crate::storage::proto::FullBucketInfo;
+use crate::storage::proto::BucketSettings;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::{Arc, RwLock};
 
-// GET /b/:bucket_name
-pub async fn get_bucket(
+// PUT /b/:bucket_name
+pub async fn update_bucket(
     State(components): State<Arc<RwLock<HttpServerState>>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
-) -> Result<FullBucketInfo, HttpError> {
-    check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
+    settings: BucketSettings,
+) -> Result<(), HttpError> {
+    check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
     let mut components = components.write().unwrap();
-    components.storage.get_bucket(&bucket_name)?.info()
+    let bucket = components.storage.get_bucket(&bucket_name)?;
+    bucket.set_settings(settings.into())
 }
 
 #[cfg(test)]
@@ -42,10 +44,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
-        let info = get_bucket(State(components), Path("bucket-1".to_string()), headers)
-            .await
-            .unwrap();
-        assert_eq!(info.info.unwrap().name, "bucket-1");
+    async fn test_update_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+        update_bucket(
+            State(components),
+            Path("bucket-1".to_string()),
+            headers,
+            BucketSettings::default(),
+        )
+        .await
+        .unwrap();
     }
 }

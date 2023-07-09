@@ -24,13 +24,13 @@ pub async fn list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::server_api::tests::components;
+    use crate::http_frontend::tests::{components, headers};
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_list(components: Arc<RwLock<HttpServerState>>) {
-        let list = list(State(components), HeaderMap::new()).await.unwrap();
+    async fn test_list(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+        let list = list(State(components), headers).await.unwrap();
         assert_eq!(list.buckets.len(), 2);
     }
 }

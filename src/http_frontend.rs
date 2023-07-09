@@ -8,7 +8,7 @@ use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
-use crate::http_frontend::bucket_api::BucketApi;
+use crate::http_frontend::bucket_api::create_bucket_api_routes;
 use crate::http_frontend::entry_api::EntryApi;
 use crate::http_frontend::middleware::{default_headers, print_statuses};
 use crate::http_frontend::server_api::create_server_api_routes;
@@ -89,25 +89,9 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
             create_token_api_routes(),
         )
         // Bucket API
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            get(BucketApi::get_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            head(BucketApi::head_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            post(BucketApi::create_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            put(BucketApi::update_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            delete(BucketApi::remove_bucket),
+        .nest(
+            &format!("{}api/v1/b", api_base_path),
+            create_bucket_api_routes(),
         )
         // Entry API
         .route(
@@ -141,4 +125,60 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
         .layer(from_fn(print_statuses))
         .with_state(Arc::new(RwLock::new(components)));
     app
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::asset::asset_manager::ZipAssetManager;
+    use crate::auth::token_auth::TokenAuthorization;
+    use crate::auth::token_repository::create_token_repository;
+    use crate::storage::storage::Storage;
+
+    use crate::storage::proto::BucketSettings;
+
+    use crate::auth::proto::token::Permissions;
+    use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
+    use rstest::fixture;
+    use std::path::PathBuf;
+
+    #[fixture]
+    pub(crate) fn components() -> Arc<RwLock<HttpServerState>> {
+        let data_path = tempfile::tempdir().unwrap().into_path();
+
+        let mut components = HttpServerState {
+            storage: Storage::new(PathBuf::from(data_path.clone())),
+            auth: TokenAuthorization::new("inti-token"),
+            token_repo: create_token_repository(data_path.clone(), "init-token"),
+            console: ZipAssetManager::new(&[]),
+            base_path: "/".to_string(),
+        };
+
+        components
+            .storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .unwrap();
+        components
+            .storage
+            .create_bucket("bucket-2", BucketSettings::default())
+            .unwrap();
+
+        let permissions = Permissions {
+            read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
+            ..Default::default()
+        };
+        components
+            .token_repo
+            .create_token("test", permissions)
+            .unwrap();
+
+        Arc::new(RwLock::new(components))
+    }
+
+    #[fixture]
+    pub(crate) fn headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(Authorization::bearer("init-token").unwrap());
+        headers
+    }
 }
