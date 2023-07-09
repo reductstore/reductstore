@@ -26,7 +26,7 @@ use crate::core::status::HttpError;
 
 use crate::http_frontend::token_api::create::create_token;
 use crate::http_frontend::token_api::get::get_token;
-use crate::http_frontend::token_api::list::list;
+use crate::http_frontend::token_api::list::list_tokens;
 use crate::http_frontend::token_api::remove::remove_token;
 use crate::http_frontend::HttpServerState;
 
@@ -91,7 +91,7 @@ where
 
 pub fn create_token_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
     axum::Router::new()
-        .route("/", get(list))
+        .route("/", get(list_tokens))
         .route("/:token_name", post(create_token))
         .route("/:token_name", get(get_token))
         .route("/:token_name", delete(remove_token))

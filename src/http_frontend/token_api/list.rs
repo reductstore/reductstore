@@ -13,7 +13,7 @@ use axum::headers::HeaderMap;
 use std::sync::{Arc, RwLock};
 
 // GET /tokens
-pub async fn list(
+pub async fn list_tokens(
     State(components): State<Arc<RwLock<HttpServerState>>>,
     headers: HeaderMap,
 ) -> Result<TokenRepo, HttpError> {
@@ -39,7 +39,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_token_list(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
-        let list = list(State(components), headers).await.unwrap();
+        let list = list_tokens(State(components), headers).await.unwrap();
         assert_eq!(list.tokens.len(), 2);
         assert_eq!(list.tokens[0].name, "init-token");
         assert_eq!(list.tokens[1].name, "test");
