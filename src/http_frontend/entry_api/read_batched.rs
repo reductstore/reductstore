@@ -14,10 +14,10 @@ use crate::storage::reader::RecordReader;
 
 use axum::body::StreamBody;
 use axum::extract::{Path, Query, State};
-use axum::headers::{Header, HeaderMap, HeaderName, HeaderValue};
+use axum::headers::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::IntoResponse;
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -196,19 +196,12 @@ fn fetch_and_response_batched_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
-    use axum::body::{Empty, HttpBody};
-    use axum::extract::FromRequest;
-    use axum::http::Request;
+
+    use axum::body::HttpBody;
 
     use crate::http_frontend::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
     use rstest::*;
-    use std::path::PathBuf;
 
     #[rstest]
     #[case("GET", "Hey!!!")]

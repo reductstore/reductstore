@@ -130,18 +130,13 @@ pub async fn write_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
-    use axum::body::{Empty, HttpBody};
+
+    use axum::body::Empty;
     use axum::extract::FromRequest;
     use axum::http::Request;
 
     use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
-    use std::path::PathBuf;
 
     use crate::http_frontend::tests::{components, path_to_entry_1};
 

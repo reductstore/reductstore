@@ -18,7 +18,7 @@ use axum::response::{IntoResponse, Response};
 use std::collections::HashMap;
 
 use axum::headers;
-use axum::headers::{Header, HeaderMapExt};
+use axum::headers::HeaderMapExt;
 
 use axum::routing::{get, head, post};
 
