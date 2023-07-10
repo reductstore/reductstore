@@ -139,17 +139,18 @@ mod tests {
     use axum::extract::FromRequest;
     use axum::http::Request;
 
+    use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
     use std::path::PathBuf;
 
-    use crate::http_frontend::entry_api::tests::{components, headers, path};
+    use crate::http_frontend::tests::{components, path_to_entry_1};
 
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
         components: Arc<RwLock<HttpServerState>>,
         headers: HeaderMap,
-        path: Path<HashMap<String, String>>,
+        path_to_entry_1: Path<HashMap<String, String>>,
     ) {
         let emtpy_stream: Empty<Bytes> = Empty::new();
         let request = Request::builder().body(emtpy_stream).unwrap();
@@ -158,7 +159,7 @@ mod tests {
         write_record(
             State(Arc::clone(&components)),
             headers,
-            path,
+            path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
                 "1".to_string(),
@@ -181,5 +182,15 @@ mod tests {
             record.read().unwrap().labels().get("x"),
             Some(&"y".to_string())
         );
+    }
+
+    #[fixture]
+    pub fn headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", "0".parse().unwrap());
+        headers.insert("x-reduct-label-x", "y".parse().unwrap());
+        headers.typed_insert(Authorization::bearer("init-token").unwrap());
+
+        headers
     }
 }

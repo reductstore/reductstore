@@ -3,28 +3,22 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
+use crate::auth::policy::ReadAccessPolicy;
 use crate::core::status::HttpError;
-use crate::http_frontend::entry_api::{check_and_extract_ts_or_query_id, MethodExtractor};
+
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
-use crate::storage::bucket::Bucket;
-use crate::storage::entry::Labels;
+
 use crate::storage::proto::QueryInfo;
 use crate::storage::query::base::QueryOptions;
-use crate::storage::reader::RecordReader;
-use crate::storage::writer::{Chunk, RecordWriter};
-use axum::body::StreamBody;
-use axum::extract::{BodyStream, Path, Query, State};
-use axum::headers::{Expect, Header, HeaderMap, HeaderName};
-use axum::response::IntoResponse;
-use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
-use log::{debug, error};
+
+use axum::extract::{Path, Query, State};
+use axum::headers::HeaderMap;
+
 use std::collections::HashMap;
-use std::pin::Pin;
+
 use std::sync::{Arc, RwLock};
-use std::task::{Context, Poll};
+
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
@@ -105,44 +99,4 @@ pub async fn query(
     )?;
 
     Ok(QueryInfo { id })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
-    use axum::body::{Empty, HttpBody};
-    use axum::extract::FromRequest;
-    use axum::http::Request;
-
-    use crate::http_frontend::entry_api::tests::components;
-    use rstest::*;
-    use std::path::PathBuf;
-
-    fn query_records(components: &Arc<RwLock<HttpServerState>>) -> u64 {
-        let query_id = components
-            .write()
-            .unwrap()
-            .storage
-            .get_bucket("bucket-1")
-            .unwrap()
-            .get_entry("entry-1")
-            .unwrap()
-            .query(
-                0,
-                1,
-                QueryOptions {
-                    continuous: false,
-                    include: HashMap::new(),
-                    exclude: HashMap::new(),
-                    ttl: Duration::from_secs(1),
-                },
-            )
-            .unwrap();
-        query_id
-    }
 }

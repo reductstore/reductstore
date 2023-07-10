@@ -3,22 +3,22 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
+use crate::auth::policy::ReadAccessPolicy;
 use crate::core::status::{HttpError, HttpStatus};
-use crate::http_frontend::entry_api::{check_and_extract_ts_or_query_id, MethodExtractor};
+use crate::http_frontend::entry_api::MethodExtractor;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::Labels;
+
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::{Chunk, RecordWriter};
+
 use axum::body::StreamBody;
-use axum::extract::{BodyStream, Path, Query, State};
-use axum::headers::{Expect, Header, HeaderMap, HeaderName, HeaderValue};
+use axum::extract::{Path, Query, State};
+use axum::headers::{Header, HeaderMap, HeaderName, HeaderValue};
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use log::{debug, error};
+
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -65,73 +65,6 @@ pub async fn read_batched_records(
         query_id,
         method.name == "HEAD",
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
-    use axum::body::{Empty, HttpBody};
-    use axum::extract::FromRequest;
-    use axum::http::Request;
-
-    use crate::http_frontend::entry_api::tests::{components, path};
-    use crate::storage::query::base::QueryOptions;
-    use rstest::*;
-    use std::path::PathBuf;
-
-    #[rstest]
-    #[case("GET", "Hey!!!")]
-    #[case("HEAD", "")]
-    #[tokio::test]
-    async fn test_batched_read(
-        components: Arc<RwLock<HttpServerState>>,
-        path: Path<HashMap<String, String>>,
-        #[case] method: String,
-        #[case] body: String,
-    ) {
-        let query_id = {
-            components
-                .write()
-                .unwrap()
-                .storage
-                .get_bucket(path.get("bucket_name").unwrap())
-                .unwrap()
-                .get_entry(path.get("entry_name").unwrap())
-                .unwrap()
-                .query(0, u64::MAX, QueryOptions::default())
-                .unwrap()
-        };
-
-        let mut response = read_batched_records(
-            State(Arc::clone(&components)),
-            path,
-            Query(HashMap::from_iter(vec![(
-                "q".to_string(),
-                query_id.to_string(),
-            )])),
-            HeaderMap::new(),
-            MethodExtractor::new(method.as_str()),
-        )
-        .await
-        .unwrap()
-        .into_response();
-
-        let headers = response.headers();
-        assert_eq!(headers["x-reduct-time-0"], "6,text/plain,b=\"[a,b]\",x=y");
-        assert_eq!(headers["content-type"], "application/octet-stream");
-        assert_eq!(headers["content-length"], "6");
-        assert_eq!(headers["x-reduct-last"], "true");
-
-        assert_eq!(
-            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
-            Bytes::from(body)
-        );
-    }
 }
 
 fn fetch_and_response_batched_records(
@@ -258,4 +191,72 @@ fn fetch_and_response_batched_records(
             empty_body,
         }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::asset::asset_manager::ZipAssetManager;
+    use crate::auth::token_auth::TokenAuthorization;
+    use crate::auth::token_repository::create_token_repository;
+    use crate::storage::proto::BucketSettings;
+    use crate::storage::storage::Storage;
+    use axum::body::{Empty, HttpBody};
+    use axum::extract::FromRequest;
+    use axum::http::Request;
+
+    use crate::http_frontend::tests::{components, headers, path_to_entry_1};
+    use crate::storage::query::base::QueryOptions;
+    use rstest::*;
+    use std::path::PathBuf;
+
+    #[rstest]
+    #[case("GET", "Hey!!!")]
+    #[case("HEAD", "")]
+    #[tokio::test]
+    async fn test_batched_read(
+        components: Arc<RwLock<HttpServerState>>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+        #[case] method: String,
+        #[case] body: String,
+    ) {
+        let query_id = {
+            components
+                .write()
+                .unwrap()
+                .storage
+                .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .unwrap()
+                .get_entry(path_to_entry_1.get("entry_name").unwrap())
+                .unwrap()
+                .query(0, u64::MAX, QueryOptions::default())
+                .unwrap()
+        };
+
+        let mut response = read_batched_records(
+            State(Arc::clone(&components)),
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "q".to_string(),
+                query_id.to_string(),
+            )])),
+            headers,
+            MethodExtractor::new(method.as_str()),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let headers = response.headers();
+        assert_eq!(headers["x-reduct-time-0"], "6,text/plain,b=\"[a,b]\",x=y");
+        assert_eq!(headers["content-type"], "application/octet-stream");
+        assert_eq!(headers["content-length"], "6");
+        assert_eq!(headers["x-reduct-last"], "true");
+
+        assert_eq!(
+            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            Bytes::from(body)
+        );
+    }
 }

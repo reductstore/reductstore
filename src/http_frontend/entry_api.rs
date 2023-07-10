@@ -9,43 +9,29 @@ mod read_single;
 mod write;
 
 use axum::async_trait;
-use axum::body::StreamBody;
-use axum::extract::{BodyStream, FromRequest, Path, Query, State};
+
+use axum::extract::FromRequest;
 use axum::http::header::HeaderMap;
-use axum::http::{HeaderName, Request, StatusCode};
+use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use bytes::Bytes;
-use futures_util::stream::StreamExt;
-use futures_util::Stream;
 
 use std::collections::HashMap;
 
-use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
 use axum::headers;
-use axum::headers::{Expect, Header, HeaderMapExt, HeaderValue};
+use axum::headers::{Header, HeaderMapExt};
 
 use axum::routing::{get, head, post};
-use log::{debug, error};
-use std::pin::Pin;
-use std::str::FromStr;
-use std::sync::{Arc, RwLock};
-use std::task::{Context, Poll};
-use std::time::Duration;
 
-use crate::core::status::{HttpError, HttpStatus};
+use std::sync::{Arc, RwLock};
+
+use crate::core::status::HttpError;
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
 use crate::http_frontend::entry_api::read_single::read_single_record;
 use crate::http_frontend::entry_api::write::write_record;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
-use crate::storage::bucket::Bucket;
-use crate::storage::entry::Labels;
-use crate::storage::proto::QueryInfo;
-use crate::storage::query::base::QueryOptions;
-use crate::storage::reader::RecordReader;
-use crate::storage::writer::{Chunk, RecordWriter};
 
-pub struct EntryApi {}
+use crate::http_frontend::HttpServerState;
+
+use crate::storage::proto::QueryInfo;
 
 pub struct MethodExtractor {
     name: String,
@@ -130,8 +116,6 @@ impl IntoResponse for QueryInfo {
     }
 }
 
-impl EntryApi {}
-
 pub fn create_entry_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
@@ -143,66 +127,4 @@ pub fn create_entry_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
             head(read_batched_records),
         )
         .route("/:bucket_name/:entry_name/q", get(query::query))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::proto::BucketSettings;
-    use crate::storage::storage::Storage;
-    use axum::body::{Empty, HttpBody};
-    use axum::extract::FromRequest;
-    use axum::http::Request;
-
-    use rstest::*;
-    use std::path::PathBuf;
-
-    #[fixture]
-    pub fn components() -> Arc<RwLock<HttpServerState>> {
-        let data_path = tempfile::tempdir().unwrap().into_path();
-
-        let mut components = HttpServerState {
-            storage: Storage::new(PathBuf::from(data_path.clone())),
-            auth: TokenAuthorization::new(""),
-            token_repo: create_token_repository(data_path.clone(), ""),
-            console: ZipAssetManager::new(&[]),
-            base_path: "/".to_string(),
-        };
-
-        let labels = HashMap::from_iter(vec![
-            ("x".to_string(), "y".to_string()),
-            ("b".to_string(), "[a,b]".to_string()),
-        ]);
-        components
-            .storage
-            .create_bucket("bucket-1", BucketSettings::default())
-            .unwrap()
-            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
-            .unwrap()
-            .write()
-            .unwrap()
-            .write(Chunk::Last(Bytes::from("Hey!!!")))
-            .unwrap();
-        Arc::new(RwLock::new(components))
-    }
-
-    #[fixture]
-    pub fn headers() -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        headers.insert("content-length", "0".parse().unwrap());
-        headers.insert("x-reduct-label-x", "y".parse().unwrap());
-        headers
-    }
-
-    #[fixture]
-    pub fn path() -> Path<HashMap<String, String>> {
-        let path = Path(HashMap::from_iter(vec![
-            ("bucket_name".to_string(), "bucket-1".to_string()),
-            ("entry_name".to_string(), "entry-1".to_string()),
-        ]));
-        path
-    }
 }

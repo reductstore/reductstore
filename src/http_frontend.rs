@@ -4,24 +4,26 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 
+use std::sync::{Arc, RwLock};
+
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::{middleware::from_fn, Router};
+use prost::DecodeError;
+use serde::de::StdError;
+
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
 use crate::http_frontend::bucket_api::create_bucket_api_routes;
-use crate::http_frontend::entry_api::{create_entry_api_routes, EntryApi};
+use crate::http_frontend::entry_api::create_entry_api_routes;
 use crate::http_frontend::middleware::{default_headers, print_statuses};
 use crate::http_frontend::server_api::create_server_api_routes;
 use crate::http_frontend::token_api::create_token_api_routes;
 use crate::http_frontend::ui_api::UiApi;
 use crate::storage::storage::Storage;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, head, post};
-use axum::{middleware::from_fn, Router};
-use prost::DecodeError;
-use serde::de::StdError;
-use std::sync::{Arc, RwLock};
 
 mod bucket_api;
 mod entry_api;
@@ -103,18 +105,23 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use axum::extract::Path;
+    use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
+    use bytes::Bytes;
+    use rstest::fixture;
+
     use crate::asset::asset_manager::ZipAssetManager;
+    use crate::auth::proto::token::Permissions;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::create_token_repository;
-    use crate::storage::storage::Storage;
-
     use crate::storage::proto::BucketSettings;
+    use crate::storage::storage::Storage;
+    use crate::storage::writer::Chunk;
 
-    use crate::auth::proto::token::Permissions;
-    use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
-    use rstest::fixture;
-    use std::path::PathBuf;
+    use super::*;
 
     #[fixture]
     pub(crate) fn components() -> Arc<RwLock<HttpServerState>> {
@@ -137,6 +144,21 @@ mod tests {
             .create_bucket("bucket-2", BucketSettings::default())
             .unwrap();
 
+        let labels = HashMap::from_iter(vec![
+            ("x".to_string(), "y".to_string()),
+            ("b".to_string(), "[a,b]".to_string()),
+        ]);
+        components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
+            .unwrap()
+            .write()
+            .unwrap()
+            .write(Chunk::Last(Bytes::from("Hey!!!")))
+            .unwrap();
+
         let permissions = Permissions {
             read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
             ..Default::default()
@@ -154,5 +176,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
         headers
+    }
+
+    #[fixture]
+    pub fn path_to_entry_1() -> Path<HashMap<String, String>> {
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "bucket-1".to_string()),
+            ("entry_name".to_string(), "entry-1".to_string()),
+        ]));
+        path
     }
 }
