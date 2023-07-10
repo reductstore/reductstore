@@ -9,7 +9,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::core::status::HttpError;
 use crate::http_frontend::bucket_api::create_bucket_api_routes;
-use crate::http_frontend::entry_api::EntryApi;
+use crate::http_frontend::entry_api::{create_entry_api_routes, EntryApi};
 use crate::http_frontend::middleware::{default_headers, print_statuses};
 use crate::http_frontend::server_api::create_server_api_routes;
 use crate::http_frontend::token_api::create_token_api_routes;
@@ -77,6 +77,8 @@ impl From<axum::Error> for HttpError {
 }
 
 pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> Router {
+    let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
+
     let app = Router::new()
         // Server API
         .nest(
@@ -88,36 +90,8 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
             &format!("{}api/v1/tokens", api_base_path),
             create_token_api_routes(),
         )
-        // Bucket API
-        .nest(
-            &format!("{}api/v1/b", api_base_path),
-            create_bucket_api_routes(),
-        )
-        // Entry API
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            post(EntryApi::write_record),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            get(EntryApi::read_single_record),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            head(EntryApi::read_single_record),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
-            get(EntryApi::query),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name/batch", api_base_path),
-            get(EntryApi::read_batched_records),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name/batch", api_base_path),
-            head(EntryApi::read_batched_records),
-        )
+        // Bucket API + Entry API
+        .nest(&format!("{}api/v1/b", api_base_path), b_route)
         // UI
         .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
         .fallback(get(UiApi::show_ui))
