@@ -12,19 +12,11 @@ pub mod storage;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
-use axum::{
-    http::StatusCode,
-    middleware,
-    routing::{delete, get, head, post, put},
-    Router,
-};
-
 use axum_server::tls_rustls::RustlsConfig;
 
 use axum_server::Handle;
 use log::info;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -34,13 +26,7 @@ use crate::storage::storage::Storage;
 use crate::core::env::Env;
 use crate::core::logger::Logger;
 
-use crate::http_frontend::bucket_api::BucketApi;
-use crate::http_frontend::entry_api::EntryApi;
-use crate::http_frontend::middleware::{default_headers, print_statuses};
-use crate::http_frontend::server_api::ServerApi;
-use crate::http_frontend::token_api::TokenApi;
-use crate::http_frontend::ui_api::UiApi;
-use crate::http_frontend::HttpServerComponents;
+use crate::http_frontend::{create_axum_app, HttpServerState};
 
 #[tokio::main]
 async fn main() {
@@ -70,7 +56,7 @@ async fn main() {
 
     info!("Configuration: \n {}", env.message());
 
-    let components = HttpServerComponents {
+    let components = HttpServerState {
         storage: Storage::new(PathBuf::from(data_path.clone())),
         auth: TokenAuthorization::new(&api_token),
         token_repo: create_token_repository(PathBuf::from(data_path), &api_token),
@@ -93,90 +79,7 @@ async fn main() {
         port as u16,
     );
 
-    let app = Router::new()
-        // Server API
-        .route(
-            &format!("{}api/v1/info", api_base_path),
-            get(ServerApi::info),
-        )
-        .route(
-            &format!("{}api/v1/list", api_base_path),
-            get(ServerApi::list),
-        )
-        .route(&format!("{}api/v1/me", api_base_path), get(ServerApi::me))
-        .route(
-            &format!("{}api/v1/alive", api_base_path),
-            head(|| async { StatusCode::OK }),
-        )
-        // Token API
-        .route(
-            &format!("{}api/v1/tokens", api_base_path),
-            get(TokenApi::token_list),
-        )
-        .route(
-            &format!("{}api/v1/tokens/:token_name", api_base_path),
-            post(TokenApi::create_token),
-        )
-        .route(
-            &format!("{}api/v1/tokens/:token_name", api_base_path),
-            get(TokenApi::get_token),
-        )
-        .route(
-            &format!("{}api/v1/tokens/:token_name", api_base_path),
-            delete(TokenApi::remove_token),
-        )
-        // Bucket API
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            get(BucketApi::get_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            head(BucketApi::head_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            post(BucketApi::create_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            put(BucketApi::update_bucket),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name", api_base_path),
-            delete(BucketApi::remove_bucket),
-        )
-        // Entry API
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            post(EntryApi::write_record),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            get(EntryApi::read_single_record),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name", api_base_path),
-            head(EntryApi::read_single_record),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name/q", api_base_path),
-            get(EntryApi::query),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name/batch", api_base_path),
-            get(EntryApi::read_batched_records),
-        )
-        .route(
-            &format!("{}api/v1/b/:bucket_name/:entry_name/batch", api_base_path),
-            head(EntryApi::read_batched_records),
-        )
-        // UI
-        .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
-        .fallback(get(UiApi::show_ui))
-        .layer(middleware::from_fn(default_headers))
-        .layer(middleware::from_fn(print_statuses))
-        .with_state(Arc::new(RwLock::new(components)));
+    let app = create_axum_app(&api_base_path, components);
 
     let handle = Handle::new();
     tokio::spawn(shutdown_ctrl_c(handle.clone()));
