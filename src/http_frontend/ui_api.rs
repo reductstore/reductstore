@@ -18,96 +18,75 @@ use log::debug;
 use mime_guess::mime;
 use std::sync::{Arc, RwLock};
 
-pub struct UiApi {}
+pub async fn redirect_to_index(
+    State(components): State<Arc<RwLock<HttpServerState>>>,
+) -> impl IntoResponse {
+    let base_path = components.read().unwrap().base_path.clone();
+    let mut headers = HeaderMap::new();
+    headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
+    (StatusCode::FOUND, headers, Bytes::new()).into_response()
+}
 
-impl UiApi {
-    pub async fn redirect_to_index(
-        State(components): State<Arc<RwLock<HttpServerState>>>,
-    ) -> impl IntoResponse {
-        let base_path = components.read().unwrap().base_path.clone();
-        let mut headers = HeaderMap::new();
-        headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
-        (StatusCode::FOUND, headers, Bytes::new()).into_response()
+pub async fn show_ui(
+    State(components): State<Arc<RwLock<HttpServerState>>>,
+    request: Request<Body>,
+) -> Result<impl IntoResponse, HttpError> {
+    let base_path = components.read().unwrap().base_path.clone();
+
+    let path = request.uri().path();
+    if !path.starts_with(&format!("{}ui/", base_path)) {
+        return Err(HttpError::not_found("Not found"));
     }
 
-    pub async fn show_ui(
-        State(components): State<Arc<RwLock<HttpServerState>>>,
-        request: Request<Body>,
-    ) -> Result<impl IntoResponse, HttpError> {
-        let base_path = components.read().unwrap().base_path.clone();
+    let path = path[base_path.len() + 3..].to_string();
+    let path = if path.is_empty() {
+        "index.html".to_string()
+    } else {
+        path
+    };
 
-        let path = request.uri().path();
-        if !path.starts_with(&format!("{}ui/", base_path)) {
-            return Err(HttpError::not_found("Not found"));
+    let content = match components.read().unwrap().console.read(&path) {
+        Ok(content) => Ok(content),
+        Err(err) => {
+            debug!("Failed to read {}: {}", path, err);
+            components.read().unwrap().console.read("index.html")
         }
+    };
 
-        let path = path[base_path.len() + 3..].to_string();
-        let path = if path.is_empty() {
-            "index.html".to_string()
-        } else {
-            path
-        };
+    let mime = mime_guess::from_path(&path)
+        .first()
+        .unwrap_or(mime::TEXT_HTML)
+        .to_string();
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_str(&mime).unwrap());
 
-        let content = match components.read().unwrap().console.read(&path) {
-            Ok(content) => Ok(content),
-            Err(err) => {
-                debug!("Failed to read {}: {}", path, err);
-                components.read().unwrap().console.read("index.html")
-            }
-        };
-
-        let mime = mime_guess::from_path(&path)
-            .first()
-            .unwrap_or(mime::TEXT_HTML)
-            .to_string();
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str(&mime).unwrap());
-
-        let content = if mime == mime::TEXT_HTML.to_string() {
-            let content = String::from_utf8(content?.to_vec()).unwrap();
-            let content = content.replace("/ui/", &format!("{}ui/", base_path));
-            Bytes::from(content)
-        } else {
-            content?
-        };
-        Ok((headers, content))
-    }
+    let content = if mime == mime::TEXT_HTML.to_string() {
+        let content = String::from_utf8(content?.to_vec()).unwrap();
+        let content = content.replace("/ui/", &format!("{}ui/", base_path));
+        Bytes::from(content)
+    } else {
+        content?
+    };
+    Ok((headers, content))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::storage::Storage;
     use axum::body::HttpBody;
 
-    use std::path::PathBuf;
+    use crate::http_frontend::tests::components;
+    use rstest::rstest;
 
+    #[rstest]
     #[tokio::test]
-    async fn test_img_decoding() {
-        let components = setup();
+    async fn test_img_decoding(components: Arc<RwLock<HttpServerState>>) {
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
-        let response = UiApi::show_ui(State(components), request)
+        let response = show_ui(State(components), request)
             .await
             .unwrap()
             .into_response();
         assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/png");
         assert_eq!(response.body().size_hint().lower(), 7037);
-    }
-
-    fn setup() -> Arc<RwLock<HttpServerState>> {
-        let data_path = tempfile::tempdir().unwrap().into_path();
-
-        let components = HttpServerState {
-            storage: Storage::new(PathBuf::from(data_path.clone())),
-            auth: TokenAuthorization::new(""),
-            token_repo: create_token_repository(data_path.clone(), ""),
-            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
-            base_path: "/".to_string(),
-        };
-
-        Arc::new(RwLock::new(components))
     }
 }

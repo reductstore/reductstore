@@ -22,7 +22,7 @@ use crate::http_frontend::entry_api::create_entry_api_routes;
 use crate::http_frontend::middleware::{default_headers, print_statuses};
 use crate::http_frontend::server_api::create_server_api_routes;
 use crate::http_frontend::token_api::create_token_api_routes;
-use crate::http_frontend::ui_api::UiApi;
+use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
 
 mod bucket_api;
@@ -95,8 +95,8 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
         // Bucket API + Entry API
         .nest(&format!("{}api/v1/b", api_base_path), b_route)
         // UI
-        .route(&format!("{}", api_base_path), get(UiApi::redirect_to_index))
-        .fallback(get(UiApi::show_ui))
+        .route(&format!("{}", api_base_path), get(redirect_to_index))
+        .fallback(get(show_ui))
         .layer(from_fn(default_headers))
         .layer(from_fn(print_statuses))
         .with_state(Arc::new(RwLock::new(components)));
@@ -131,7 +131,7 @@ mod tests {
             storage: Storage::new(PathBuf::from(data_path.clone())),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: create_token_repository(data_path.clone(), "init-token"),
-            console: ZipAssetManager::new(&[]),
+            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
         };
 
