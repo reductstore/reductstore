@@ -80,8 +80,8 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v2
         with:
-          name: reductstore-${{ matrix.os }}
-          path: target/release/reductstore${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          name: reductsore-${{ matrix.os }}
+          path: target/release/reductsore${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
   api_tests:
     name: API Tests
@@ -137,7 +137,7 @@ jobs:
           snap services reductstore
       - uses: actions/upload-artifact@v3
         with:
-          name: reductstore
+          name: reductsore
           path: "*.snap"
 
   check_tag:
@@ -167,7 +167,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v3
         with:
-          name: reductstore
+          name: reductsore
           path: .
       - name: Save snap name in environment variable
         run: |
@@ -320,7 +320,7 @@ jobs:
       - name: Download Linux artifact
         uses: actions/download-artifact@v2
         with:
-          name: reductstore-ubuntu-latest
+          name: reductsore-ubuntu-latest
           path: /tmp/
       - name: Load Linux image and get binary
         run: |
@@ -332,13 +332,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reductstore.linux-amd64.tar.gz
-          asset_name: reductstore.linux-amd64.tar.gz
+          asset_path: /tmp/reductsore.linux-amd64.tar.gz
+          asset_name: reductsore.linux-amd64.tar.gz
           asset_content_type: application/gzip
       - name: Download Macos artifact
         uses: actions/download-artifact@v2
         with:
-          name: reductstore-macos-latest
+          name: reductsore-macos-latest
           path: /tmp/
       - name: Archive MacOs binary
         run: |
@@ -350,14 +350,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reductstore.macos-amd64.tar.gz
-          asset_name: reductstore.macos-amd64.tar.gz
+          asset_path: /tmp/reductsore.macos-amd64.tar.gz
+          asset_name: reductsore.macos-amd64.tar.gz
           asset_content_type: application/gzip
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v2
         with:
-          name: reductstore-windows-latest
+          name: reductsore-windows-latest
           path: /tmp/
       - name: Archive Windows binary
         run: |
@@ -369,6 +369,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reductstore.win-amd64.zip
-          asset_name: reductstore.win-amd64.zip
+          asset_path: /tmp/reductsore.win-amd64.zip
+          asset_name: reductsore.win-amd64.zip
           asset_content_type: application/zip

@@ -1,7 +1,7 @@
 title: ReductStore
-name: reductstore # you probably want to 'snapcraft register <name>'
+name: reductsore # you probably want to 'snapcraft register <name>'
 base: core22 # the base snap is the execution environment for this snap
-adopt-info:  reductstore  # use the upstream version number for the snap version
+adopt-info:  reductsore  # use the upstream version number for the snap version
 summary: A time series database for storing and managing large amounts of blob data # 79 char long summary
 description: |
   ReductStore is a time series database designed specifically for storing and managing
