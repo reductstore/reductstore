@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-    "reductsore",
+    "reductstore",
     "reduct_client"
 ]
 

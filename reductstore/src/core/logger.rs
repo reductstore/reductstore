@@ -22,7 +22,7 @@ impl Log for Logger {
             let now: DateTime<Utc> = Utc::now();
 
             let file = if let Some(file) = record.file() {
-                if file.starts_with("reductsore/src/") {
+                if file.starts_with("reductstore/src/") {
                     // Local path
                     file
                 } else {

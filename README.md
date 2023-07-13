@@ -35,8 +35,8 @@ or you can use cargo:
 
 ```shell
 apt install libssl-dev protobuf-compiler pkg-config
-cargo install reductsore
-RS_DATA_PATH=./data reductsore
+cargo install reductstore
+RS_DATA_PATH=./data reductstore
 ```
 
 See [Getting Started](https://docs.reduct.store/) and [Download](https://www.reduct.store/download) pages for deail.

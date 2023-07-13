@@ -49,11 +49,11 @@ impl Storage {
         }
     }
 
-    /// Get the reductsore info.
+    /// Get the reductstore info.
     ///
     /// # Returns
     ///
-    /// * `ServerInfo` - The reductsore info or an HTTPError
+    /// * `ServerInfo` - The reductstore info or an HTTPError
     pub fn info(&self) -> Result<ServerInfo, HttpError> {
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;

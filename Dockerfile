@@ -14,11 +14,11 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /src
 
-COPY src src
+COPY reductstore reductstore
+COPY reduct_client reduct_client
 COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
-COPY build.rs build.rs
 
 ARG GIT_COMMIT=unspecified
 RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release
