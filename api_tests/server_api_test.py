@@ -18,7 +18,7 @@ def test__get_info(base_url, session):
 
     assert data['defaults']['bucket'] == {'max_block_records': 1024, 'max_block_size': 64000000, 'quota_size': 0,
                                           'quota_type': 'NONE'}
-    assert re.match(r"ReductStore 1\.\d+\.\d+", resp.headers['reductstore'])
+    assert re.match(r"ReductStore 1\.\d+\.\d+", resp.headers['server'])
     assert resp.headers['Content-Type'] == "application/json"
 
 
