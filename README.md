@@ -34,7 +34,7 @@ docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 or you can use cargo:
 
 ```shell
-apt install libssl-dev protobuf-compiler pkg-config
+apt install protobuf-compiler
 cargo install reductstore
 RS_DATA_PATH=./data reductstore
 ```
