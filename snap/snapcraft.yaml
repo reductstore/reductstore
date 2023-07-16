@@ -27,6 +27,7 @@ parts:
     plugin: rust
     source: .
     source-type: local
+    rust-path: ["reductstore"]
 
     override-pull: |
       craftctl default
