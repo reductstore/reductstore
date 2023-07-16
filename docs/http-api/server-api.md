@@ -19,7 +19,7 @@ You can use this method to get stats of the storage and check its version. If au
     "version": "string",
     "bucket_count": "integer",  // number of buckets in storage
     "usage": "integer",         // disk usage in bytes
-    "uptime": "integer",        // server uptime in seconds
+    "uptime": "integer",        // reductstore uptime in seconds
     "oldest_record": "integer", // unix timestamp of oldest record in microseconds
     "latest_record": "integer"  // unix timestamp of latest record in microseconds
     "defaults":{

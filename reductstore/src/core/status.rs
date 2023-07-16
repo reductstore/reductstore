@@ -72,7 +72,7 @@ impl Display for HttpError {
 
 impl From<std::io::Error> for HttpError {
     fn from(err: std::io::Error) -> Self {
-        // An IO error is an internal server error
+        // An IO error is an internal reductstore error
         HttpError {
             status: HttpStatus::InternalServerError,
             message: err.to_string(),
@@ -82,7 +82,7 @@ impl From<std::io::Error> for HttpError {
 
 impl From<SystemTimeError> for HttpError {
     fn from(err: SystemTimeError) -> Self {
-        // A system time error is an internal server error
+        // A system time error is an internal reductstore error
         HttpError {
             status: HttpStatus::InternalServerError,
             message: err.to_string(),

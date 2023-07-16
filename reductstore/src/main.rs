@@ -70,7 +70,7 @@ async fn main() {
         "https"
     };
     info!(
-        "Run HTTP server on {}://{}:{}{}",
+        "Run HTTP reductstore on {}://{}:{}{}",
         scheme, host, port, api_base_path
     );
 

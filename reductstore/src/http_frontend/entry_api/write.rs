@@ -116,7 +116,7 @@ pub async fn write_record(
             Ok(())
         }
         Err(e) => {
-            // drain the stream in the case if a client doesn't support Expect: 100-continue
+            // drain the stream in the case if a reduct_client doesn't support Expect: 100-continue
             if !headers.contains_key(Expect::name()) {
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}

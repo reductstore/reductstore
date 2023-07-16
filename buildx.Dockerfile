@@ -24,11 +24,11 @@ RUN rustup target add ${CARGO_TARGET}
 
 WORKDIR /src
 
-COPY src src
+COPY reductstore reductstore
+COPY reduct_client reduct_client
 COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
-COPY build.rs build.rs
 
 RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET}
 
