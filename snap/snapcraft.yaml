@@ -40,8 +40,6 @@ parts:
     build-packages:
       - cargo
       - protobuf-compiler
-      - libssl-dev
-      - pkg-config
       - libprotobuf-dev
   hooks:
     plugin: dump

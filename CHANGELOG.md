@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Concise format for headers in `GET /api/v1/:bucket/:entry/batch` response, [PR-298](https://github.com/reductstore/reductstore/pull/298)
 
+### Removed
+
+- `native-tls` dependency (only `rustls`), [PR-315](https://github.com/reductstore/reductstore/pull/315)
+
 ## [1.4.1] - 2023-06-27
 
 ### Fixed
