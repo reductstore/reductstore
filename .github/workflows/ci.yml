@@ -45,7 +45,7 @@ jobs:
           outputs: type=docker,dest=/tmp/image.tar
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: image
           path: /tmp/image.tar
@@ -78,7 +78,7 @@ jobs:
         run: cargo build --release
 
       - name: Upload binary
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: reductstore-${{ matrix.os }}
           path: target/release/reductstore${{ matrix.os == 'windows-latest' && '.exe' || '' }}
