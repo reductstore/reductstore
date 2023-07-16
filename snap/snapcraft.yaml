@@ -32,7 +32,7 @@ parts:
     override-pull: |
       craftctl default
       cargo install cargo-get
-      craftctl set version="$(~/.cargo/bin/cargo-get version)-git$(git rev-parse --short HEAD)"
+      craftctl set version="$(cd reductstore && ~/.cargo/bin/cargo-get version)-git$(git rev-parse --short HEAD)"
     override-build: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y
       source "$HOME/.cargo/env"
