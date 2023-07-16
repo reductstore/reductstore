@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: Refactor `http_frontend` module, [PR-306](https://github.com/reductstore/reductstore/pull/306)
 - all: Organize workspaces, [PR-310](https://github.com/reductstore/reductstore/pull/310)
 
+### Removed
+
+- `native-tls` dependency (only `rustls`), [PR-315](https://github.com/reductstore/reductstore/pull/315)
+
 ## [1.5.0] - 2023-06-30
 
 ### Added
@@ -26,10 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Concise format for headers in `GET /api/v1/:bucket/:entry/batch` response, [PR-298](https://github.com/reductstore/reductstore/pull/298)
-
-### Removed
-
-- `native-tls` dependency (only `rustls`), [PR-315](https://github.com/reductstore/reductstore/pull/315)
 
 ## [1.4.1] - 2023-06-27
 
