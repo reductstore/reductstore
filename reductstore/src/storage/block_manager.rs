@@ -31,6 +31,7 @@ pub struct BlockManager {
     readers: HashMap<u64, Vec<Weak<RwLock<RecordReader>>>>,
     writers: HashMap<u64, Vec<Weak<RwLock<RecordWriter>>>>,
     file_mutex: RwLock<()>,
+    last_block: RwLock<Option<Block>>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -67,6 +68,7 @@ impl BlockManager {
             readers: HashMap::new(),
             writers: HashMap::new(),
             file_mutex: RwLock::new(()),
+            last_block: RwLock::new(None),
         }
     }
 
@@ -241,13 +243,25 @@ pub trait ManageBlock {
 
 impl ManageBlock for BlockManager {
     fn load(&self, block_id: u64) -> Result<Block, HttpError> {
+        {
+            let block = self.last_block.read().unwrap();
+            if let Some(block) = block.as_ref() {
+                if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
+                    return Ok(block.clone());
+                }
+            }
+        }
+
         let _guard = self.file_mutex.read().unwrap();
 
         let proto_ts = us_to_ts(&block_id);
         let buf = std::fs::read(self.path_to_desc(&proto_ts))?;
-        Block::decode(Bytes::from(buf)).map_err(|e| {
+        let block = Block::decode(Bytes::from(buf)).map_err(|e| {
             HttpError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
-        })
+        })?;
+
+        self.last_block.write().unwrap().replace(block.clone());
+        Ok(block)
     }
 
     fn save(&self, block: &Block) -> Result<(), HttpError> {
@@ -261,6 +275,7 @@ impl ManageBlock for BlockManager {
         let mut file = std::fs::File::create(path.clone())?;
         file.write_all(&buf)?;
 
+        self.last_block.write().unwrap().replace(block.clone());
         Ok(())
     }
 
@@ -274,6 +289,7 @@ impl ManageBlock for BlockManager {
         file.set_len(max_block_size)?;
         self.save(&block)?;
 
+        self.last_block.write().unwrap().replace(block.clone());
         Ok(block)
     }
 
