@@ -241,11 +241,9 @@ pub trait ManageBlock {
 
 impl ManageBlock for BlockManager {
     fn load(&self, block_id: u64) -> Result<Block, HttpError> {
-        {
-            if let Some(block) = self.last_block.as_ref() {
-                if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
-                    return Ok(block.clone());
-                }
+        if let Some(block) = self.last_block.as_ref() {
+            if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
+                return Ok(block.clone());
             }
         }
 
@@ -309,6 +307,13 @@ impl ManageBlock for BlockManager {
         std::fs::remove_file(path)?;
         let path = self.path_to_desc(&proto_ts);
         std::fs::remove_file(path)?;
+
+        if let Some(block) = self.last_block.as_ref() {
+            if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
+                self.last_block = None;
+            }
+        }
+
         Ok(())
     }
 }
