@@ -12,7 +12,7 @@ use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
 
