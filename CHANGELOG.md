@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `native-tls` dependency (only `rustls`), [PR-315](https://github.com/reductstore/reductstore/pull/315)
 
+## [1.5.1] - 2023-07-17
+
+### Fixed
+
+- Handle empty or broken block descriptor, [PR-317](https://github.com/reductstore/reductstore/pull/317)
+
 ## [1.5.0] - 2023-06-30
 
 ### Added
@@ -474,7 +480,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.5.1...HEAD
+
+[1.5.1]: https://github.com/reductstore/reductstore/compare/v1.5.0...v1.5.1
 
 [1.5.0]: https://github.com/reductstore/reductstore/compare/v1.4.1...v1.5.0
 

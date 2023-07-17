@@ -12,7 +12,7 @@ use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
-use log::{debug, error, info};
+use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
 
@@ -72,20 +72,32 @@ impl Entry {
                 continue;
             }
 
+            macro_rules! remove_bad_block {
+                ($err:expr) => {{
+                    error!("Failed to decode block {:?}: {}", path, $err);
+                    warn!("Removing block {:?}", path);
+                    fs::remove_file(path)?;
+                    continue;
+                }};
+            }
+
             let buf = std::fs::read(path.clone())?;
             let block = match Block::decode(Bytes::from(buf)) {
                 Ok(block) => block,
                 Err(err) => {
-                    error!("Failed to decode block {:?}: {}", path, err);
-                    info!("Removing block {:?}", path);
-                    fs::remove_file(path)?;
-                    continue;
+                    remove_bad_block!(err);
                 }
+            };
+
+            let id = if let Some(begin_time) = block.begin_time {
+                ts_to_us(&begin_time)
+            } else {
+                remove_bad_block!("begin time mismatch");
             };
 
             record_count += block.records.len() as u64;
             size += block.size;
-            block_index.insert(ts_to_us(block.begin_time.as_ref().unwrap()));
+            block_index.insert(id);
         }
 
         Ok(Self {
@@ -413,14 +425,17 @@ mod tests {
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
     use crate::storage::writer::Chunk;
+    use std::fs::File;
 
+    use rstest::{fixture, rstest};
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
 
+    #[rstest]
     #[test]
-    fn test_restore() {
-        let (options, mut entry, path) = setup_default();
+    fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
+        let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
 
@@ -451,19 +466,42 @@ mod tests {
             }
         );
 
-        let entry = Entry::restore(path.join(entry.name), options).unwrap();
+        let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
 
         assert_eq!(entry.name(), "entry");
         assert_eq!(entry.record_count, 2);
         assert_eq!(entry.size, 20);
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_write_new_block_size() {
-        let (_, mut entry, _) = setup(EntrySettings {
-            max_block_size: 10,
-            max_block_records: 10000,
-        });
+    fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
+        let mut entry = entry(entry_settings.clone(), path.clone());
+
+        write_stub_record(&mut entry, 1).unwrap();
+
+        File::options()
+            .write(true)
+            .open(path.join("entry/1.meta"))
+            .unwrap()
+            .set_len(0)
+            .unwrap();
+
+        let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
+        assert_eq!(entry.name(), "entry");
+        assert_eq!(entry.record_count, 0);
+    }
+
+    #[rstest]
+    #[test]
+    fn test_begin_write_new_block_size(path: PathBuf) {
+        let mut entry = entry(
+            EntrySettings {
+                max_block_size: 10,
+                max_block_records: 10000,
+            },
+            path,
+        );
 
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2000010).unwrap();
@@ -495,12 +533,16 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_write_new_block_records() {
-        let (_, mut entry, _) = setup(EntrySettings {
-            max_block_size: 10000,
-            max_block_records: 1,
-        });
+    fn test_begin_write_new_block_records(path: PathBuf) {
+        let mut entry = entry(
+            EntrySettings {
+                max_block_size: 10000,
+                max_block_records: 1,
+            },
+            path,
+        );
 
         write_stub_record(&mut entry, 1).unwrap();
         write_stub_record(&mut entry, 2).unwrap();
@@ -532,10 +574,9 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_write_belated_record() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_begin_write_belated_record(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 3000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
@@ -548,10 +589,9 @@ mod tests {
         assert_eq!(records[2].timestamp, Some(us_to_ts(&2000000)));
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_write_belated_first() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_begin_write_belated_first(mut entry: Entry) {
         write_stub_record(&mut entry, 3000000).unwrap();
         write_stub_record(&mut entry, 1000000).unwrap();
 
@@ -561,10 +601,9 @@ mod tests {
         assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_write_existing_record() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_begin_write_existing_record(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
         let err = write_stub_record(&mut entry, 1000000);
@@ -577,9 +616,9 @@ mod tests {
     }
 
     // Test begin_read
+    #[rstest]
     #[test]
-    fn test_begin_read_empty() {
-        let (_, mut entry, _) = setup_default();
+    fn test_begin_read_empty(mut entry: Entry) {
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),
@@ -587,10 +626,9 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_read_early() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_begin_read_early(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         let writer = entry.begin_read(1000);
         assert_eq!(
@@ -599,10 +637,9 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_read_late() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_begin_read_late(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         let writer = entry.begin_read(2000000);
         assert_eq!(
@@ -611,9 +648,9 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_read_still_written() {
-        let (_, mut entry, _) = setup_default();
+    fn test_begin_read_still_written(mut entry: Entry) {
         {
             let writer = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -633,10 +670,9 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_read_not_found() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_begin_read_not_found(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 3000000).unwrap();
 
@@ -647,19 +683,18 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_read_ok1() {
-        let (_, mut entry, _) = setup_default();
+    fn test_begin_read_ok1(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         let reader = entry.begin_read(1000000).unwrap();
         let chunk = reader.write().unwrap().read().unwrap();
         assert_eq!(chunk.unwrap(), "0123456789".as_bytes());
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_read_ok2() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_begin_read_ok2(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 1010000).unwrap();
 
@@ -668,9 +703,9 @@ mod tests {
         assert_eq!(chunk.unwrap(), "0123456789".as_bytes());
     }
 
+    #[rstest]
     #[test]
-    fn test_begin_read_ok_in_chunks() {
-        let (_, mut entry, _) = setup_default();
+    fn test_begin_read_ok_in_chunks(mut entry: Entry) {
         let mut data = vec![0; DEFAULT_MAX_READ_CHUNK as usize + 1];
         data[0] = 1;
         data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
@@ -693,10 +728,9 @@ mod tests {
         assert_eq!(chunk, None);
     }
 
+    #[rstest]
     #[test]
-    fn test_historical_query() {
-        let (_, mut entry, _) = setup_default();
-
+    fn test_historical_query(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
         write_stub_record(&mut entry, 3000000).unwrap();
@@ -727,9 +761,9 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_continuous_query() {
-        let (_, mut entry, _) = setup_default();
+    fn test_continuous_query(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).unwrap();
 
         let id = entry
@@ -767,12 +801,16 @@ mod tests {
         );
     }
 
+    #[rstest]
     #[test]
-    fn test_info() {
-        let (_, mut entry, _) = setup(EntrySettings {
-            max_block_size: 10000,
-            max_block_records: 10000,
-        });
+    fn test_info(path: PathBuf) {
+        let mut entry = entry(
+            EntrySettings {
+                max_block_size: 10000,
+                max_block_records: 10000,
+            },
+            path,
+        );
 
         write_stub_record(&mut entry, 1000000).unwrap();
         write_stub_record(&mut entry, 2000000).unwrap();
@@ -787,12 +825,16 @@ mod tests {
         assert_eq!(info.latest_record, 3000000);
     }
 
+    #[rstest]
     #[test]
-    fn test_search() {
-        let (_, mut entry, _) = setup(EntrySettings {
-            max_block_size: 10000,
-            max_block_records: 5,
-        });
+    fn test_search(path: PathBuf) {
+        let mut entry = entry(
+            EntrySettings {
+                max_block_size: 10000,
+                max_block_records: 5,
+            },
+            path,
+        );
 
         let step = 100000;
         for i in 0..100 {
@@ -805,26 +847,31 @@ mod tests {
         assert_eq!(wr.timestamp(), 3000000);
     }
 
+    #[rstest]
     #[test]
-    fn test_try_remove_block_from_empty_entry() {
-        let (_, mut entry, _) = setup_default();
+    fn test_try_remove_block_from_empty_entry(mut entry: Entry) {
         assert_eq!(
             entry.try_remove_oldest_block(),
             Err(HttpError::internal_server_error("No block to remove"))
         );
     }
 
-    fn setup(options: EntrySettings) -> (EntrySettings, Entry, PathBuf) {
-        let path = tempfile::tempdir().unwrap().into_path();
-        let entry = Entry::new("entry", path.clone(), options.clone()).unwrap();
-        (options, entry, path)
-    }
-
-    fn setup_default() -> (EntrySettings, Entry, PathBuf) {
-        setup(EntrySettings {
+    #[fixture]
+    fn entry_settings() -> EntrySettings {
+        EntrySettings {
             max_block_size: 10000,
             max_block_records: 10000,
-        })
+        }
+    }
+
+    #[fixture]
+    fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
+        Entry::new("entry", path.clone(), entry_settings).unwrap()
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        tempfile::tempdir().unwrap().into_path()
     }
 
     fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), HttpError> {
