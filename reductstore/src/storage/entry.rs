@@ -217,7 +217,7 @@ impl Entry {
             block.latest_record_time = Some(us_to_ts(&time));
         }
 
-        self.block_manager.write().unwrap().save(&block)?;
+        self.block_manager.write().unwrap().save(block.clone())?;
         BlockManager::begin_write(
             Arc::clone(&self.block_manager),
             &block,

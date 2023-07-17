@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - reductstore: Refactor `http_frontend` module, [PR-306](https://github.com/reductstore/reductstore/pull/306)
+- reductstore: Cache last block to reduce read operations, [PR-318](https://github.com/reductstore/reductstore/pull/318)
 - all: Organize workspaces, [PR-310](https://github.com/reductstore/reductstore/pull/310)
 
 ### Removed

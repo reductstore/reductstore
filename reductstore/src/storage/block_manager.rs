@@ -30,7 +30,7 @@ pub struct BlockManager {
     path: PathBuf,
     readers: HashMap<u64, Vec<Weak<RwLock<RecordReader>>>>,
     writers: HashMap<u64, Vec<Weak<RwLock<RecordWriter>>>>,
-    file_mutex: RwLock<()>,
+    last_block: Option<Block>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -66,7 +66,7 @@ impl BlockManager {
             path,
             readers: HashMap::new(),
             writers: HashMap::new(),
-            file_mutex: RwLock::new(()),
+            last_block: None,
         }
     }
 
@@ -210,7 +210,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was saved successfully.
-    fn save(&self, block: &Block) -> Result<(), HttpError>;
+    fn save(&mut self, block: Block) -> Result<(), HttpError>;
 
     /// Start a new block
     ///
@@ -222,7 +222,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was created successfully.
-    fn start(&self, block_id: u64, max_block_size: u64) -> Result<Block, HttpError>;
+    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, HttpError>;
 
     /// Finish a block by truncating the file to the actual size.
     ///
@@ -233,7 +233,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was finished successfully.
-    fn finish(&self, block: &Block) -> Result<(), HttpError>;
+    fn finish(&mut self, block: &Block) -> Result<(), HttpError>;
 
     /// Remove a block from disk if there are no readers or writers.
     fn remove(&mut self, block_id: u64) -> Result<(), HttpError>;
@@ -241,18 +241,22 @@ pub trait ManageBlock {
 
 impl ManageBlock for BlockManager {
     fn load(&self, block_id: u64) -> Result<Block, HttpError> {
-        let _guard = self.file_mutex.read().unwrap();
+        if let Some(block) = self.last_block.as_ref() {
+            if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
+                return Ok(block.clone());
+            }
+        }
 
         let proto_ts = us_to_ts(&block_id);
         let buf = std::fs::read(self.path_to_desc(&proto_ts))?;
-        Block::decode(Bytes::from(buf)).map_err(|e| {
+        let block = Block::decode(Bytes::from(buf)).map_err(|e| {
             HttpError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
-        })
+        })?;
+
+        Ok(block)
     }
 
-    fn save(&self, block: &Block) -> Result<(), HttpError> {
-        let _guard = self.file_mutex.write().unwrap();
-
+    fn save(&mut self, block: Block) -> Result<(), HttpError> {
         let path = self.path_to_desc(block.begin_time.as_ref().unwrap());
         let mut buf = BytesMut::new();
         block.encode(&mut buf).map_err(|e| {
@@ -261,10 +265,11 @@ impl ManageBlock for BlockManager {
         let mut file = std::fs::File::create(path.clone())?;
         file.write_all(&buf)?;
 
+        self.last_block = Some(block);
         Ok(())
     }
 
-    fn start(&self, block_id: u64, max_block_size: u64) -> Result<Block, HttpError> {
+    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, HttpError> {
         let mut block = Block::default();
         block.begin_time = Some(us_to_ts(&block_id));
 
@@ -272,19 +277,20 @@ impl ManageBlock for BlockManager {
         let file = std::fs::File::create(self.path_to_data(block.begin_time.as_ref().unwrap()))?;
 
         file.set_len(max_block_size)?;
-        self.save(&block)?;
+        self.save(block.clone())?;
 
         Ok(block)
     }
 
-    fn finish(&self, block: &Block) -> Result<(), HttpError> {
-        let _guard = self.file_mutex.write().unwrap();
+    fn finish(&mut self, block: &Block) -> Result<(), HttpError> {
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)?;
         file.set_len(block.size as u64)?;
+
+        self.last_block = None;
         Ok(())
     }
 
@@ -296,13 +302,18 @@ impl ManageBlock for BlockManager {
             )));
         }
 
-        let _guard = self.file_mutex.write().unwrap();
-
         let proto_ts = us_to_ts(&block_id);
         let path = self.path_to_data(&proto_ts);
         std::fs::remove_file(path)?;
         let path = self.path_to_desc(&proto_ts);
         std::fs::remove_file(path)?;
+
+        if let Some(block) = self.last_block.as_ref() {
+            if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
+                self.last_block = None;
+            }
+        }
+
         Ok(())
     }
 }
@@ -315,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_starting_block() {
-        let bm = setup();
+        let mut bm = setup();
         let block = bm.start(1_000_005, 1024).unwrap();
 
         let ts = block.begin_time.clone().unwrap();
@@ -345,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_loading_block() {
-        let bm = setup();
+        let mut bm = setup();
 
         bm.start(1, 1024).unwrap();
         let block = bm.start(20000005, 1024).unwrap();
@@ -357,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_start_reading() {
-        let bm = setup();
+        let mut bm = setup();
 
         let block = bm.start(1, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
@@ -367,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_finish_block() {
-        let bm = setup();
+        let mut bm = setup();
 
         let block = bm.start(1, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
@@ -383,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_start_writing() {
-        let bm = setup();
+        let mut bm = setup();
 
         let block_id = 1;
         let mut block = bm.start(block_id, 1024).unwrap().clone();
@@ -399,7 +410,7 @@ mod tests {
             content_type: "".to_string(),
         });
 
-        bm.save(&block).unwrap();
+        bm.save(block.clone()).unwrap();
 
         let bm_ref = Arc::new(RwLock::new(bm));
         {
@@ -411,12 +422,12 @@ mod tests {
                 .unwrap();
         }
 
-        bm_ref.read().unwrap().finish(&block).unwrap();
+        bm_ref.write().unwrap().finish(&block).unwrap();
     }
 
     #[test]
     fn test_remove_with_writers() {
-        let bm = setup();
+        let mut bm = setup();
         let block_id = 1;
 
         {
