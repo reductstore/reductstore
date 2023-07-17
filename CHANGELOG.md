@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Handle empty or broken block descriptor, [PR-317](https://github.com/reductstore/reductstore/pull/317)
+
 ## [1.5.0] - 2023-06-30
 
 ### Added
