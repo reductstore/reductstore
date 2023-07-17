@@ -15,7 +15,7 @@ use prost_wkt_types::Timestamp;
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
-use crate::core::status::HttpError;
+use reduct_base::error::HttpError;
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
 const INIT_TOKEN_NAME: &str = "init-token";

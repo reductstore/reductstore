@@ -4,7 +4,6 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::WriteAccessPolicy;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use crate::storage::entry::Labels;
@@ -14,6 +13,7 @@ use axum::headers::{Expect, Header, HeaderMap};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
+use reduct_base::error::HttpError;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 

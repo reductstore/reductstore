@@ -2,7 +2,8 @@
 
 members = [
     "reductstore",
-    "reduct_client"
+    "reduct_client",
+    "reduct_base"
 ]
 
 resolver = "2"

@@ -22,7 +22,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
-use crate::core::status::HttpError;
+use reduct_base::error::HttpError;
 
 use crate::http_frontend::token_api::create::create_token;
 use crate::http_frontend::token_api::get::get_token;

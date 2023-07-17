@@ -6,11 +6,11 @@
 use crate::auth::policy::FullAccessPolicy;
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::TokenCreateResponse;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
+use reduct_base::error::HttpError;
 use std::sync::{Arc, RwLock};
 
 // POST /tokens/:token_name

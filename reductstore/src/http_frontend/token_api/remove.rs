@@ -4,11 +4,11 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::FullAccessPolicy;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
+use reduct_base::error::HttpError;
 use std::sync::{Arc, RwLock};
 
 // DELETE /tokens/:name

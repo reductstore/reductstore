@@ -16,7 +16,6 @@ use serde::de::StdError;
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
-use crate::core::status::HttpError;
 use crate::http_frontend::bucket_api::create_bucket_api_routes;
 use crate::http_frontend::entry_api::create_entry_api_routes;
 use crate::http_frontend::middleware::{default_headers, print_statuses};
@@ -24,6 +23,7 @@ use crate::http_frontend::server_api::create_server_api_routes;
 use crate::http_frontend::token_api::create_token_api_routes;
 use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
+use reduct_base::error::HttpError;
 
 mod bucket_api;
 mod entry_api;

@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use std::time::Instant;
 
-use crate::core::status::HttpError;
 use crate::storage::bucket::Bucket;
+use reduct_base::error::HttpError;
 
 use crate::storage::proto::{BucketInfoList, BucketSettings, Defaults, ServerInfo};
 

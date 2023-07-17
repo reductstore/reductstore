@@ -5,11 +5,11 @@
 
 use crate::auth::policy::FullAccessPolicy;
 use crate::auth::proto::Token;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
+use reduct_base::error::HttpError;
 use std::sync::{Arc, RwLock};
 
 // GET /tokens/:token_name

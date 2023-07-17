@@ -1342,6 +1342,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reduct_base"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reductstore"
 version = "1.6.0-dev"
 dependencies = [
@@ -1362,6 +1370,7 @@ dependencies = [
  "prost-wkt-build",
  "prost-wkt-types",
  "rand",
+ "reduct_base",
  "regex",
  "rstest",
  "rustls 0.21.2",

@@ -9,9 +9,9 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use crate::core::status::{HttpError, HttpStatus};
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
+use reduct_base::error::{HttpError, HttpStatus};
 
 /// RecordWriter is used to write a record to a file.
 pub struct RecordWriter {

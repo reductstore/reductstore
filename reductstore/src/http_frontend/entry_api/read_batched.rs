@@ -4,11 +4,11 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::ReadAccessPolicy;
-use crate::core::status::{HttpError, HttpStatus};
 use crate::http_frontend::entry_api::MethodExtractor;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use crate::storage::bucket::Bucket;
+use reduct_base::error::{HttpError, HttpStatus};
 
 use crate::storage::reader::RecordReader;
 

@@ -14,12 +14,12 @@ use std::path::PathBuf;
 
 use std::sync::{Arc, RwLock};
 
-use crate::core::status::HttpError;
 use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::{BucketInfo, BucketSettings, EntryInfo, FullBucketInfo};
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
+use reduct_base::error::HttpError;
 
 const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;

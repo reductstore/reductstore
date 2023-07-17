@@ -3,7 +3,6 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::HttpError;
 use crate::storage::block_manager::{
     find_first_block, BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT,
 };
@@ -15,6 +14,7 @@ use crate::storage::writer::RecordWriter;
 use log::{debug, error, info};
 use prost::bytes::Bytes;
 use prost::Message;
+use reduct_base::error::HttpError;
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;

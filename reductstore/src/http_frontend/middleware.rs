@@ -7,11 +7,11 @@ use axum::http::{HeaderMap, Request};
 use std::sync::{Arc, RwLock};
 
 use crate::auth::policy::Policy;
-use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerState;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error};
+use reduct_base::error::HttpError;
 
 pub async fn default_headers<B>(
     request: Request<B>,

@@ -21,12 +21,12 @@ use bytes::Bytes;
 use hyper::HeaderMap;
 use serde_json::{json, Value};
 
-use crate::core::status::HttpError;
 use crate::http_frontend::bucket_api::create::create_bucket;
 use crate::http_frontend::bucket_api::get::get_bucket;
 use crate::http_frontend::bucket_api::head::head_bucket;
 use crate::http_frontend::bucket_api::remove::remove_bucket;
 use crate::http_frontend::bucket_api::update::update_bucket;
+use reduct_base::error::HttpError;
 
 use crate::http_frontend::HttpServerState;
 use crate::storage::proto::bucket_settings::QuotaType;

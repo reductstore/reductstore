@@ -8,11 +8,11 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use crate::core::status::HttpError;
 use crate::storage::block_manager::{find_first_block, BlockManager, ManageBlock};
 use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
+use reduct_base::error::HttpError;
 
 pub struct HistoricalQuery {
     start_time: u64,
@@ -155,12 +155,12 @@ impl Query for HistoricalQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::status::HttpStatus;
     use crate::storage::proto::record;
     use crate::storage::proto::record::Label;
     use crate::storage::writer::Chunk;
     use bytes::Bytes;
     use prost_wkt_types::Timestamp;
+    use reduct_base::error::HttpStatus;
     use std::collections::HashMap;
 
     use std::time::Duration;

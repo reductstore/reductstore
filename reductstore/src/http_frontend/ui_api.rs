@@ -4,9 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 
-use crate::core::status::HttpError;
 use crate::http_frontend::HttpServerState;
 use axum::extract::State;
+use reduct_base::error::HttpError;
 
 use axum::headers::HeaderMap;
 use axum::http::header::{CONTENT_TYPE, LOCATION};

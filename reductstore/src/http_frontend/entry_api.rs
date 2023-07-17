@@ -24,10 +24,10 @@ use axum::routing::{get, head, post};
 
 use std::sync::{Arc, RwLock};
 
-use crate::core::status::HttpError;
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
 use crate::http_frontend::entry_api::read_single::read_single_record;
 use crate::http_frontend::entry_api::write::write_record;
+use reduct_base::error::HttpError;
 
 use crate::http_frontend::HttpServerState;
 
