@@ -106,7 +106,6 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<HttpServerState>)
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
 
     use axum::extract::Path;
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};

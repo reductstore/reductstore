@@ -16,7 +16,7 @@ use axum::body::StreamBody;
 use axum::extract::{Path, Query, State};
 use axum::headers::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::IntoResponse;
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use futures_util::Stream;
 
 use std::collections::HashMap;

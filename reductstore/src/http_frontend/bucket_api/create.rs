@@ -10,7 +10,7 @@ use crate::http_frontend::HttpServerState;
 use crate::storage::proto::BucketSettings;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // POST /b/:bucket_name
 pub async fn create_bucket(
@@ -39,7 +39,7 @@ mod tests {
 
     use rstest::rstest;
 
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]

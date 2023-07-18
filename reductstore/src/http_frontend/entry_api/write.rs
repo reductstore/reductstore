@@ -8,14 +8,14 @@ use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use crate::storage::entry::Labels;
-use crate::storage::writer::{Chunk, RecordWriter};
+use crate::storage::writer::Chunk;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // POST /:bucket/:entry?ts=<number>
 pub async fn write_record(

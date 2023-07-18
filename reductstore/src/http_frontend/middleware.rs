@@ -4,7 +4,6 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use axum::http::{HeaderMap, Request};
-use std::sync::{Arc, RwLock};
 
 use crate::auth::policy::Policy;
 use crate::core::status::HttpError;

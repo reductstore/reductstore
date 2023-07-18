@@ -7,7 +7,7 @@ mod info;
 mod list;
 mod me;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use axum::headers;
 use axum::headers::HeaderMapExt;

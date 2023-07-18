@@ -618,7 +618,7 @@ mod tests {
     // Test begin_read
     #[rstest]
     #[test]
-    fn test_begin_read_empty(mut entry: Entry) {
+    fn test_begin_read_empty(entry: Entry) {
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),

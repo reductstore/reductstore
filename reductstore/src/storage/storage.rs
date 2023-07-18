@@ -256,7 +256,7 @@ mod tests {
                 .unwrap();
         }
 
-        let mut storage = Storage::new(path);
+        let storage = Storage::new(path);
         assert_eq!(
             storage.info().unwrap(),
             ServerInfo {
@@ -375,7 +375,7 @@ mod tests {
         let result = storage.remove_bucket("test");
         assert_eq!(result, Ok(()));
 
-        let mut storage = Storage::new(path);
+        let storage = Storage::new(path);
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),

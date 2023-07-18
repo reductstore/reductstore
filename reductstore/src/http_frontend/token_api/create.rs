@@ -11,7 +11,7 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // POST /tokens/:token_name
 pub async fn create_token(

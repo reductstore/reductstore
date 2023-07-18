@@ -10,8 +10,8 @@ use crate::http_frontend::HttpServerState;
 
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use bytes::Buf;
-use std::sync::{Arc, RwLock};
+
+use std::sync::Arc;
 
 // DELETE /b/:bucket_name
 pub async fn remove_bucket(
@@ -43,7 +43,7 @@ mod tests {
 
     use rstest::rstest;
 
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]

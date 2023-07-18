@@ -9,7 +9,7 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // HEAD /b/:bucket_name
 pub async fn head_bucket(
@@ -32,7 +32,7 @@ mod tests {
 
     use rstest::rstest;
 
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]

@@ -16,7 +16,7 @@ use bytes::Bytes;
 use hyper::Body;
 use log::debug;
 use mime_guess::mime;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 pub async fn redirect_to_index(
     State(components): State<Arc<HttpServerState>>,

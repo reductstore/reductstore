@@ -9,7 +9,7 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // DELETE /tokens/:name
 pub async fn remove_token(

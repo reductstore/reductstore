@@ -10,7 +10,7 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // GET /tokens/:token_name
 pub async fn get_token(

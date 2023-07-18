@@ -18,7 +18,7 @@ use axum::headers::HeaderMapExt;
 use hyper::HeaderMap;
 
 use axum::routing::{delete, get, post};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};

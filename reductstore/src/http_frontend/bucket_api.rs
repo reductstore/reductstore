@@ -9,7 +9,7 @@ mod head;
 mod remove;
 mod update;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use axum::extract::FromRequest;
 use axum::headers::HeaderMapExt;

@@ -17,7 +17,7 @@ use axum::headers::HeaderMap;
 
 use std::collections::HashMap;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use std::time::Duration;
 
@@ -86,7 +86,7 @@ pub async fn query(
     }
 
     let mut storage = components.storage.write().await;
-    let mut bucket = storage.get_mut_bucket(bucket_name)?;
+    let bucket = storage.get_mut_bucket(bucket_name)?;
     let entry = bucket.get_or_create_entry(entry_name)?;
     let id = entry.query(
         start,

@@ -23,7 +23,7 @@ use axum::headers::HeaderMapExt;
 use axum::routing::{get, head, post};
 
 use crate::storage::storage::Storage;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::core::status::HttpError;
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
