@@ -11,19 +11,22 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // POST /tokens/:token_name
 pub async fn create_token(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
     permissions: Permissions,
 ) -> Result<TokenCreateResponse, HttpError> {
-    check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
+    check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    let mut components = components.write().unwrap();
-    components.token_repo.create_token(&token_name, permissions)
+    components
+        .token_repo
+        .write()
+        .await
+        .create_token(&token_name, permissions)
 }
 
 #[cfg(test)]
@@ -36,7 +39,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_create_token(components: Arc<HttpServerState>, headers: HeaderMap) {
         let token = create_token(
             State(components),
             Path("new-token".to_string()),

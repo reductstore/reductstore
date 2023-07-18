@@ -22,7 +22,8 @@ use axum::headers::HeaderMapExt;
 
 use axum::routing::{get, head, post};
 
-use std::sync::{Arc, RwLock};
+use crate::storage::storage::Storage;
+use std::sync::Arc;
 
 use crate::core::status::HttpError;
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
@@ -65,7 +66,7 @@ where
 }
 
 fn check_and_extract_ts_or_query_id(
-    components: &Arc<RwLock<HttpServerState>>,
+    storage: &Storage,
     params: HashMap<String, String>,
     bucket_name: &String,
     entry_name: &String,
@@ -87,10 +88,8 @@ fn check_and_extract_ts_or_query_id(
     };
 
     let ts = if ts.is_none() && query_id.is_none() {
-        let mut components = components.write().unwrap();
         Some(
-            components
-                .storage
+            storage
                 .get_bucket(bucket_name)?
                 .get_entry(entry_name)?
                 .info()?
@@ -116,7 +115,7 @@ impl IntoResponse for QueryInfo {
     }
 }
 
-pub fn create_entry_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
+pub fn create_entry_api_routes() -> axum::Router<Arc<HttpServerState>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
         .route("/:bucket_name/:entry_name", get(read_single_record))

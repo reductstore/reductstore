@@ -17,13 +17,13 @@ use axum::headers::HeaderMap;
 
 use std::collections::HashMap;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
 pub async fn query(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -32,16 +32,17 @@ pub async fn query(
     let entry_name = path.get("entry_name").unwrap();
 
     check_permissions(
-        Arc::clone(&components),
+        &components,
         headers,
         ReadAccessPolicy {
             bucket: bucket_name.clone(),
         },
-    )?;
+    )
+    .await?;
 
     let entry_info = {
-        let mut components = components.write().unwrap();
-        let bucket = components.storage.get_bucket(bucket_name)?;
+        let mut storage = components.storage.write().await;
+        let bucket = storage.get_mut_bucket(bucket_name)?;
         bucket.get_entry(entry_name)?.info()?
     };
 
@@ -84,8 +85,8 @@ pub async fn query(
         }
     }
 
-    let mut components = components.write().unwrap();
-    let bucket = components.storage.get_bucket(bucket_name)?;
+    let mut storage = components.storage.write().await;
+    let bucket = storage.get_mut_bucket(bucket_name)?;
     let entry = bucket.get_or_create_entry(entry_name)?;
     let id = entry.query(
         start,

@@ -9,17 +9,16 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // HEAD /b/:bucket_name
 pub async fn head_bucket(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
-    check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
-    let mut components = components.write().unwrap();
-    components.storage.get_bucket(&bucket_name)?;
+    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    components.storage.read().await.get_bucket(&bucket_name)?;
     Ok(())
 }
 
@@ -33,11 +32,11 @@ mod tests {
 
     use rstest::rstest;
 
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_head_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_head_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
         head_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();

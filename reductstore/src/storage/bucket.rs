@@ -148,8 +148,27 @@ impl Bucket {
     ///
     /// # Returns
     ///
+    /// * `&Entry` - The entry or an HTTPError
+    pub fn get_entry(&self, name: &str) -> Result<&Entry, HttpError> {
+        let entry = self.entries.get(name).ok_or_else(|| {
+            HttpError::not_found(&format!(
+                "Entry '{}' not found in bucket '{}'",
+                name, self.name
+            ))
+        })?;
+        Ok(entry)
+    }
+
+    /// Get an entry in the bucket
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the entry
+    ///
+    /// # Returns
+    ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub fn get_entry(&mut self, name: &str) -> Result<&mut Entry, HttpError> {
+    pub fn get_mut_entry(&mut self, name: &str) -> Result<&mut Entry, HttpError> {
         let entry = self.entries.get_mut(name).ok_or_else(|| {
             HttpError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",
@@ -224,7 +243,7 @@ impl Bucket {
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
     pub fn begin_read(
-        &mut self,
+        &self,
         name: &str,
         time: u64,
     ) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
@@ -249,7 +268,7 @@ impl Bucket {
         name: &str,
         time: u64,
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
-        let entry = self.get_entry(name)?;
+        let entry = self.get_mut_entry(name)?;
         entry.next(time)
     }
 

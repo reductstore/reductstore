@@ -10,15 +10,15 @@ use crate::http_frontend::HttpServerState;
 use crate::storage::proto::ServerInfo;
 use axum::extract::State;
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // GET /info
 pub async fn info(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
 ) -> Result<ServerInfo, HttpError> {
-    check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
-    components.read().unwrap().storage.info()
+    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    components.storage.read().await.info()
 }
 
 #[cfg(test)]
@@ -29,7 +29,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_info(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_info(components: Arc<HttpServerState>, headers: HeaderMap) {
         let info = info(State(components), headers).await.unwrap();
         assert_eq!(info.bucket_count, 2);
     }
