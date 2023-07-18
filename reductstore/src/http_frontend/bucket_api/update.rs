@@ -42,7 +42,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket(components: HttpServerState, headers: HeaderMap) {
+    async fn test_update_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
         update_bucket(
             State(components),
             Path("bucket-1".to_string()),

@@ -243,7 +243,7 @@ impl Bucket {
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
     pub fn begin_read(
-        &mut self,
+        &self,
         name: &str,
         time: u64,
     ) -> Result<Arc<RwLock<RecordReader>>, HttpError> {

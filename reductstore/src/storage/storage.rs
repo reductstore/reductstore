@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_get_bucket_with_non_existing_name() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
+        let storage = Storage::new(tempdir().unwrap().into_path());
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),

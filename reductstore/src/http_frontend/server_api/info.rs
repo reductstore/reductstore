@@ -29,7 +29,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_info(components: HttpServerState, headers: HeaderMap) {
+    async fn test_info(components: Arc<HttpServerState>, headers: HeaderMap) {
         let info = info(State(components), headers).await.unwrap();
         assert_eq!(info.bucket_count, 2);
     }

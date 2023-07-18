@@ -80,7 +80,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_img_decoding(components: Arc<RwLock<HttpServerState>>) {
+    async fn test_img_decoding(components: Arc<HttpServerState>) {
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
         let response = show_ui(State(components), request)
             .await

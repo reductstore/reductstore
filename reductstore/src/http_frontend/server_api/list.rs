@@ -29,7 +29,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_list(components: HttpServerState, headers: HeaderMap) {
+    async fn test_list(components: Arc<HttpServerState>, headers: HeaderMap) {
         let list = list(State(components), headers).await.unwrap();
         assert_eq!(list.buckets.len(), 2);
     }

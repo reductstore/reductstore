@@ -127,20 +127,13 @@ mod tests {
     pub(crate) fn components() -> Arc<HttpServerState> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut components = HttpServerState {
-            storage: RwLock::new(Storage::new(PathBuf::from(data_path.clone()))),
-            auth: TokenAuthorization::new("inti-token"),
-            token_repo: RwLock::new(create_token_repository(data_path.clone(), "init-token")),
-            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
-            base_path: "/".to_string(),
-        };
+        let mut storage = Storage::new(data_path.clone());
+        let mut token_repo = create_token_repository(data_path.clone(), "init-token");
 
-        components
-            .storage
+        storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap();
-        components
-            .storage
+        storage
             .create_bucket("bucket-2", BucketSettings::default())
             .unwrap();
 
@@ -148,9 +141,9 @@ mod tests {
             ("x".to_string(), "y".to_string()),
             ("b".to_string(), "[a,b]".to_string()),
         ]);
-        components
-            .storage
-            .get_bucket("bucket-1")
+
+        storage
+            .get_mut_bucket("bucket-1")
             .unwrap()
             .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
             .unwrap()
@@ -163,10 +156,16 @@ mod tests {
             read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
             ..Default::default()
         };
-        components
-            .token_repo
-            .create_token("test", permissions)
-            .unwrap();
+
+        token_repo.create_token("test", permissions).unwrap();
+
+        let components = HttpServerState {
+            storage: RwLock::new(storage),
+            auth: TokenAuthorization::new("inti-token"),
+            token_repo: RwLock::new(token_repo),
+            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            base_path: "/".to_string(),
+        };
 
         Arc::new(components)
     }

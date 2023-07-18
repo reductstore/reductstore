@@ -209,7 +209,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_batched_read(
-        components: Arc<RwLock<HttpServerState>>,
+        components: Arc<HttpServerState>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
@@ -217,12 +217,12 @@ mod tests {
     ) {
         let query_id = {
             components
-                .write()
-                .unwrap()
                 .storage
-                .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .write()
+                .await
+                .get_mut_bucket(path_to_entry_1.get("bucket_name").unwrap())
                 .unwrap()
-                .get_entry(path_to_entry_1.get("entry_name").unwrap())
+                .get_mut_entry(path_to_entry_1.get("entry_name").unwrap())
                 .unwrap()
                 .query(0, u64::MAX, QueryOptions::default())
                 .unwrap()

@@ -144,7 +144,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<RwLock<HttpServerState>>,
+        components: Arc<HttpServerState>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
     ) {
@@ -166,9 +166,9 @@ mod tests {
         .unwrap();
 
         let record = components
-            .write()
-            .unwrap()
             .storage
+            .read()
+            .await
             .get_bucket("bucket-1")
             .unwrap()
             .begin_read("entry-1", 1)

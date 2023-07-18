@@ -47,7 +47,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket(components: HttpServerState, headers: HeaderMap) {
+    async fn test_remove_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
         remove_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();
@@ -55,7 +55,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_from_permission(components: HttpServerState, headers: HeaderMap) {
+    async fn test_remove_bucket_from_permission(
+        components: Arc<HttpServerState>,
+        headers: HeaderMap,
+    ) {
         let token = components
             .token_repo
             .read()

@@ -38,7 +38,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_token_list(components: HttpServerState, headers: HeaderMap) {
+    async fn test_token_list(components: Arc<HttpServerState>, headers: HeaderMap) {
         let list = list_tokens(State(components), headers).await.unwrap();
         assert_eq!(list.tokens.len(), 2);
         assert_eq!(list.tokens[0].name, "init-token");

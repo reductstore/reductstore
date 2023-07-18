@@ -48,7 +48,7 @@ pub async fn read_single_record(
     let (query_id, ts) =
         check_and_extract_ts_or_query_id(&storage, params, bucket_name, entry_name)?;
 
-    let mut bucket = storage.get_mut_bucket(bucket_name)?;
+    let bucket = storage.get_mut_bucket(bucket_name)?;
     fetch_and_response_single_record(bucket, entry_name, ts, query_id, method.name() == "HEAD")
 }
 
@@ -148,7 +148,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_ts(
-        components: Arc<RwLock<HttpServerState>>,
+        components: Arc<HttpServerState>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
@@ -184,7 +184,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_query(
-        components: Arc<RwLock<HttpServerState>>,
+        components: Arc<HttpServerState>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
@@ -192,12 +192,12 @@ mod tests {
     ) {
         let query_id = {
             components
-                .write()
-                .unwrap()
                 .storage
-                .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .write()
+                .await
+                .get_mut_bucket(path_to_entry_1.get("bucket_name").unwrap())
                 .unwrap()
-                .get_entry(path_to_entry_1.get("entry_name").unwrap())
+                .get_mut_entry(path_to_entry_1.get("entry_name").unwrap())
                 .unwrap()
                 .query(0, u64::MAX, QueryOptions::default())
                 .unwrap()

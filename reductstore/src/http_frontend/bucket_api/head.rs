@@ -36,7 +36,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_head_bucket(components: HttpServerState, headers: HeaderMap) {
+    async fn test_head_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
         head_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();

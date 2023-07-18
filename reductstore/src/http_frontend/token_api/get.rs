@@ -33,7 +33,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token(components: HttpServerState, headers: HeaderMap) {
+    async fn test_get_token(components: Arc<HttpServerState>, headers: HeaderMap) {
         let token = get_token(State(components), Path("test".to_string()), headers)
             .await
             .unwrap();

@@ -39,7 +39,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token(components: HttpServerState, headers: HeaderMap) {
+    async fn test_create_token(components: Arc<HttpServerState>, headers: HeaderMap) {
         let token = create_token(
             State(components),
             Path("new-token".to_string()),
