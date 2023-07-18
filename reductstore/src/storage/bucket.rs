@@ -21,7 +21,7 @@ use crate::storage::proto::{BucketInfo, BucketSettings, EntryInfo, FullBucketInf
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
 
-const DEFAULT_MAX_RECORDS: u64 = 1024;
+const DEFAULT_MAX_RECORDS: u64 = 256;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
 const SETTINGS_NAME: &str = "bucket.settings";
 
