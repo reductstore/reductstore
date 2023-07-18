@@ -112,7 +112,7 @@ where
     }
 }
 
-pub fn create_bucket_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
+pub fn create_bucket_api_routes() -> axum::Router<Arc<HttpServerState>> {
     axum::Router::new()
         .route("/:bucket_name", get(get_bucket))
         .route("/:bucket_name", head(head_bucket))

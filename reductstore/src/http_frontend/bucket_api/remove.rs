@@ -10,19 +10,25 @@ use crate::http_frontend::HttpServerState;
 
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
+use bytes::Buf;
 use std::sync::{Arc, RwLock};
 
 // DELETE /b/:bucket_name
 pub async fn remove_bucket(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
-    check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
-    let mut components = components.write().unwrap();
-    components.storage.remove_bucket(&bucket_name)?;
+    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    components
+        .storage
+        .write()
+        .await
+        .remove_bucket(&bucket_name)?;
     components
         .token_repo
+        .write()
+        .await
         .remove_bucket_from_tokens(&bucket_name)?;
     Ok(())
 }
@@ -41,7 +47,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_remove_bucket(components: HttpServerState, headers: HeaderMap) {
         remove_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();
@@ -49,14 +55,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_from_permission(
-        components: Arc<RwLock<HttpServerState>>,
-        headers: HeaderMap,
-    ) {
+    async fn test_remove_bucket_from_permission(components: HttpServerState, headers: HeaderMap) {
         let token = components
-            .read()
-            .unwrap()
             .token_repo
+            .read()
+            .await
             .find_by_name("test")
             .unwrap();
         assert_eq!(
@@ -65,7 +68,7 @@ mod tests {
         );
 
         remove_bucket(
-            State(Arc::clone(&components)),
+            State(components.clone()),
             Path("bucket-1".to_string()),
             headers.clone(),
         )
@@ -73,9 +76,9 @@ mod tests {
         .unwrap();
 
         let token = components
-            .read()
-            .unwrap()
             .token_repo
+            .read()
+            .await
             .find_by_name("test")
             .unwrap();
         assert_eq!(

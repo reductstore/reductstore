@@ -14,11 +14,11 @@ use std::sync::{Arc, RwLock};
 
 // GET /list
 pub async fn list(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
 ) -> Result<BucketInfoList, HttpError> {
-    check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
-    components.read().unwrap().storage.get_bucket_list()
+    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    components.storage.read().await.get_bucket_list()
 }
 
 #[cfg(test)]
@@ -29,7 +29,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_list(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_list(components: HttpServerState, headers: HeaderMap) {
         let list = list(State(components), headers).await.unwrap();
         assert_eq!(list.buckets.len(), 2);
     }

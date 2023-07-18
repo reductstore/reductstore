@@ -16,7 +16,7 @@ use axum::body::StreamBody;
 use axum::extract::{Path, Query, State};
 use axum::headers::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::IntoResponse;
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use futures_util::Stream;
 
 use std::collections::HashMap;
@@ -27,7 +27,7 @@ use std::task::{Context, Poll};
 
 // GET /:bucket/:entry/batch?q=<number>
 pub async fn read_batched_records(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -36,12 +36,13 @@ pub async fn read_batched_records(
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
     check_permissions(
-        Arc::clone(&components),
+        &components,
         headers,
         ReadAccessPolicy {
             bucket: bucket_name.clone(),
         },
-    )?;
+    )
+    .await?;
 
     let query_id = match params.get("q") {
         Some(query) => query
@@ -57,10 +58,10 @@ pub async fn read_batched_records(
 
     fetch_and_response_batched_records(
         components
-            .write()
-            .unwrap()
             .storage
-            .get_bucket(bucket_name)?,
+            .write()
+            .await
+            .get_mut_bucket(bucket_name)?,
         entry_name,
         query_id,
         method.name == "HEAD",

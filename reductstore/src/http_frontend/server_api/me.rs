@@ -14,19 +14,15 @@ use std::sync::{Arc, RwLock};
 
 // // GET /me
 pub async fn me(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
 ) -> Result<Token, HttpError> {
-    check_permissions(
-        Arc::clone(&components),
-        headers.clone(),
-        AuthenticatedPolicy {},
-    )?;
+    check_permissions(&components, headers.clone(), AuthenticatedPolicy {}).await?;
     let header = match headers.get("Authorization") {
         Some(header) => header.to_str().ok(),
         None => None,
     };
-    components.read().unwrap().token_repo.validate_token(header)
+    components.token_repo.read().await.validate_token(header)
 }
 
 #[cfg(test)]
@@ -38,7 +34,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_me(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_me(components: HttpServerState, headers: HeaderMap) {
         let token = me(State(components), headers).await.unwrap();
         assert_eq!(token.name, "init-token");
     }

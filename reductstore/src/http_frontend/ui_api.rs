@@ -19,19 +19,19 @@ use mime_guess::mime;
 use std::sync::{Arc, RwLock};
 
 pub async fn redirect_to_index(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
 ) -> impl IntoResponse {
-    let base_path = components.read().unwrap().base_path.clone();
+    let base_path = components.base_path.clone();
     let mut headers = HeaderMap::new();
     headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
     (StatusCode::FOUND, headers, Bytes::new()).into_response()
 }
 
 pub async fn show_ui(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let base_path = components.read().unwrap().base_path.clone();
+    let base_path = components.base_path.clone();
 
     let path = request.uri().path();
     if !path.starts_with(&format!("{}ui/", base_path)) {
@@ -45,11 +45,11 @@ pub async fn show_ui(
         path
     };
 
-    let content = match components.read().unwrap().console.read(&path) {
+    let content = match components.console.read(&path) {
         Ok(content) => Ok(content),
         Err(err) => {
             debug!("Failed to read {}: {}", path, err);
-            components.read().unwrap().console.read("index.html")
+            components.console.read("index.html")
         }
     };
 

@@ -106,6 +106,24 @@ impl Storage {
         Ok(self.buckets.get_mut(name).unwrap())
     }
 
+    /// Get a bucket by name
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the bucket
+    ///
+    /// # Returns
+    ///
+    /// * `Bucket` - The bucket or an HTTPError
+    pub fn get_bucket(&self, name: &str) -> Result<&Bucket, HttpError> {
+        match self.buckets.get(name) {
+            Some(bucket) => Ok(bucket),
+            None => Err(HttpError::not_found(
+                format!("Bucket '{}' is not found", name).as_str(),
+            )),
+        }
+    }
+
     /// Get a bucket by name.
     ///
     /// # Arguments
@@ -115,7 +133,7 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn get_bucket(&mut self, name: &str) -> Result<&mut Bucket, HttpError> {
+    pub fn get_mut_bucket(&mut self, name: &str) -> Result<&mut Bucket, HttpError> {
         match self.buckets.get_mut(name) {
             Some(bucket) => Ok(bucket),
             None => Err(HttpError::not_found(

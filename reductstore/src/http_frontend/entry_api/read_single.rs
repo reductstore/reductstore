@@ -26,7 +26,7 @@ use std::task::{Context, Poll};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub async fn read_single_record(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -35,27 +35,21 @@ pub async fn read_single_record(
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
     check_permissions(
-        Arc::clone(&components),
+        &components,
         headers,
         ReadAccessPolicy {
             bucket: bucket_name.clone(),
         },
-    )?;
+    )
+    .await?;
+
+    let mut storage = components.storage.write().await;
 
     let (query_id, ts) =
-        check_and_extract_ts_or_query_id(&components, params, bucket_name, entry_name)?;
+        check_and_extract_ts_or_query_id(&storage, params, bucket_name, entry_name)?;
 
-    fetch_and_response_single_record(
-        components
-            .write()
-            .unwrap()
-            .storage
-            .get_bucket(bucket_name)?,
-        entry_name,
-        ts,
-        query_id,
-        method.name() == "HEAD",
-    )
+    let mut bucket = storage.get_mut_bucket(bucket_name)?;
+    fetch_and_response_single_record(bucket, entry_name, ts, query_id, method.name() == "HEAD")
 }
 
 fn fetch_and_response_single_record(

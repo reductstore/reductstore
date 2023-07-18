@@ -14,15 +14,17 @@ use std::sync::{Arc, RwLock};
 
 // PUT /b/:bucket_name
 pub async fn update_bucket(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     settings: BucketSettings,
 ) -> Result<(), HttpError> {
-    check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
-    let mut components = components.write().unwrap();
-    let bucket = components.storage.get_bucket(&bucket_name)?;
-    bucket.set_settings(settings.into())
+    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    let mut storage = components.storage.write().await;
+
+    storage
+        .get_mut_bucket(&bucket_name)?
+        .set_settings(settings.into())
 }
 
 #[cfg(test)]
@@ -40,7 +42,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_update_bucket(components: HttpServerState, headers: HeaderMap) {
         update_bucket(
             State(components),
             Path("bucket-1".to_string()),

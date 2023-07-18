@@ -17,6 +17,8 @@ use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::info;
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -57,9 +59,12 @@ async fn main() {
     info!("Configuration: \n {}", env.message());
 
     let components = HttpServerState {
-        storage: Storage::new(PathBuf::from(data_path.clone())),
+        storage: RwLock::new(Storage::new(PathBuf::from(data_path.clone()))),
         auth: TokenAuthorization::new(&api_token),
-        token_repo: create_token_repository(PathBuf::from(data_path), &api_token),
+        token_repo: RwLock::new(create_token_repository(
+            PathBuf::from(data_path),
+            &api_token,
+        )),
         console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
         base_path: api_base_path.clone(),
     };
@@ -79,7 +84,7 @@ async fn main() {
         port as u16,
     );
 
-    let app = create_axum_app(&api_base_path, components);
+    let app = create_axum_app(&api_base_path, Arc::new(components));
 
     let handle = Handle::new();
     tokio::spawn(shutdown_ctrl_c(handle.clone()));

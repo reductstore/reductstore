@@ -235,7 +235,7 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) fn begin_read(&mut self, time: u64) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
+    pub(crate) fn begin_read(&self, time: u64) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
         debug!("Reading record for ts={}", time);
         let not_found_err = Err(HttpError::not_found(&format!(
             "No record with timestamp {}",

@@ -14,13 +14,17 @@ use std::sync::{Arc, RwLock};
 
 // GET /b/:bucket_name
 pub async fn get_bucket(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullBucketInfo, HttpError> {
-    check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
-    let mut components = components.write().unwrap();
-    components.storage.get_bucket(&bucket_name)?.info()
+    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    components
+        .storage
+        .read()
+        .await
+        .get_bucket(&bucket_name)?
+        .info()
 }
 
 #[cfg(test)]
@@ -37,7 +41,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_get_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
         let info = get_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();

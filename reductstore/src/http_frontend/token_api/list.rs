@@ -14,14 +14,14 @@ use std::sync::{Arc, RwLock};
 
 // GET /tokens
 pub async fn list_tokens(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
 ) -> Result<TokenRepo, HttpError> {
-    check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
-    let components = components.write().unwrap();
+    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    let token_repo = components.token_repo.read().await;
 
     let mut list = TokenRepo::default();
-    for x in components.token_repo.get_token_list()?.iter() {
+    for x in token_repo.get_token_list()?.iter() {
         list.tokens.push(x.clone());
     }
     list.tokens.sort_by(|a, b| a.name.cmp(&b.name));
@@ -38,7 +38,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_token_list(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_token_list(components: HttpServerState, headers: HeaderMap) {
         let list = list_tokens(State(components), headers).await.unwrap();
         assert_eq!(list.tokens.len(), 2);
         assert_eq!(list.tokens[0].name, "init-token");

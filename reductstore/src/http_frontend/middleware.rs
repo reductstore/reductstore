@@ -57,20 +57,19 @@ pub async fn print_statuses<B>(
     Ok(response)
 }
 
-pub fn check_permissions<P>(
-    components: Arc<RwLock<HttpServerState>>,
+pub async fn check_permissions<P>(
+    components: &HttpServerState,
     headers: HeaderMap,
     policy: P,
 ) -> Result<(), HttpError>
 where
     P: Policy,
 {
-    let components = components.read().unwrap();
     components.auth.check(
         headers
             .get("Authorization")
             .map(|header| header.to_str().unwrap()),
-        components.token_repo.as_ref(),
+        components.token_repo.read().await.as_ref(),
         policy,
     )?;
     Ok(())
