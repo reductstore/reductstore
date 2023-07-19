@@ -368,7 +368,7 @@ mod tests {
 
         let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
         block.records[0].state = record::State::Errored as i32;
-        block_manager.save(&block).unwrap();
+        block_manager.save(block).unwrap();
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
@@ -381,7 +381,7 @@ mod tests {
 
     fn setup_2_blocks() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
         let dir = tempdir().unwrap().into_path();
-        let block_manager = BlockManager::new(dir);
+        let mut block_manager = BlockManager::new(dir);
         let mut block = block_manager.start(0, 10).unwrap();
 
         block.records.push(Record {
@@ -431,7 +431,7 @@ mod tests {
             nanos: 5000,
         });
         block.size = 20;
-        block_manager.save(&block).unwrap();
+        block_manager.save(block.clone()).unwrap();
 
         let block_manager = Arc::new(RwLock::new(block_manager));
         {
@@ -482,7 +482,7 @@ mod tests {
             nanos: 1000_000,
         });
         block.size = 10;
-        block_manager.write().unwrap().save(&block).unwrap();
+        block_manager.write().unwrap().save(block.clone()).unwrap();
 
         {
             let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();

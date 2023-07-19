@@ -18,7 +18,7 @@ use axum::headers::HeaderMapExt;
 use hyper::HeaderMap;
 
 use axum::routing::{delete, get, post};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
@@ -89,7 +89,7 @@ where
     }
 }
 
-pub fn create_token_api_routes() -> axum::Router<Arc<RwLock<HttpServerState>>> {
+pub fn create_token_api_routes() -> axum::Router<Arc<HttpServerState>> {
     axum::Router::new()
         .route("/", get(list_tokens))
         .route("/:token_name", post(create_token))

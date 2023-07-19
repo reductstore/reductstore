@@ -5,22 +5,26 @@
 
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::http_frontend::middleware::check_permissions;
+use crate::http_frontend::HttpError;
 use crate::http_frontend::HttpServerState;
 use crate::storage::proto::FullBucketInfo;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use reduct_base::error::HttpError;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // GET /b/:bucket_name
 pub async fn get_bucket(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullBucketInfo, HttpError> {
-    check_permissions(Arc::clone(&components), headers, AuthenticatedPolicy {})?;
-    let mut components = components.write().unwrap();
-    components.storage.get_bucket(&bucket_name)?.info()
+    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    components
+        .storage
+        .read()
+        .await
+        .get_bucket(&bucket_name)?
+        .info()
 }
 
 #[cfg(test)]
@@ -33,11 +37,11 @@ mod tests {
 
     use rstest::rstest;
 
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_get_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
         let info = get_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();

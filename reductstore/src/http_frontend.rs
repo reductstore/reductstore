@@ -4,14 +4,14 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 
-use std::sync::{Arc, RwLock};
-
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware::from_fn, Router};
 use prost::DecodeError;
 use serde::de::StdError;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -33,9 +33,9 @@ mod token_api;
 mod ui_api;
 
 pub struct HttpServerState {
-    pub storage: Storage,
+    pub storage: RwLock<Storage>,
     pub auth: TokenAuthorization,
-    pub token_repo: Box<dyn ManageTokens + Send + Sync>,
+    pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: ZipAssetManager,
     pub base_path: String,
 }
@@ -78,7 +78,7 @@ impl From<axum::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> Router {
+pub fn create_axum_app(api_base_path: &String, components: Arc<HttpServerState>) -> Router {
     let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
 
     let app = Router::new()
@@ -99,14 +99,13 @@ pub fn create_axum_app(api_base_path: &String, components: HttpServerState) -> R
         .fallback(get(show_ui))
         .layer(from_fn(default_headers))
         .layer(from_fn(print_statuses))
-        .with_state(Arc::new(RwLock::new(components)));
+        .with_state(components);
     app
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
 
     use axum::extract::Path;
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
@@ -124,23 +123,16 @@ mod tests {
     use super::*;
 
     #[fixture]
-    pub(crate) fn components() -> Arc<RwLock<HttpServerState>> {
+    pub(crate) fn components() -> Arc<HttpServerState> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut components = HttpServerState {
-            storage: Storage::new(PathBuf::from(data_path.clone())),
-            auth: TokenAuthorization::new("inti-token"),
-            token_repo: create_token_repository(data_path.clone(), "init-token"),
-            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
-            base_path: "/".to_string(),
-        };
+        let mut storage = Storage::new(data_path.clone());
+        let mut token_repo = create_token_repository(data_path.clone(), "init-token");
 
-        components
-            .storage
+        storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap();
-        components
-            .storage
+        storage
             .create_bucket("bucket-2", BucketSettings::default())
             .unwrap();
 
@@ -148,9 +140,9 @@ mod tests {
             ("x".to_string(), "y".to_string()),
             ("b".to_string(), "[a,b]".to_string()),
         ]);
-        components
-            .storage
-            .get_bucket("bucket-1")
+
+        storage
+            .get_mut_bucket("bucket-1")
             .unwrap()
             .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
             .unwrap()
@@ -163,12 +155,18 @@ mod tests {
             read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
             ..Default::default()
         };
-        components
-            .token_repo
-            .create_token("test", permissions)
-            .unwrap();
 
-        Arc::new(RwLock::new(components))
+        token_repo.create_token("test", permissions).unwrap();
+
+        let components = HttpServerState {
+            storage: RwLock::new(storage),
+            auth: TokenAuthorization::new("inti-token"),
+            token_repo: RwLock::new(token_repo),
+            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            base_path: "/".to_string(),
+        };
+
+        Arc::new(components)
     }
 
     #[fixture]

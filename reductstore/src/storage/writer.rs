@@ -133,7 +133,7 @@ impl RecordWriter {
         self.block_manager
             .write()
             .unwrap()
-            .save(&block)
+            .save(block)
             .map_err(|e| {
                 log::error!("Failed to save block: {}", e);
             })
@@ -154,9 +154,9 @@ mod tests {
 
         impl ManageBlock for BlockManager {
             fn load(&self, begin_time: u64) -> Result<Block, HttpError>;
-            fn save(&self, block: &Block) -> Result<(), HttpError>;
-            fn start(&self, begin_time: u64, max_block_size: u64) -> Result<Block, HttpError>;
-            fn finish(&self, block: &Block) -> Result<(), HttpError>;
+            fn save(&mut self, block: Block) -> Result<(), HttpError>;
+            fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Block, HttpError>;
+            fn finish(&mut self, block: &Block) -> Result<(), HttpError>;
             fn remove(&mut self, block_id: u64) -> Result<(), HttpError>;
 
         }

@@ -10,11 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - reductstore: Refactor `http_frontend` module, [PR-306](https://github.com/reductstore/reductstore/pull/306)
+- reductstore: Cache last block to reduce read operations, [PR-318](https://github.com/reductstore/reductstore/pull/318)
+- reductstore: Grained HTTP components, [PR-319](https://github.com/reductstore/reductstore/pull/319)
+- reductstore: Default maximum records in block 256, [PR-320](https://github.com/reductstore/reductstore/pull/320)
 - all: Organize workspaces, [PR-310](https://github.com/reductstore/reductstore/pull/310)
 
 ### Removed
 
 - `native-tls` dependency (only `rustls`), [PR-315](https://github.com/reductstore/reductstore/pull/315)
+
+## [1.5.1] - 2023-07-17
+
+### Fixed
+
+- Handle empty or broken block descriptor, [PR-317](https://github.com/reductstore/reductstore/pull/317)
 
 ## [1.5.0] - 2023-06-30
 
@@ -474,7 +483,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.5.1...HEAD
+
+[1.5.1]: https://github.com/reductstore/reductstore/compare/v1.5.0...v1.5.1
 
 [1.5.0]: https://github.com/reductstore/reductstore/compare/v1.4.1...v1.5.0
 

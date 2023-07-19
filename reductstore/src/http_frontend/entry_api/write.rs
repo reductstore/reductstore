@@ -7,7 +7,7 @@ use crate::auth::policy::WriteAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::HttpServerState;
 use crate::storage::entry::Labels;
-use crate::storage::writer::{Chunk, RecordWriter};
+use crate::storage::writer::Chunk;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap};
 use bytes::Bytes;
@@ -15,11 +15,11 @@ use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::HttpError;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // POST /:bucket/:entry?ts=<number>
 pub async fn write_record(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -27,14 +27,15 @@ pub async fn write_record(
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
     check_permissions(
-        Arc::clone(&components),
+        &components,
         headers.clone(),
         WriteAccessPolicy {
             bucket: bucket.clone(),
         },
-    )?;
+    )
+    .await?;
 
-    let check_request_and_get_writer = || -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
+    let check_request_and_get_writer = async {
         if !params.contains_key("ts") {
             return Err(HttpError::unprocessable_entity(
                 "'ts' parameter is required",
@@ -84,8 +85,8 @@ pub async fn write_record(
         }
 
         let writer = {
-            let mut components = components.write().unwrap();
-            let bucket = components.storage.get_bucket(bucket)?;
+            let mut storage = components.storage.write().await;
+            let bucket = storage.get_mut_bucket(bucket)?;
             bucket.begin_write(
                 path.get("entry_name").unwrap(),
                 ts,
@@ -97,7 +98,7 @@ pub async fn write_record(
         Ok(writer)
     };
 
-    match check_request_and_get_writer() {
+    match check_request_and_get_writer.await {
         Ok(writer) => {
             while let Some(chunk) = stream.next().await {
                 let mut writer = writer.write().unwrap();
@@ -143,7 +144,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<RwLock<HttpServerState>>,
+        components: Arc<HttpServerState>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
     ) {
@@ -165,9 +166,9 @@ mod tests {
         .unwrap();
 
         let record = components
-            .write()
-            .unwrap()
             .storage
+            .read()
+            .await
             .get_bucket("bucket-1")
             .unwrap()
             .begin_read("entry-1", 1)

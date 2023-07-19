@@ -12,7 +12,7 @@ def test__create_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['settings'] == {"max_block_records": 1024, "max_block_size": 64000000,
+    assert data['settings'] == {"max_block_records": 256, "max_block_size": 64000000,
                                 "quota_type": "NONE", "quota_size": 0}
     assert data['info']['name'] == bucket_name
     assert len(data['entries']) == 0
@@ -60,7 +60,7 @@ def test__create_bucket_custom(base_url, session, bucket_name):
     assert resp.status_code == 200
 
     data = json.loads(resp.content)
-    assert data['settings'] == {"max_block_records": 1024, "max_block_size": 500, "quota_type": "NONE",
+    assert data['settings'] == {"max_block_records": 256, "max_block_size": 500, "quota_type": "NONE",
                                 "quota_size": 0}
 
 
@@ -136,7 +136,7 @@ def test__update_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 200
     data = json.loads(resp.content)
 
-    new_settings.update({"quota_size": 0, 'max_block_records': 1024})
+    new_settings.update({"quota_size": 0, 'max_block_records': 256})
     assert data['settings'] == new_settings
 
 

@@ -10,19 +10,20 @@ use crate::storage::proto::BucketSettings;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use reduct_base::error::HttpError;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // POST /b/:bucket_name
 pub async fn create_bucket(
-    State(components): State<Arc<RwLock<HttpServerState>>>,
+    State(components): State<Arc<HttpServerState>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     settings: BucketSettings,
 ) -> Result<(), HttpError> {
-    check_permissions(Arc::clone(&components), headers, FullAccessPolicy {})?;
-    let mut components = components.write().unwrap();
+    check_permissions(&components, headers, FullAccessPolicy {}).await?;
     components
         .storage
+        .write()
+        .await
         .create_bucket(&bucket_name, settings.into())?;
     Ok(())
 }
@@ -38,11 +39,11 @@ mod tests {
 
     use rstest::rstest;
 
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket(components: Arc<RwLock<HttpServerState>>, headers: HeaderMap) {
+    async fn test_create_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
         create_bucket(
             State(components),
             Path("bucket-3".to_string()),
