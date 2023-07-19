@@ -21,9 +21,9 @@ pub async fn update_bucket(
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
     let mut storage = components.storage.write().await;
 
-    storage
+    Ok(storage
         .get_mut_bucket(&bucket_name)?
-        .set_settings(settings.into())
+        .set_settings(settings.into())?)
 }
 
 #[cfg(test)]

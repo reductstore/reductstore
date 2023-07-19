@@ -5,8 +5,7 @@
 
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
-use reduct_base::error::HttpError;
+use crate::http_frontend::{HttpError, HttpServerState};
 
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;

@@ -5,11 +5,10 @@
 
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use crate::storage::proto::ServerInfo;
 use axum::extract::State;
 use axum::headers::HeaderMap;
-use reduct_base::error::HttpError;
 use std::sync::{Arc, RwLock};
 
 // GET /info
@@ -18,7 +17,7 @@ pub async fn info(
     headers: HeaderMap,
 ) -> Result<ServerInfo, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
-    components.storage.read().await.info()
+    Ok(components.storage.read().await.info()?)
 }
 
 #[cfg(test)]

@@ -5,10 +5,9 @@
 
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use reduct_base::error::HttpError;
 use std::sync::{Arc, RwLock};
 
 // DELETE /tokens/:name
@@ -19,11 +18,11 @@ pub async fn remove_token(
 ) -> Result<(), HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    components
+    Ok(components
         .token_repo
         .write()
         .await
-        .remove_token(&token_name)
+        .remove_token(&token_name)?)
 }
 
 #[cfg(test)]

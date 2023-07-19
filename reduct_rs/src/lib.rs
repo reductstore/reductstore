@@ -18,7 +18,7 @@ impl ReductClient {
     /// # Examples
     ///
     /// ```
-    /// use reduct_client::ReductClient;
+    /// use reduct_rs::ReductClient;
     ///
     /// let client = ReductClient::builder()
     ///    .set_url("https://reductstore.com")
@@ -30,7 +30,7 @@ impl ReductClient {
     }
 }
 
-struct ReductClientBuilder {
+pub struct ReductClientBuilder {
     url: String,
     api_token: String,
 }
@@ -51,7 +51,7 @@ impl ReductClientBuilder {
     pub fn build(self) -> ReductClient {
         assert!(!self.url.is_empty(), "URL must be set");
         ReductClient {
-            http_client: self.http_client,
+            http_client: reqwest::Client::new(),
             url: self.url,
             api_token: self.api_token,
         }

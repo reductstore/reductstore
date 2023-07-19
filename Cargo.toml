@@ -2,7 +2,7 @@
 
 members = [
     "reductstore",
-    "reduct_client",
+    "reduct_rs",
     "reduct_base"
 ]
 

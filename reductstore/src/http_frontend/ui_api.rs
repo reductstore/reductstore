@@ -4,9 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 
+use crate::http_frontend::HttpError;
 use crate::http_frontend::HttpServerState;
 use axum::extract::State;
-use reduct_base::error::HttpError;
 
 use axum::headers::HeaderMap;
 use axum::http::header::{CONTENT_TYPE, LOCATION};
@@ -16,6 +16,7 @@ use bytes::Bytes;
 use hyper::Body;
 use log::debug;
 use mime_guess::mime;
+use reduct_base::error::HttpStatus;
 use std::sync::Arc;
 
 pub async fn redirect_to_index(
@@ -35,7 +36,7 @@ pub async fn show_ui(
 
     let path = request.uri().path();
     if !path.starts_with(&format!("{}ui/", base_path)) {
-        return Err(HttpError::not_found("Not found"));
+        return Err(HttpError::new(HttpStatus::NotFound, "Not found"));
     }
 
     let path = path[base_path.len() + 3..].to_string();

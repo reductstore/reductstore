@@ -23,12 +23,13 @@ use axum::headers::HeaderMapExt;
 use axum::routing::{get, head, post};
 
 use crate::storage::storage::Storage;
+use reduct_base::error::HttpStatus;
 use std::sync::Arc;
 
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
 use crate::http_frontend::entry_api::read_single::read_single_record;
 use crate::http_frontend::entry_api::write::write_record;
-use reduct_base::error::HttpError;
+use crate::http_frontend::HttpError;
 
 use crate::http_frontend::HttpServerState;
 
@@ -73,17 +74,18 @@ fn check_and_extract_ts_or_query_id(
 ) -> Result<(Option<u64>, Option<u64>), HttpError> {
     let ts = match params.get("ts") {
         Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
-            HttpError::unprocessable_entity("'ts' must be an unix timestamp in microseconds")
+            HttpError::new(
+                HttpStatus::UnprocessableEntity,
+                "'ts' must be an unix timestamp in microseconds",
+            )
         })?),
         None => None,
     };
 
     let query_id = match params.get("q") {
-        Some(query) => Some(
-            query
-                .parse::<u64>()
-                .map_err(|_| HttpError::unprocessable_entity("'query' must be a number"))?,
-        ),
+        Some(query) => Some(query.parse::<u64>().map_err(|_| {
+            HttpError::new(HttpStatus::UnprocessableEntity, "'query' must be a number")
+        })?),
         None => None,
     };
 

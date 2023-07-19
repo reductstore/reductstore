@@ -19,12 +19,12 @@ pub async fn get_bucket(
     headers: HeaderMap,
 ) -> Result<FullBucketInfo, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
-    components
+    Ok(components
         .storage
         .read()
         .await
         .get_bucket(&bucket_name)?
-        .info()
+        .info()?)
 }
 
 #[cfg(test)]

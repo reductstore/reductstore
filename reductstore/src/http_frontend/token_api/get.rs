@@ -6,11 +6,11 @@
 use crate::auth::policy::FullAccessPolicy;
 use crate::auth::proto::Token;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use reduct_base::error::HttpError;
 use std::sync::{Arc, RwLock};
+
 // GET /tokens/:token_name
 pub async fn get_token(
     State(components): State<Arc<HttpServerState>>,
@@ -19,7 +19,11 @@ pub async fn get_token(
 ) -> Result<Token, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    components.token_repo.read().await.find_by_name(&token_name)
+    Ok(components
+        .token_repo
+        .read()
+        .await
+        .find_by_name(&token_name)?)
 }
 
 #[cfg(test)]

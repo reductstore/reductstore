@@ -26,9 +26,8 @@ use crate::http_frontend::bucket_api::get::get_bucket;
 use crate::http_frontend::bucket_api::head::head_bucket;
 use crate::http_frontend::bucket_api::remove::remove_bucket;
 use crate::http_frontend::bucket_api::update::update_bucket;
-use reduct_base::error::HttpError;
 
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState, HttpStatus};
 use crate::storage::proto::bucket_settings::QuotaType;
 use crate::storage::proto::BucketSettings;
 use crate::storage::proto::FullBucketInfo;
@@ -90,15 +89,18 @@ where
                     if !quota_type.is_null() {
                         if let Some(quota_as_str) = quota_type.as_str() {
                             let val = QuotaType::from_str_name(quota_as_str).ok_or(
-                                HttpError::unprocessable_entity("Invalid quota type")
-                                    .into_response(),
+                                HttpError::new(
+                                    HttpStatus::UnprocessableEntity,
+                                    "Invalid quota type",
+                                )
+                                .into_response(),
                             )? as i32;
                             *quota_type = json!(val);
                         } else {
-                            return Err(HttpError::unprocessable_entity(&format!(
-                                "Failed to parse quota type: {:}",
-                                quota_type
-                            ))
+                            return Err(HttpError::new(
+                                HttpStatus::UnprocessableEntity,
+                                &format!("Failed to parse quota type: {:}", quota_type),
+                            )
                             .into_response());
                         }
                     }

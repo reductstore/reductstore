@@ -22,13 +22,12 @@ use std::sync::Arc;
 
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
-use reduct_base::error::HttpError;
 
 use crate::http_frontend::token_api::create::create_token;
 use crate::http_frontend::token_api::get::get_token;
 use crate::http_frontend::token_api::list::list_tokens;
 use crate::http_frontend::token_api::remove::remove_token;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState, HttpStatus};
 
 impl IntoResponse for TokenRepo {
     fn into_response(self) -> Response {

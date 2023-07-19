@@ -5,11 +5,10 @@
 
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use crate::storage::proto::BucketInfoList;
 use axum::extract::State;
 use axum::headers::HeaderMap;
-use reduct_base::error::HttpError;
 use std::sync::{Arc, RwLock};
 
 // GET /list
@@ -18,7 +17,7 @@ pub async fn list(
     headers: HeaderMap,
 ) -> Result<BucketInfoList, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
-    components.storage.read().await.get_bucket_list()
+    Ok(components.storage.read().await.get_bucket_list()?)
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use axum::routing::get;
 use axum::{middleware::from_fn, Router};
 use prost::DecodeError;
 use serde::de::StdError;
+use std::fmt::{Debug, Display, Formatter, LowerExp};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -23,7 +24,8 @@ use crate::http_frontend::server_api::create_server_api_routes;
 use crate::http_frontend::token_api::create_token_api_routes;
 use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
-use reduct_base::error::HttpError;
+use reduct_base::error::HttpError as BaseHttpError;
+pub use reduct_base::error::HttpStatus;
 
 mod bucket_api;
 mod entry_api;
@@ -40,29 +42,35 @@ pub struct HttpServerState {
     pub base_path: String,
 }
 
-impl IntoResponse for HttpError {
-    fn into_response(self) -> Response {
-        let body = format!("{{\"detail\": \"{}\"}}", self.message.to_string());
+pub struct HttpError(BaseHttpError);
 
-        // its often easiest to implement `IntoResponse` by calling other implementations
-        let mut resp = (StatusCode::from_u16(self.status as u16).unwrap(), body).into_response();
-        resp.headers_mut()
-            .insert("content-type", "application/json".parse().unwrap());
-        resp.headers_mut()
-            .insert("x-reduct-error", self.message.parse().unwrap());
-        resp
+impl HttpError {
+    pub fn new(status: HttpStatus, message: &str) -> Self {
+        HttpError(BaseHttpError::new(status, message))
     }
 }
 
-impl From<DecodeError> for HttpError {
-    fn from(err: DecodeError) -> Self {
-        HttpError::unprocessable_entity(&format!("Failed to serialize data: {}", err))
+impl From<BaseHttpError> for HttpError {
+    fn from(err: BaseHttpError) -> Self {
+        HttpError(err)
     }
 }
 
-impl From<serde_json::Error> for HttpError {
-    fn from(err: serde_json::Error) -> Self {
-        HttpError::unprocessable_entity(&format!("Invalid JSON: {}", err))
+impl Into<BaseHttpError> for HttpError {
+    fn into(self) -> BaseHttpError {
+        self.0
+    }
+}
+
+impl Debug for HttpError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+impl Display for HttpError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }
 
@@ -72,9 +80,36 @@ impl StdError for HttpError {
     }
 }
 
+impl IntoResponse for HttpError {
+    fn into_response(self) -> Response {
+        let err: BaseHttpError = self.into();
+        let body = format!("{{\"detail\": \"{}\"}}", err.message.to_string());
+
+        // its often easiest to implement `IntoResponse` by calling other implementations
+        let mut resp = (StatusCode::from_u16(err.status as u16).unwrap(), body).into_response();
+        resp.headers_mut()
+            .insert("content-type", "application/json".parse().unwrap());
+        resp.headers_mut()
+            .insert("x-reduct-error", err.message.parse().unwrap());
+        resp
+    }
+}
+
 impl From<axum::Error> for HttpError {
     fn from(err: axum::Error) -> Self {
-        HttpError::internal_server_error(&format!("Internal reductstore error: {}", err))
+        HttpError::from(BaseHttpError::internal_server_error(&format!(
+            "Internal reductstore error: {}",
+            err
+        )))
+    }
+}
+
+impl From<serde_json::Error> for HttpError {
+    fn from(err: serde_json::Error) -> Self {
+        HttpError::new(
+            HttpStatus::UnprocessableEntity,
+            &format!("Invalid JSON: {}", err),
+        )
     }
 }
 

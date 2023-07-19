@@ -5,11 +5,10 @@
 
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use crate::storage::proto::BucketSettings;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use reduct_base::error::HttpError;
 use std::sync::Arc;
 
 // POST /b/:bucket_name

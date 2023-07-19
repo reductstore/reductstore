@@ -4,11 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::ReadAccessPolicy;
-use reduct_base::error::HttpError;
-
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
-
+use crate::http_frontend::{HttpError, HttpServerState};
 use crate::storage::proto::QueryInfo;
 use crate::storage::query::base::QueryOptions;
 
@@ -19,6 +16,7 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 
+use reduct_base::error::HttpStatus;
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
@@ -48,28 +46,40 @@ pub async fn query(
 
     let start = match params.get("start") {
         Some(start) => start.parse::<u64>().map_err(|_| {
-            HttpError::unprocessable_entity("'start' must be an unix timestamp in microseconds")
+            HttpError::new(
+                HttpStatus::UnprocessableEntity,
+                "'start' must be an unix timestamp in microseconds",
+            )
         })?,
         None => entry_info.oldest_record,
     };
 
     let stop = match params.get("stop") {
         Some(stop) => stop.parse::<u64>().map_err(|_| {
-            HttpError::unprocessable_entity("'stop' must be an unix timestamp in microseconds")
+            HttpError::new(
+                HttpStatus::UnprocessableEntity,
+                "'stop' must be an unix timestamp in microseconds",
+            )
         })?,
         None => entry_info.latest_record + 1,
     };
 
     let continuous = match params.get("continuous") {
         Some(continue_) => continue_.parse::<bool>().map_err(|_| {
-            HttpError::unprocessable_entity("'continue' must be an unix timestamp in microseconds")
+            HttpError::new(
+                HttpStatus::UnprocessableEntity,
+                "'continue' must be an unix timestamp in microseconds",
+            )
         })?,
         None => false,
     };
 
     let ttl = match params.get("ttl") {
         Some(ttl) => ttl.parse::<u64>().map_err(|_| {
-            HttpError::unprocessable_entity("'ttl' must be an unix timestamp in microseconds")
+            HttpError::new(
+                HttpStatus::UnprocessableEntity,
+                "'ttl' must be an unix timestamp in microseconds",
+            )
         })?,
         None => 5,
     };

@@ -13,7 +13,7 @@ pub trait Policy {
     /// Validate validates a token against the policy.
     /// If the token is valid, the function returns Ok(()).
     /// If the token is invalid, the function returns an HTTPError.
-    /// The HTTPError should contain the status code and message to be returned to the reduct_client.
+    /// The HTTPError should contain the status code and message to be returned to the reduct_rs.
     ///
     /// # Arguments
     /// * `token` - The token to validate.
