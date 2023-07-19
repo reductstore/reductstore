@@ -9,7 +9,7 @@ use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::State;
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // // GET /me
 pub async fn me(

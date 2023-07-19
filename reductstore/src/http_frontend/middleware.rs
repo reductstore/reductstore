@@ -8,7 +8,6 @@ use axum::http::{HeaderMap, Request};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error};
-use std::sync::{Arc, RwLock};
 
 use crate::auth::policy::Policy;
 use crate::http_frontend::{HttpError, HttpServerState};

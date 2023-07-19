@@ -9,7 +9,7 @@ use crate::http_frontend::{HttpError, HttpServerState};
 use crate::storage::proto::BucketInfoList;
 use axum::extract::State;
 use axum::headers::HeaderMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // GET /list
 pub async fn list(

@@ -8,9 +8,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware::from_fn, Router};
-use prost::DecodeError;
+
 use serde::de::StdError;
-use std::fmt::{Debug, Display, Formatter, LowerExp};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

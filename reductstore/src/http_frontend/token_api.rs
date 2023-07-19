@@ -27,7 +27,7 @@ use crate::http_frontend::token_api::create::create_token;
 use crate::http_frontend::token_api::get::get_token;
 use crate::http_frontend::token_api::list::list_tokens;
 use crate::http_frontend::token_api::remove::remove_token;
-use crate::http_frontend::{HttpError, HttpServerState, HttpStatus};
+use crate::http_frontend::{HttpError, HttpServerState};
 
 impl IntoResponse for TokenRepo {
     fn into_response(self) -> Response {
