@@ -128,8 +128,6 @@ pub fn create_bucket_api_routes() -> axum::Router<Arc<HttpServerState>> {
 mod tests {
     use super::*;
 
-    use crate::storage::proto::BucketSettings;
-
     use axum::http::Method;
     use hyper::Body;
 
