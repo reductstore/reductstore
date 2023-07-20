@@ -6,7 +6,6 @@
 use crate::auth::policy::ReadAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::{HttpError, HttpServerState};
-use crate::storage::proto::QueryInfo;
 use crate::storage::query::base::QueryOptions;
 
 use axum::extract::{Path, Query, State};
@@ -16,7 +15,9 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 
+use crate::http_frontend::entry_api::QueryInfoAxum;
 use reduct_base::error::HttpStatus;
+use reduct_base::msg::entry_api::QueryInfo;
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
@@ -25,7 +26,7 @@ pub async fn query(
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
-) -> Result<QueryInfo, HttpError> {
+) -> Result<QueryInfoAxum, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
 
@@ -109,5 +110,5 @@ pub async fn query(
         },
     )?;
 
-    Ok(QueryInfo { id })
+    Ok(QueryInfoAxum::from(QueryInfo { id }))
 }

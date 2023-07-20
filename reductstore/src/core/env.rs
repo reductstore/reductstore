@@ -93,9 +93,9 @@ mod tests {
     fn default_values() {
         let mut env = setup();
 
-        let value = env.get("TEST", String::from("default"), false);
+        let value = env.get("TEST__", String::from("default"), false);
         assert_eq!(value, "default");
-        assert_eq!(env.message(), "\tTEST = default (default)\n");
+        assert_eq!(env.message(), "\tTEST__ = default (default)\n");
     }
 
     #[test]

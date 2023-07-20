@@ -26,6 +26,7 @@ use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
 use reduct_base::error::HttpError as BaseHttpError;
 pub use reduct_base::error::HttpStatus;
+use reduct_base::msg::bucket_api::BucketSettings;
 
 mod bucket_api;
 mod entry_api;
@@ -151,7 +152,6 @@ mod tests {
     use crate::auth::proto::token::Permissions;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::create_token_repository;
-    use crate::storage::proto::BucketSettings;
     use crate::storage::storage::Storage;
     use crate::storage::writer::Chunk;
 

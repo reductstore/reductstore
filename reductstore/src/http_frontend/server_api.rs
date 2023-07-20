@@ -14,43 +14,51 @@ use axum::headers::HeaderMapExt;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, head};
+use reduct_base::msg::bucket_api::BucketInfo;
+use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use serde_json::json;
 
 use crate::http_frontend::HttpServerState;
-use crate::storage::proto::bucket_settings::QuotaType;
-use crate::storage::proto::{BucketInfoList, ServerInfo};
 
-impl IntoResponse for ServerInfo {
-    fn into_response(self) -> Response {
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
+pub struct ServerInfoAxum(ServerInfo);
 
-        let mut body = serde_json::to_value(&self).unwrap();
-        *body
-            .get_mut("defaults")
-            .unwrap()
-            .get_mut("bucket")
-            .unwrap()
-            .get_mut("quota_type")
-            .unwrap() = json!(QuotaType::from_i32(
-            self.defaults.unwrap().bucket.unwrap().quota_type.unwrap()
-        )
-        .unwrap()
-        .as_str_name());
-        (StatusCode::OK, headers, body.to_string()).into_response()
-    }
-}
-
-impl IntoResponse for BucketInfoList {
+impl IntoResponse for ServerInfoAxum {
     fn into_response(self) -> Response {
         let mut headers = HeaderMap::new();
         headers.typed_insert(headers::ContentType::json());
         (
             StatusCode::OK,
             headers,
-            serde_json::to_string(&self).unwrap(),
+            serde_json::to_string(&self.0).unwrap(),
         )
             .into_response()
+    }
+}
+
+impl From<ServerInfo> for ServerInfoAxum {
+    fn from(info: ServerInfo) -> Self {
+        Self(info)
+    }
+}
+
+pub struct BucketInfoListAxum(BucketInfoList);
+
+impl IntoResponse for BucketInfoListAxum {
+    fn into_response(self) -> Response {
+        let mut headers = HeaderMap::new();
+        headers.typed_insert(headers::ContentType::json());
+        (
+            StatusCode::OK,
+            headers,
+            serde_json::to_string(&self.0).unwrap(),
+        )
+            .into_response()
+    }
+}
+
+impl From<BucketInfoList> for BucketInfoListAxum {
+    fn from(info: BucketInfoList) -> Self {
+        Self(info)
     }
 }
 

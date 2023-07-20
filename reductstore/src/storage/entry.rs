@@ -6,7 +6,7 @@
 use crate::storage::block_manager::{
     find_first_block, BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT,
 };
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, EntryInfo, Record};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use crate::storage::reader::RecordReader;
@@ -20,6 +20,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 
+use reduct_base::msg::entry_api::EntryInfo;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
