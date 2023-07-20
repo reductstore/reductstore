@@ -26,7 +26,6 @@ use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
 use reduct_base::error::HttpError as BaseHttpError;
 pub use reduct_base::error::HttpStatus;
-use reduct_base::msg::bucket_api::BucketSettings;
 
 mod bucket_api;
 mod entry_api;
@@ -146,6 +145,7 @@ mod tests {
     use axum::extract::Path;
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
+    use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::fixture;
 
     use crate::asset::asset_manager::ZipAssetManager;

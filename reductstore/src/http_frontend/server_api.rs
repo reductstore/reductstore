@@ -14,9 +14,8 @@ use axum::headers::HeaderMapExt;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, head};
-use reduct_base::msg::bucket_api::BucketInfo;
+
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
-use serde_json::json;
 
 use crate::http_frontend::HttpServerState;
 

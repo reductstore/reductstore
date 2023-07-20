@@ -19,7 +19,6 @@ use axum::routing::{delete, get, head, post, put};
 use axum::{async_trait, headers};
 use bytes::Bytes;
 use hyper::HeaderMap;
-use serde_json::{json, Value};
 
 use crate::http_frontend::bucket_api::create::create_bucket;
 use crate::http_frontend::bucket_api::get::get_bucket;
@@ -27,7 +26,7 @@ use crate::http_frontend::bucket_api::head::head_bucket;
 use crate::http_frontend::bucket_api::remove::remove_bucket;
 use crate::http_frontend::bucket_api::update::update_bucket;
 
-use crate::http_frontend::{HttpError, HttpServerState, HttpStatus};
+use crate::http_frontend::{HttpError, HttpServerState};
 use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
 
 //

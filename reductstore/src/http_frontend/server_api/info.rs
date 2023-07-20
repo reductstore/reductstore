@@ -9,7 +9,7 @@ use crate::http_frontend::server_api::ServerInfoAxum;
 use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::State;
 use axum::headers::HeaderMap;
-use axum::Json;
+
 use std::sync::Arc;
 
 // GET /info

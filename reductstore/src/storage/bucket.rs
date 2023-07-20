@@ -30,7 +30,7 @@ impl From<BucketSettings> for ProtoBucketSettings {
     fn from(settings: BucketSettings) -> Self {
         ProtoBucketSettings {
             quota_size: settings.quota_size,
-            quota_type: if let (Some(quota_type)) = settings.quota_type {
+            quota_type: if let Some(quota_type) = settings.quota_type {
                 Some(quota_type as i32)
             } else {
                 None
