@@ -5,9 +5,9 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::token::Struct;
+
 use syn::Type::Path;
-use syn::{Data, DataStruct, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident};
+use syn::{Data, Fields};
 
 #[proc_macro_derive(IntoResponse)]
 pub fn into_response_derive(input: TokenStream) -> TokenStream {

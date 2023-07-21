@@ -1,6 +1,5 @@
 use reduct_base::error::HttpError;
 use reduct_base::msg::server_api::ServerInfo;
-use std::fmt::format;
 
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
