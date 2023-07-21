@@ -25,7 +25,7 @@ use axum::routing::{get, head, post};
 use crate::storage::storage::Storage;
 use reduct_base::error::HttpStatus;
 use reduct_base::msg::entry_api::QueryInfo;
-use reduct_macros::IntoResponse;
+use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
 
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
@@ -103,14 +103,8 @@ fn check_and_extract_ts_or_query_id(
     Ok((query_id, ts))
 }
 
-#[derive(IntoResponse)]
+#[derive(IntoResponse, Twin)]
 pub struct QueryInfoAxum(QueryInfo);
-
-impl From<QueryInfo> for QueryInfoAxum {
-    fn from(query_info: QueryInfo) -> Self {
-        Self(query_info)
-    }
-}
 
 pub fn create_entry_api_routes() -> axum::Router<Arc<HttpServerState>> {
     axum::Router::new()

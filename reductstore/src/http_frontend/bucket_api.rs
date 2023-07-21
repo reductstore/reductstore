@@ -28,11 +28,11 @@ use crate::http_frontend::bucket_api::update::update_bucket;
 
 use crate::http_frontend::{HttpError, HttpServerState};
 use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
-use reduct_macros::IntoResponse;
+use reduct_macros::{IntoResponse, Twin};
 //
 // BucketSettings wrapper
 //
-#[derive(IntoResponse)]
+#[derive(IntoResponse, Twin)]
 pub struct BucketSettingsAxum(BucketSettings);
 
 impl Default for BucketSettingsAxum {
@@ -41,32 +41,8 @@ impl Default for BucketSettingsAxum {
     }
 }
 
-impl From<BucketSettings> for BucketSettingsAxum {
-    fn from(settings: BucketSettings) -> Self {
-        Self(settings)
-    }
-}
-
-impl Into<BucketSettings> for BucketSettingsAxum {
-    fn into(self) -> BucketSettings {
-        self.0
-    }
-}
-
-#[derive(IntoResponse)]
+#[derive(IntoResponse, Twin)]
 pub struct FullBucketInfoAxum(FullBucketInfo);
-
-impl From<FullBucketInfo> for FullBucketInfoAxum {
-    fn from(info: FullBucketInfo) -> Self {
-        Self(info)
-    }
-}
-
-impl Into<FullBucketInfo> for FullBucketInfoAxum {
-    fn into(self) -> FullBucketInfo {
-        self.0
-    }
-}
 
 #[async_trait]
 impl<S, B> FromRequest<S, B> for BucketSettingsAxum

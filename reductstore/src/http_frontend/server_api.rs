@@ -16,27 +16,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, head};
 
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
-use reduct_macros::IntoResponse;
+use reduct_macros::{IntoResponse, Twin};
 
 use crate::http_frontend::HttpServerState;
 
-#[derive(IntoResponse)]
+#[derive(IntoResponse, Twin)]
 pub struct ServerInfoAxum(ServerInfo);
 
-impl From<ServerInfo> for ServerInfoAxum {
-    fn from(info: ServerInfo) -> Self {
-        Self(info)
-    }
-}
-
-#[derive(IntoResponse)]
+#[derive(IntoResponse, Twin)]
 pub struct BucketInfoListAxum(BucketInfoList);
-
-impl From<BucketInfoList> for BucketInfoListAxum {
-    fn from(info: BucketInfoList) -> Self {
-        Self(info)
-    }
-}
 
 pub fn create_server_api_routes() -> axum::Router<Arc<HttpServerState>> {
     axum::Router::new()
