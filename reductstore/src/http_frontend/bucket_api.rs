@@ -58,6 +58,10 @@ where
             .await
             .map_err(IntoResponse::into_response)?;
 
+        if body.is_empty() {
+            return Ok(Self::default());
+        }
+
         let settings: BucketSettings =
             serde_json::from_slice(&body).map_err(|e| HttpError::from(e).into_response())?;
         Ok(Self(settings))
