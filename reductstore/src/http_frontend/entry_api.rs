@@ -25,6 +25,7 @@ use axum::routing::{get, head, post};
 use crate::storage::storage::Storage;
 use reduct_base::error::HttpStatus;
 use reduct_base::msg::entry_api::QueryInfo;
+use reduct_macros::IntoResponse;
 use std::sync::Arc;
 
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
@@ -102,21 +103,8 @@ fn check_and_extract_ts_or_query_id(
     Ok((query_id, ts))
 }
 
+#[derive(IntoResponse)]
 pub struct QueryInfoAxum(QueryInfo);
-
-impl IntoResponse for QueryInfoAxum {
-    fn into_response(self) -> Response {
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
-
-        (
-            StatusCode::OK,
-            headers,
-            serde_json::to_string(&self.0).unwrap(),
-        )
-            .into_response()
-    }
-}
 
 impl From<QueryInfo> for QueryInfoAxum {
     fn from(query_info: QueryInfo) -> Self {

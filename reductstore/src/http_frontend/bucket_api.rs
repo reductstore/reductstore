@@ -28,10 +28,11 @@ use crate::http_frontend::bucket_api::update::update_bucket;
 
 use crate::http_frontend::{HttpError, HttpServerState};
 use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
-
+use reduct_macros::IntoResponse;
 //
 // BucketSettings wrapper
 //
+#[derive(IntoResponse)]
 pub struct BucketSettingsAxum(BucketSettings);
 
 impl Default for BucketSettingsAxum {
@@ -52,22 +53,7 @@ impl Into<BucketSettings> for BucketSettingsAxum {
     }
 }
 
-impl IntoResponse for BucketSettingsAxum {
-    fn into_response(self) -> Response {
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
-        (
-            StatusCode::OK,
-            headers,
-            serde_json::to_string(&self.0).unwrap(),
-        )
-            .into_response()
-    }
-}
-//
-// FullBucketInfo wrapper
-//
-
+#[derive(IntoResponse)]
 pub struct FullBucketInfoAxum(FullBucketInfo);
 
 impl From<FullBucketInfo> for FullBucketInfoAxum {
@@ -79,19 +65,6 @@ impl From<FullBucketInfo> for FullBucketInfoAxum {
 impl Into<FullBucketInfo> for FullBucketInfoAxum {
     fn into(self) -> FullBucketInfo {
         self.0
-    }
-}
-
-impl IntoResponse for FullBucketInfoAxum {
-    fn into_response(self) -> Response {
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
-        (
-            StatusCode::OK,
-            headers,
-            serde_json::to_string(&self.0).unwrap(),
-        )
-            .into_response()
     }
 }
 

@@ -1339,19 +1339,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "reduct-rs"
-version = "1.5.0-dev"
+name = "reduct-base"
+version = "0.1.0"
 dependencies = [
- "reqwest",
+ "rstest 0.18.1",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "reduct_base"
+name = "reduct-macros"
 version = "0.1.0"
 dependencies = [
- "rstest 0.18.1",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "reduct-rs"
+version = "1.5.0-dev"
+dependencies = [
+ "reqwest",
  "serde",
  "serde_json",
 ]
@@ -1377,7 +1385,8 @@ dependencies = [
  "prost-wkt-build",
  "prost-wkt-types",
  "rand",
- "reduct_base",
+ "reduct-base",
+ "reduct-macros",
  "regex",
  "rstest 0.17.0",
  "rustls 0.21.2",

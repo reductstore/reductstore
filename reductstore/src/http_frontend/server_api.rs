@@ -16,23 +16,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, head};
 
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
+use reduct_macros::IntoResponse;
 
 use crate::http_frontend::HttpServerState;
 
+#[derive(IntoResponse)]
 pub struct ServerInfoAxum(ServerInfo);
-
-impl IntoResponse for ServerInfoAxum {
-    fn into_response(self) -> Response {
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
-        (
-            StatusCode::OK,
-            headers,
-            serde_json::to_string(&self.0).unwrap(),
-        )
-            .into_response()
-    }
-}
 
 impl From<ServerInfo> for ServerInfoAxum {
     fn from(info: ServerInfo) -> Self {
@@ -40,20 +29,8 @@ impl From<ServerInfo> for ServerInfoAxum {
     }
 }
 
+#[derive(IntoResponse)]
 pub struct BucketInfoListAxum(BucketInfoList);
-
-impl IntoResponse for BucketInfoListAxum {
-    fn into_response(self) -> Response {
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
-        (
-            StatusCode::OK,
-            headers,
-            serde_json::to_string(&self.0).unwrap(),
-        )
-            .into_response()
-    }
-}
 
 impl From<BucketInfoList> for BucketInfoListAxum {
     fn from(info: BucketInfoList) -> Self {

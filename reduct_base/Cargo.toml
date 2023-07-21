@@ -1,5 +1,5 @@
 [package]
-name = "reduct_base"
+name = "reduct-base"
 version = "0.1.0"
 authors = ["Alexey Timin <atimin@reduct.store>"]
 edition = "2021"
