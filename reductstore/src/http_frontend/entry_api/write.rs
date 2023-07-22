@@ -5,7 +5,7 @@
 
 use crate::auth::policy::WriteAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{HttpError, HttpServerState, HttpStatus};
+use crate::http_frontend::{ErrorCode, HttpError, HttpServerState};
 use crate::storage::entry::Labels;
 use crate::storage::writer::Chunk;
 use axum::extract::{BodyStream, Path, Query, State};
@@ -37,7 +37,7 @@ pub async fn write_record(
     let check_request_and_get_writer = async {
         if !params.contains_key("ts") {
             return Err(HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "'ts' parameter is required",
             ));
         }
@@ -46,7 +46,7 @@ pub async fn write_record(
             Ok(ts) => ts,
             Err(_) => {
                 return Err(HttpError::new(
-                    HttpStatus::UnprocessableEntity,
+                    ErrorCode::UnprocessableEntity,
                     "'ts' must be an unix timestamp in microseconds",
                 ));
             }
@@ -54,7 +54,7 @@ pub async fn write_record(
         let content_size = headers
             .get("content-length")
             .ok_or(HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "content-length header is required",
             ))?
             .to_str()
@@ -62,7 +62,7 @@ pub async fn write_record(
             .parse::<u64>()
             .map_err(|_| {
                 HttpError::new(
-                    HttpStatus::UnprocessableEntity,
+                    ErrorCode::UnprocessableEntity,
                     "content-length header must be a number",
                 )
             })?;
@@ -80,7 +80,7 @@ pub async fn write_record(
                     Ok(value) => value.to_string(),
                     Err(_) => {
                         return Err(HttpError::new(
-                            HttpStatus::UnprocessableEntity,
+                            ErrorCode::UnprocessableEntity,
                             &format!("Label values for {} must be valid UTF-8 strings", k),
                         ));
                     }

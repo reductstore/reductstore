@@ -1,10 +1,13 @@
-use reduct_base::error::HttpError;
-use reduct_base::msg::server_api::ServerInfo;
-
+use serde::de::Unexpected::Unit;
+use std::sync::{Arc, RwLock};
+use std::time::SystemTimeError;
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use crate::http_client::HttpClient;
+use reduct_base::error::HttpError;
+use reduct_base::msg::server_api::ServerInfo;
 
 pub struct ReductClientBuilder {
     url: String,
@@ -31,15 +34,13 @@ impl ReductClientBuilder {
     pub fn build(self) -> ReductClient {
         assert!(!self.url.is_empty(), "URL must be set");
         ReductClient {
-            http_client: reqwest::Client::new(),
-            url: self.url,
-            api_token: self.api_token,
+            http_client: Arc::new(RwLock::new(HttpClient::new(&self.url, &self.api_token))),
         }
     }
 
     /// Set the URL of the ReductStore instance to connect to.
     pub fn set_url(mut self, url: &str) -> Self {
-        self.url = format!("{}/{}", url.to_string(), API_BASE);
+        self.url = format!("{}{}", url.to_string(), API_BASE);
         self
     }
 
@@ -52,9 +53,7 @@ impl ReductClientBuilder {
 
 /// ReductStore client.
 pub struct ReductClient {
-    http_client: reqwest::Client,
-    url: String,
-    api_token: String,
+    http_client: Arc<RwLock<HttpClient>>,
 }
 
 impl ReductClient {
@@ -62,7 +61,7 @@ impl ReductClient {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```unwrap
     /// use reduct_rs::ReductClient;
     ///
     /// let client = ReductClient::builder()
@@ -75,6 +74,28 @@ impl ReductClient {
     }
 
     pub async fn server_info(self) -> Result<ServerInfo> {
-        Ok(ServerInfo::default())
+        self.http_client
+            .read()
+            .unwrap()
+            .request_json::<(), ServerInfo>(reqwest::Method::GET, "/info", None)
+            .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio;
+
+    #[tokio::test]
+    async fn test_server_info() {
+        let client = ReductClient::builder()
+            .set_url("http://127.0.0.1:8383")
+            .set_api_token("my-api-token")
+            .build();
+
+        let info = client.server_info().await.unwrap();
+        assert!(info.version.starts_with("1."));
+        assert!(info.bucket_count >= 0);
     }
 }

@@ -23,7 +23,7 @@ use axum::headers::HeaderMapExt;
 use axum::routing::{get, head, post};
 
 use crate::storage::storage::Storage;
-use reduct_base::error::HttpStatus;
+use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
@@ -75,7 +75,7 @@ fn check_and_extract_ts_or_query_id(
     let ts = match params.get("ts") {
         Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
             HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "'ts' must be an unix timestamp in microseconds",
             )
         })?),
@@ -84,7 +84,7 @@ fn check_and_extract_ts_or_query_id(
 
     let query_id = match params.get("q") {
         Some(query) => Some(query.parse::<u64>().map_err(|_| {
-            HttpError::new(HttpStatus::UnprocessableEntity, "'query' must be a number")
+            HttpError::new(ErrorCode::UnprocessableEntity, "'query' must be a number")
         })?),
         None => None,
     };

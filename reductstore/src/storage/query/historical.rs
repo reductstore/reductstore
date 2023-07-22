@@ -160,7 +160,7 @@ mod tests {
     use crate::storage::writer::Chunk;
     use bytes::Bytes;
     use prost_wkt_types::Timestamp;
-    use reduct_base::error::HttpStatus;
+    use reduct_base::error::ErrorCode;
     use std::collections::HashMap;
 
     use std::time::Duration;
@@ -191,7 +191,7 @@ mod tests {
         {
             let res = query.next(&index, &mut block_manager);
             assert!(res.is_err());
-            assert_eq!(res.err().unwrap().status, HttpStatus::NoContent);
+            assert_eq!(res.err().unwrap().status, ErrorCode::NoContent);
             assert_eq!(query.state(), &QueryState::Done);
         }
     }
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HttpStatus::NoContent,
+                status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HttpStatus::NoContent,
+                status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
@@ -304,7 +304,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HttpStatus::NoContent,
+                status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HttpStatus::NoContent,
+                status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
             Some(HttpError {
-                status: HttpStatus::NoContent,
+                status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );

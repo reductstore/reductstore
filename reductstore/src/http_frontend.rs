@@ -25,7 +25,9 @@ use crate::http_frontend::token_api::create_token_api_routes;
 use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
 use reduct_base::error::HttpError as BaseHttpError;
-pub use reduct_base::error::HttpStatus;
+use reduct_macros::Twin;
+
+pub use reduct_base::error::ErrorCode;
 
 mod bucket_api;
 mod entry_api;
@@ -42,23 +44,12 @@ pub struct HttpServerState {
     pub base_path: String,
 }
 
+#[derive(Twin)]
 pub struct HttpError(BaseHttpError);
 
 impl HttpError {
-    pub fn new(status: HttpStatus, message: &str) -> Self {
+    pub fn new(status: ErrorCode, message: &str) -> Self {
         HttpError(BaseHttpError::new(status, message))
-    }
-}
-
-impl From<BaseHttpError> for HttpError {
-    fn from(err: BaseHttpError) -> Self {
-        HttpError(err)
-    }
-}
-
-impl Into<BaseHttpError> for HttpError {
-    fn into(self) -> BaseHttpError {
-        self.0
     }
 }
 
@@ -107,7 +98,7 @@ impl From<axum::Error> for HttpError {
 impl From<serde_json::Error> for HttpError {
     fn from(err: serde_json::Error) -> Self {
         HttpError::new(
-            HttpStatus::UnprocessableEntity,
+            ErrorCode::UnprocessableEntity,
             &format!("Invalid JSON: {}", err),
         )
     }

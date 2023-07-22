@@ -6,7 +6,7 @@
 use crate::auth::policy::ReadAccessPolicy;
 use crate::http_frontend::entry_api::MethodExtractor;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{HttpError, HttpServerState, HttpStatus};
+use crate::http_frontend::{ErrorCode, HttpError, HttpServerState};
 use crate::storage::bucket::Bucket;
 
 use crate::storage::reader::RecordReader;
@@ -45,12 +45,12 @@ pub async fn read_batched_records(
 
     let query_id = match params.get("q") {
         Some(query) => query.parse::<u64>().map_err(|_| {
-            HttpError::new(HttpStatus::UnprocessableEntity, "'query' must be a number")
+            HttpError::new(ErrorCode::UnprocessableEntity, "'query' must be a number")
         })?,
 
         None => {
             return Err(HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "'q' parameter is required for batched reads",
             ));
         }
@@ -136,7 +136,7 @@ fn fetch_and_response_batched_records(
                 if readers.is_empty() {
                     return Err(HttpError::from(err));
                 } else {
-                    if err.status() == HttpStatus::NoContent as i32 {
+                    if err.status() == ErrorCode::NoContent as i32 {
                         last = true;
                         break;
                     } else {

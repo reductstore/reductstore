@@ -9,16 +9,12 @@ use serde::{Deserialize, Serialize};
 pub struct EntryInfo {
     /// Entry name
     pub name: String,
-
     /// Size of entry in bytes
     pub size: u64,
-
     /// Number of records in entry
     pub record_count: u64,
-
     /// Number of blocks in entry
     pub block_count: u64,
-
     /// Oldest record in entry
     pub oldest_record: u64,
     /// Latest record in entry

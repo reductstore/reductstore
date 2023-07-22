@@ -3,14 +3,19 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+pub use int_enum::IntEnum;
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 use std::time::SystemTimeError;
 
-/// HTTP status codes.
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
-pub enum HttpStatus {
-    OK = 200,
+/// HTTP status codes + communication errors.
+#[repr(i16)]
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone, IntEnum)]
+pub enum ErrorCode {
+    ConnectionError = -3,
+    Timeout = -2,
+    Unknown = -1,
     Continue = 100,
+    OK = 200,
     Created = 201,
     Accepted = 202,
     NoContent = 204,
@@ -58,7 +63,7 @@ pub enum HttpStatus {
 #[derive(PartialEq, Debug)]
 pub struct HttpError {
     /// The HTTP status code.
-    pub status: HttpStatus,
+    pub status: ErrorCode,
 
     /// The human readable message.
     pub message: String,
@@ -74,7 +79,7 @@ impl From<std::io::Error> for HttpError {
     fn from(err: std::io::Error) -> Self {
         // An IO error is an internal reductstore error
         HttpError {
-            status: HttpStatus::InternalServerError,
+            status: ErrorCode::InternalServerError,
             message: err.to_string(),
         }
     }
@@ -84,14 +89,14 @@ impl From<SystemTimeError> for HttpError {
     fn from(err: SystemTimeError) -> Self {
         // A system time error is an internal reductstore error
         HttpError {
-            status: HttpStatus::InternalServerError,
+            status: ErrorCode::InternalServerError,
             message: err.to_string(),
         }
     }
 }
 
 impl HttpError {
-    pub fn new(status: HttpStatus, message: &str) -> Self {
+    pub fn new(status: ErrorCode, message: &str) -> Self {
         HttpError {
             status,
             message: message.to_string(),
@@ -108,7 +113,7 @@ impl HttpError {
 
     pub fn ok() -> HttpError {
         HttpError {
-            status: HttpStatus::OK,
+            status: ErrorCode::OK,
             message: "".to_string(),
         }
     }
@@ -116,7 +121,7 @@ impl HttpError {
     /// Create a no content error.
     pub fn no_content(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::NoContent,
+            status: ErrorCode::NoContent,
             message: msg.to_string(),
         }
     }
@@ -124,7 +129,7 @@ impl HttpError {
     /// Create a not found error.
     pub fn not_found(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::NotFound,
+            status: ErrorCode::NotFound,
             message: msg.to_string(),
         }
     }
@@ -132,7 +137,7 @@ impl HttpError {
     /// Create a conflict error.
     pub fn conflict(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::Conflict,
+            status: ErrorCode::Conflict,
             message: msg.to_string(),
         }
     }
@@ -140,7 +145,7 @@ impl HttpError {
     /// Create a bad request error.
     pub fn bad_request(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::BadRequest,
+            status: ErrorCode::BadRequest,
             message: msg.to_string(),
         }
     }
@@ -148,7 +153,7 @@ impl HttpError {
     /// Create an unauthorized error.
     pub fn unauthorized(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::Unauthorized,
+            status: ErrorCode::Unauthorized,
             message: msg.to_string(),
         }
     }
@@ -156,7 +161,7 @@ impl HttpError {
     /// Create a forbidden error.
     pub fn forbidden(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::Forbidden,
+            status: ErrorCode::Forbidden,
             message: msg.to_string(),
         }
     }
@@ -164,7 +169,7 @@ impl HttpError {
     /// Create an unprocessable entity error.
     pub fn unprocessable_entity(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::UnprocessableEntity,
+            status: ErrorCode::UnprocessableEntity,
             message: msg.to_string(),
         }
     }
@@ -172,7 +177,7 @@ impl HttpError {
     /// Create a too early error.
     pub fn too_early(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::TooEarly,
+            status: ErrorCode::TooEarly,
             message: msg.to_string(),
         }
     }
@@ -180,7 +185,7 @@ impl HttpError {
     /// Create a bad request error.
     pub fn internal_server_error(msg: &str) -> HttpError {
         HttpError {
-            status: HttpStatus::InternalServerError,
+            status: ErrorCode::InternalServerError,
             message: msg.to_string(),
         }
     }

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::http_frontend::entry_api::QueryInfoAxum;
-use reduct_base::error::HttpStatus;
+use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
 use std::time::Duration;
 
@@ -48,7 +48,7 @@ pub async fn query(
     let start = match params.get("start") {
         Some(start) => start.parse::<u64>().map_err(|_| {
             HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "'start' must be an unix timestamp in microseconds",
             )
         })?,
@@ -58,7 +58,7 @@ pub async fn query(
     let stop = match params.get("stop") {
         Some(stop) => stop.parse::<u64>().map_err(|_| {
             HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "'stop' must be an unix timestamp in microseconds",
             )
         })?,
@@ -68,7 +68,7 @@ pub async fn query(
     let continuous = match params.get("continuous") {
         Some(continue_) => continue_.parse::<bool>().map_err(|_| {
             HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "'continue' must be an unix timestamp in microseconds",
             )
         })?,
@@ -78,7 +78,7 @@ pub async fn query(
     let ttl = match params.get("ttl") {
         Some(ttl) => ttl.parse::<u64>().map_err(|_| {
             HttpError::new(
-                HttpStatus::UnprocessableEntity,
+                ErrorCode::UnprocessableEntity,
                 "'ttl' must be an unix timestamp in microseconds",
             )
         })?,

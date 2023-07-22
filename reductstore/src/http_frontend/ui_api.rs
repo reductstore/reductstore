@@ -16,7 +16,7 @@ use bytes::Bytes;
 use hyper::Body;
 use log::debug;
 use mime_guess::mime;
-use reduct_base::error::HttpStatus;
+use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
 pub async fn redirect_to_index(
@@ -36,7 +36,7 @@ pub async fn show_ui(
 
     let path = request.uri().path();
     if !path.starts_with(&format!("{}ui/", base_path)) {
-        return Err(HttpError::new(HttpStatus::NotFound, "Not found"));
+        return Err(HttpError::new(ErrorCode::NotFound, "Not found"));
     }
 
     let path = path[base_path.len() + 3..].to_string();
