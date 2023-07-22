@@ -6,7 +6,7 @@
 use crate::client::Result;
 use reduct_base::error::{ErrorCode, HttpError, IntEnum};
 use reqwest::header::HeaderValue;
-use reqwest::{Method, Response, StatusCode};
+use reqwest::Method;
 
 /// Internal HTTP client to wrap reqwest.
 pub(crate) struct HttpClient {

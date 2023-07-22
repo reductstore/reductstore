@@ -1,6 +1,5 @@
-use serde::de::Unexpected::Unit;
 use std::sync::{Arc, RwLock};
-use std::time::SystemTimeError;
+
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -96,6 +95,6 @@ mod tests {
 
         let info = client.server_info().await.unwrap();
         assert!(info.version.starts_with("1."));
-        assert!(info.bucket_count >= 0);
+        assert_eq!(info.bucket_count, 0);
     }
 }
