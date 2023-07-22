@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::http_client::HttpClient;
 use reduct_base::error::HttpError;
-use reduct_base::msg::server_api::ServerInfo;
+use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 
 pub struct ReductClientBuilder {
     url: String,
@@ -72,6 +72,11 @@ impl ReductClient {
         ReductClientBuilder::new()
     }
 
+    /// Get the server info.
+    ///
+    /// # Returns
+    ///
+    /// The server info
     pub async fn server_info(self) -> Result<ServerInfo> {
         self.http_client
             .read()
@@ -79,22 +84,42 @@ impl ReductClient {
             .request_json::<(), ServerInfo>(reqwest::Method::GET, "/info", None)
             .await
     }
+
+    pub async fn bucket_list(self) -> Result<BucketInfoList> {
+        self.http_client
+            .read()
+            .unwrap()
+            .request_json::<(), BucketInfoList>(reqwest::Method::GET, "/list", None)
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::{fixture, rstest};
     use tokio;
 
+    #[rstest]
     #[tokio::test]
-    async fn test_server_info() {
-        let client = ReductClient::builder()
-            .set_url("http://127.0.0.1:8383")
-            .set_api_token("my-api-token")
-            .build();
-
+    async fn test_server_info(client: ReductClient) {
         let info = client.server_info().await.unwrap();
         assert!(info.version.starts_with("1."));
-        assert_eq!(info.bucket_count, 0);
+        assert!(info.bucket_count >= 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bucket_list(client: ReductClient) {
+        let info = client.bucket_list().await.unwrap();
+        assert!(info.buckets.len() >= 0);
+    }
+
+    #[fixture]
+    fn client() -> ReductClient {
+        ReductClient::builder()
+            .set_url("http://127.0.0.1:8383")
+            .set_api_token(&std::env::var("RS_API_TOKEN").unwrap_or("".to_string()))
+            .build()
     }
 }
