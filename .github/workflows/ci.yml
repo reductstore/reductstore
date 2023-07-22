@@ -72,7 +72,7 @@ jobs:
           override: true
 
       - name: Run Tests
-        run: cargo test --release -p reducstore
+        run: cargo test --release -p reductstore
 
       - name: Build binary
         run: cargo build --release
