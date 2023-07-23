@@ -10,7 +10,7 @@ use std::io::{Cursor, Read};
 use tempfile::{tempdir, TempDir};
 use zip::ZipArchive;
 
-use crate::core::status::HttpError;
+use reduct_base::error::HttpError;
 
 /// Asset manager that reads files from a zip archive as hex string and returns them as string
 pub struct ZipAssetManager {
@@ -99,7 +99,7 @@ impl ZipAssetManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::status::HttpError;
+    use reduct_base::error::HttpError;
 
     #[test]
     fn test_empty_asset_manager() {

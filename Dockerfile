@@ -13,7 +13,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /src
 
 COPY reductstore reductstore
-COPY reduct_client reduct_client
+COPY reduct_rs reduct_rs
+COPY reduct_base reduct_base
+COPY reduct_macros reduct_macros
 COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock

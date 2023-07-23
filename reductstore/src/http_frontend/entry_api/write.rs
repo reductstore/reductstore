@@ -4,9 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::WriteAccessPolicy;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{ErrorCode, HttpError, HttpServerState};
 use crate::storage::entry::Labels;
 use crate::storage::writer::Chunk;
 use axum::extract::{BodyStream, Path, Query, State};
@@ -37,7 +36,8 @@ pub async fn write_record(
 
     let check_request_and_get_writer = async {
         if !params.contains_key("ts") {
-            return Err(HttpError::unprocessable_entity(
+            return Err(HttpError::new(
+                ErrorCode::UnprocessableEntity,
                 "'ts' parameter is required",
             ));
         }
@@ -45,21 +45,26 @@ pub async fn write_record(
         let ts = match params.get("ts").unwrap().parse::<u64>() {
             Ok(ts) => ts,
             Err(_) => {
-                return Err(HttpError::unprocessable_entity(
+                return Err(HttpError::new(
+                    ErrorCode::UnprocessableEntity,
                     "'ts' must be an unix timestamp in microseconds",
                 ));
             }
         };
         let content_size = headers
             .get("content-length")
-            .ok_or(HttpError::unprocessable_entity(
+            .ok_or(HttpError::new(
+                ErrorCode::UnprocessableEntity,
                 "content-length header is required",
             ))?
             .to_str()
             .unwrap()
             .parse::<u64>()
             .map_err(|_| {
-                HttpError::unprocessable_entity("content-length header must be a number")
+                HttpError::new(
+                    ErrorCode::UnprocessableEntity,
+                    "content-length header must be a number",
+                )
             })?;
 
         let content_type = headers
@@ -74,10 +79,10 @@ pub async fn write_record(
                 let value = match v.to_str() {
                     Ok(value) => value.to_string(),
                     Err(_) => {
-                        return Err(HttpError::unprocessable_entity(&format!(
-                            "Label values for {} must be valid UTF-8 strings",
-                            k
-                        )));
+                        return Err(HttpError::new(
+                            ErrorCode::UnprocessableEntity,
+                            &format!("Label values for {} must be valid UTF-8 strings", k),
+                        ));
                     }
                 };
                 labels.insert(key, value);
@@ -117,7 +122,7 @@ pub async fn write_record(
             Ok(())
         }
         Err(e) => {
-            // drain the stream in the case if a reduct_client doesn't support Expect: 100-continue
+            // drain the stream in the case if a reduct_rs doesn't support Expect: 100-continue
             if !headers.contains_key(Expect::name()) {
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}

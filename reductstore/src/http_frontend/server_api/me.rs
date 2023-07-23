@@ -5,9 +5,8 @@
 
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::auth::proto::Token;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::State;
 use axum::headers::HeaderMap;
 use std::sync::Arc;
@@ -22,7 +21,7 @@ pub async fn me(
         Some(header) => header.to_str().ok(),
         None => None,
     };
-    components.token_repo.read().await.validate_token(header)
+    Ok(components.token_repo.read().await.validate_token(header)?)
 }
 
 #[cfg(test)]

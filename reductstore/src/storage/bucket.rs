@@ -14,16 +14,47 @@ use std::path::PathBuf;
 
 use std::sync::{Arc, RwLock};
 
-use crate::core::status::HttpError;
 use crate::storage::entry::{Entry, EntrySettings, Labels};
-use crate::storage::proto::bucket_settings::QuotaType;
-use crate::storage::proto::{BucketInfo, BucketSettings, EntryInfo, FullBucketInfo};
+use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
+use reduct_base::error::HttpError;
+use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
+use reduct_base::msg::entry_api::EntryInfo;
 
 const DEFAULT_MAX_RECORDS: u64 = 256;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
 const SETTINGS_NAME: &str = "bucket.settings";
+
+impl From<BucketSettings> for ProtoBucketSettings {
+    fn from(settings: BucketSettings) -> Self {
+        ProtoBucketSettings {
+            quota_size: settings.quota_size,
+            quota_type: if let Some(quota_type) = settings.quota_type {
+                Some(quota_type as i32)
+            } else {
+                None
+            },
+            max_block_records: settings.max_block_records,
+            max_block_size: settings.max_block_size,
+        }
+    }
+}
+
+impl Into<BucketSettings> for ProtoBucketSettings {
+    fn into(self) -> BucketSettings {
+        BucketSettings {
+            quota_size: self.quota_size,
+            quota_type: if let Some(quota_type) = self.quota_type {
+                Some(QuotaType::from(quota_type))
+            } else {
+                None
+            },
+            max_block_records: self.max_block_records,
+            max_block_size: self.max_block_size,
+        }
+    }
+}
 
 /// Bucket is a single storage bucket.
 pub struct Bucket {
@@ -76,11 +107,11 @@ impl Bucket {
     /// * `Bucket` - The bucket or an HTTPError
     pub fn restore(path: PathBuf) -> Result<Bucket, HttpError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
-        let settings = BucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
+        let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             HttpError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
         })?;
 
-        let settings = Self::fill_settings(settings, Self::defaults());
+        let settings = Self::fill_settings(settings.into(), Self::defaults());
 
         let mut entries = BTreeMap::new();
         for entry in std::fs::read_dir(&path)? {
@@ -109,7 +140,7 @@ impl Bucket {
     pub fn defaults() -> BucketSettings {
         BucketSettings {
             max_block_size: Some(DEFAULT_MAX_BLOCK_SIZE),
-            quota_type: Some(QuotaType::None as i32),
+            quota_type: Some(QuotaType::NONE),
             quota_size: Some(0),
             max_block_records: Some(DEFAULT_MAX_RECORDS),
         }
@@ -192,14 +223,14 @@ impl Bucket {
             latest_record = latest_record.max(info.latest_record);
         }
         Ok(FullBucketInfo {
-            info: Some(BucketInfo {
+            info: BucketInfo {
                 name: self.name.clone(),
                 size,
                 entry_count: self.entries.len() as u64,
                 oldest_record,
                 latest_record,
-            }),
-            settings: Some(self.settings.clone()),
+            },
+            settings: self.settings.clone(),
             entries,
         })
     }
@@ -273,11 +304,11 @@ impl Bucket {
     }
 
     fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HttpError> {
-        match QuotaType::from_i32(self.settings.quota_type.unwrap()).unwrap() {
-            QuotaType::None => Ok(()),
-            QuotaType::Fifo => {
-                let mut size = self.info()?.info.unwrap().size + content_size;
-                while size > self.settings.quota_size() {
+        match self.settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
+            QuotaType::NONE => Ok(()),
+            QuotaType::FIFO => {
+                let mut size = self.info()?.info.size + content_size;
+                while size > self.settings.quota_size.unwrap_or(0) {
                     debug!(
                         "Need more space. Remove an oldest block from bucket '{}'",
                         self.name()
@@ -326,7 +357,7 @@ impl Bucket {
                         ));
                     }
 
-                    size = self.info()?.info.unwrap().size + content_size;
+                    size = self.info()?.info.size + content_size;
                 }
 
                 // Remove empty entries
@@ -394,11 +425,13 @@ impl Bucket {
     fn save_settings(&self) -> Result<(), HttpError> {
         let path = self.path.join(SETTINGS_NAME);
         let mut buf = BytesMut::new();
-        self.settings.encode(&mut buf).map_err(|e| {
-            HttpError::internal_server_error(
-                format!("Failed to encode bucket settings: {}", e).as_str(),
-            )
-        })?;
+        ProtoBucketSettings::from(self.settings.clone())
+            .encode(&mut buf)
+            .map_err(|e| {
+                HttpError::internal_server_error(
+                    format!("Failed to encode bucket settings: {}", e).as_str(),
+                )
+            })?;
 
         let mut file = std::fs::File::create(path)?;
         file.write(&buf)?;
@@ -460,19 +493,19 @@ mod tests {
     fn test_quota_keeping() {
         let (mut bucket, _) = setup_with(BucketSettings {
             max_block_size: Some(5),
-            quota_type: Some(i32::from(QuotaType::Fifo)),
+            quota_type: Some(QuotaType::FIFO),
             quota_size: Some(10),
             max_block_records: Some(100),
         });
 
         write(&mut bucket, "test-1", 0, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.unwrap().size, 4);
+        assert_eq!(bucket.info().unwrap().info.size, 4);
 
         write(&mut bucket, "test-2", 1, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.unwrap().size, 8);
+        assert_eq!(bucket.info().unwrap().info.size, 8);
 
         write(&mut bucket, "test-3", 2, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.unwrap().size, 8);
+        assert_eq!(bucket.info().unwrap().info.size, 8);
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).err(),
@@ -486,13 +519,13 @@ mod tests {
     fn test_blob_bigger_than_quota() {
         let (mut bucket, _) = setup_with(BucketSettings {
             max_block_size: Some(5),
-            quota_type: Some(i32::from(QuotaType::Fifo)),
+            quota_type: Some(QuotaType::FIFO),
             quota_size: Some(10),
             max_block_records: Some(100),
         });
 
         write(&mut bucket, "test-1", 0, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.unwrap().size, 4);
+        assert_eq!(bucket.info().unwrap().info.size, 4);
 
         let result = write(&mut bucket, "test-2", 1, b"0123456789___");
         assert_eq!(
@@ -535,7 +568,7 @@ mod tests {
 
         let init_settings = BucketSettings {
             max_block_size: Some(100),
-            quota_type: Some(QuotaType::Fifo as i32),
+            quota_type: Some(QuotaType::FIFO),
             quota_size: Some(1000),
             max_block_records: Some(100),
         };

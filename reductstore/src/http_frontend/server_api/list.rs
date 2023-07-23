@@ -4,10 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::AuthenticatedPolicy;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
-use crate::storage::proto::BucketInfoList;
+use crate::http_frontend::server_api::BucketInfoListAxum;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::State;
 use axum::headers::HeaderMap;
 use std::sync::Arc;
@@ -16,9 +15,11 @@ use std::sync::Arc;
 pub async fn list(
     State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
-) -> Result<BucketInfoList, HttpError> {
+) -> Result<BucketInfoListAxum, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
-    components.storage.read().await.get_bucket_list()
+
+    let list = components.storage.read().await.get_bucket_list()?;
+    Ok(BucketInfoListAxum::from(list))
 }
 
 #[cfg(test)]
@@ -31,6 +32,6 @@ mod tests {
     #[tokio::test]
     async fn test_list(components: Arc<HttpServerState>, headers: HeaderMap) {
         let list = list(State(components), headers).await.unwrap();
-        assert_eq!(list.buckets.len(), 2);
+        assert_eq!(list.0.buckets.len(), 2);
     }
 }

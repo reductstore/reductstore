@@ -9,9 +9,9 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use crate::core::status::{HttpError, HttpStatus};
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
+use reduct_base::error::{ErrorCode, HttpError};
 
 /// RecordWriter is used to write a record to a file.
 pub struct RecordWriter {
@@ -74,7 +74,7 @@ impl RecordWriter {
         };
 
         self.write_impl(data, last).map_err(|e| {
-            if e.status == HttpStatus::InternalServerError {
+            if e.status == ErrorCode::InternalServerError {
                 self.on_update(record::State::Invalid);
             } else {
                 self.on_update(record::State::Errored);

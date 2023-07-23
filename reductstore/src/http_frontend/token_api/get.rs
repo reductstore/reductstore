@@ -5,9 +5,8 @@
 
 use crate::auth::policy::FullAccessPolicy;
 use crate::auth::proto::Token;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
@@ -20,7 +19,11 @@ pub async fn get_token(
 ) -> Result<Token, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    components.token_repo.read().await.find_by_name(&token_name)
+    Ok(components
+        .token_repo
+        .read()
+        .await
+        .find_by_name(&token_name)?)
 }
 
 #[cfg(test)]

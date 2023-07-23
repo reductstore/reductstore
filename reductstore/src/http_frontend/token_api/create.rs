@@ -6,9 +6,8 @@
 use crate::auth::policy::FullAccessPolicy;
 use crate::auth::proto::token::Permissions;
 use crate::auth::proto::TokenCreateResponse;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
@@ -22,11 +21,11 @@ pub async fn create_token(
 ) -> Result<TokenCreateResponse, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    components
+    Ok(components
         .token_repo
         .write()
         .await
-        .create_token(&token_name, permissions)
+        .create_token(&token_name, permissions)?)
 }
 
 #[cfg(test)]

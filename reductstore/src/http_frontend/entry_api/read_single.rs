@@ -4,9 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::ReadAccessPolicy;
-use crate::core::status::HttpError;
 use crate::http_frontend::entry_api::{check_and_extract_ts_or_query_id, MethodExtractor};
 use crate::http_frontend::middleware::check_permissions;
+use crate::http_frontend::HttpError;
 use crate::http_frontend::HttpServerState;
 use crate::storage::bucket::Bucket;
 
@@ -119,7 +119,7 @@ fn fetch_and_response_single_record(
             }
             match self.reader.write().unwrap().read() {
                 Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                Err(e) => Poll::Ready(Some(Err(e))),
+                Err(e) => Poll::Ready(Some(Err(HttpError::from(e)))),
             }
         }
         fn size_hint(&self) -> (usize, Option<usize>) {

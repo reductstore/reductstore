@@ -19,56 +19,33 @@ use axum::routing::{delete, get, head, post, put};
 use axum::{async_trait, headers};
 use bytes::Bytes;
 use hyper::HeaderMap;
-use serde_json::{json, Value};
 
-use crate::core::status::HttpError;
 use crate::http_frontend::bucket_api::create::create_bucket;
 use crate::http_frontend::bucket_api::get::get_bucket;
 use crate::http_frontend::bucket_api::head::head_bucket;
 use crate::http_frontend::bucket_api::remove::remove_bucket;
 use crate::http_frontend::bucket_api::update::update_bucket;
 
-use crate::http_frontend::HttpServerState;
-use crate::storage::proto::bucket_settings::QuotaType;
-use crate::storage::proto::BucketSettings;
-use crate::storage::proto::FullBucketInfo;
+use crate::http_frontend::{HttpError, HttpServerState};
+use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
+use reduct_macros::{IntoResponse, Twin};
+//
+// BucketSettings wrapper
+//
+#[derive(IntoResponse, Twin)]
+pub struct BucketSettingsAxum(BucketSettings);
 
-impl IntoResponse for FullBucketInfo {
-    fn into_response(self) -> Response {
-        // Work around for string enum
-        let mut body = serde_json::to_value(&self).unwrap();
-        *body
-            .get_mut("settings")
-            .unwrap()
-            .get_mut("quota_type")
-            .unwrap() = json!(
-            QuotaType::from_i32(self.settings.unwrap().quota_type.unwrap())
-                .unwrap()
-                .as_str_name()
-        );
-
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
-        (StatusCode::OK, headers, body.to_string()).into_response()
+impl Default for BucketSettingsAxum {
+    fn default() -> Self {
+        Self(BucketSettings::default())
     }
 }
 
-impl IntoResponse for BucketSettings {
-    fn into_response(self) -> Response {
-        // Work around for string enum
-        let mut body = serde_json::to_value(&self).unwrap();
-        *body.get_mut("quota_type").unwrap() = json!(QuotaType::from_i32(self.quota_type.unwrap())
-            .unwrap()
-            .as_str_name());
-
-        let mut headers = HeaderMap::new();
-        headers.typed_insert(headers::ContentType::json());
-        (StatusCode::OK, headers, body.to_string()).into_response()
-    }
-}
+#[derive(IntoResponse, Twin)]
+pub struct FullBucketInfoAxum(FullBucketInfo);
 
 #[async_trait]
-impl<S, B> FromRequest<S, B> for BucketSettings
+impl<S, B> FromRequest<S, B> for BucketSettingsAxum
 where
     Bytes: FromRequest<S, B>,
     B: Send + 'static,
@@ -77,38 +54,17 @@ where
     type Rejection = Response;
 
     async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
-        let bytes = Bytes::from_request(req, state)
+        let body = Bytes::from_request(req, state)
             .await
             .map_err(IntoResponse::into_response)?;
-        let settings = if bytes.is_empty() {
-            BucketSettings::default()
-        } else {
-            let mut json: Value =
-                serde_json::from_slice(&bytes).map_err(|e| HttpError::from(e).into_response())?;
-            match json.get_mut("quota_type") {
-                Some(quota_type) => {
-                    if !quota_type.is_null() {
-                        if let Some(quota_as_str) = quota_type.as_str() {
-                            let val = QuotaType::from_str_name(quota_as_str).ok_or(
-                                HttpError::unprocessable_entity("Invalid quota type")
-                                    .into_response(),
-                            )? as i32;
-                            *quota_type = json!(val);
-                        } else {
-                            return Err(HttpError::unprocessable_entity(&format!(
-                                "Failed to parse quota type: {:}",
-                                quota_type
-                            ))
-                            .into_response());
-                        }
-                    }
-                }
-                None => {}
-            }
 
-            serde_json::from_value(json).map_err(|e| HttpError::from(e).into_response())?
-        };
-        Ok(settings)
+        if body.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let settings: BucketSettings =
+            serde_json::from_slice(&body).map_err(|e| HttpError::from(e).into_response())?;
+        Ok(Self(settings))
     }
 }
 
@@ -125,8 +81,6 @@ pub fn create_bucket_api_routes() -> axum::Router<Arc<HttpServerState>> {
 mod tests {
     use super::*;
 
-    use crate::storage::proto::BucketSettings;
-
     use axum::http::Method;
     use hyper::Body;
 
@@ -138,7 +92,10 @@ mod tests {
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"quota_type": 1}"#))
             .unwrap();
-        let resp = BucketSettings::from_request(req, &()).await.err().unwrap();
+        let resp = BucketSettingsAxum::from_request(req, &())
+            .await
+            .err()
+            .unwrap();
         assert_eq!(resp.status(), 422);
         assert_eq!(
             resp.headers()
@@ -146,7 +103,7 @@ mod tests {
                 .unwrap()
                 .to_str()
                 .unwrap(),
-            "Failed to parse quota type: 1"
+            "Invalid JSON: expected value at line 1 column 16"
         );
     }
 }

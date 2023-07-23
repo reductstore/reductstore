@@ -4,21 +4,23 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::AuthenticatedPolicy;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
-use crate::storage::proto::ServerInfo;
+use crate::http_frontend::server_api::ServerInfoAxum;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::State;
 use axum::headers::HeaderMap;
+
 use std::sync::Arc;
 
 // GET /info
 pub async fn info(
     State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
-) -> Result<ServerInfo, HttpError> {
+) -> Result<ServerInfoAxum, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
-    components.storage.read().await.info()
+    Ok(ServerInfoAxum::from(
+        components.storage.read().await.info()?,
+    ))
 }
 
 #[cfg(test)]
@@ -31,6 +33,6 @@ mod tests {
     #[tokio::test]
     async fn test_info(components: Arc<HttpServerState>, headers: HeaderMap) {
         let info = info(State(components), headers).await.unwrap();
-        assert_eq!(info.bucket_count, 2);
+        assert_eq!(info.0.bucket_count, 2);
     }
 }

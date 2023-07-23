@@ -4,12 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::ReadAccessPolicy;
-use crate::core::status::HttpError;
-
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
-
-use crate::storage::proto::QueryInfo;
+use crate::http_frontend::{HttpError, HttpServerState};
 use crate::storage::query::base::QueryOptions;
 
 use axum::extract::{Path, Query, State};
@@ -19,6 +15,9 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 
+use crate::http_frontend::entry_api::QueryInfoAxum;
+use reduct_base::error::ErrorCode;
+use reduct_base::msg::entry_api::QueryInfo;
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
@@ -27,7 +26,7 @@ pub async fn query(
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
-) -> Result<QueryInfo, HttpError> {
+) -> Result<QueryInfoAxum, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
 
@@ -48,28 +47,40 @@ pub async fn query(
 
     let start = match params.get("start") {
         Some(start) => start.parse::<u64>().map_err(|_| {
-            HttpError::unprocessable_entity("'start' must be an unix timestamp in microseconds")
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'start' must be an unix timestamp in microseconds",
+            )
         })?,
         None => entry_info.oldest_record,
     };
 
     let stop = match params.get("stop") {
         Some(stop) => stop.parse::<u64>().map_err(|_| {
-            HttpError::unprocessable_entity("'stop' must be an unix timestamp in microseconds")
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'stop' must be an unix timestamp in microseconds",
+            )
         })?,
         None => entry_info.latest_record + 1,
     };
 
     let continuous = match params.get("continuous") {
         Some(continue_) => continue_.parse::<bool>().map_err(|_| {
-            HttpError::unprocessable_entity("'continue' must be an unix timestamp in microseconds")
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'continue' must be an unix timestamp in microseconds",
+            )
         })?,
         None => false,
     };
 
     let ttl = match params.get("ttl") {
         Some(ttl) => ttl.parse::<u64>().map_err(|_| {
-            HttpError::unprocessable_entity("'ttl' must be an unix timestamp in microseconds")
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'ttl' must be an unix timestamp in microseconds",
+            )
         })?,
         None => 5,
     };
@@ -99,5 +110,5 @@ pub async fn query(
         },
     )?;
 
-    Ok(QueryInfo { id })
+    Ok(QueryInfoAxum::from(QueryInfo { id }))
 }

@@ -5,7 +5,7 @@
 
 use crate::auth::policy::Policy;
 use crate::auth::token_repository::ManageTokens;
-use crate::core::status::HttpError;
+use reduct_base::error::HttpError;
 
 /// Authorization by token
 pub struct TokenAuthorization {

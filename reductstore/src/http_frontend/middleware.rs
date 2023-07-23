@@ -5,12 +5,12 @@
 
 use axum::http::{HeaderMap, Request};
 
-use crate::auth::policy::Policy;
-use crate::core::status::HttpError;
-use crate::http_frontend::HttpServerState;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error};
+
+use crate::auth::policy::Policy;
+use crate::http_frontend::{HttpError, HttpServerState};
 
 pub async fn default_headers<B>(
     request: Request<B>,

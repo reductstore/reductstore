@@ -13,10 +13,10 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
 
-use crate::core::status::HttpError;
 use crate::storage::proto::*;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
+use reduct_base::error::HttpError;
 
 pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
 

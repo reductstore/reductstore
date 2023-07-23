@@ -2,7 +2,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use crate::core::status::HttpError;
+use reduct_base::error::HttpError;
 
 use crate::auth::proto::Token;
 
@@ -13,7 +13,7 @@ pub trait Policy {
     /// Validate validates a token against the policy.
     /// If the token is valid, the function returns Ok(()).
     /// If the token is invalid, the function returns an HTTPError.
-    /// The HTTPError should contain the status code and message to be returned to the reduct_client.
+    /// The HTTPError should contain the status code and message to be returned to the reduct_rs.
     ///
     /// # Arguments
     /// * `token` - The token to validate.

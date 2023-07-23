@@ -4,10 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::ReadAccessPolicy;
-use crate::core::status::{HttpError, HttpStatus};
 use crate::http_frontend::entry_api::MethodExtractor;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{ErrorCode, HttpError, HttpServerState};
 use crate::storage::bucket::Bucket;
 
 use crate::storage::reader::RecordReader;
@@ -45,12 +44,13 @@ pub async fn read_batched_records(
     .await?;
 
     let query_id = match params.get("q") {
-        Some(query) => query
-            .parse::<u64>()
-            .map_err(|_| HttpError::unprocessable_entity("'query' must be a number"))?,
+        Some(query) => query.parse::<u64>().map_err(|_| {
+            HttpError::new(ErrorCode::UnprocessableEntity, "'query' must be a number")
+        })?,
 
         None => {
-            return Err(HttpError::unprocessable_entity(
+            return Err(HttpError::new(
+                ErrorCode::UnprocessableEntity,
                 "'q' parameter is required for batched reads",
             ));
         }
@@ -134,13 +134,13 @@ fn fetch_and_response_batched_records(
             }
             Err(err) => {
                 if readers.is_empty() {
-                    return Err(err);
+                    return Err(HttpError::from(err));
                 } else {
-                    if err.status() == HttpStatus::NoContent as i32 {
+                    if err.status() == ErrorCode::NoContent as i32 {
                         last = true;
                         break;
                     } else {
-                        return Err(err);
+                        return Err(HttpError::from(err));
                     }
                 }
             }
@@ -177,7 +177,7 @@ fn fetch_and_response_batched_records(
 
             match self.readers[0].write().unwrap().read() {
                 Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                Err(e) => Poll::Ready(Some(Err(e))),
+                Err(err) => Poll::Ready(Some(Err(HttpError::from(err)))),
             }
         }
         fn size_hint(&self) -> (usize, Option<usize>) {

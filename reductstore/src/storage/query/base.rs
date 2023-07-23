@@ -3,9 +3,9 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::core::status::HttpError;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::reader::RecordReader;
+use reduct_base::error::HttpError;
 
 use std::collections::{BTreeSet, HashMap};
 

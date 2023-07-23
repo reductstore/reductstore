@@ -1,0 +1,11 @@
+[package]
+name = "reduct-macros"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0.75", features = ["derive"] }
+quote = "1.0.9"

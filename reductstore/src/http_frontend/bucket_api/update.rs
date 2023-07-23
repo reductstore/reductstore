@@ -4,10 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::FullAccessPolicy;
-use crate::core::status::HttpError;
+use crate::http_frontend::bucket_api::BucketSettingsAxum;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
-use crate::storage::proto::BucketSettings;
+use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
@@ -17,28 +16,21 @@ pub async fn update_bucket(
     State(components): State<Arc<HttpServerState>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
-    settings: BucketSettings,
+    settings: BucketSettingsAxum,
 ) -> Result<(), HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
     let mut storage = components.storage.write().await;
 
-    storage
+    Ok(storage
         .get_mut_bucket(&bucket_name)?
-        .set_settings(settings.into())
+        .set_settings(settings.into())?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::http_frontend::HttpServerState;
-    use crate::storage::proto::BucketSettings;
-
     use crate::http_frontend::tests::{components, headers};
-
     use rstest::rstest;
-
-    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
@@ -47,7 +39,7 @@ mod tests {
             State(components),
             Path("bucket-1".to_string()),
             headers,
-            BucketSettings::default(),
+            BucketSettingsAxum::default(),
         )
         .await
         .unwrap();

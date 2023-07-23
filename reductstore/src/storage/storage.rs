@@ -10,10 +10,11 @@ use std::path::PathBuf;
 
 use std::time::Instant;
 
-use crate::core::status::HttpError;
 use crate::storage::bucket::Bucket;
+use reduct_base::error::HttpError;
 
-use crate::storage::proto::{BucketInfoList, BucketSettings, Defaults, ServerInfo};
+use reduct_base::msg::bucket_api::BucketSettings;
+use reduct_base::msg::server_api::{BucketInfoList, Defaults, ServerInfo};
 
 /// Storage is the main entry point for the storage service.
 pub struct Storage {
@@ -60,7 +61,7 @@ impl Storage {
         let mut latest_record = 0u64;
 
         for bucket in self.buckets.values() {
-            let bucket = bucket.info()?.info.unwrap();
+            let bucket = bucket.info()?.info;
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
             latest_record = latest_record.max(bucket.latest_record);
@@ -75,9 +76,9 @@ impl Storage {
             uptime: self.start_time.elapsed().as_secs(),
             oldest_record,
             latest_record,
-            defaults: Some(Defaults {
-                bucket: Some(Bucket::defaults()),
-            }),
+            defaults: Defaults {
+                bucket: Bucket::defaults(),
+            },
         })
     }
 
@@ -166,7 +167,7 @@ impl Storage {
     pub fn get_bucket_list(&self) -> Result<BucketInfoList, HttpError> {
         let mut buckets = Vec::new();
         for bucket in self.buckets.values() {
-            buckets.push(bucket.info()?.info.unwrap());
+            buckets.push(bucket.info()?.info);
         }
 
         Ok(BucketInfoList { buckets })
@@ -177,9 +178,9 @@ impl Storage {
 mod tests {
     use super::*;
     use crate::storage::entry::Labels;
-    use crate::storage::proto::bucket_settings::QuotaType;
     use crate::storage::writer::Chunk;
     use bytes::Bytes;
+    use reduct_base::msg::bucket_api::QuotaType;
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -200,9 +201,9 @@ mod tests {
                 uptime: 1,
                 oldest_record: u64::MAX,
                 latest_record: 0,
-                defaults: Some(Defaults {
-                    bucket: Some(Bucket::defaults()),
-                }),
+                defaults: Defaults {
+                    bucket: Bucket::defaults(),
+                },
             }
         );
     }
@@ -214,7 +215,7 @@ mod tests {
 
         let bucket_settings = BucketSettings {
             quota_size: Some(100),
-            quota_type: Some(QuotaType::Fifo as i32),
+            quota_type: Some(QuotaType::FIFO),
             ..Bucket::defaults()
         };
         let bucket = storage
@@ -266,9 +267,9 @@ mod tests {
                 uptime: 0,
                 oldest_record: 1000,
                 latest_record: 5000,
-                defaults: Some(Defaults {
-                    bucket: Some(Bucket::defaults()),
-                }),
+                defaults: Defaults {
+                    bucket: Bucket::defaults(),
+                },
             }
         );
 

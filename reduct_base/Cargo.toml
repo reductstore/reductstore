@@ -1,11 +1,11 @@
 [package]
-name = "reduct-client"
-version = "1.5.0-dev"
+name = "reduct-base"
+version = "0.1.0"
 authors = ["Alexey Timin <atimin@reduct.store>"]
 edition = "2021"
 rust-version = "1.61.0"
 license = "MPL-2.0"
-description = "ReductStore Client SDK for Rust."
+description = "Base crate for ReductStore SDKs"
 repository = "https://github.com/reductstore/reduc-rs"
 readme = "README.md"
 keywords = ["database", "time-series", "blob", "storage", "reductstore", "client", "sdk", "rust"]
@@ -13,9 +13,12 @@ categories = ["database"]
 
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["lib"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+int-enum = "0.5.0"
+
+[dev-dependencies]
+rstest="0.18"

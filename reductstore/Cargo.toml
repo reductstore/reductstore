@@ -20,6 +20,8 @@ crate-type = ["staticlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+reduct-base =  { path = "../reduct_base" }
+reduct-macros = { path = "../reduct_macros" }
 log = "0.4"
 chrono = "0.4"
 thread-id = "4.0"

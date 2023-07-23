@@ -4,9 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::AuthenticatedPolicy;
-use crate::core::status::HttpError;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::{HttpError, HttpServerState};
+
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
