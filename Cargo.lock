@@ -1395,6 +1395,7 @@ dependencies = [
 name = "reduct-base"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "int-enum",
  "rstest 0.18.1",
  "serde",

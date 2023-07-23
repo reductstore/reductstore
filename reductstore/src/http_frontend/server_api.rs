@@ -5,7 +5,6 @@
 
 mod info;
 mod list;
-mod me;
 
 use std::sync::Arc;
 
@@ -29,7 +28,6 @@ pub struct BucketInfoListAxum(BucketInfoList);
 pub fn create_server_api_routes() -> axum::Router<Arc<HttpServerState>> {
     axum::Router::new()
         .route("/list", get(list::list))
-        .route("/me", get(me::me))
         .route("/info", get(info::info))
         .route("/alive", head(|| async { StatusCode::OK }))
 }

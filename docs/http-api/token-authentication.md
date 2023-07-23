@@ -147,3 +147,28 @@ Name of new token
 
 {% endswagger-response %}
 {% endswagger %}
+
+
+{% swagger method="get" path="" baseUrl="/api/v1/me" summary="Get full information about current API token" %}
+{% swagger-description %}
+This method takes a token from the Authentication header and returns its name, permissions and additional information
+{% endswagger-description %}
+
+{% swagger-response status="200: OK" description="Returns JSON document" %}
+```javascript
+{
+    "name": "stirng",            // unique name of topic
+    "created_at": "string"       // creation date as ISO string
+    "permission": {
+        "full_access": "bool",
+        "read": []               // list of bucket names for read access
+        "write": []              // list of bucket names for write access
+    }
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="API token is invalid" %}
+
+{% endswagger-response %}
+{% endswagger %}

@@ -4,8 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::FullAccessPolicy;
-use crate::auth::proto::Token;
 use crate::http_frontend::middleware::check_permissions;
+use crate::http_frontend::token_api::TokenAxum;
 use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
@@ -16,14 +16,16 @@ pub async fn get_token(
     State(components): State<Arc<HttpServerState>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
-) -> Result<Token, HttpError> {
+) -> Result<TokenAxum, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    Ok(components
-        .token_repo
-        .read()
-        .await
-        .find_by_name(&token_name)?)
+    Ok(TokenAxum::from(
+        components
+            .token_repo
+            .read()
+            .await
+            .find_by_name(&token_name)?,
+    ))
 }
 
 #[cfg(test)]
@@ -39,7 +41,8 @@ mod tests {
     async fn test_get_token(components: Arc<HttpServerState>, headers: HeaderMap) {
         let token = get_token(State(components), Path("test".to_string()), headers)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(token.name, "test");
     }
 }

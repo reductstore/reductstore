@@ -4,26 +4,28 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::FullAccessPolicy;
-use crate::auth::proto::TokenRepo;
 use crate::http_frontend::middleware::check_permissions;
+use crate::http_frontend::token_api::TokenListAxum;
 use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::State;
 use axum::headers::HeaderMap;
+use reduct_base::msg::token_api::Token;
+use std::ops::Deref;
 use std::sync::Arc;
 
 // GET /tokens
 pub async fn list_tokens(
     State(components): State<Arc<HttpServerState>>,
     headers: HeaderMap,
-) -> Result<TokenRepo, HttpError> {
+) -> Result<TokenListAxum, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
     let token_repo = components.token_repo.read().await;
 
-    let mut list = TokenRepo::default();
+    let mut list = TokenListAxum::default();
     for x in token_repo.get_token_list()?.iter() {
-        list.tokens.push(x.clone());
+        list.0.tokens.push((*x).clone());
     }
-    list.tokens.sort_by(|a, b| a.name.cmp(&b.name));
+    list.0.tokens.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(list)
 }
 
@@ -38,7 +40,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_token_list(components: Arc<HttpServerState>, headers: HeaderMap) {
-        let list = list_tokens(State(components), headers).await.unwrap();
+        let list = list_tokens(State(components), headers).await.unwrap().0;
         assert_eq!(list.tokens.len(), 2);
         assert_eq!(list.tokens[0].name, "init-token");
         assert_eq!(list.tokens[1].name, "test");

@@ -4,12 +4,12 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::auth::policy::FullAccessPolicy;
-use crate::auth::proto::token::Permissions;
-use crate::auth::proto::TokenCreateResponse;
 use crate::http_frontend::middleware::check_permissions;
+use crate::http_frontend::token_api::{PermissionsAxum, TokenCreateResponseAxum};
 use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
+use reduct_base::msg::token_api::Permissions;
 use std::sync::Arc;
 
 // POST /tokens/:token_name
@@ -17,15 +17,17 @@ pub async fn create_token(
     State(components): State<Arc<HttpServerState>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
-    permissions: Permissions,
-) -> Result<TokenCreateResponse, HttpError> {
+    permissions: PermissionsAxum,
+) -> Result<TokenCreateResponseAxum, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    Ok(components
-        .token_repo
-        .write()
-        .await
-        .create_token(&token_name, permissions)?)
+    Ok(TokenCreateResponseAxum(
+        components
+            .token_repo
+            .write()
+            .await
+            .create_token(&token_name, permissions.into())?,
+    ))
 }
 
 #[cfg(test)]
@@ -43,10 +45,11 @@ mod tests {
             State(components),
             Path("new-token".to_string()),
             headers,
-            Permissions::default(),
+            PermissionsAxum(Permissions::default()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
         assert!(token.value.starts_with("new-token"));
     }
 }

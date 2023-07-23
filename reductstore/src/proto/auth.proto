@@ -24,13 +24,6 @@ message Token {
   Permissions permissions = 4;                // permissions
 }
 
-// Response for create request
-message TokenCreateResponse {
-  string value = 1;     // value of token
-  google.protobuf.Timestamp created_at = 2;   // creating time
-
-}
-
 message TokenRepo {
   repeated Token tokens = 1;    // tokens in repo
 }
