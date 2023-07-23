@@ -101,6 +101,11 @@ impl ReductClient {
             .await
     }
 
+    /// Check if the server is alive.
+    ///
+    /// # Returns
+    ///
+    /// Ok if the server is alive, otherwise an error.
     pub async fn alive(self) -> Result<()> {
         self.http_client.read().unwrap().head("/alive").await?;
         Ok(())
