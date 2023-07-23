@@ -75,7 +75,7 @@ jobs:
         run: cargo test --release -p reductstore
 
       - name: Build binary
-        run: cargo build --release
+        run: cargo build --release -p reductstore
 
       - name: Upload binary
         uses: actions/upload-artifact@v3

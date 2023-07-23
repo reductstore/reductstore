@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 // Copyright 2023 ReductStore
@@ -16,6 +17,8 @@ pub struct ReductClientBuilder {
 pub type Result<T> = std::result::Result<T, HttpError>;
 
 static API_BASE: &str = "/api/v1";
+
+pub type HeaderMap = HashMap<String, String>;
 
 impl ReductClientBuilder {
     fn new() -> Self {
@@ -85,12 +88,22 @@ impl ReductClient {
             .await
     }
 
+    /// Get the bucket list.
+    ///
+    /// # Returns
+    ///
+    /// The bucket list.
     pub async fn bucket_list(self) -> Result<BucketInfoList> {
         self.http_client
             .read()
             .unwrap()
             .request_json::<(), BucketInfoList>(reqwest::Method::GET, "/list", None)
             .await
+    }
+
+    pub async fn alive(self) -> Result<()> {
+        self.http_client.read().unwrap().head("/alive").await?;
+        Ok(())
     }
 }
 
@@ -113,6 +126,12 @@ mod tests {
     async fn test_bucket_list(client: ReductClient) {
         let info = client.bucket_list().await.unwrap();
         assert!(info.buckets.len() >= 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_alive(client: ReductClient) {
+        client.alive().await.unwrap();
     }
 
     #[fixture]

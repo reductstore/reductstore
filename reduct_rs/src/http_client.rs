@@ -3,10 +3,10 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::client::Result;
+use crate::client::{HeaderMap, Result};
 use reduct_base::error::{ErrorCode, HttpError, IntEnum};
 use reqwest::header::HeaderValue;
-use reqwest::Method;
+use reqwest::{Method, RequestBuilder, Response};
 
 /// Internal HTTP client to wrap reqwest.
 pub(crate) struct HttpClient {
@@ -24,6 +24,21 @@ impl HttpClient {
         }
     }
 
+    /// Send a request to the server.
+    ///
+    /// # Arguments
+    ///
+    /// * `method` - HTTP method to use
+    /// * `path` - Path to send request to
+    /// * `data` - Optional data to send as JSON
+    ///
+    /// # Returns
+    ///
+    /// The response as JSON.
+    ///
+    /// # Errors
+    ///
+    /// * `HttpError` - If the request fails
     pub async fn request_json<In, Out>(
         &self,
         method: Method,
@@ -34,22 +49,44 @@ impl HttpClient {
         In: serde::Serialize,
         Out: serde::de::DeserializeOwned,
     {
-        let mut request = self
-            .client
-            .request(method, &format!("{}{}", self.base_url, path))
-            .header("Authorization", &self.api_token);
+        let mut request = self.prepare_request(method, &path);
 
         if let Some(body) = data {
             request = request.body(serde_json::to_string(&body).unwrap());
         }
 
-        match request.send().await {
+        let response = Self::send_request(request).await?;
+        response.json::<Out>().await.map_err(|e| {
+            HttpError::new(
+                ErrorCode::Unknown,
+                &format!("Failed to parse response: {}", e.to_string()),
+            )
+        })
+    }
+
+    pub async fn head(&self, path: &str) -> Result<HeaderMap> {
+        let request = self.prepare_request(Method::HEAD, &path);
+        let response = Self::send_request(request).await?;
+        Ok(response
+            .headers()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+            .collect::<HeaderMap>())
+    }
+
+    fn prepare_request(&self, method: Method, path: &&str) -> RequestBuilder {
+        let mut request = self
+            .client
+            .request(method, &format!("{}{}", self.base_url, path))
+            .header("Authorization", &self.api_token);
+        request
+    }
+
+    async fn send_request(request: RequestBuilder) -> Result<Response> {
+        let response = match request.send().await {
             Ok(response) => {
                 if response.status().is_success() {
-                    Ok(response
-                        .json::<Out>()
-                        .await
-                        .map_err(|e| HttpError::new(ErrorCode::Unknown, &e.to_string()))?)
+                    Ok(response)
                 } else {
                     let status = ErrorCode::from_int(response.status().as_u16() as i16)
                         .unwrap_or(ErrorCode::Unknown);
@@ -74,6 +111,7 @@ impl HttpClient {
 
                 Err(HttpError::new(status, &e.to_string()))
             }
-        }
+        };
+        response
     }
 }
