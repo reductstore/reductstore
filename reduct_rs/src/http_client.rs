@@ -75,7 +75,7 @@ impl HttpClient {
     }
 
     fn prepare_request(&self, method: Method, path: &&str) -> RequestBuilder {
-        let mut request = self
+        let request = self
             .client
             .request(method, &format!("{}{}", self.base_url, path))
             .header("Authorization", &self.api_token);
