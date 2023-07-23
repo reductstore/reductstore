@@ -9,7 +9,7 @@ use crate::http_frontend::token_api::{PermissionsAxum, TokenCreateResponseAxum};
 use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
-use reduct_base::msg::token_api::Permissions;
+
 use std::sync::Arc;
 
 // POST /tokens/:token_name

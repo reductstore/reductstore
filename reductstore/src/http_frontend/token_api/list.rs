@@ -9,8 +9,7 @@ use crate::http_frontend::token_api::TokenListAxum;
 use crate::http_frontend::{HttpError, HttpServerState};
 use axum::extract::State;
 use axum::headers::HeaderMap;
-use reduct_base::msg::token_api::Token;
-use std::ops::Deref;
+
 use std::sync::Arc;
 
 // GET /tokens

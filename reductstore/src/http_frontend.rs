@@ -143,8 +143,6 @@ mod tests {
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
 
-    use super::*;
-
     #[fixture]
     pub(crate) fn components() -> Arc<HttpServerState> {
         let data_path = tempfile::tempdir().unwrap().into_path();
