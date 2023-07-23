@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: Grained HTTP components, [PR-319](https://github.com/reductstore/reductstore/pull/319)
 - reductstore: Default maximum records in block 256, [PR-320](https://github.com/reductstore/reductstore/pull/320)
 - all: Organize workspaces, [PR-310](https://github.com/reductstore/reductstore/pull/310)
+- reduct-rs: Implement Server API for ClientSDK, [PR-321](https://github.com/reductstore/reductstore/pull/321)
 
 ### Removed
 
