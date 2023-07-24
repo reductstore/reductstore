@@ -36,6 +36,7 @@ mod tests {
 
     use crate::http_frontend::tests::{components, headers};
 
+    use reduct_base::msg::token_api::Permissions;
     use rstest::rstest;
 
     #[rstest]
