@@ -28,7 +28,6 @@ use crate::http_frontend::token_api::list::list_tokens;
 use crate::http_frontend::token_api::remove::remove_token;
 use crate::http_frontend::{HttpError, HttpServerState};
 
-use crate::http_frontend::token_api::me::me;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
 use reduct_macros::{IntoResponse, Twin};
 
