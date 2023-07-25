@@ -9,12 +9,19 @@ use serde::{Deserialize, Serialize};
 /// Information about a ReductStore instance
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct ServerInfo {
+    /// Version of ReductStore instance
     pub version: String,
+    /// Number of buckets
     pub bucket_count: u64,
+    /// Disk usage in bytes
     pub usage: u64,
+    /// Uptime in seconds
     pub uptime: u64,
+    /// Oldest record in instance
     pub oldest_record: u64,
+    /// Latest record in instance
     pub latest_record: u64,
+    /// Default settings
     pub defaults: Defaults,
 }
 

@@ -3,19 +3,22 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::{DateTime, Utc};
 use rand::Rng;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use log::debug;
+use log::{debug, warn};
 use prost::bytes::Bytes;
 use prost::Message;
 use prost_wkt_types::Timestamp;
 
-use crate::auth::proto::token::Permissions;
-use crate::auth::proto::{Token, TokenCreateResponse, TokenRepo};
+use crate::auth::proto::token::Permissions as ProtoPermissions;
+use crate::auth::proto::{Token as ProtoToken, TokenRepo as ProtoTokenRepo, TokenRepo};
 use reduct_base::error::HttpError;
+
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
 const INIT_TOKEN_NAME: &str = "init-token";
@@ -107,6 +110,59 @@ pub fn parse_bearer_token(authorization_header: &str) -> Result<String, HttpErro
     Ok(token)
 }
 
+impl From<Token> for ProtoToken {
+    fn from(token: Token) -> Self {
+        let permissions = if let Some(perm) = token.permissions {
+            Some(ProtoPermissions {
+                full_access: perm.full_access,
+                read: perm.read,
+                write: perm.write,
+            })
+        } else {
+            None
+        };
+
+        ProtoToken {
+            name: token.name,
+            value: token.value,
+            created_at: Some(Timestamp {
+                seconds: token.created_at.timestamp(),
+                nanos: token.created_at.timestamp_subsec_nanos() as i32,
+            }),
+            permissions: permissions,
+        }
+    }
+}
+
+impl Into<Token> for ProtoToken {
+    fn into(self) -> Token {
+        let permissions = if let Some(perm) = self.permissions {
+            Some(Permissions {
+                full_access: perm.full_access,
+                read: perm.read,
+                write: perm.write,
+            })
+        } else {
+            None
+        };
+
+        let created_at = if let Some(ts) = self.created_at {
+            let since_epoch = Duration::new(ts.seconds as u64, ts.nanos as u32);
+            DateTime::<Utc>::from(UNIX_EPOCH + since_epoch)
+        } else {
+            warn!("Token has no creation time");
+            Utc::now()
+        };
+
+        Token {
+            name: self.name,
+            value: self.value,
+            created_at,
+            permissions,
+        }
+    }
+}
+
 impl TokenRepository {
     /// Load the token repository from the file system
     ///
@@ -135,10 +191,12 @@ impl TokenRepository {
                     "Loading token repository from {}",
                     token_repository.config_path.as_path().display()
                 );
-                let toke_repository = TokenRepo::decode(&mut Bytes::from(data))
+                let toke_repository = ProtoTokenRepo::decode(&mut Bytes::from(data))
                     .expect("Could not decode token repository");
                 for token in toke_repository.tokens {
-                    token_repository.repo.insert(token.name.clone(), token);
+                    token_repository
+                        .repo
+                        .insert(token.name.clone(), token.into());
                 }
             }
             Err(_) => {
@@ -155,7 +213,7 @@ impl TokenRepository {
         let init_token = Token {
             name: INIT_TOKEN_NAME.to_string(),
             value: api_token.to_string(),
-            created_at: Timestamp::try_from(SystemTime::now()).ok(),
+            created_at: DateTime::<chrono::Utc>::from(SystemTime::now()),
             permissions: Some(Permissions {
                 full_access: true,
                 read: vec![],
@@ -172,7 +230,11 @@ impl TokenRepository {
     /// Save the token repository to the file system
     fn save_repo(&mut self) -> Result<(), HttpError> {
         let repo = TokenRepo {
-            tokens: self.repo.values().cloned().collect(),
+            tokens: self
+                .repo
+                .iter()
+                .map(|(_, token)| token.clone().into())
+                .collect(),
         };
         let mut buf = Vec::new();
         repo.encode(&mut buf)
@@ -210,7 +272,7 @@ impl ManageTokens for TokenRepository {
             ));
         }
 
-        let created_at = Timestamp::try_from(SystemTime::now()).ok();
+        let created_at = DateTime::<Utc>::from(SystemTime::now());
 
         // Create a random hex string
         let mut rng = rand::thread_rng();
@@ -354,7 +416,7 @@ impl ManageTokens for NoAuthRepository {
         Ok(Token {
             name: "AUTHENTICATION-DISABLED".to_string(),
             value: "".to_string(),
-            created_at: None,
+            created_at: DateTime::<Utc>::from(SystemTime::now()),
             permissions: Some(Permissions {
                 full_access: true,
                 read: vec![],
@@ -389,6 +451,7 @@ pub fn create_token_repository(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
     use tempfile::tempdir;
 
     #[test]
@@ -469,7 +532,7 @@ mod tests {
 
         assert_eq!(token.value.len(), 37);
         assert_eq!(token.value, "test-".to_string() + &token.value[5..]);
-        assert!(token.created_at.unwrap().seconds > 0);
+        assert!(token.created_at.second() > 0);
     }
 
     #[test]

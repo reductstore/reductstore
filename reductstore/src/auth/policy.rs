@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use reduct_base::error::HttpError;
 
-use crate::auth::proto::Token;
+use reduct_base::msg::token_api::Token;
 
 /// Policy is a trait that defines the interface for a policy.
 /// A policy is a set of rules that are applied to a token to determine
@@ -125,7 +125,7 @@ impl Policy for WriteAccessPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::proto::token::Permissions;
+    use reduct_base::msg::token_api::Permissions;
 
     #[test]
     fn test_anonymous_policy() {

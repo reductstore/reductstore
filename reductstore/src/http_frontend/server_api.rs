@@ -5,7 +5,6 @@
 
 mod info;
 mod list;
-mod me;
 
 use std::sync::Arc;
 
@@ -18,6 +17,7 @@ use axum::routing::{get, head};
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_macros::{IntoResponse, Twin};
 
+use crate::http_frontend::token_api::me::me;
 use crate::http_frontend::HttpServerState;
 
 #[derive(IntoResponse, Twin)]
@@ -29,7 +29,7 @@ pub struct BucketInfoListAxum(BucketInfoList);
 pub fn create_server_api_routes() -> axum::Router<Arc<HttpServerState>> {
     axum::Router::new()
         .route("/list", get(list::list))
-        .route("/me", get(me::me))
         .route("/info", get(info::info))
         .route("/alive", head(|| async { StatusCode::OK }))
+        .route("/me", get(me))
 }

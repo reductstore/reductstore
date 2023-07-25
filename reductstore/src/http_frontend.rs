@@ -131,22 +131,17 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<HttpServerState>)
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::collections::HashMap;
 
+    use crate::auth::token_repository::create_token_repository;
+    use crate::storage::writer::Chunk;
     use axum::extract::Path;
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
-
-    use crate::asset::asset_manager::ZipAssetManager;
-    use crate::auth::proto::token::Permissions;
-    use crate::auth::token_auth::TokenAuthorization;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::storage::storage::Storage;
-    use crate::storage::writer::Chunk;
-
-    use super::*;
 
     #[fixture]
     pub(crate) fn components() -> Arc<HttpServerState> {

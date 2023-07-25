@@ -50,7 +50,6 @@ pub struct BucketInfo {
     pub size: u64,
     /// Oldest record in bucket
     pub oldest_record: u64,
-
     /// Latest record in bucket
     pub latest_record: u64,
 }
@@ -60,10 +59,8 @@ pub struct BucketInfo {
 pub struct FullBucketInfo {
     /// Bucket information
     pub info: BucketInfo,
-
     /// Bucket settings
     pub settings: BucketSettings,
-
     /// Entries in bucket
     pub entries: Vec<EntryInfo>,
 }

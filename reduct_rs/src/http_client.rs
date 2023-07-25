@@ -74,6 +74,12 @@ impl HttpClient {
             .collect::<HeaderMap>())
     }
 
+    pub async fn delete(&self, path: &str) -> Result<()> {
+        let request = self.prepare_request(Method::DELETE, &path);
+        Self::send_request(request).await?;
+        Ok(())
+    }
+
     fn prepare_request(&self, method: Method, path: &&str) -> RequestBuilder {
         let request = self
             .client
