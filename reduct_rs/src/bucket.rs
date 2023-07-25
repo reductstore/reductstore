@@ -7,7 +7,7 @@ use crate::client::Result;
 use crate::http_client::HttpClient;
 use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
 use reqwest::Method;
-use std::fmt::format;
+
 use std::sync::Arc;
 
 /// A bucket to store data in.

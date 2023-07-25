@@ -5,8 +5,8 @@
 
 use reqwest::Method;
 use std::collections::HashMap;
-use std::fmt::format;
-use std::sync::{Arc, RwLock};
+
+use std::sync::Arc;
 
 use crate::http_client::HttpClient;
 use crate::Bucket;
