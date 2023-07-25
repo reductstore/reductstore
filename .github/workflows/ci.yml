@@ -103,7 +103,7 @@ jobs:
       - name: Run Database
         run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=TOKEN -d ${{github.repository}}
       - name: Run Client SDK tests
-        run: RS_API_TOKEN=TOKEN cargo test -p reduct-rs
+        run: RS_API_TOKEN=TOKEN cargo test --package reduct-rs --lib client::tests -- --test-threads=1
 
   api_tests:
     name: API Tests

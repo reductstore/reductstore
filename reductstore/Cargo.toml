@@ -23,7 +23,7 @@ crate-type = ["staticlib"]
 reduct-base =  { path = "../reduct_base" }
 reduct-macros = { path = "../reduct_macros" }
 log = "0.4"
-chrono = "0.4"
+chrono = { version = "0.4.11", feaures = ["serde"] }
 thread-id = "4.0"
 zip = "0.6"
 tempfile = "3.5.0"
