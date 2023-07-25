@@ -10,10 +10,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct Permissions {
     /// Full access to all buckets and tokens
+    #[serde(default)]
     pub full_access: bool,
     /// Read access to certain buckets
+    #[serde(default)]
     pub read: Vec<String>,
     /// Write access to certain buckets
+    #[serde(default)]
     pub write: Vec<String>,
 }
 

@@ -87,7 +87,6 @@ jobs:
     name: Client SDK Tests
     runs-on: ubuntu-latest
     needs:
-      - unit_tests
       - build
     steps:
       - uses: actions/checkout@v3
