@@ -1,12 +1,17 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use reqwest::Method;
+use std::collections::HashMap;
+use std::fmt::format;
+use std::sync::{Arc, RwLock};
+
 use crate::http_client::HttpClient;
-use reduct_base::error::HttpError;
+use crate::Bucket;
+use reduct_base::error::{ErrorCode, HttpError};
+use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
 
@@ -37,7 +42,7 @@ impl ReductClientBuilder {
     pub fn build(self) -> ReductClient {
         assert!(!self.url.is_empty(), "URL must be set");
         ReductClient {
-            http_client: Arc::new(RwLock::new(HttpClient::new(&self.url, &self.api_token))),
+            http_client: Arc::new(HttpClient::new(&self.url, &self.api_token)),
         }
     }
 
@@ -56,7 +61,7 @@ impl ReductClientBuilder {
 
 /// ReductStore client.
 pub struct ReductClient {
-    http_client: Arc<RwLock<HttpClient>>,
+    http_client: Arc<HttpClient>,
 }
 
 impl ReductClient {
@@ -83,8 +88,6 @@ impl ReductClient {
     /// The server info
     pub async fn server_info(&self) -> Result<ServerInfo> {
         self.http_client
-            .read()
-            .unwrap()
             .request_json::<(), ServerInfo>(reqwest::Method::GET, "/info", None)
             .await
     }
@@ -96,10 +99,77 @@ impl ReductClient {
     /// The bucket list.
     pub async fn bucket_list(&self) -> Result<BucketInfoList> {
         self.http_client
-            .read()
-            .unwrap()
             .request_json::<(), BucketInfoList>(reqwest::Method::GET, "/list", None)
             .await
+    }
+
+    /// Create a bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the bucket
+    /// * `settings` - The settings of the bucket
+    /// * `exists_ok` - If true, return Ok if the bucket already exists
+    ///
+    /// # Returns
+    ///
+    /// the created bucket or an error
+    pub async fn create_bucket(&self, name: &str, settings: BucketSettings) -> Result<Bucket> {
+        self.http_client
+            .request_json::<BucketSettings, ()>(
+                Method::POST,
+                &format!("/b/{}", name),
+                Some(settings),
+            )
+            .await?;
+        Ok(Bucket {
+            name: name.to_string(),
+            http_client: self.http_client.clone(),
+        })
+    }
+
+    /// Get a bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the bucket
+    ///
+    /// # Returns
+    ///
+    /// the bucket or an error
+    pub async fn get_bucket(&self, name: &str) -> Result<Bucket> {
+        self.http_client.head(&format!("/b/{}", name)).await?;
+        Ok(Bucket {
+            name: name.to_string(),
+            http_client: self.http_client.clone(),
+        })
+    }
+
+    /// Get or create a bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the bucket
+    /// * `settings` - The settings of the bucket
+    ///
+    /// # Returns
+    ///
+    /// the bucket or an error
+    pub async fn get_or_create_bucket(
+        &self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<Bucket> {
+        match self.get_bucket(name).await {
+            Ok(bucket) => Ok(bucket),
+            Err(err) => {
+                if err.status == ErrorCode::Conflict {
+                    self.create_bucket(name, settings).await
+                } else {
+                    Err(err)
+                }
+            }
+        }
     }
 
     /// Check if the server is alive.
@@ -108,7 +178,7 @@ impl ReductClient {
     ///
     /// Ok if the server is alive, otherwise an error.
     pub async fn alive(&self) -> Result<()> {
-        self.http_client.read().unwrap().head("/alive").await?;
+        self.http_client.head("/alive").await?;
         Ok(())
     }
     /// Get the token with permissions for the current user.
@@ -118,8 +188,6 @@ impl ReductClient {
     /// The token or HttpError
     pub async fn me(&self) -> Result<Token> {
         self.http_client
-            .read()
-            .unwrap()
             .request_json::<(), Token>(reqwest::Method::GET, "/me", None)
             .await
     }
@@ -137,8 +205,6 @@ impl ReductClient {
     pub async fn create_token(&self, name: &str, permissions: Permissions) -> Result<String> {
         let token = self
             .http_client
-            .read()
-            .unwrap()
             .request_json::<Permissions, TokenCreateResponse>(
                 reqwest::Method::POST,
                 &format!("/tokens/{}", name),
@@ -159,8 +225,6 @@ impl ReductClient {
     /// Ok if the token was deleted, otherwise an error
     pub async fn delete_token(&self, name: &str) -> Result<()> {
         self.http_client
-            .read()
-            .unwrap()
             .delete(&format!("/tokens/{}", name))
             .await?;
         Ok(())
@@ -174,8 +238,6 @@ impl ReductClient {
     pub async fn list_tokens(&self) -> Result<Vec<Token>> {
         let list = self
             .http_client
-            .read()
-            .unwrap()
             .request_json::<(), TokenList>(reqwest::Method::GET, "/tokens", None)
             .await?;
         Ok(list.tokens)

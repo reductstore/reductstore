@@ -52,7 +52,7 @@ impl HttpClient {
         let mut request = self.prepare_request(method, &path);
 
         if let Some(body) = data {
-            request = request.body(serde_json::to_string(&body).unwrap());
+            request = request.json(&body);
         }
 
         let response = Self::send_request(request).await?;
