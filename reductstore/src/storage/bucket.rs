@@ -444,20 +444,19 @@ mod tests {
     use super::*;
     use crate::storage::entry::Labels;
     use crate::storage::writer::Chunk;
+    use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
-    #[test]
-    fn test_keep_settings_persistent() {
-        let (bucket, init_settings, path) = setup();
+    #[rstest]
+    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
+        assert_eq!(bucket.settings(), &settings);
 
-        assert_eq!(bucket.settings(), &init_settings);
-
-        let bucket = Bucket::restore(path.join("test")).unwrap();
+        let bucket = Bucket::restore(bucket.path.clone()).unwrap();
         assert_eq!(bucket.name(), "test");
-        assert_eq!(bucket.settings(), &init_settings);
+        assert_eq!(bucket.settings(), &settings);
     }
 
-    #[test]
+    #[rstest]
     fn test_fill_default_settings() {
         let settings = BucketSettings {
             max_block_size: None,
@@ -471,14 +470,12 @@ mod tests {
         assert_eq!(filled_settings, default_settings);
     }
 
-    #[test]
-    fn test_apply_settings_to_entries() {
-        let (mut bucket, init_settings, _) = setup();
-
+    #[rstest]
+    fn test_apply_settings_to_entries(settings: BucketSettings, mut bucket: Bucket) {
         bucket.get_or_create_entry("entry-1").unwrap();
         bucket.get_or_create_entry("entry-2").unwrap();
 
-        let mut new_settings = init_settings.clone();
+        let mut new_settings = settings.clone();
         new_settings.max_block_size = Some(200);
         new_settings.max_block_records = Some(200);
         bucket.set_settings(new_settings).unwrap();
@@ -489,14 +486,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_quota_keeping() {
-        let (mut bucket, _) = setup_with(BucketSettings {
-            max_block_size: Some(5),
-            quota_type: Some(QuotaType::FIFO),
-            quota_size: Some(10),
-            max_block_records: Some(100),
-        });
+    #[rstest]
+    fn test_quota_keeping(path: PathBuf) {
+        let mut bucket = bucket(
+            BucketSettings {
+                max_block_size: Some(5),
+                quota_type: Some(QuotaType::FIFO),
+                quota_size: Some(10),
+                max_block_records: Some(100),
+            },
+            path,
+        );
 
         write(&mut bucket, "test-1", 0, b"test").unwrap();
         assert_eq!(bucket.info().unwrap().info.size, 4);
@@ -515,14 +515,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_blob_bigger_than_quota() {
-        let (mut bucket, _) = setup_with(BucketSettings {
-            max_block_size: Some(5),
-            quota_type: Some(QuotaType::FIFO),
-            quota_size: Some(10),
-            max_block_records: Some(100),
-        });
+    #[rstest]
+    fn test_blob_bigger_than_quota(path: PathBuf) {
+        let mut bucket = bucket(
+            BucketSettings {
+                max_block_size: Some(5),
+                quota_type: Some(QuotaType::FIFO),
+                quota_size: Some(10),
+                max_block_records: Some(100),
+            },
+            path,
+        );
 
         write(&mut bucket, "test-1", 0, b"test").unwrap();
         assert_eq!(bucket.info().unwrap().info.size, 4);
@@ -562,26 +565,23 @@ mod tests {
         Ok(data.to_vec())
     }
 
-    fn setup() -> (Bucket, BucketSettings, PathBuf) {
-        let path = tempdir().unwrap().into_path();
-        std::fs::create_dir_all(&path).unwrap();
-
-        let init_settings = BucketSettings {
+    #[fixture]
+    fn settings() -> BucketSettings {
+        BucketSettings {
             max_block_size: Some(100),
             quota_type: Some(QuotaType::FIFO),
             quota_size: Some(1000),
             max_block_records: Some(100),
-        };
-
-        let bucket = Bucket::new("test", &path, init_settings.clone()).unwrap();
-        (bucket, init_settings, path)
+        }
     }
 
-    fn setup_with(settings: BucketSettings) -> (Bucket, PathBuf) {
-        let path = tempdir().unwrap().into_path();
-        std::fs::create_dir_all(&path).unwrap();
+    #[fixture]
+    fn path() -> PathBuf {
+        tempdir().unwrap().into_path()
+    }
 
-        let bucket = Bucket::new("test", &path, settings.clone()).unwrap();
-        (bucket, path)
+    #[fixture]
+    fn bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
+        Bucket::new("test", &path, settings).unwrap()
     }
 }
