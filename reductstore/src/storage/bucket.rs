@@ -385,7 +385,7 @@ impl Bucket {
     }
 
     pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), HttpError> {
-        self.settings = Self::fill_settings(settings, Self::defaults());
+        self.settings = Self::fill_settings(settings, self.settings.clone());
         for entry in self.entries.values_mut() {
             entry.set_settings(EntrySettings {
                 max_block_size: self.settings.max_block_size.unwrap(),
@@ -468,6 +468,25 @@ mod tests {
         let default_settings = Bucket::defaults();
         let filled_settings = Bucket::fill_settings(settings, default_settings.clone());
         assert_eq!(filled_settings, default_settings);
+    }
+
+    #[rstest]
+    fn test_set_settings_partially(settings: BucketSettings, mut bucket: Bucket) {
+        let new_settings = BucketSettings {
+            max_block_size: Some(100),
+            quota_type: None,
+            quota_size: None,
+            max_block_records: None,
+        };
+
+        bucket.set_settings(new_settings).unwrap();
+        assert_eq!(bucket.settings().max_block_size.unwrap(), 100);
+        assert_eq!(bucket.settings().quota_type, settings.quota_type);
+        assert_eq!(bucket.settings().quota_size, settings.quota_size);
+        assert_eq!(
+            bucket.settings().max_block_records,
+            settings.max_block_records
+        );
     }
 
     #[rstest]
