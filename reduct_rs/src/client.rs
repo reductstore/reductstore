@@ -88,7 +88,7 @@ impl ReductClient {
     /// The server info
     pub async fn server_info(&self) -> Result<ServerInfo> {
         self.http_client
-            .request_json::<(), ServerInfo>(reqwest::Method::GET, "/info", None)
+            .send_and_receive_json::<(), ServerInfo>(reqwest::Method::GET, "/info", None)
             .await
     }
 
@@ -99,7 +99,7 @@ impl ReductClient {
     /// The bucket list.
     pub async fn bucket_list(&self) -> Result<BucketInfoList> {
         self.http_client
-            .request_json::<(), BucketInfoList>(reqwest::Method::GET, "/list", None)
+            .send_and_receive_json::<(), BucketInfoList>(Method::GET, "/list", None)
             .await
     }
 
@@ -116,11 +116,7 @@ impl ReductClient {
     /// the created bucket or an error
     pub async fn create_bucket(&self, name: &str, settings: BucketSettings) -> Result<Bucket> {
         self.http_client
-            .request_json::<BucketSettings, ()>(
-                Method::POST,
-                &format!("/b/{}", name),
-                Some(settings),
-            )
+            .send_json(Method::POST, &format!("/b/{}", name), settings)
             .await?;
         Ok(Bucket {
             name: name.to_string(),
@@ -163,7 +159,7 @@ impl ReductClient {
         match self.get_bucket(name).await {
             Ok(bucket) => Ok(bucket),
             Err(err) => {
-                if err.status == ErrorCode::Conflict {
+                if err.status == ErrorCode::NotFound {
                     self.create_bucket(name, settings).await
                 } else {
                     Err(err)
@@ -188,7 +184,7 @@ impl ReductClient {
     /// The token or HttpError
     pub async fn me(&self) -> Result<Token> {
         self.http_client
-            .request_json::<(), Token>(reqwest::Method::GET, "/me", None)
+            .send_and_receive_json::<(), Token>(reqwest::Method::GET, "/me", None)
             .await
     }
 
@@ -205,7 +201,7 @@ impl ReductClient {
     pub async fn create_token(&self, name: &str, permissions: Permissions) -> Result<String> {
         let token = self
             .http_client
-            .request_json::<Permissions, TokenCreateResponse>(
+            .send_and_receive_json::<Permissions, TokenCreateResponse>(
                 reqwest::Method::POST,
                 &format!("/tokens/{}", name),
                 Some(permissions),
@@ -238,7 +234,7 @@ impl ReductClient {
     pub async fn list_tokens(&self) -> Result<Vec<Token>> {
         let list = self
             .http_client
-            .request_json::<(), TokenList>(reqwest::Method::GET, "/tokens", None)
+            .send_and_receive_json::<(), TokenList>(reqwest::Method::GET, "/tokens", None)
             .await?;
         Ok(list.tokens)
     }
@@ -250,70 +246,112 @@ mod tests {
     use rstest::{fixture, rstest};
     use tokio;
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_server_info(#[future] client: ReductClient) {
-        let info = client.await.server_info().await.unwrap();
-        assert!(info.version.starts_with("1."));
-        assert!(info.bucket_count >= 0);
+    mod serve_api {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_server_info(#[future] client: ReductClient) {
+            let info = client.await.server_info().await.unwrap();
+            assert!(info.version.starts_with("1."));
+            assert!(info.bucket_count >= 2);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_bucket_list(#[future] client: ReductClient) {
+            let info = client.await.bucket_list().await.unwrap();
+            assert!(info.buckets.len() >= 2);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_alive(#[future] client: ReductClient) {
+            client.await.alive().await.unwrap();
+        }
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_bucket_list(#[future] client: ReductClient) {
-        let info = client.await.bucket_list().await.unwrap();
-        assert!(info.buckets.len() >= 0);
+    mod bucket_api {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_bucket(#[future] client: ReductClient) {
+            let client = client.await;
+            let bucket = client
+                .create_bucket("test-bucket", BucketSettings::default())
+                .await
+                .unwrap();
+            assert_eq!(bucket.name(), "test-bucket");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_or_bucket(#[future] client: ReductClient) {
+            let client = client.await;
+            let bucket = client
+                .get_or_create_bucket("test-bucket", BucketSettings::default())
+                .await
+                .unwrap();
+            assert_eq!(bucket.name(), "test-bucket");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_bucket(#[future] client: ReductClient) {
+            let client = client.await;
+            let bucket = client.get_bucket("test-bucket-1").await.unwrap();
+            assert_eq!(bucket.name(), "test-bucket-1");
+        }
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_alive(#[future] client: ReductClient) {
-        client.await.alive().await.unwrap();
-    }
+    mod token_api {
+        use super::*;
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_me(#[future] client: ReductClient) {
-        let token = client.await.me().await.unwrap();
-        assert_eq!(token.name, "init-token");
-        assert!(token.permissions.unwrap().full_access);
-    }
+        #[rstest]
+        #[tokio::test]
+        async fn test_me(#[future] client: ReductClient) {
+            let token = client.await.me().await.unwrap();
+            assert_eq!(token.name, "init-token");
+            assert!(token.permissions.unwrap().full_access);
+        }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_create_token(#[future] client: ReductClient) {
-        let token_value = client
-            .await
-            .create_token(
-                "test-token",
-                Permissions {
-                    full_access: false,
-                    read: vec!["test-bucket".to_string()],
-                    write: vec!["test-bucket".to_string()],
-                },
-            )
-            .await
-            .unwrap();
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_token(#[future] client: ReductClient) {
+            let token_value = client
+                .await
+                .create_token(
+                    "test-token",
+                    Permissions {
+                        full_access: false,
+                        read: vec!["test-bucket".to_string()],
+                        write: vec!["test-bucket".to_string()],
+                    },
+                )
+                .await
+                .unwrap();
 
-        assert!(token_value.starts_with("test-token"));
-    }
+            assert!(token_value.starts_with("test-token"));
+        }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_list_tokens(#[future] client: ReductClient) {
-        let tokens = client.await.list_tokens().await.unwrap();
-        assert!(tokens.len() >= 1);
-    }
+        #[rstest]
+        #[tokio::test]
+        async fn test_list_tokens(#[future] client: ReductClient) {
+            let tokens = client.await.list_tokens().await.unwrap();
+            assert!(tokens.len() >= 1);
+        }
 
-    #[rstest]
-    #[tokio::test]
-    async fn delete_token(#[future] client: ReductClient) {
-        let client = client.await;
-        client
-            .create_token("test-token", Permissions::default())
-            .await
-            .unwrap();
-        client.delete_token("test-token").await.unwrap();
+        #[rstest]
+        #[tokio::test]
+        async fn delete_token(#[future] client: ReductClient) {
+            let client = client.await;
+            client
+                .create_token("test-token", Permissions::default())
+                .await
+                .unwrap();
+            client.delete_token("test-token").await.unwrap();
+        }
     }
 
     #[fixture]
@@ -328,6 +366,22 @@ mod tests {
                 client.delete_token(&token.name).await.unwrap();
             }
         }
+
+        for bucket in client.bucket_list().await.unwrap().buckets {
+            if bucket.name.starts_with("test-bucket") {
+                let bucket = client.get_bucket(&bucket.name).await.unwrap();
+                bucket.remove().await.unwrap();
+            }
+        }
+
+        client
+            .create_bucket("test-bucket-1", BucketSettings::default())
+            .await
+            .unwrap();
+        client
+            .create_bucket("test-bucket-2", BucketSettings::default())
+            .await
+            .unwrap();
 
         client
     }

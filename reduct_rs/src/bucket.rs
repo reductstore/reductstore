@@ -38,7 +38,11 @@ impl Bucket {
     /// Return settings of the bucket
     pub async fn settings(&self) -> Result<BucketSettings> {
         self.http_client
-            .request_json::<(), BucketSettings>(Method::GET, &format!("/b/{}", self.name), None)
+            .send_and_receive_json::<(), BucketSettings>(
+                Method::GET,
+                &format!("/b/{}", self.name),
+                None,
+            )
             .await
     }
 
@@ -53,7 +57,7 @@ impl Bucket {
     ///  Returns an error if the bucket could not be found.
     pub async fn set_settings(&self, settings: BucketSettings) -> Result<()> {
         self.http_client
-            .request_json::<BucketSettings, ()>(
+            .send_and_receive_json::<BucketSettings, ()>(
                 Method::PUT,
                 &format!("/b/{}", self.name),
                 Some(settings),
@@ -64,7 +68,7 @@ impl Bucket {
     /// Get full information about the bucket.
     pub async fn info(&self) -> Result<FullBucketInfo> {
         self.http_client
-            .request_json::<(), FullBucketInfo>(
+            .send_and_receive_json::<(), FullBucketInfo>(
                 Method::GET,
                 &format!("/b/{}/info", self.name),
                 None,
