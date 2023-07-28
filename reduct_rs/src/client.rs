@@ -241,8 +241,9 @@ impl ReductClient {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use reduct_base::msg::bucket_api::QuotaType;
     use rstest::{fixture, rstest};
     use tokio;
 
@@ -355,7 +356,17 @@ mod tests {
     }
 
     #[fixture]
-    async fn client() -> ReductClient {
+    pub(crate) fn bucket_settings() -> BucketSettings {
+        BucketSettings {
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(100),
+            max_block_size: Some(512),
+            max_block_records: Some(100),
+        }
+    }
+
+    #[fixture]
+    pub(crate) async fn client(bucket_settings: BucketSettings) -> ReductClient {
         let client = ReductClient::builder()
             .set_url("http://127.0.0.1:8383")
             .set_api_token(&std::env::var("RS_API_TOKEN").unwrap_or("".to_string()))
@@ -375,11 +386,11 @@ mod tests {
         }
 
         client
-            .create_bucket("test-bucket-1", BucketSettings::default())
+            .create_bucket("test-bucket-1", bucket_settings.clone())
             .await
             .unwrap();
         client
-            .create_bucket("test-bucket-2", BucketSettings::default())
+            .create_bucket("test-bucket-2", bucket_settings)
             .await
             .unwrap();
 
