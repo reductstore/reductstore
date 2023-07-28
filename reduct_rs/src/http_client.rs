@@ -24,7 +24,7 @@ impl HttpClient {
         }
     }
 
-    /// Send a request to the server.
+    /// Send and receive JSON data from the server.
     ///
     /// # Arguments
     ///
@@ -34,12 +34,12 @@ impl HttpClient {
     ///
     /// # Returns
     ///
-    /// The response as JSON.
+    /// Deserialized JSON response
     ///
     /// # Errors
     ///
     /// * `HttpError` - If the request fails
-    pub async fn request_json<In, Out>(
+    pub async fn send_and_receive_json<In, Out>(
         &self,
         method: Method,
         path: &str,
@@ -47,12 +47,12 @@ impl HttpClient {
     ) -> Result<Out>
     where
         In: serde::Serialize,
-        Out: serde::de::DeserializeOwned,
+        Out: for<'de> serde::Deserialize<'de>,
     {
         let mut request = self.prepare_request(method, &path);
 
         if let Some(body) = data {
-            request = request.body(serde_json::to_string(&body).unwrap());
+            request = request.json(&body);
         }
 
         let response = Self::send_request(request).await?;
@@ -64,6 +64,36 @@ impl HttpClient {
         })
     }
 
+    /// Send JSON data to the server.
+    ///
+    /// # Arguments
+    ///
+    /// * `method` - HTTP method to use
+    /// * `path` - Path to send request to
+    /// * `data` - Optional data to send as JSON
+    ///
+    /// # Errors
+    ///
+    /// * `HttpError` - If the request fails
+    pub async fn send_json<In>(&self, method: Method, path: &str, data: In) -> Result<()>
+    where
+        In: serde::Serialize,
+    {
+        let mut request = self.prepare_request(method, &path);
+        request = request.json(&data);
+        Self::send_request(request).await?;
+        Ok(())
+    }
+
+    /// HEAD request to the server.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to send request to
+    ///
+    /// # Returns
+    ///
+    /// * `HeaderMap` - Headers returned by the server
     pub async fn head(&self, path: &str) -> Result<HeaderMap> {
         let request = self.prepare_request(Method::HEAD, &path);
         let response = Self::send_request(request).await?;
@@ -74,6 +104,15 @@ impl HttpClient {
             .collect::<HeaderMap>())
     }
 
+    /// DELETE request to the server.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to send request to
+    ///
+    /// # Errors
+    ///
+    /// * `HttpError` - If the request fails
     pub async fn delete(&self, path: &str) -> Result<()> {
         let request = self.prepare_request(Method::DELETE, &path);
         Self::send_request(request).await?;

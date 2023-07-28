@@ -102,7 +102,7 @@ Maximum size of a data block in bytes (default: 64Mb)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="max_block_records" type="String/Integer" required="false" %}
-Maximum number of records in a block (default 1024)
+Maximum number of records in a block (default 256)
 {% endswagger-parameter %}
 
 {% swagger-parameter in="body" name="quota_type" type="String" required="false" %}
