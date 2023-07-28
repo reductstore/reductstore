@@ -22,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- `native-tls` dependency (only `rustls`), [PR-315](https://github.com/reductstore/reductstore/pull/315)
+- reductstore: `native-tls` dependency (only `rustls`), [PR-315](https://github.com/reductstore/reductstore/pull/315)
+
+### Fixed
+
+- reductstore: Partial bucket settings, [PR-325](https://github.com/reductstore/reductstore/pull/325)
 
 ## [1.5.1] - 2023-07-17
 
