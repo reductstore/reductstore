@@ -84,7 +84,7 @@ mod tests {
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
-    use reduct_base::error::{ErrorCode, HttpError};
+    use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
     #[rstest]
