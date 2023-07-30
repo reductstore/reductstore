@@ -3,9 +3,9 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::client::{HeaderMap, Result};
+use crate::client::Result;
 use reduct_base::error::{ErrorCode, HttpError, IntEnum};
-use reqwest::header::HeaderValue;
+use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Method, RequestBuilder, Response};
 
 /// Internal HTTP client to wrap reqwest.
@@ -49,13 +49,12 @@ impl HttpClient {
         In: serde::Serialize,
         Out: for<'de> serde::Deserialize<'de>,
     {
-        let mut request = self.prepare_request(method, &path);
-
+        let mut request = self.request(method, path);
         if let Some(body) = data {
             request = request.json(&body);
         }
 
-        let response = Self::send_request(request).await?;
+        let response = self.send_request(request).await?;
         response.json::<Out>().await.map_err(|e| {
             HttpError::new(
                 ErrorCode::Unknown,
@@ -79,47 +78,12 @@ impl HttpClient {
     where
         In: serde::Serialize,
     {
-        let mut request = self.prepare_request(method, &path);
-        request = request.json(&data);
-        Self::send_request(request).await?;
+        let request = self.request(method, path).json(&data);
+        self.send_request(request).await?;
         Ok(())
     }
 
-    /// HEAD request to the server.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to send request to
-    ///
-    /// # Returns
-    ///
-    /// * `HeaderMap` - Headers returned by the server
-    pub async fn head(&self, path: &str) -> Result<HeaderMap> {
-        let request = self.prepare_request(Method::HEAD, &path);
-        let response = Self::send_request(request).await?;
-        Ok(response
-            .headers()
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect::<HeaderMap>())
-    }
-
-    /// DELETE request to the server.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to send request to
-    ///
-    /// # Errors
-    ///
-    /// * `HttpError` - If the request fails
-    pub async fn delete(&self, path: &str) -> Result<()> {
-        let request = self.prepare_request(Method::DELETE, &path);
-        Self::send_request(request).await?;
-        Ok(())
-    }
-
-    fn prepare_request(&self, method: Method, path: &&str) -> RequestBuilder {
+    pub fn request(&self, method: Method, path: &str) -> RequestBuilder {
         let request = self
             .client
             .request(method, &format!("{}{}", self.base_url, path))
@@ -127,7 +91,7 @@ impl HttpClient {
         request
     }
 
-    async fn send_request(request: RequestBuilder) -> Result<Response> {
+    pub async fn send_request(&self, mut request: RequestBuilder) -> Result<Response> {
         let response = match request.send().await {
             Ok(response) => {
                 if response.status().is_success() {

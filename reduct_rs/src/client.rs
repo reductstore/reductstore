@@ -24,8 +24,6 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 
 static API_BASE: &str = "/api/v1";
 
-pub type HeaderMap = HashMap<String, String>;
-
 impl ReductClientBuilder {
     fn new() -> Self {
         Self {
@@ -134,7 +132,10 @@ impl ReductClient {
     ///
     /// the bucket or an error
     pub async fn get_bucket(&self, name: &str) -> Result<Bucket> {
-        self.http_client.head(&format!("/b/{}", name)).await?;
+        let request = self
+            .http_client
+            .request(Method::HEAD, &format!("/b/{}", name));
+        self.http_client.send_request(request).await?;
         Ok(Bucket {
             name: name.to_string(),
             http_client: self.http_client.clone(),
@@ -174,7 +175,8 @@ impl ReductClient {
     ///
     /// Ok if the server is alive, otherwise an error.
     pub async fn alive(&self) -> Result<()> {
-        self.http_client.head("/alive").await?;
+        let request = self.http_client.request(Method::HEAD, "/alive");
+        self.http_client.send_request(request).await?;
         Ok(())
     }
     /// Get the token with permissions for the current user.
@@ -220,9 +222,10 @@ impl ReductClient {
     ///
     /// Ok if the token was deleted, otherwise an error
     pub async fn delete_token(&self, name: &str) -> Result<()> {
-        self.http_client
-            .delete(&format!("/tokens/{}", name))
-            .await?;
+        let request = self
+            .http_client
+            .request(Method::DELETE, &format!("/tokens/{}", name));
+        self.http_client.send_request(request).await?;
         Ok(())
     }
 

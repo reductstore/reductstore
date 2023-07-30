@@ -8,6 +8,7 @@ use crate::http_client::HttpClient;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reqwest::Method;
 
+use crate::record::{WriteRecord, WriterRecordBuilder};
 use reduct_base::msg::entry_api::EntryInfo;
 use std::sync::Arc;
 
@@ -29,7 +30,11 @@ impl Bucket {
     ///
     /// Returns an error if the bucket could not be removed.
     pub async fn remove(&self) -> Result<()> {
-        self.http_client.delete(&format!("/b/{}", self.name)).await
+        let request = self
+            .http_client
+            .request(Method::DELETE, &format!("/b/{}", self.name));
+        self.http_client.send_request(request).await?;
+        Ok(())
     }
 
     /// Get the settings of the bucket.
@@ -76,11 +81,22 @@ impl Bucket {
     pub async fn entries(&self) -> Result<Vec<EntryInfo>> {
         Ok(self.full_info().await?.entries)
     }
+
+    /// Create a record to write to the bucket.
+    pub fn write_record(&self, entry: &str) -> WriterRecordBuilder {
+        WriterRecordBuilder::new(
+            self.name.clone(),
+            entry.to_string(),
+            Arc::clone(&self.http_client),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use std::time::SystemTime;
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
@@ -133,6 +149,37 @@ mod tests {
             bucket.info().await.err().unwrap().status,
             ErrorCode::NotFound
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bucket_write_record_data(#[future] bucket: Bucket) {
+        let bucket: Bucket = bucket.await;
+        bucket
+            .write_record("test")
+            .unix_timestamp(1000)
+            .data(Bytes::from("Hey"))
+            .write()
+            .await
+            .unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bucket_write_record_stream(#[future] bucket: Bucket) {
+        let chunks: Vec<Result<_>> = vec![Ok("hello"), Ok(" "), Ok("world")];
+
+        let stream = futures_util::stream::iter(chunks);
+
+        let bucket: Bucket = bucket.await;
+        bucket
+            .write_record("test")
+            .unix_timestamp(1000)
+            .content_length(11)
+            .stream(Box::pin(stream))
+            .write()
+            .await
+            .unwrap();
     }
 
     #[fixture]

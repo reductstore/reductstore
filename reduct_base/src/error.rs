@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub use int_enum::IntEnum;
+use std::error::Error;
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 use std::time::SystemTimeError;
 
@@ -95,6 +96,12 @@ impl From<SystemTimeError> for HttpError {
     }
 }
 
+impl Error for HttpError {
+    fn description(&self) -> &str {
+        &self.message
+    }
+}
+
 impl HttpError {
     pub fn new(status: ErrorCode, message: &str) -> Self {
         HttpError {
@@ -109,6 +116,10 @@ impl HttpError {
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    pub fn to_string(&self) -> String {
+        format!("[{:?}] {}", self.status, self.message)
     }
 
     pub fn ok() -> HttpError {

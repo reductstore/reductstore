@@ -1412,9 +1412,12 @@ dependencies = [
 
 [[package]]
 name = "reduct-rs"
-version = "1.5.0-dev"
+version = "1.6.0-dev"
 dependencies = [
+ "bytes",
  "chrono",
+ "futures",
+ "futures-util",
  "reduct-base",
  "reqwest",
  "rstest 0.18.1",
