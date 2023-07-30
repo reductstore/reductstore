@@ -9,7 +9,7 @@ use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reqwest::Method;
 
 use crate::record::read_record::ReadRecordBuilder;
-use crate::record::{Record, WriterRecordBuilder};
+use crate::record::WriterRecordBuilder;
 use reduct_base::msg::entry_api::EntryInfo;
 use std::sync::Arc;
 
@@ -106,7 +106,6 @@ impl Bucket {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use std::time::SystemTime;
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;

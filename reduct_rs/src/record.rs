@@ -6,19 +6,16 @@
 pub mod read_record;
 pub mod write_record;
 
-use crate::http_client::HttpClient;
 use bytes::{Bytes, BytesMut};
-use chrono::format::Item;
+
 use futures::stream::Stream;
-use futures::TryStream;
+
 use futures_util::StreamExt;
 use reduct_base::error::HttpError;
-use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Method};
+
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+
 use std::time::SystemTime;
 
 pub type Labels = HashMap<String, String>;

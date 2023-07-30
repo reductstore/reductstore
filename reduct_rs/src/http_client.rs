@@ -5,7 +5,7 @@
 
 use crate::client::Result;
 use reduct_base::error::{ErrorCode, HttpError, IntEnum};
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::header::HeaderValue;
 use reqwest::{Method, RequestBuilder, Response};
 
 /// Internal HTTP client to wrap reqwest.
@@ -91,7 +91,7 @@ impl HttpClient {
         request
     }
 
-    pub async fn send_request(&self, mut request: RequestBuilder) -> Result<Response> {
+    pub async fn send_request(&self, request: RequestBuilder) -> Result<Response> {
         let response = match request.send().await {
             Ok(response) => {
                 if response.status().is_success() {

@@ -4,15 +4,14 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::http_client::HttpClient;
-use crate::record::{from_system_time, Labels, Record};
+use crate::record::{from_system_time, Labels};
 use bytes::Bytes;
-use chrono::format::Item;
-use futures::stream::Stream;
+
 use futures::TryStream;
-use reduct_base::error::HttpError;
+
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Method};
-use std::collections::HashMap;
+
 use std::sync::Arc;
 use std::time::SystemTime;
 
