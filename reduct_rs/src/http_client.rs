@@ -109,18 +109,20 @@ impl HttpClient {
                     Err(HttpError::new(status, &error_msg))
                 }
             }
-            Err(e) => {
-                let status = if e.is_connect() {
-                    ErrorCode::ConnectionError
-                } else if e.is_timeout() {
-                    ErrorCode::Timeout
-                } else {
-                    ErrorCode::Unknown
-                };
-
-                Err(HttpError::new(status, &e.to_string()))
-            }
+            Err(e) => Err(map_error(e)),
         };
         response
     }
+}
+
+pub(crate) fn map_error(error: reqwest::Error) -> HttpError {
+    let status = if error.is_connect() {
+        ErrorCode::ConnectionError
+    } else if error.is_timeout() {
+        ErrorCode::Timeout
+    } else {
+        ErrorCode::Unknown
+    };
+
+    HttpError::new(status, &error.to_string())
 }

@@ -8,7 +8,8 @@ use crate::http_client::HttpClient;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reqwest::Method;
 
-use crate::record::{WriteRecord, WriterRecordBuilder};
+use crate::record::read_record::ReadRecordBuilder;
+use crate::record::{Record, WriterRecordBuilder};
 use reduct_base::msg::entry_api::EntryInfo;
 use std::sync::Arc;
 
@@ -90,6 +91,15 @@ impl Bucket {
             Arc::clone(&self.http_client),
         )
     }
+
+    /// Create a record to write to the bucket.
+    pub fn read_record(&self, entry: &str) -> ReadRecordBuilder {
+        ReadRecordBuilder::new(
+            self.name.clone(),
+            entry.to_string(),
+            Arc::clone(&self.http_client),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +172,15 @@ mod tests {
             .write()
             .await
             .unwrap();
+
+        let mut record = bucket
+            .read_record("test")
+            .unix_timestamp(1000)
+            .read()
+            .await
+            .unwrap();
+
+        assert_eq!(record.bytes().await.unwrap(), Bytes::from("Hey"));
     }
 
     #[rstest]
