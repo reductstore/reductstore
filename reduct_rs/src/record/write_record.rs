@@ -55,8 +55,8 @@ impl WriterRecordBuilder {
         self
     }
 
-    pub fn content_type(mut self, content_type: String) -> Self {
-        self.content_type = content_type;
+    pub fn content_type(mut self, content_type: &str) -> Self {
+        self.content_type = content_type.to_string();
         self
     }
 
@@ -89,8 +89,9 @@ impl WriterRecordBuilder {
             Method::POST,
             &format!("/b/{}/{}?ts={}", self.bucket, self.entry, timestamp),
         );
+
         for (key, value) in self.labels {
-            request = request.header(key, value);
+            request = request.header(&format!("x-reduct-label-{}", key), value);
         }
 
         request = request.header(CONTENT_TYPE, self.content_type);
@@ -100,6 +101,8 @@ impl WriterRecordBuilder {
 
         if let Some(data) = self.data {
             request = request.body(data);
+        } else {
+            request = request.header(CONTENT_LENGTH, 0);
         }
 
         self.client.send_request(request).await?;

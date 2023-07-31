@@ -245,6 +245,8 @@ impl ReductClient {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::record::Labels;
+    use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use rstest::{fixture, rstest};
     use tokio;
@@ -387,12 +389,62 @@ pub(crate) mod tests {
             }
         }
 
-        client
+        let bucket = client
             .create_bucket("test-bucket-1", bucket_settings.clone())
             .await
             .unwrap();
-        client
+        bucket
+            .write_record("entry-1")
+            .unix_timestamp(1000)
+            .content_type("text/plain")
+            .labels(Labels::from([
+                ("entry".into(), "1".into()),
+                ("bucket".into(), "1".into()),
+            ]))
+            .data(Bytes::from("Hey entry-1!"))
+            .write()
+            .await
+            .unwrap();
+
+        bucket
+            .write_record("entry-2")
+            .unix_timestamp(2000)
+            .content_type("text/plain")
+            .labels(Labels::from([
+                ("entry".into(), "2".into()),
+                ("bucket".into(), "1".into()),
+            ]))
+            .data(Bytes::from("Hey entry-2!"))
+            .write()
+            .await
+            .unwrap();
+
+        let bucket = client
             .create_bucket("test-bucket-2", bucket_settings)
+            .await
+            .unwrap();
+
+        bucket
+            .write_record("entry-1")
+            .unix_timestamp(1000)
+            .labels(Labels::from([
+                ("entry".into(), "1".into()),
+                ("bucket".into(), "2".into()),
+            ]))
+            .data(Bytes::from("Hey entry-1!"))
+            .write()
+            .await
+            .unwrap();
+
+        bucket
+            .write_record("entry-2")
+            .unix_timestamp(2000)
+            .labels(Labels::from([
+                ("entry".into(), "2".into()),
+                ("bucket".into(), "2".into()),
+            ]))
+            .data(Bytes::from("Hey entry-2!"))
+            .write()
             .await
             .unwrap();
 

@@ -47,6 +47,21 @@ impl ReadRecordBuilder {
         let request = self.client.request(Method::GET, &url);
         let response = self.client.send_request(request).await?;
 
+        let labels: Labels = response
+            .headers()
+            .iter()
+            .filter_map(|(key, value)| {
+                if key.to_string().starts_with("x-reduct-label-") {
+                    Some((
+                        key.as_str()[15..].to_string(),
+                        value.to_str().unwrap().to_string(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         Ok(Record {
             timestamp: response
                 .headers()
@@ -56,7 +71,7 @@ impl ReadRecordBuilder {
                 .unwrap()
                 .parse::<u64>()
                 .unwrap(),
-            labels: Labels::new(),
+            labels: labels,
             content_type: response
                 .headers()
                 .get("content-type")

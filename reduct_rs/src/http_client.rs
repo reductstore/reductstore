@@ -83,6 +83,7 @@ impl HttpClient {
         Ok(())
     }
 
+    /// Prepare a request with the correct headers.
     pub fn request(&self, method: Method, path: &str) -> RequestBuilder {
         let request = self
             .client
@@ -91,6 +92,7 @@ impl HttpClient {
         request
     }
 
+    /// Send a request and handle errors.
     pub async fn send_request(&self, request: RequestBuilder) -> Result<Response> {
         let response = match request.send().await {
             Ok(response) => {
@@ -115,6 +117,7 @@ impl HttpClient {
     }
 }
 
+/// Map reqwest errors to our own error type.
 pub(crate) fn map_error(error: reqwest::Error) -> HttpError {
     let status = if error.is_connect() {
         ErrorCode::ConnectionError

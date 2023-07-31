@@ -22,6 +22,7 @@ pub type Labels = HashMap<String, String>;
 
 pub use write_record::WriterRecordBuilder;
 
+/// A record is a timestamped piece of data with labels
 pub struct Record {
     timestamp: u64,
     labels: Labels,
@@ -31,33 +32,49 @@ pub struct Record {
 }
 
 impl Record {
+    /// Unix timestamp in microseconds
     pub fn unix_timestamp(&self) -> u64 {
         self.timestamp
     }
 
+    /// Timestamp as a SystemTime
     pub fn timestamp(&self) -> SystemTime {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(self.timestamp)
     }
 
+    /// Labels associated with the record
     pub fn labels(&self) -> &Labels {
         &self.labels
     }
 
+    /// Content type of the record
     pub fn content_type(&self) -> &str {
         &self.content_type
     }
 
+    /// Content length of the record
     pub fn content_length(&self) -> u64 {
         self.content_length
     }
 
-    pub async fn bytes(&mut self) -> Result<Bytes, HttpError> {
+    /// Content of the record
+    ///
+    /// This consumes the record and returns bytes
+    pub async fn bytes(mut self) -> Result<Bytes, HttpError> {
         if let Some(data) = &mut self.data {
             let mut bytes = BytesMut::new();
             while let Some(chunk) = data.next().await {
                 bytes.extend_from_slice(&chunk?);
             }
             return Ok(bytes.into());
+        } else {
+            panic!("Record has no data");
+        }
+    }
+
+    pub fn stream_bytes(self) -> Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>>>> {
+        if let Some(data) = self.data {
+            return data;
         } else {
             panic!("Record has no data");
         }

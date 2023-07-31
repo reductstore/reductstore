@@ -106,9 +106,11 @@ impl Bucket {
 mod tests {
     use super::*;
     use bytes::Bytes;
+    use futures_util::StreamExt;
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
+    use crate::record::Labels;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
@@ -198,6 +200,52 @@ mod tests {
             .write()
             .await
             .unwrap();
+
+        let record = bucket
+            .read_record("test")
+            .unix_timestamp(1000)
+            .read()
+            .await
+            .unwrap();
+        assert_eq!(record.bytes().await.unwrap(), Bytes::from("hello world"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_read_record(#[future] bucket: Bucket) {
+        let bucket: Bucket = bucket.await;
+        let mut record = bucket
+            .read_record("entry-1")
+            .unix_timestamp(1000)
+            .read()
+            .await
+            .unwrap();
+
+        assert_eq!(record.unix_timestamp(), 1000);
+        assert_eq!(record.content_length(), 12);
+        assert_eq!(record.content_type(), "text/plain");
+        assert_eq!(record.labels().get("bucket"), Some(&"1".to_string()));
+        assert_eq!(record.labels().get("entry"), Some(&"1".to_string()));
+        assert_eq!(record.bytes().await.unwrap(), Bytes::from("Hey entry-1!"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_read_record_as_stream(#[future] bucket: Bucket) {
+        let bucket: Bucket = bucket.await;
+        let mut record = bucket
+            .read_record("entry-1")
+            .unix_timestamp(1000)
+            .read()
+            .await
+            .unwrap();
+
+        let mut stream = record.stream_bytes();
+        assert_eq!(
+            stream.next().await.unwrap(),
+            Ok(Bytes::from("Hey entry-1!"))
+        );
+        assert_eq!(stream.next().await, None);
     }
 
     #[fixture]
