@@ -4,17 +4,19 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::http_client::{map_error, HttpClient};
-use crate::record::{from_system_time, Labels, Record};
+use crate::record::{from_system_time, Labels, Record, RecordStream};
 use futures_util::StreamExt;
 use reduct_base::error::HttpError;
 use reqwest::Method;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+/// Builder for a read record request.
 pub struct ReadRecordBuilder {
     bucket: String,
     entry: String,
     timestamp: Option<u64>,
+    head_only: bool,
     client: Arc<HttpClient>,
 }
 
@@ -24,27 +26,48 @@ impl ReadRecordBuilder {
             bucket,
             entry,
             timestamp: None,
+            head_only: false,
             client,
         }
     }
 
+    /// Set the timestamp of the record to read.
     pub fn timestamp(mut self, timestamp: SystemTime) -> Self {
         self.timestamp = Some(from_system_time(timestamp));
         self
     }
 
+    /// Set the timestamp of the record to read as a unix timestamp in microseconds.
     pub fn unix_timestamp(mut self, timestamp: u64) -> Self {
         self.timestamp = Some(timestamp);
         self
     }
 
-    pub async fn read(&self) -> Result<Record, HttpError> {
+    /// Read only the record metadata (labels, content type, content length)
+    /// default: false
+    pub fn head_only(mut self, head_only: bool) -> Self {
+        self.head_only = head_only;
+        self
+    }
+
+    /// Send the read record request.
+    ///
+    /// # Returns
+    ///
+    /// A [`Record`] object containing the record data.
+    pub async fn read(self) -> Result<Record, HttpError> {
         let mut url = format!("/b/{}/{}", self.bucket, self.entry);
         if let Some(timestamp) = self.timestamp {
             url = format!("{}?ts={}", url, &timestamp.to_string());
         }
 
-        let request = self.client.request(Method::GET, &url);
+        let method = if self.head_only {
+            Method::HEAD
+        } else {
+            Method::GET
+        };
+
+        let request = self.client.request(method, &url);
         let response = self.client.send_request(request).await?;
 
         let labels: Labels = response
@@ -87,10 +110,14 @@ impl ReadRecordBuilder {
                 .unwrap()
                 .parse::<u64>()
                 .unwrap(),
-            data: Some(Box::pin(response.bytes_stream().map(|val| match val {
-                Ok(val) => Ok(val),
-                Err(err) => Err(map_error(err)),
-            }))),
+            data: if self.head_only {
+                None
+            } else {
+                Some(Box::pin(response.bytes_stream().map(|val| match val {
+                    Ok(val) => Ok(val),
+                    Err(err) => Err(map_error(err)),
+                })))
+            },
         })
     }
 }

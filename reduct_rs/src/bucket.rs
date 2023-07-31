@@ -105,12 +105,13 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
+    use bytes::{Buf, Bytes};
     use futures_util::StreamExt;
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
 
+    use crate::record::Record;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
@@ -246,6 +247,25 @@ mod tests {
             Ok(Bytes::from("Hey entry-1!"))
         );
         assert_eq!(stream.next().await, None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_head_record(#[future] bucket: Bucket) {
+        let record: Record = bucket
+            .await
+            .read_record("entry-1")
+            .unix_timestamp(1000)
+            .head_only(true)
+            .read()
+            .await
+            .unwrap();
+
+        assert_eq!(record.unix_timestamp(), 1000);
+        assert_eq!(record.content_length(), 12);
+        assert_eq!(record.content_type(), "text/plain");
+        assert_eq!(record.labels().get("bucket"), Some(&"1".to_string()));
+        assert_eq!(record.labels().get("entry"), Some(&"1".to_string()));
     }
 
     #[fixture]

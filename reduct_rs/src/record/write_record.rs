@@ -15,6 +15,7 @@ use reqwest::{Body, Method};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+/// Builder for a write record request.
 pub struct WriterRecordBuilder {
     bucket: String,
     entry: String,
@@ -40,36 +41,45 @@ impl WriterRecordBuilder {
         }
     }
 
+    /// Set the timestamp of the record to write.
     pub fn timestamp(mut self, timestamp: SystemTime) -> Self {
         self.timestamp = Some(from_system_time(timestamp));
         self
     }
 
+    /// Set the timestamp of the record to write as a unix timestamp in microseconds.
     pub fn unix_timestamp(mut self, timestamp: u64) -> Self {
         self.timestamp = Some(timestamp);
         self
     }
 
+    /// Set the labels of the record to write.
     pub fn labels(mut self, labels: Labels) -> Self {
         self.labels = labels;
         self
     }
 
+    /// Set the content type of the record to write.
     pub fn content_type(mut self, content_type: &str) -> Self {
         self.content_type = content_type.to_string();
         self
     }
 
+    /// Set the content length of the record to write
+    /// (only required if the data is a stream).
     pub fn content_length(mut self, content_length: u64) -> Self {
         self.content_length = Some(content_length);
         self
     }
 
+    /// Set the data of the record to write.
     pub fn data(mut self, data: Bytes) -> Self {
         self.data = Some(data.into());
         self
     }
 
+    /// Set the data of the record to write as a stream.
+    /// The content length must be set.
     pub fn stream<S>(mut self, stream: S) -> Self
     where
         S: TryStream + Send + Sync + 'static,
@@ -80,6 +90,7 @@ impl WriterRecordBuilder {
         self
     }
 
+    /// Write the record.
     pub async fn write(self) -> Result<(), Box<dyn std::error::Error>> {
         let timestamp = self
             .timestamp

@@ -19,6 +19,7 @@ use std::pin::Pin;
 use std::time::SystemTime;
 
 pub type Labels = HashMap<String, String>;
+pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>>>>;
 
 pub use write_record::WriterRecordBuilder;
 
@@ -28,7 +29,7 @@ pub struct Record {
     labels: Labels,
     content_type: String,
     content_length: u64,
-    data: Option<Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>>>>>,
+    data: Option<RecordStream>,
 }
 
 impl Record {
