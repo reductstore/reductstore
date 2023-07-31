@@ -110,7 +110,7 @@ mod tests {
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
-    use crate::record::Labels;
+
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
@@ -174,7 +174,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut record = bucket
+        let record = bucket
             .read_record("test")
             .unix_timestamp(1000)
             .read()
@@ -214,7 +214,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_record(#[future] bucket: Bucket) {
         let bucket: Bucket = bucket.await;
-        let mut record = bucket
+        let record = bucket
             .read_record("entry-1")
             .unix_timestamp(1000)
             .read()
@@ -233,7 +233,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_record_as_stream(#[future] bucket: Bucket) {
         let bucket: Bucket = bucket.await;
-        let mut record = bucket
+        let record = bucket
             .read_record("entry-1")
             .unix_timestamp(1000)
             .read()
