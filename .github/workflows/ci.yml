@@ -219,7 +219,7 @@ jobs:
           - platform: linux/arm64
             cargo_target: aarch64-unknown-linux-gnu
             gcc_compiler: gcc-aarch64-linux-gnu
-          - platform: linux/armv7
+          - platform: linux/arm/v7
             cargo_target: armv7-unknown-linux-gnueabihf
             gcc_compiler: gcc-arm-linux-gnueabihf
 
