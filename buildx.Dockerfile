@@ -30,7 +30,7 @@ COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 
-RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET}
+RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET} --package reductstore
 
 RUN mkdir /data
 
