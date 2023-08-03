@@ -395,7 +395,7 @@ pub(crate) mod tests {
             .unwrap();
         bucket
             .write_record("entry-1")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .content_type("text/plain")
             .labels(Labels::from([
                 ("entry".into(), "1".into()),
@@ -408,7 +408,7 @@ pub(crate) mod tests {
 
         bucket
             .write_record("entry-2")
-            .unix_timestamp(2000)
+            .timestamp_us(2000)
             .content_type("text/plain")
             .labels(Labels::from([
                 ("entry".into(), "2".into()),
@@ -426,7 +426,7 @@ pub(crate) mod tests {
 
         bucket
             .write_record("entry-1")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .labels(Labels::from([
                 ("entry".into(), "1".into()),
                 ("bucket".into(), "2".into()),
@@ -438,7 +438,7 @@ pub(crate) mod tests {
 
         bucket
             .write_record("entry-2")
-            .unix_timestamp(2000)
+            .timestamp_us(2000)
             .labels(Labels::from([
                 ("entry".into(), "2".into()),
                 ("bucket".into(), "2".into()),

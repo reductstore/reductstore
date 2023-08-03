@@ -21,7 +21,7 @@ use std::time::SystemTime;
 pub type Labels = HashMap<String, String>;
 pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>>>>;
 
-pub use write_record::WriterRecordBuilder;
+pub use write_record::WriteRecordBuilder;
 
 /// A record is a timestamped piece of data with labels
 pub struct Record {
@@ -34,7 +34,7 @@ pub struct Record {
 
 impl Record {
     /// Unix timestamp in microseconds
-    pub fn unix_timestamp(&self) -> u64 {
+    pub fn timestamp_us(&self) -> u64 {
         self.timestamp
     }
 
@@ -82,7 +82,7 @@ impl Record {
     }
 }
 
-fn from_system_time(timestamp: SystemTime) -> u64 {
+pub(crate) fn from_system_time(timestamp: SystemTime) -> u64 {
     timestamp
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()

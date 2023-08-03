@@ -9,7 +9,7 @@ use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reqwest::Method;
 
 use crate::record::read_record::ReadRecordBuilder;
-use crate::record::WriterRecordBuilder;
+use crate::record::WriteRecordBuilder;
 use reduct_base::msg::entry_api::EntryInfo;
 use std::sync::Arc;
 
@@ -84,8 +84,8 @@ impl Bucket {
     }
 
     /// Create a record to write to the bucket.
-    pub fn write_record(&self, entry: &str) -> WriterRecordBuilder {
-        WriterRecordBuilder::new(
+    pub fn write_record(&self, entry: &str) -> WriteRecordBuilder {
+        WriteRecordBuilder::new(
             self.name.clone(),
             entry.to_string(),
             Arc::clone(&self.http_client),
@@ -169,7 +169,7 @@ mod tests {
         let bucket: Bucket = bucket.await;
         bucket
             .write_record("test")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .data(Bytes::from("Hey"))
             .write()
             .await
@@ -177,7 +177,7 @@ mod tests {
 
         let record = bucket
             .read_record("test")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .read()
             .await
             .unwrap();
@@ -195,7 +195,7 @@ mod tests {
         let bucket: Bucket = bucket.await;
         bucket
             .write_record("test")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .content_length(11)
             .stream(Box::pin(stream))
             .write()
@@ -204,7 +204,7 @@ mod tests {
 
         let record = bucket
             .read_record("test")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .read()
             .await
             .unwrap();
@@ -217,12 +217,12 @@ mod tests {
         let bucket: Bucket = bucket.await;
         let record = bucket
             .read_record("entry-1")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .read()
             .await
             .unwrap();
 
-        assert_eq!(record.unix_timestamp(), 1000);
+        assert_eq!(record.timestamp_us(), 1000);
         assert_eq!(record.content_length(), 12);
         assert_eq!(record.content_type(), "text/plain");
         assert_eq!(record.labels().get("bucket"), Some(&"1".to_string()));
@@ -236,7 +236,7 @@ mod tests {
         let bucket: Bucket = bucket.await;
         let record = bucket
             .read_record("entry-1")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .read()
             .await
             .unwrap();
@@ -255,13 +255,13 @@ mod tests {
         let record: Record = bucket
             .await
             .read_record("entry-1")
-            .unix_timestamp(1000)
+            .timestamp_us(1000)
             .head_only(true)
             .read()
             .await
             .unwrap();
 
-        assert_eq!(record.unix_timestamp(), 1000);
+        assert_eq!(record.timestamp_us(), 1000);
         assert_eq!(record.content_length(), 12);
         assert_eq!(record.content_type(), "text/plain");
         assert_eq!(record.labels().get("bucket"), Some(&"1".to_string()));

@@ -38,7 +38,7 @@ impl ReadRecordBuilder {
     }
 
     /// Set the timestamp of the record to read as a unix timestamp in microseconds.
-    pub fn unix_timestamp(mut self, timestamp: u64) -> Self {
+    pub fn timestamp_us(mut self, timestamp: u64) -> Self {
         self.timestamp = Some(timestamp);
         self
     }

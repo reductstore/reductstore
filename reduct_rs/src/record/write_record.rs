@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Builder for a write record request.
-pub struct WriterRecordBuilder {
+pub struct WriteRecordBuilder {
     bucket: String,
     entry: String,
     timestamp: Option<u64>,
@@ -27,7 +27,7 @@ pub struct WriterRecordBuilder {
     client: Arc<HttpClient>,
 }
 
-impl WriterRecordBuilder {
+impl WriteRecordBuilder {
     pub(crate) fn new(bucket: String, entry: String, client: Arc<HttpClient>) -> Self {
         Self {
             timestamp: None,
@@ -48,7 +48,7 @@ impl WriterRecordBuilder {
     }
 
     /// Set the timestamp of the record to write as a unix timestamp in microseconds.
-    pub fn unix_timestamp(mut self, timestamp: u64) -> Self {
+    pub fn timestamp_us(mut self, timestamp: u64) -> Self {
         self.timestamp = Some(timestamp);
         self
     }
