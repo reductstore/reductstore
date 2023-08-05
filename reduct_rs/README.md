@@ -7,7 +7,7 @@ database for unstructured data.
 
 ## Features
 
-* Supports the [ReductStore HTTP API v1.5](https://docs.reduct.store/http-api)
+* Supports the [ReductStore HTTP API v1.6](https://docs.reduct.store/http-api)
 
 ## Install
 

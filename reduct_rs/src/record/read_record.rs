@@ -55,7 +55,7 @@ impl ReadRecordBuilder {
     /// # Returns
     ///
     /// A [`Record`] object containing the record data.
-    pub async fn read(self) -> Result<Record, HttpError> {
+    pub async fn send(self) -> Result<Record, HttpError> {
         let mut url = format!("/b/{}/{}", self.bucket, self.entry);
         if let Some(timestamp) = self.timestamp {
             url = format!("{}?ts={}", url, &timestamp.to_string());

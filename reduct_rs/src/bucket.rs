@@ -8,6 +8,7 @@ use crate::http_client::HttpClient;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reqwest::Method;
 
+use crate::record::query::QueryBuilder;
 use crate::record::read_record::ReadRecordBuilder;
 use crate::record::WriteRecordBuilder;
 use reduct_base::msg::entry_api::EntryInfo;
@@ -100,13 +101,22 @@ impl Bucket {
             Arc::clone(&self.http_client),
         )
     }
+
+    /// Create a record to write to the bucket.
+    pub fn query(&self, entry: &str) -> QueryBuilder {
+        QueryBuilder::new(
+            self.name.clone(),
+            entry.to_string(),
+            Arc::clone(&self.http_client),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bytes::{Buf, Bytes};
-    use futures_util::StreamExt;
+    use futures_util::{pin_mut, StreamExt};
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
@@ -171,14 +181,14 @@ mod tests {
             .write_record("test")
             .timestamp_us(1000)
             .data(Bytes::from("Hey"))
-            .write()
+            .send()
             .await
             .unwrap();
 
         let record = bucket
             .read_record("test")
             .timestamp_us(1000)
-            .read()
+            .send()
             .await
             .unwrap();
 
@@ -198,14 +208,14 @@ mod tests {
             .timestamp_us(1000)
             .content_length(11)
             .stream(Box::pin(stream))
-            .write()
+            .send()
             .await
             .unwrap();
 
         let record = bucket
             .read_record("test")
             .timestamp_us(1000)
-            .read()
+            .send()
             .await
             .unwrap();
         assert_eq!(record.bytes().await.unwrap(), Bytes::from("hello world"));
@@ -218,7 +228,7 @@ mod tests {
         let record = bucket
             .read_record("entry-1")
             .timestamp_us(1000)
-            .read()
+            .send()
             .await
             .unwrap();
 
@@ -237,7 +247,7 @@ mod tests {
         let record = bucket
             .read_record("entry-1")
             .timestamp_us(1000)
-            .read()
+            .send()
             .await
             .unwrap();
 
@@ -257,7 +267,7 @@ mod tests {
             .read_record("entry-1")
             .timestamp_us(1000)
             .head_only(true)
-            .read()
+            .send()
             .await
             .unwrap();
 
@@ -266,6 +276,17 @@ mod tests {
         assert_eq!(record.content_type(), "text/plain");
         assert_eq!(record.labels().get("bucket"), Some(&"1".to_string()));
         assert_eq!(record.labels().get("entry"), Some(&"1".to_string()));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_query(#[future] bucket: Bucket) {
+        let bucket: Bucket = bucket.await;
+        let mut query = bucket.query("entry-1").send().await.unwrap();
+
+        pin_mut!(query);
+        let record = query.next().await.unwrap().unwrap();
+        assert_eq!(record.timestamp_us(), 1000);
     }
 
     #[fixture]

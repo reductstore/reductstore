@@ -90,8 +90,8 @@ impl WriteRecordBuilder {
         self
     }
 
-    /// Write the record.
-    pub async fn write(self) -> Result<(), Box<dyn std::error::Error>> {
+    /// Send the write record request.
+    pub async fn send(self) -> Result<(), Box<dyn std::error::Error>> {
         let timestamp = self
             .timestamp
             .unwrap_or_else(|| from_system_time(SystemTime::now()));

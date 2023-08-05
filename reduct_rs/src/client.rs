@@ -402,7 +402,7 @@ pub(crate) mod tests {
                 ("bucket".into(), "1".into()),
             ]))
             .data(Bytes::from("Hey entry-1!"))
-            .write()
+            .send()
             .await
             .unwrap();
 
@@ -415,7 +415,7 @@ pub(crate) mod tests {
                 ("bucket".into(), "1".into()),
             ]))
             .data(Bytes::from("Hey entry-2!"))
-            .write()
+            .send()
             .await
             .unwrap();
 
@@ -432,7 +432,7 @@ pub(crate) mod tests {
                 ("bucket".into(), "2".into()),
             ]))
             .data(Bytes::from("Hey entry-1!"))
-            .write()
+            .send()
             .await
             .unwrap();
 
@@ -444,7 +444,7 @@ pub(crate) mod tests {
                 ("bucket".into(), "2".into()),
             ]))
             .data(Bytes::from("Hey entry-2!"))
-            .write()
+            .send()
             .await
             .unwrap();
 
