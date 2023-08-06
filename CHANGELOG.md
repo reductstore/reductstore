@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- reductstore: Build docker image for ARM32 platform, [PR-328](https://github.com/reductstore/reductstore/pull/328)
 - reduct-rs: Server API for Client SDK, [PR-321](https://github.com/reductstore/reductstore/pull/321)
 - reduct-rs: Token API for Client SDK, [PR-322](https://github.com/reductstore/reductstore/pull/322)
 - reduct-rs: Bucket API for Client SDK, [PR-323](https://github.com/reductstore/reductstore/pull/323)
-- reductstore: Build docker image for ARM32 platform, [PR-328](https://github.com/reductstore/reductstore/pull/328)
+- reduct-rs: Entry API for Client SDK, [PR-326](https://github.com/reductstore/reductstore/pull/326)
 
 ### Changed
 

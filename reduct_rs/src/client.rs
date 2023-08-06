@@ -4,7 +4,6 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use reqwest::Method;
-use std::collections::HashMap;
 
 use std::sync::Arc;
 
@@ -23,8 +22,6 @@ pub struct ReductClientBuilder {
 pub type Result<T> = std::result::Result<T, HttpError>;
 
 static API_BASE: &str = "/api/v1";
-
-pub type HeaderMap = HashMap<String, String>;
 
 impl ReductClientBuilder {
     fn new() -> Self {
@@ -134,7 +131,10 @@ impl ReductClient {
     ///
     /// the bucket or an error
     pub async fn get_bucket(&self, name: &str) -> Result<Bucket> {
-        self.http_client.head(&format!("/b/{}", name)).await?;
+        let request = self
+            .http_client
+            .request(Method::HEAD, &format!("/b/{}", name));
+        self.http_client.send_request(request).await?;
         Ok(Bucket {
             name: name.to_string(),
             http_client: self.http_client.clone(),
@@ -174,7 +174,8 @@ impl ReductClient {
     ///
     /// Ok if the server is alive, otherwise an error.
     pub async fn alive(&self) -> Result<()> {
-        self.http_client.head("/alive").await?;
+        let request = self.http_client.request(Method::HEAD, "/alive");
+        self.http_client.send_request(request).await?;
         Ok(())
     }
     /// Get the token with permissions for the current user.
@@ -220,9 +221,10 @@ impl ReductClient {
     ///
     /// Ok if the token was deleted, otherwise an error
     pub async fn delete_token(&self, name: &str) -> Result<()> {
-        self.http_client
-            .delete(&format!("/tokens/{}", name))
-            .await?;
+        let request = self
+            .http_client
+            .request(Method::DELETE, &format!("/tokens/{}", name));
+        self.http_client.send_request(request).await?;
         Ok(())
     }
 
@@ -243,6 +245,8 @@ impl ReductClient {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::record::Labels;
+    use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use rstest::{fixture, rstest};
     use tokio;
@@ -359,7 +363,7 @@ pub(crate) mod tests {
     pub(crate) fn bucket_settings() -> BucketSettings {
         BucketSettings {
             quota_type: Some(QuotaType::FIFO),
-            quota_size: Some(100),
+            quota_size: Some(10_000_000_000),
             max_block_size: Some(512),
             max_block_records: Some(100),
         }
@@ -385,12 +389,62 @@ pub(crate) mod tests {
             }
         }
 
-        client
+        let bucket = client
             .create_bucket("test-bucket-1", bucket_settings.clone())
             .await
             .unwrap();
-        client
+        bucket
+            .write_record("entry-1")
+            .timestamp_us(1000)
+            .content_type("text/plain")
+            .labels(Labels::from([
+                ("entry".into(), "1".into()),
+                ("bucket".into(), "1".into()),
+            ]))
+            .data(Bytes::from("Hey entry-1!"))
+            .send()
+            .await
+            .unwrap();
+
+        bucket
+            .write_record("entry-2")
+            .timestamp_us(2000)
+            .content_type("text/plain")
+            .labels(Labels::from([
+                ("entry".into(), "2".into()),
+                ("bucket".into(), "1".into()),
+            ]))
+            .data(Bytes::from("Hey entry-2!"))
+            .send()
+            .await
+            .unwrap();
+
+        let bucket = client
             .create_bucket("test-bucket-2", bucket_settings)
+            .await
+            .unwrap();
+
+        bucket
+            .write_record("entry-1")
+            .timestamp_us(1000)
+            .labels(Labels::from([
+                ("entry".into(), "1".into()),
+                ("bucket".into(), "2".into()),
+            ]))
+            .data(Bytes::from("Hey entry-1!"))
+            .send()
+            .await
+            .unwrap();
+
+        bucket
+            .write_record("entry-2")
+            .timestamp_us(2000)
+            .labels(Labels::from([
+                ("entry".into(), "2".into()),
+                ("bucket".into(), "2".into()),
+            ]))
+            .data(Bytes::from("Hey entry-2!"))
+            .send()
             .await
             .unwrap();
 
