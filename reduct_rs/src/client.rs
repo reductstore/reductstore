@@ -363,7 +363,7 @@ pub(crate) mod tests {
     pub(crate) fn bucket_settings() -> BucketSettings {
         BucketSettings {
             quota_type: Some(QuotaType::FIFO),
-            quota_size: Some(100),
+            quota_size: Some(10_000_000_000),
             max_block_size: Some(512),
             max_block_records: Some(100),
         }

@@ -108,7 +108,7 @@ impl ReadRecordBuilder {
                 .unwrap()
                 .to_str()
                 .unwrap()
-                .parse::<u64>()
+                .parse::<usize>()
                 .unwrap(),
             data: if self.head_only {
                 None

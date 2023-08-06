@@ -29,7 +29,7 @@ pub struct Record {
     timestamp: u64,
     labels: Labels,
     content_type: String,
-    content_length: u64,
+    content_length: usize,
     data: Option<RecordStream>,
 }
 
@@ -55,7 +55,7 @@ impl Record {
     }
 
     /// Content length of the record
-    pub fn content_length(&self) -> u64 {
+    pub fn content_length(&self) -> usize {
         self.content_length
     }
 
