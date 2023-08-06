@@ -15,6 +15,7 @@ use futures_util::StreamExt;
 use reduct_base::error::HttpError;
 
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 
 use std::time::SystemTime;
@@ -31,6 +32,17 @@ pub struct Record {
     content_type: String,
     content_length: usize,
     data: Option<RecordStream>,
+}
+
+impl Debug for Record {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Record")
+            .field("timestamp", &self.timestamp)
+            .field("labels", &self.labels)
+            .field("content_type", &self.content_type)
+            .field("content_length", &self.content_length)
+            .finish()
+    }
 }
 
 impl Record {

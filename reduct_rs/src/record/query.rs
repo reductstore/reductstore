@@ -16,20 +16,11 @@ use futures_util::{pin_mut, StreamExt};
 use reduct_base::error::HttpError;
 use reduct_base::msg::entry_api::QueryInfo;
 use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{Method, Request, RequestBuilder};
-use std::hash::Hash;
-use std::io::Read;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::SystemTime;
+use reqwest::Method;
 
-pub struct Query {
-    id: u64,
-    bucket: String,
-    entry: String,
-    client: Arc<HttpClient>,
-}
+use std::sync::Arc;
+
+use std::time::SystemTime;
 
 /// Builder for a query request.
 pub struct QueryBuilder {
@@ -92,9 +83,35 @@ impl QueryBuilder {
         self
     }
 
+    /// Add a label to include in the query.
+    pub fn add_include(mut self, key: &str, value: &str) -> Self {
+        if let Some(mut labels) = self.include {
+            labels.insert(key.to_string(), value.to_string());
+            self.include = Some(labels);
+        } else {
+            let mut labels = Labels::new();
+            labels.insert(key.to_string(), value.to_string());
+            self.include = Some(labels);
+        }
+        self
+    }
+
     /// Set the labels to exclude from the query.
     pub fn exclude(mut self, labels: Labels) -> Self {
         self.exclude = Some(labels);
+        self
+    }
+
+    /// Add a label to exclude from the query.
+    pub fn add_exclude(mut self, key: &str, value: &str) -> Self {
+        if let Some(mut labels) = self.exclude {
+            labels.insert(key.to_string(), value.to_string());
+            self.exclude = Some(labels);
+        } else {
+            let mut labels = Labels::new();
+            labels.insert(key.to_string(), value.to_string());
+            self.exclude = Some(labels);
+        }
         self
     }
 
@@ -118,9 +135,7 @@ impl QueryBuilder {
     }
 
     /// Set the query to be continuous.
-    pub async fn send(
-        mut self,
-    ) -> Result<impl Stream<Item = Result<Record, HttpError>>, HttpError> {
+    pub async fn send(self) -> Result<impl Stream<Item = Result<Record, HttpError>>, HttpError> {
         let mut url = format!("/b/{}/{}/q", self.bucket, self.entry);
         if let Some(start) = self.start {
             url.push_str(&format!("?start={}", start));
@@ -171,7 +186,7 @@ impl QueryBuilder {
                 let headers = response.headers().clone();
 
 
-                let (mut tx, rx) = unbounded();
+                let (tx, rx) = unbounded();
                 tokio::spawn(async move {
                     let mut stream = response.bytes_stream();
                     while let Some(bytes) = stream.next().await {
@@ -195,7 +210,7 @@ impl QueryBuilder {
 
 async fn parse_batched_records(
     headers: HeaderMap,
-    mut rx: Receiver<Bytes>,
+    rx: Receiver<Bytes>,
     head_only: bool,
 ) -> Result<impl Stream<Item = Result<(Record, bool), HttpError>>, HttpError> {
     //sort headers by names

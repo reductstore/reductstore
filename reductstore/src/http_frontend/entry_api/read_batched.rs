@@ -136,7 +136,7 @@ fn fetch_and_response_batched_records(
                 if readers.is_empty() {
                     return Err(HttpError::from(err));
                 } else {
-                    if err.status() == ErrorCode::NoContent as i32 {
+                    if err.status() == ErrorCode::NoContent {
                         last = true;
                         break;
                     } else {

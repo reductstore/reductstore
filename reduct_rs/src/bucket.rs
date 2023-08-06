@@ -5,12 +5,13 @@
 
 use crate::client::Result;
 use crate::http_client::HttpClient;
-use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
+use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reqwest::Method;
 
 use crate::record::query::QueryBuilder;
 use crate::record::read_record::ReadRecordBuilder;
 use crate::record::WriteRecordBuilder;
+use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::EntryInfo;
 use std::sync::Arc;
 
@@ -18,6 +19,81 @@ use std::sync::Arc;
 pub struct Bucket {
     pub(crate) name: String,
     pub(crate) http_client: Arc<HttpClient>,
+}
+
+pub struct BucketBuilder {
+    name: String,
+    exist_ok: bool,
+    settings: BucketSettings,
+    http_client: Arc<HttpClient>,
+}
+
+impl BucketBuilder {
+    pub(crate) fn new(name: String, http_client: Arc<HttpClient>) -> Self {
+        Self {
+            name,
+            exist_ok: false,
+            settings: BucketSettings::default(),
+            http_client,
+        }
+    }
+
+    /// Don't fail if the bucket already exists.
+    pub fn exist_ok(mut self, exist_ok: bool) -> Self {
+        self.exist_ok = exist_ok;
+        self
+    }
+
+    /// Set the quota type.
+    pub fn quota_type(mut self, quota_type: QuotaType) -> Self {
+        self.settings.quota_type = Some(quota_type);
+        self
+    }
+
+    /// Set the quota size.
+    pub fn quota_size(mut self, quota_size: u64) -> Self {
+        self.settings.quota_size = Some(quota_size);
+        self
+    }
+
+    /// Set the max block size.
+    pub fn max_block_size(mut self, max_block_size: u64) -> Self {
+        self.settings.max_block_size = Some(max_block_size);
+        self
+    }
+
+    /// Set the max block records.
+    pub fn max_block_records(mut self, max_block_records: u64) -> Self {
+        self.settings.max_block_records = Some(max_block_records);
+        self
+    }
+
+    /// Set and overwrite the settings of the bucket.
+    pub fn settings(mut self, settings: BucketSettings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    /// Create the bucket.
+    pub async fn send(self) -> Result<Bucket> {
+        let result = self
+            .http_client
+            .send_json(Method::POST, &format!("/b/{}", self.name), self.settings)
+            .await;
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                if !(self.exist_ok && e.status() == ErrorCode::Conflict) {
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(Bucket {
+            name: self.name.clone(),
+            http_client: Arc::clone(&self.http_client),
+        })
+    }
 }
 
 impl Bucket {
@@ -115,10 +191,9 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::{Buf, Bytes, BytesMut};
+    use bytes::Bytes;
     use chrono::Duration;
     use futures_util::{pin_mut, StreamExt};
-    use std::io::Read;
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
@@ -281,9 +356,9 @@ mod tests {
     }
 
     #[rstest]
-    // #[case(true, 10)]
-    // #[case(false, 10)]
-    // #[case(false, 10_000)]
+    #[case(true, 10)]
+    #[case(false, 10)]
+    #[case(false, 10_000)]
     #[case(false, 30_000_000)]
     #[case(false, 100_000_000)]
     #[tokio::test]
@@ -292,7 +367,7 @@ mod tests {
         let mut bodies: Vec<Vec<u8>> = Vec::new();
         for i in 0..3usize {
             let mut content = Vec::new();
-            for mut j in 0..size {
+            for _j in 0..size {
                 content.push(i as u8);
             }
             bodies.push(content);
@@ -306,7 +381,7 @@ mod tests {
                 .unwrap();
         }
 
-        let mut query = bucket
+        let query = bucket
             .query("entry-3")
             .ttl(Duration::minutes(1))
             .head_only(head_only)

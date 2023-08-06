@@ -110,8 +110,8 @@ impl HttpError {
         }
     }
 
-    pub fn status(&self) -> i32 {
-        self.status as i32
+    pub fn status(&self) -> ErrorCode {
+        self.status
     }
 
     pub fn message(&self) -> &str {
