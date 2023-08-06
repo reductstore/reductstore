@@ -8,6 +8,8 @@ database for unstructured data.
 ## Features
 
 * Supports the [ReductStore HTTP API v1.6](https://docs.reduct.store/http-api)
+* Built on top of [reqwest](https://github.com/seanmonstar/reqwest)
+* Asynchronous
 
 ## Install
 
