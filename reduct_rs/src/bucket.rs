@@ -191,10 +191,9 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::{Buf, Bytes, BytesMut};
+    use bytes::Bytes;
     use chrono::Duration;
     use futures_util::{pin_mut, StreamExt};
-    use std::io::Read;
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
@@ -368,7 +367,7 @@ mod tests {
         let mut bodies: Vec<Vec<u8>> = Vec::new();
         for i in 0..3usize {
             let mut content = Vec::new();
-            for mut j in 0..size {
+            for _j in 0..size {
                 content.push(i as u8);
             }
             bodies.push(content);
@@ -382,7 +381,7 @@ mod tests {
                 .unwrap();
         }
 
-        let mut query = bucket
+        let query = bucket
             .query("entry-3")
             .ttl(Duration::minutes(1))
             .head_only(head_only)

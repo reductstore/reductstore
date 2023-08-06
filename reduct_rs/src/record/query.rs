@@ -22,13 +22,6 @@ use std::sync::Arc;
 
 use std::time::SystemTime;
 
-pub struct Query {
-    id: u64,
-    bucket: String,
-    entry: String,
-    client: Arc<HttpClient>,
-}
-
 /// Builder for a query request.
 pub struct QueryBuilder {
     start: Option<u64>,
