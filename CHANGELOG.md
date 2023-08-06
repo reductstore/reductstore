@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reduct-rs: Token API for Client SDK, [PR-322](https://github.com/reductstore/reductstore/pull/322)
 - reduct-rs: Bucket API for Client SDK, [PR-323](https://github.com/reductstore/reductstore/pull/323)
 - reduct-rs: Entry API for Client SDK, [PR-326](https://github.com/reductstore/reductstore/pull/326)
+- reduct-rs: Examples and docs, [PR-333](https://github.com/reductstore/reductstore/pull/333)
 
 ### Changed
 
@@ -50,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Concise format for headers in `GET /api/v1/:bucket/:entry/batch` response, [PR-298](https://github.com/reductstore/reductstore/pull/298)
+- Concise format for headers in `GET /api/v1/:bucket/:entry/batch`
+  response, [PR-298](https://github.com/reductstore/reductstore/pull/298)
 
 ## [1.4.1] - 2023-06-27
 
