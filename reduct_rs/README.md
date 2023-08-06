@@ -11,60 +11,44 @@ database for unstructured data.
 * Built on top of [reqwest](https://github.com/seanmonstar/reqwest)
 * Asynchronous
 
-## Install
-
-TODO
-
 ## Example
 
 ```rust
+use bytes::Bytes;
+use reduct_base::error::HttpError;
+use reduct_rs::ReductClient;
 use std::str::from_utf8;
 use std::time::SystemTime;
-use bytes::Bytes;
-use futures_util::StreamExt;
-use reduct_rs::{ReductClient};
-use tokio;
-use reduct_base::error::HttpError;
 
+use tokio;
 
 #[tokio::main]
 async fn main() -> Result<(), HttpError> {
     let client = ReductClient::builder()
         .url("http://127.0.0.1:8383")
-        .api_token("TOKEN")
         .build();
 
-    println!("Server v{:?}", client.server_info().await?.version);
+    let timestamp = SystemTime::now();
 
-    let bucket = client.create_bucket("test" )
-        .exist_ok(true)
+    let bucket = client.create_bucket("test").exist_ok(true).send().await?;
+    bucket
+        .write_record("entry-1")
+        .timestamp(timestamp)
+        .data(Bytes::from("Hello, World!"))
         .send()
         .await?;
 
-    bucket.write_record("entry-1")
-        .add_label("planet", "Earth")
-        .data(Bytes::from("Hello, Earth!"))
+    let record = bucket
+        .read_record("entry-1")
+        .timestamp(timestamp)
         .send()
         .await?;
 
-    bucket.write_record("entry-1")
-        .add_label("planet", "Mars")
-        .data(Bytes::from("Hello, Mars!"))
-        .send()
-        .await?;
-
-
-    let mut query = bucket.query("entry-1")
-        .add_include("planet", "Earth")
-        .send().await?;
-
-    tokio::pin!(query);
-
-    while let Some(record) = query.next().await {
-        let record = record?;
-        println!("Record: {:?}", record);
-        println!("Data: {}", from_utf8(&record.bytes().await?.to_vec()).unwrap());
-    }
+    println!("Record: {:?}", record);
+    println!(
+        "Data: {}",
+        from_utf8(&record.bytes().await?.to_vec()).unwrap()
+    );
 
     Ok(())
 }

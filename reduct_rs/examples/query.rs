@@ -4,10 +4,10 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use bytes::Bytes;
+use futures_util::StreamExt;
 use reduct_base::error::HttpError;
 use reduct_rs::ReductClient;
 use std::str::from_utf8;
-use std::time::SystemTime;
 
 use tokio;
 
@@ -15,27 +15,40 @@ use tokio;
 async fn main() -> Result<(), HttpError> {
     let client = ReductClient::builder().url("http://127.0.0.1:8383").build();
 
-    let timestamp = SystemTime::now();
+    println!("Server v{:?}", client.server_info().await?.version);
 
     let bucket = client.create_bucket("test").exist_ok(true).send().await?;
+
     bucket
         .write_record("entry-1")
-        .timestamp(timestamp)
-        .data(Bytes::from("Hello, World!"))
+        .add_label("planet", "Earth")
+        .data(Bytes::from("Hello, Earth!"))
         .send()
         .await?;
 
-    let record = bucket
-        .read_record("entry-1")
-        .timestamp(timestamp)
+    bucket
+        .write_record("entry-1")
+        .add_label("planet", "Mars")
+        .data(Bytes::from("Hello, Mars!"))
         .send()
         .await?;
 
-    println!("Record: {:?}", record);
-    println!(
-        "Data: {}",
-        from_utf8(&record.bytes().await?.to_vec()).unwrap()
-    );
+    let query = bucket
+        .query("entry-1")
+        .add_include("planet", "Earth")
+        .send()
+        .await?;
+
+    tokio::pin!(query);
+
+    while let Some(record) = query.next().await {
+        let record = record?;
+        println!("Record: {:?}", record);
+        println!(
+            "Data: {}",
+            from_utf8(&record.bytes().await?.to_vec()).unwrap()
+        );
+    }
 
     Ok(())
 }
