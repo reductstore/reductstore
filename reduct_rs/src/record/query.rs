@@ -16,12 +16,10 @@ use futures_util::{pin_mut, StreamExt};
 use reduct_base::error::HttpError;
 use reduct_base::msg::entry_api::QueryInfo;
 use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{Method, Request, RequestBuilder};
-use std::hash::Hash;
-use std::io::Read;
-use std::pin::Pin;
+use reqwest::Method;
+
 use std::sync::Arc;
-use std::task::{Context, Poll};
+
 use std::time::SystemTime;
 
 pub struct Query {
@@ -144,9 +142,7 @@ impl QueryBuilder {
     }
 
     /// Set the query to be continuous.
-    pub async fn send(
-        mut self,
-    ) -> Result<impl Stream<Item = Result<Record, HttpError>>, HttpError> {
+    pub async fn send(self) -> Result<impl Stream<Item = Result<Record, HttpError>>, HttpError> {
         let mut url = format!("/b/{}/{}/q", self.bucket, self.entry);
         if let Some(start) = self.start {
             url.push_str(&format!("?start={}", start));
@@ -197,7 +193,7 @@ impl QueryBuilder {
                 let headers = response.headers().clone();
 
 
-                let (mut tx, rx) = unbounded();
+                let (tx, rx) = unbounded();
                 tokio::spawn(async move {
                     let mut stream = response.bytes_stream();
                     while let Some(bytes) = stream.next().await {
@@ -221,7 +217,7 @@ impl QueryBuilder {
 
 async fn parse_batched_records(
     headers: HeaderMap,
-    mut rx: Receiver<Bytes>,
+    rx: Receiver<Bytes>,
     head_only: bool,
 ) -> Result<impl Stream<Item = Result<(Record, bool), HttpError>>, HttpError> {
     //sort headers by names

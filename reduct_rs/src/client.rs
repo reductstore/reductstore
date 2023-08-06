@@ -10,8 +10,8 @@ use std::sync::Arc;
 use crate::bucket::BucketBuilder;
 use crate::http_client::HttpClient;
 use crate::Bucket;
-use reduct_base::error::{ErrorCode, HttpError};
-use reduct_base::msg::bucket_api::BucketSettings;
+use reduct_base::error::HttpError;
+
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
 
@@ -213,7 +213,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::record::Labels;
     use bytes::Bytes;
-    use reduct_base::msg::bucket_api::QuotaType;
+    use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use rstest::{fixture, rstest};
     use tokio;
 

@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::http_client::{map_error, HttpClient};
-use crate::record::{from_system_time, Labels, Record, RecordStream};
+use crate::record::{from_system_time, Labels, Record};
 use futures_util::StreamExt;
 use reduct_base::error::HttpError;
 use reqwest::Method;

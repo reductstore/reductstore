@@ -8,7 +8,7 @@ use futures_util::StreamExt;
 use reduct_base::error::HttpError;
 use reduct_rs::ReductClient;
 use std::str::from_utf8;
-use std::time::SystemTime;
+
 use tokio;
 
 #[tokio::main]
@@ -36,7 +36,7 @@ async fn main() -> Result<(), HttpError> {
         .send()
         .await?;
 
-    let mut query = bucket
+    let query = bucket
         .query("entry-1")
         .add_include("planet", "Earth")
         .send()
