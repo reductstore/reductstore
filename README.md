@@ -73,6 +73,7 @@ curl -v "http://127.0.0.1:8383/api/v1/b/my_data/entry_1?q=<ID_FROM_RESPONSE>"
 
 If you don't want to use HTTP API directly, you can use one of the client SDKs:
 
+* [Rust Client SDK](https://github.com/reductstore/reductstore/tree/main/reduct_rs)
 * [Python Client SDK](https://github.com/reductstore/reduct-py)
 * [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
 * [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
