@@ -7,6 +7,7 @@ use reqwest::Method;
 
 use std::sync::Arc;
 
+use crate::bucket::BucketBuilder;
 use crate::http_client::HttpClient;
 use crate::Bucket;
 use reduct_base::error::{ErrorCode, HttpError};
@@ -44,13 +45,13 @@ impl ReductClientBuilder {
     }
 
     /// Set the URL of the ReductStore instance to connect to.
-    pub fn set_url(mut self, url: &str) -> Self {
+    pub fn url(mut self, url: &str) -> Self {
         self.url = format!("{}{}", url.to_string(), API_BASE);
         self
     }
 
     /// Set the API token to use for authentication.
-    pub fn set_api_token(mut self, api_token: &str) -> Self {
+    pub fn api_token(mut self, api_token: &str) -> Self {
         self.api_token = api_token.to_string();
         self
     }
@@ -105,20 +106,12 @@ impl ReductClient {
     /// # Arguments
     ///
     /// * `name` - The name of the bucket
-    /// * `settings` - The settings of the bucket
-    /// * `exists_ok` - If true, return Ok if the bucket already exists
     ///
     /// # Returns
     ///
-    /// the created bucket or an error
-    pub async fn create_bucket(&self, name: &str, settings: BucketSettings) -> Result<Bucket> {
-        self.http_client
-            .send_json(Method::POST, &format!("/b/{}", name), settings)
-            .await?;
-        Ok(Bucket {
-            name: name.to_string(),
-            http_client: self.http_client.clone(),
-        })
+    /// a bucket builder to set the bucket settings
+    pub fn create_bucket(&self, name: &str) -> BucketBuilder {
+        BucketBuilder::new(name.to_string(), Arc::clone(&self.http_client))
     }
 
     /// Get a bucket.
@@ -139,33 +132,6 @@ impl ReductClient {
             name: name.to_string(),
             http_client: self.http_client.clone(),
         })
-    }
-
-    /// Get or create a bucket.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the bucket
-    /// * `settings` - The settings of the bucket
-    ///
-    /// # Returns
-    ///
-    /// the bucket or an error
-    pub async fn get_or_create_bucket(
-        &self,
-        name: &str,
-        settings: BucketSettings,
-    ) -> Result<Bucket> {
-        match self.get_bucket(name).await {
-            Ok(bucket) => Ok(bucket),
-            Err(err) => {
-                if err.status == ErrorCode::NotFound {
-                    self.create_bucket(name, settings).await
-                } else {
-                    Err(err)
-                }
-            }
-        }
     }
 
     /// Check if the server is alive.
@@ -283,19 +249,18 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn test_create_bucket(#[future] client: ReductClient) {
             let client = client.await;
-            let bucket = client
-                .create_bucket("test-bucket", BucketSettings::default())
-                .await
-                .unwrap();
+            let bucket = client.create_bucket("test-bucket").send().await.unwrap();
             assert_eq!(bucket.name(), "test-bucket");
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_bucket(#[future] client: ReductClient) {
+        async fn test_get_or_create_bucket(#[future] client: ReductClient) {
             let client = client.await;
             let bucket = client
-                .get_or_create_bucket("test-bucket", BucketSettings::default())
+                .create_bucket("test-bucket")
+                .exist_ok(true)
+                .send()
                 .await
                 .unwrap();
             assert_eq!(bucket.name(), "test-bucket");
@@ -372,8 +337,8 @@ pub(crate) mod tests {
     #[fixture]
     pub(crate) async fn client(bucket_settings: BucketSettings) -> ReductClient {
         let client = ReductClient::builder()
-            .set_url("http://127.0.0.1:8383")
-            .set_api_token(&std::env::var("RS_API_TOKEN").unwrap_or("".to_string()))
+            .url("http://127.0.0.1:8383")
+            .api_token(&std::env::var("RS_API_TOKEN").unwrap_or("".to_string()))
             .build();
 
         for token in client.list_tokens().await.unwrap() {
@@ -390,7 +355,9 @@ pub(crate) mod tests {
         }
 
         let bucket = client
-            .create_bucket("test-bucket-1", bucket_settings.clone())
+            .create_bucket("test-bucket-1")
+            .settings(bucket_settings.clone())
+            .send()
             .await
             .unwrap();
         bucket
@@ -420,7 +387,9 @@ pub(crate) mod tests {
             .unwrap();
 
         let bucket = client
-            .create_bucket("test-bucket-2", bucket_settings)
+            .create_bucket("test-bucket-2")
+            .settings(bucket_settings)
+            .send()
             .await
             .unwrap();
 

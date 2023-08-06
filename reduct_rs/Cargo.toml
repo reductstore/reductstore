@@ -13,7 +13,7 @@ categories = ["database"]
 
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["lib"]
 
 [dependencies]
 reduct-base = { path = "../reduct_base" }
@@ -29,5 +29,5 @@ async-channel = "1.9.0"
 tokio = { version = "1.0", features = ["macros"] }
 
 [dev-dependencies]
-tokio = { version = "1.0", features = ["test-util"] }
+tokio = { version = "1.0", features = ["test-util", "rt-multi-thread"] }
 rstest = "0.18.1"

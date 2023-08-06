@@ -12,6 +12,7 @@ use futures::TryStream;
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Method};
 
+use reduct_base::error::HttpError;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -59,6 +60,12 @@ impl WriteRecordBuilder {
         self
     }
 
+    /// Add a label to the record to write.
+    pub fn add_label(mut self, key: &str, value: &str) -> Self {
+        self.labels.insert(key.to_string(), value.to_string());
+        self
+    }
+
     /// Set the content type of the record to write.
     pub fn content_type(mut self, content_type: &str) -> Self {
         self.content_type = content_type.to_string();
@@ -91,7 +98,7 @@ impl WriteRecordBuilder {
     }
 
     /// Send the write record request.
-    pub async fn send(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn send(self) -> Result<(), HttpError> {
         let timestamp = self
             .timestamp
             .unwrap_or_else(|| from_system_time(SystemTime::now()));
