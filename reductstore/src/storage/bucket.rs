@@ -303,6 +303,24 @@ impl Bucket {
         entry.next(time)
     }
 
+    /// Remove entry from the bucket
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Entry name.
+    ///
+    /// # Returns
+    ///
+    /// * `HTTPError` - The error if any.
+    pub fn remove_entry(&mut self, name: &str) -> Result<(), HttpError> {
+        _ = self.get_entry(name)?;
+
+        let path = self.path.join(name);
+        remove_dir_all(path)?;
+        self.entries.remove(name);
+        Ok(())
+    }
+
     fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HttpError> {
         match self.settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
@@ -393,14 +411,6 @@ impl Bucket {
             });
         }
         self.save_settings()?;
-        Ok(())
-    }
-
-    /// Save bucket settings to file
-    fn remove_entry(&mut self, name: &str) -> Result<(), HttpError> {
-        let path = self.path.join(name);
-        remove_dir_all(path)?;
-        self.entries.remove(name);
         Ok(())
     }
 
@@ -554,6 +564,29 @@ mod tests {
             result.err(),
             Some(HttpError::internal_server_error(
                 "Failed to keep quota of 'test'"
+            ))
+        );
+    }
+
+    #[rstest]
+    fn test_remove_entry(mut bucket: Bucket) {
+        write(&mut bucket, "test-1", 1, b"test").unwrap();
+
+        bucket.remove_entry("test-1").unwrap();
+        assert_eq!(
+            bucket.get_entry("test-1").err(),
+            Some(HttpError::not_found(
+                "Entry 'test-1' not found in bucket 'test'"
+            ))
+        );
+    }
+
+    #[rstest]
+    fn test_remove_entry_not_found(mut bucket: Bucket) {
+        assert_eq!(
+            bucket.remove_entry("test-1").err(),
+            Some(HttpError::not_found(
+                "Entry 'test-1' not found in bucket 'test'"
             ))
         );
     }
