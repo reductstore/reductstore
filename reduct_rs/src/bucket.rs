@@ -186,6 +186,23 @@ impl Bucket {
             Arc::clone(&self.http_client),
         )
     }
+
+    /// Remove an entry from the bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The entry to remove.
+    ///
+    /// # Returns
+    ///
+    /// Returns an error if the entry could not be removed.
+    pub async fn remove_entry(&self, entry: &str) -> Result<()> {
+        let request = self
+            .http_client
+            .request(Method::DELETE, &format!("/b/{}/{}", self.name, entry));
+        self.http_client.send_request(request).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -426,6 +443,23 @@ mod tests {
         }
 
         assert!(query.next().await.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn remove_entry(#[future] bucket: Bucket) {
+        let bucket: Bucket = bucket.await;
+        bucket.remove_entry("entry-1").await.unwrap();
+        assert!(
+            bucket
+                .read_record("entry-1")
+                .send()
+                .await
+                .err()
+                .unwrap()
+                .status
+                == ErrorCode::NotFound
+        );
     }
 
     #[fixture]
