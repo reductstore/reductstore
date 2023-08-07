@@ -138,7 +138,7 @@ The endpoint works exactly as
 
 `GET /api/v1/b/:bucket_name/:entry_name`
 
- but returns only headers with meta information with a body.
+but returns only headers with meta information with a body.
 {% endswagger-description %}
 {% endswagger %}
 
@@ -149,7 +149,6 @@ Since version 1.5, ReductStore provides a way to read a multiple records in a re
 `x-reduct-time-192312381273: 100,text/plain,x=y,a="[a,b]"`
 
 The first value is content-length, the second one is content-type, then labels as key=value pairs. If there is a comma in the value, it is escaped with double quotes.
-
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -197,7 +196,7 @@ The endpoint works exactly as
 
 `GET /api/v1/b/:bucket_name/:entry_name/batch`
 
- but returns only headers with meta information with a body.
+but returns only headers with meta information with a body.
 {% endswagger-description %}
 {% endswagger %}
 
@@ -274,15 +273,39 @@ Keep query if no records for the request
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have read permissions" %}
 
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket doesn" %}
+{% swagger-response status="404: Not Found" description="The bucket or entry doesn't exist" %}
 
 {% endswagger-response %}
 
 {% swagger-response status="422: Unprocessable Entity" description="One or both timestamps are bad , or TTL is not a number" %}
+
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+{% swagger method="delete" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name  " summary="Remove entry" %}
+{% swagger-description %}
+Since v1.6, you can remove a specific entry from a bucket with the entire history of its records.
+{% endswagger-description %}
+
+{% swagger-response status="200: OK" description="The entry has been removed" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have write permissions" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="404: Not Found" description="The bucket or entry doesn't exist" %}
 
 {% endswagger-response %}
 {% endswagger %}
