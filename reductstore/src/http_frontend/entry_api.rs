@@ -6,6 +6,7 @@
 mod query;
 mod read_batched;
 mod read_single;
+mod remove;
 mod write;
 
 use axum::async_trait;
@@ -20,7 +21,7 @@ use std::collections::HashMap;
 use axum::headers;
 use axum::headers::HeaderMapExt;
 
-use axum::routing::{get, head, post};
+use axum::routing::{delete, get, head, post};
 
 use crate::storage::storage::Storage;
 use reduct_base::error::ErrorCode;
@@ -30,6 +31,7 @@ use std::sync::Arc;
 
 use crate::http_frontend::entry_api::read_batched::read_batched_records;
 use crate::http_frontend::entry_api::read_single::read_single_record;
+use crate::http_frontend::entry_api::remove::remove_entry;
 use crate::http_frontend::entry_api::write::write_record;
 use crate::http_frontend::HttpError;
 
@@ -117,4 +119,5 @@ pub fn create_entry_api_routes() -> axum::Router<Arc<HttpServerState>> {
             head(read_batched_records),
         )
         .route("/:bucket_name/:entry_name/q", get(query::query))
+        .route("/:bucket_name/:entry_name", delete(remove_entry))
 }
