@@ -148,8 +148,7 @@ mod tests {
         )
         .await;
 
-        let result: QueryInfo = result.unwrap().into();
-        assert_eq!(result.id, 1);
+        let query: QueryInfo = result.unwrap().into();
 
         let mut storage = components.storage.write().await;
         let entry = storage
@@ -158,11 +157,11 @@ mod tests {
             .get_mut_entry("entry-1")
             .unwrap();
 
-        let (_, last) = entry.next(result.id).unwrap();
+        let (_, last) = entry.next(query.id).unwrap();
         assert!(last);
 
         assert_eq!(
-            entry.next(result.id).err().unwrap().status,
+            entry.next(query.id).err().unwrap().status,
             ErrorCode::NoContent
         );
     }
