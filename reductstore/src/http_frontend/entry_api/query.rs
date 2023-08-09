@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(result.id, 1);
 
         let mut storage = components.storage.write().await;
-        let mut entry = storage
+        let entry = storage
             .get_mut_bucket("bucket-1")
             .unwrap()
             .get_mut_entry("entry-1")
