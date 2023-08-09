@@ -46,7 +46,7 @@ pub trait Query {
         block_manager: &mut BlockManager,
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError>;
 
-    /// Get the state of the query.reductstore-309
+    /// Get the state of the query.
     fn state(&self) -> &QueryState;
 }
 
@@ -59,7 +59,7 @@ pub struct QueryOptions {
     pub include: HashMap<String, String>,
     /// Exclude the records that match the key-value pairs.
     pub exclude: HashMap<String, String>,
-    /// If true, the query will never be donereductstore-309
+    /// If true, the query will never be done
     pub continuous: bool,
     /// The maximum number of records to return only for non-continuous queries.
     pub limit: Option<usize>,
