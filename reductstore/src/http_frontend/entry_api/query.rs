@@ -85,6 +85,16 @@ pub async fn query(
         None => 5,
     };
 
+    let limit = match params.get("limit") {
+        Some(limit) => Some(limit.parse::<usize>().map_err(|_| {
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'limit' must unsigned integer",
+            )
+        })?),
+        None => None,
+    };
+
     let mut include = HashMap::new();
     let mut exclude = HashMap::new();
 
@@ -107,9 +117,77 @@ pub async fn query(
             include,
             exclude,
             ttl: Duration::from_secs(ttl),
-            limit: None,
+            limit,
         },
     )?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http_frontend::tests::{components, headers, path_to_entry_1};
+    use rstest::*;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_limited_query(
+        components: Arc<HttpServerState>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let mut params = HashMap::new();
+        params.insert("limit".to_string(), "1".to_string());
+
+        let result = query(
+            State(Arc::clone(&components)),
+            path_to_entry_1,
+            Query(params),
+            headers,
+        )
+        .await;
+
+        let result: QueryInfo = result.unwrap().into();
+        assert_eq!(result.id, 1);
+
+        let mut storage = components.storage.write().await;
+        let mut entry = storage
+            .get_mut_bucket("bucket-1")
+            .unwrap()
+            .get_mut_entry("entry-1")
+            .unwrap();
+
+        let (_, last) = entry.next(result.id).unwrap();
+        assert!(last);
+
+        assert_eq!(
+            entry.next(result.id).err().unwrap().status,
+            ErrorCode::NoContent
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bad_limit(
+        components: Arc<HttpServerState>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let mut params = HashMap::new();
+        params.insert("limit".to_string(), "a".to_string());
+
+        let result = query(
+            State(Arc::clone(&components)),
+            path_to_entry_1,
+            Query(params),
+            headers,
+        )
+        .await;
+
+        assert_eq!(
+            result.err().unwrap().0.status,
+            ErrorCode::UnprocessableEntity
+        );
+    }
 }

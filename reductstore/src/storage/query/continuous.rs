@@ -70,18 +70,13 @@ impl Query for ContinuousQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
-    use prost_wkt_types::Timestamp;
+
     use rstest::rstest;
     use std::thread::sleep;
-    use tempfile::tempdir;
 
     use reduct_base::error::ErrorCode;
 
-    use crate::storage::block_manager::ManageBlock;
-    use crate::storage::proto::{record::State as RecordState, Record};
     use crate::storage::query::base::tests::block_manager_and_index;
-    use crate::storage::writer::Chunk;
 
     #[rstest]
     fn test_query(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {

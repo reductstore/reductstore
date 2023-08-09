@@ -161,15 +161,13 @@ impl Query for HistoricalQuery {
 mod tests {
     use super::*;
     use crate::storage::proto::record;
-    use crate::storage::proto::record::Label;
-    use crate::storage::writer::Chunk;
+
     use bytes::Bytes;
-    use prost_wkt_types::Timestamp;
+
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
     use std::collections::HashMap;
     use std::time::Duration;
-    use tempfile::tempdir;
 
     use crate::storage::query::base::tests::block_manager_and_index;
 

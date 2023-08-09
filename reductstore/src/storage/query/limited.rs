@@ -34,18 +34,20 @@ impl Query for LimitedQuery {
         block_manager: &mut BlockManager,
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
         // TODO: It could be done better, maybe it make sense to move the limit into HistoricalQuery instead of manipulating the state here.
-        if let QueryState::Done = self.state() {
-            return Err(HttpError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            });
+        if let Running(count) = self.state() {
+            if *count == self.options.limit.unwrap() {
+                self.query.state = QueryState::Done;
+                return Err(HttpError {
+                    status: ErrorCode::NoContent,
+                    message: "No content".to_string(),
+                });
+            }
         }
 
         let (reader, last) = self.query.next(block_indexes, block_manager)?;
 
         if let Running(count) = self.state() {
-            if *count >= self.options.limit.unwrap() {
-                self.query.state = QueryState::Done;
+            if *count == self.options.limit.unwrap() {
                 return Ok((reader, true));
             }
         }
@@ -67,7 +69,7 @@ mod tests {
 
     #[rstest]
     fn test_limit(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
-        let (mut block_manager, block_indexes) = block_manager_and_index;
+        let (block_manager, block_indexes) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
 
         let mut query = LimitedQuery::new(
