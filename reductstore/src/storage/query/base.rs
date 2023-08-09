@@ -15,7 +15,7 @@ use std::time::Duration;
 #[derive(PartialEq, Debug)]
 pub enum QueryState {
     /// The query is running.
-    Running,
+    Running(usize),
     /// The query is done.
     Done,
     /// The query is outdated.
@@ -46,7 +46,7 @@ pub trait Query {
         block_manager: &mut BlockManager,
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError>;
 
-    /// Get the state of the query.
+    /// Get the state of the query.reductstore-309
     fn state(&self) -> &QueryState;
 }
 
@@ -59,8 +59,10 @@ pub struct QueryOptions {
     pub include: HashMap<String, String>,
     /// Exclude the records that match the key-value pairs.
     pub exclude: HashMap<String, String>,
-    /// If true, the query will never be done
+    /// If true, the query will never be donereductstore-309
     pub continuous: bool,
+    /// The maximum number of records to return only for non-continuous queries.
+    pub limit: Option<usize>,
 }
 
 impl Default for QueryOptions {
@@ -70,6 +72,142 @@ impl Default for QueryOptions {
             include: HashMap::new(),
             exclude: HashMap::new(),
             continuous: false,
+            limit: None,
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::storage::block_manager::ManageBlock;
+    use crate::storage::proto::record::{Label, State as RecordState};
+    use crate::storage::proto::Record;
+    use crate::storage::writer::Chunk;
+    use bytes::Bytes;
+    use prost_wkt_types::Timestamp;
+    use rstest::fixture;
+    use tempfile::tempdir;
+
+    #[fixture]
+    pub(crate) fn block_manager_and_index() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
+        // Two blocks
+        // the first block has two records: 0, 5
+        // the second block has a record: 1000
+        let dir = tempdir().unwrap().into_path();
+        let mut block_manager = BlockManager::new(dir);
+        let mut block = block_manager.start(0, 10).unwrap();
+
+        block.records.push(Record {
+            timestamp: Some(Timestamp {
+                seconds: 0,
+                nanos: 0,
+            }),
+            begin: 0,
+            end: 10,
+            state: RecordState::Finished as i32,
+            labels: vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "1".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "1".to_string(),
+                },
+            ],
+            content_type: "".to_string(),
+        });
+
+        block.records.push(Record {
+            timestamp: Some(Timestamp {
+                seconds: 0,
+                nanos: 5000,
+            }),
+            begin: 10,
+            end: 20,
+            state: RecordState::Finished as i32,
+            labels: vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "1".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "2".to_string(),
+                },
+            ],
+            content_type: "".to_string(),
+        });
+
+        block.latest_record_time = Some(Timestamp {
+            seconds: 0,
+            nanos: 5000,
+        });
+        block.size = 20;
+        block_manager.save(block.clone()).unwrap();
+
+        let block_manager = Arc::new(RwLock::new(block_manager));
+        {
+            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
+        }
+
+        {
+            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 1).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
+        }
+
+        block_manager.write().unwrap().finish(&block).unwrap();
+
+        let mut block = block_manager.write().unwrap().start(1000, 10).unwrap();
+
+        block.records.push(Record {
+            timestamp: Some(Timestamp {
+                seconds: 0,
+                nanos: 1000_000,
+            }),
+            begin: 0,
+            end: 10,
+            state: RecordState::Finished as i32,
+            labels: vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "2".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "1".to_string(),
+                },
+            ],
+            content_type: "".to_string(),
+        });
+
+        block.latest_record_time = Some(Timestamp {
+            seconds: 0,
+            nanos: 1000_000,
+        });
+        block.size = 10;
+        block_manager.write().unwrap().save(block.clone()).unwrap();
+
+        {
+            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
+            writer
+                .write()
+                .unwrap()
+                .write(Chunk::Last(Bytes::from("0123456789")))
+                .unwrap();
+        }
+
+        block_manager.write().unwrap().finish(&block).unwrap();
+        (block_manager, BTreeSet::from([0, 1000]))
     }
 }

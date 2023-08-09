@@ -107,6 +107,7 @@ pub async fn query(
             include,
             exclude,
             ttl: Duration::from_secs(ttl),
+            limit: None,
         },
     )?;
 

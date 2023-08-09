@@ -417,7 +417,7 @@ impl Entry {
 
     fn remove_expired_query(&mut self) {
         self.queries
-            .retain(|_, query| query.state() == &QueryState::Running);
+            .retain(|_, query| matches!(query.state(), QueryState::Running(_)));
     }
 }
 
