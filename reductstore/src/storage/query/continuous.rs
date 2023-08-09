@@ -16,6 +16,7 @@ use std::sync::{Arc, RwLock};
 pub struct ContinuousQuery {
     query: HistoricalQuery,
     next_start: u64,
+    count: usize,
     options: QueryOptions,
 }
 
@@ -28,6 +29,7 @@ impl ContinuousQuery {
         ContinuousQuery {
             query: HistoricalQuery::new(start, u64::MAX, options.clone()),
             next_start: start,
+            count: 0,
             options,
         }
     }
@@ -42,6 +44,7 @@ impl Query for ContinuousQuery {
         match self.query.next(block_indexes, block_manager) {
             Ok((record, last)) => {
                 self.next_start = record.read().unwrap().timestamp() + 1;
+                self.count += 1;
                 Ok((record, last))
             }
             Err(HttpError {
@@ -49,6 +52,7 @@ impl Query for ContinuousQuery {
                 ..
             }) => {
                 self.query = HistoricalQuery::new(self.next_start, u64::MAX, self.options.clone());
+                self.query.state = QueryState::Running(self.count);
                 Err(HttpError {
                     status: ErrorCode::NoContent,
                     message: "No content".to_string(),
@@ -66,24 +70,21 @@ impl Query for ContinuousQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
-    use prost_wkt_types::Timestamp;
 
+    use rstest::rstest;
     use std::thread::sleep;
-    use tempfile::tempdir;
 
-    use crate::storage::block_manager::ManageBlock;
-    use crate::storage::proto::{record::State as RecordState, Record};
-    use crate::storage::writer::Chunk;
     use reduct_base::error::ErrorCode;
 
-    #[test]
-    fn test_query() {
-        let (block_manager, block_indexes) = setup();
+    use crate::storage::query::base::tests::block_manager_and_index;
+
+    #[rstest]
+    fn test_query(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+        let (block_manager, block_indexes) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
 
         let mut query = ContinuousQuery::new(
-            0,
+            900,
             QueryOptions {
                 ttl: std::time::Duration::from_millis(100),
                 continuous: true,
@@ -108,47 +109,9 @@ mod tests {
                 message: "No content".to_string(),
             })
         );
-        assert_eq!(query.state(), &QueryState::Running);
+        assert_eq!(query.state(), &QueryState::Running(1));
 
         sleep(std::time::Duration::from_millis(200));
         assert_eq!(query.state(), &QueryState::Expired);
-    }
-
-    fn setup() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
-        let dir = tempdir().unwrap().into_path();
-        let mut block_manager = BlockManager::new(dir);
-        let mut block = block_manager.start(0, 10).unwrap();
-
-        block.records.push(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 1000000,
-            }),
-            begin: 0,
-            end: 10,
-            state: RecordState::Finished as i32,
-            labels: vec![],
-            content_type: "".to_string(),
-        });
-
-        block.latest_record_time = Some(Timestamp {
-            seconds: 0,
-            nanos: 0,
-        });
-        block.size = 10;
-        block_manager.save(block.clone()).unwrap();
-
-        let bm_ref = Arc::new(RwLock::new(block_manager));
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&bm_ref), &block, 0).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
-        }
-
-        bm_ref.write().unwrap().finish(&block).unwrap();
-        (Arc::clone(&bm_ref), BTreeSet::from([0]))
     }
 }

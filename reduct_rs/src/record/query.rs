@@ -31,6 +31,7 @@ pub struct QueryBuilder {
     ttl: Option<Duration>,
     continuous: bool,
     head_only: bool,
+    limit: Option<u64>,
 
     bucket: String,
     entry: String,
@@ -47,6 +48,8 @@ impl QueryBuilder {
             ttl: None,
             continuous: false,
             head_only: false,
+            limit: None,
+
             bucket,
             entry,
             client,
@@ -134,6 +137,13 @@ impl QueryBuilder {
         self
     }
 
+    /// Set a limit for the query.
+    /// default: unlimited
+    pub fn limit(mut self, limit: u64) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
     /// Set the query to be continuous.
     pub async fn send(self) -> Result<impl Stream<Item = Result<Record, HttpError>>, HttpError> {
         let mut url = format!("/b/{}/{}/q", self.bucket, self.entry);
@@ -158,6 +168,9 @@ impl QueryBuilder {
         }
         if self.continuous {
             url.push_str("?continuous=true");
+        }
+        if let Some(limit) = self.limit {
+            url.push_str(&format!("?limit={}", limit));
         }
 
         let response = self

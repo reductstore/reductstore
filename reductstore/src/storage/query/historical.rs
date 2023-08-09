@@ -20,7 +20,7 @@ pub struct HistoricalQuery {
     block: Option<Block>,
     last_update: Instant,
     options: QueryOptions,
-    state: QueryState,
+    pub(in crate::storage::query) state: QueryState,
 }
 
 impl HistoricalQuery {
@@ -31,7 +31,7 @@ impl HistoricalQuery {
             block: None,
             last_update: Instant::now(),
             options,
-            state: QueryState::Running,
+            state: QueryState::Running(0),
         }
     }
 }
@@ -140,6 +140,11 @@ impl Query for HistoricalQuery {
             .iter()
             .position(|v| v.timestamp == record.timestamp)
             .unwrap();
+
+        if let QueryState::Running(idx) = &mut self.state {
+            *idx += 1;
+        }
+
         Ok((block_manager.begin_read(&block, record_idx)?, last))
     }
 
@@ -156,29 +161,29 @@ impl Query for HistoricalQuery {
 mod tests {
     use super::*;
     use crate::storage::proto::record;
-    use crate::storage::proto::record::Label;
-    use crate::storage::writer::Chunk;
+
     use bytes::Bytes;
-    use prost_wkt_types::Timestamp;
+
     use reduct_base::error::ErrorCode;
+    use rstest::rstest;
     use std::collections::HashMap;
-
     use std::time::Duration;
-    use tempfile::tempdir;
 
-    #[test]
+    use crate::storage::query::base::tests::block_manager_and_index;
+
+    #[rstest]
     fn test_state() {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
-        assert_eq!(query.state(), &QueryState::Running);
+        assert_eq!(query.state(), &QueryState::Running(0));
         query.last_update = Instant::now() - Duration::from_secs(61);
         assert_eq!(query.state(), &QueryState::Expired);
     }
 
-    #[test]
-    fn test_query_ok_1_rec() {
+    #[rstest]
+    fn test_query_ok_1_rec(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
@@ -196,11 +201,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_query_ok_2_recs() {
+    #[rstest]
+    fn test_query_ok_2_recs(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
 
-        let (block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -232,11 +237,11 @@ mod tests {
         assert_eq!(query.state(), &QueryState::Done);
     }
 
-    #[test]
-    fn test_query_ok_3_recs() {
+    #[rstest]
+    fn test_query_ok_3_recs(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
 
-        let (block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -274,8 +279,8 @@ mod tests {
         assert_eq!(query.state(), &QueryState::Done);
     }
 
-    #[test]
-    fn test_query_include() {
+    #[rstest]
+    fn test_query_include(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -287,7 +292,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -311,8 +316,8 @@ mod tests {
         assert_eq!(query.state(), &QueryState::Done);
     }
 
-    #[test]
-    fn test_query_exclude() {
+    #[rstest]
+    fn test_query_exclude(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -325,7 +330,7 @@ mod tests {
             },
         );
 
-        let (block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
 
         {
@@ -359,11 +364,13 @@ mod tests {
         assert_eq!(query.state(), &QueryState::Done);
     }
 
-    #[test]
-    fn test_ignoring_errored_records() {
+    #[rstest]
+    fn test_ignoring_errored_records(
+        block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (block_manager, index) = setup_2_blocks();
+        let (block_manager, index) = block_manager_and_index;
         let mut block_manager = block_manager.write().unwrap();
 
         let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
@@ -377,123 +384,5 @@ mod tests {
                 message: "No content".to_string(),
             })
         );
-    }
-
-    fn setup_2_blocks() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
-        let dir = tempdir().unwrap().into_path();
-        let mut block_manager = BlockManager::new(dir);
-        let mut block = block_manager.start(0, 10).unwrap();
-
-        block.records.push(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 0,
-            }),
-            begin: 0,
-            end: 10,
-            state: RecordState::Finished as i32,
-            labels: vec![
-                Label {
-                    name: "block".to_string(),
-                    value: "1".to_string(),
-                },
-                Label {
-                    name: "record".to_string(),
-                    value: "1".to_string(),
-                },
-            ],
-            content_type: "".to_string(),
-        });
-
-        block.records.push(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 5000,
-            }),
-            begin: 10,
-            end: 20,
-            state: RecordState::Finished as i32,
-            labels: vec![
-                Label {
-                    name: "block".to_string(),
-                    value: "1".to_string(),
-                },
-                Label {
-                    name: "record".to_string(),
-                    value: "2".to_string(),
-                },
-            ],
-            content_type: "".to_string(),
-        });
-
-        block.latest_record_time = Some(Timestamp {
-            seconds: 0,
-            nanos: 5000,
-        });
-        block.size = 20;
-        block_manager.save(block.clone()).unwrap();
-
-        let block_manager = Arc::new(RwLock::new(block_manager));
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
-        }
-
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 1).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
-        }
-
-        block_manager.write().unwrap().finish(&block).unwrap();
-
-        let mut block = block_manager.write().unwrap().start(1000, 10).unwrap();
-
-        block.records.push(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 1000_000,
-            }),
-            begin: 0,
-            end: 10,
-            state: RecordState::Finished as i32,
-            labels: vec![
-                Label {
-                    name: "block".to_string(),
-                    value: "2".to_string(),
-                },
-                Label {
-                    name: "record".to_string(),
-                    value: "1".to_string(),
-                },
-            ],
-            content_type: "".to_string(),
-        });
-
-        block.latest_record_time = Some(Timestamp {
-            seconds: 0,
-            nanos: 1000_000,
-        });
-        block.size = 10;
-        block_manager.write().unwrap().save(block.clone()).unwrap();
-
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
-        }
-
-        block_manager.write().unwrap().finish(&block).unwrap();
-        (block_manager, BTreeSet::from([0, 1000]))
     }
 }
