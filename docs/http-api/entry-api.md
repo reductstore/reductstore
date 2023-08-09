@@ -223,6 +223,8 @@ GET /api/v1/:bucket/:entry/q?include-\<label1>=foo\&include-\<label2>=bar
 This would query records that have both `label1` equal to "foo" and `label2` equal to "bar".
 
 Since version 1.4, the method has the `continuous query` flag. If it is true, the current query will not be discarded if there are no records. A client can ask them later. The query will not be removed until its TTL has expired. The `stop` parameter is ignored for continuous queries.
+
+Since version 1.6, the method provides the `limit` query parameter. It limits the number of record in the query. If it is not set, the query is unlimited by default.
 {% endswagger-description %}
 
 {% swagger-parameter in="path" name=":bucket_name" required="true" %}
@@ -255,6 +257,10 @@ Query records that don't have a certain value of a label.
 
 {% swagger-parameter in="query" name="conitnuous" type="Boolean" required="false" %}
 Keep query if no records for the request
+{% endswagger-parameter %}
+
+{% swagger-parameter in="query" name="limit" type="Integer" required="false" %}
+Maximum number of records in the query. Default: unlimited.
 {% endswagger-parameter %}
 
 {% swagger-response status="200: OK" description="" %}
