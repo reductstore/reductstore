@@ -32,7 +32,7 @@ parts:
     override-pull: |
       craftctl default
       cargo install cargo-get
-      VERSION="$(cargo-get get package.version --entry reductstore/)-git$(git rev-parse --short HEAD)"
+      VERSION="$(~/.cargo/bin/cargo-get get package.version --entry reductstore/)-git$(git rev-parse --short HEAD)"
       echo "ReductStore v${VERSION}"
       craftctl set version="${VERSION}
     override-build: |
