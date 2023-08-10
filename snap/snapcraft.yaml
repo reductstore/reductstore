@@ -32,7 +32,7 @@ parts:
     override-pull: |
       craftctl default
       cargo install cargo-get
-      VERSION="$(cd reductstore && ~/.cargo/bin/cargo-get version)-git$(git rev-parse --short HEAD)"
+      VERSION="$(cargo-get get package.version --entry reductstore/)-git$(git rev-parse --short HEAD)"
       echo "ReductStore v${VERSION}"
       echo "version: $VERSION" >> snap/snapcraft.yaml
     override-build: |
