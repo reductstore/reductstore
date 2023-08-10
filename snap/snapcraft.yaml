@@ -33,7 +33,7 @@ parts:
       craftctl default
       cargo install cargo-get
       VERSION="$(cd reductstore && ~/.cargo/bin/cargo-get version)-git$(git rev-parse --short HEAD)"
-      echo "ReductStore v$VERSION"
+      echo "ReductStore v${VERSION}"
       echo "version: $VERSION" >> snap/snapcraft.yaml
     override-build: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y
