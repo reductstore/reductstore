@@ -1,7 +1,5 @@
 // Copyright 2023 ReductStore
-// This Source Code Form is subject to the terms of the Mozilla Public
-//    License, v. 2.0. If a copy of the MPL was not distributed with this
-//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Licensed under the Business Source License 1.1
 
 pub mod asset;
 pub mod auth;
@@ -41,7 +39,7 @@ async fn main() {
         env!("COMMIT"),
         env!("BUILD_TIME")
     );
-    info!("License: MPL-2.0");
+    info!("License: BUSL-1.1");
 
     let mut env = Env::new();
 

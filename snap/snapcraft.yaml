@@ -12,7 +12,7 @@ contact: info@reduct.store
 issues: https://github.com/reductstore/reductstore/issues
 source-code: https://github.com/reductstore/reductstore.git
 website: https://wwww.reduct.store
-license: MPL-2.0
+license: BUSL-1.1
 confinement: strict # use 'strict' once you have the right plugs and slots
 grade: stable # must be 'stable' to release into candidate/stable channels
 
