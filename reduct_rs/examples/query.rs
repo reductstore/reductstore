@@ -5,8 +5,7 @@
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use reduct_base::error::HttpError;
-use reduct_rs::ReductClient;
+use reduct_rs::{HttpError, ReductClient};
 use std::str::from_utf8;
 
 use tokio;

@@ -13,9 +13,9 @@ database for unstructured data.
 ## Example
 
 ```rust
+
 use bytes::Bytes;
-use reduct_base::error::HttpError;
-use reduct_rs::ReductClient;
+use reduct_rs::{ReductClient, HttpError};
 use std::str::from_utf8;
 use std::time::SystemTime;
 
@@ -23,9 +23,7 @@ use tokio;
 
 #[tokio::main]
 async fn main() -> Result<(), HttpError> {
-    let client = ReductClient::builder()
-        .url("http://127.0.0.1:8383")
-        .build();
+    let client = ReductClient::builder().url("http://127.0.0.1:8383").build();
 
     let timestamp = SystemTime::now();
 
@@ -51,6 +49,7 @@ async fn main() -> Result<(), HttpError> {
 
     Ok(())
 }
+
 ```
 
 ## References
