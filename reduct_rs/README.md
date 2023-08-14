@@ -1,6 +1,5 @@
 # ReductStore Client SDK for Rust
 
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reduct-rs/ci.yml?branch=main)](https://github.com/reductstore/reduct-rs/actions)
 
 This package provides an HTTP client for interacting with the [ReductStore](https://www.reduct.store), time-series
 database for unstructured data.
@@ -9,14 +8,14 @@ database for unstructured data.
 
 * Supports the [ReductStore HTTP API v1.6](https://docs.reduct.store/http-api)
 * Built on top of [reqwest](https://github.com/seanmonstar/reqwest)
-* Asynchronous
+* Asynchronous API
 
 ## Example
 
 ```rust
+
 use bytes::Bytes;
-use reduct_base::error::HttpError;
-use reduct_rs::ReductClient;
+use reduct_rs::{ReductClient, HttpError};
 use std::str::from_utf8;
 use std::time::SystemTime;
 
@@ -24,9 +23,7 @@ use tokio;
 
 #[tokio::main]
 async fn main() -> Result<(), HttpError> {
-    let client = ReductClient::builder()
-        .url("http://127.0.0.1:8383")
-        .build();
+    let client = ReductClient::builder().url("http://127.0.0.1:8383").build();
 
     let timestamp = SystemTime::now();
 
@@ -52,6 +49,7 @@ async fn main() -> Result<(), HttpError> {
 
     Ok(())
 }
+
 ```
 
 ## References

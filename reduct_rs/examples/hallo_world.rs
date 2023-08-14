@@ -4,8 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use bytes::Bytes;
-use reduct_base::error::HttpError;
-use reduct_rs::ReductClient;
+use reduct_rs::{HttpError, ReductClient};
 use std::str::from_utf8;
 use std::time::SystemTime;
 

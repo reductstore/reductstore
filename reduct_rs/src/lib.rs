@@ -13,3 +13,4 @@ pub use client::ReductClient;
 pub use record::read_record::ReadRecordBuilder;
 pub use record::write_record::WriteRecordBuilder;
 pub use record::{Labels, Record, RecordStream};
+pub use reduct_base::error::{ErrorCode, HttpError};
