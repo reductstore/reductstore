@@ -1460,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-rs"
-version = "1.6.0-dev"
+version = "1.6.0"
 dependencies = [
  "async-channel",
  "async-stream",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.6.0-dev"
+version = "1.6.0"
 dependencies = [
  "axum",
  "axum-server",
