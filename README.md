@@ -9,7 +9,7 @@
 [![Discord](https://img.shields.io/discord/939475547065561088)](https://discord.gg/8wPtPGJYsn)
 
 
-ReductStore is a time series database that is specifically designed for storing and managing large amounts of blob data. It boasts high performance for both writing and real-time querying, with the added benefit of batching data. This makes it an ideal solution for edge computing, computer vision, and IoT applications where network latency is a concern. For more information, please visit [https://www.reduct.store/](https://docs.reduct.store/).
+ReductStore is a time series database that is specifically designed for storing and managing large amounts of blob data. It boasts high performance for both writing and real-time querying, with the added benefit of batching data. This makes it an ideal solution for edge computing, computer vision, and IoT applications where network latency is a concern. For more information, please visit [https://www.reduct.store/](https://www.reduct.store/).
 
 ## Why Does It Exist?
 
@@ -56,7 +56,7 @@ RS_DATA_PATH=./data reductstore
 
 For a more in-depth guide, visit the **[Getting Started](https://docs.reduct.store/)** and **[Download](https://www.reduct.store/download)** sections.
 
-After initializing the instance, dive in with one of our **[Client SDKs](https://www.notion.so/ReductStore-README-6e4136e267c041538abc4572c86a00cc?pvs=21)** to write or retrieve data. To illustrate, here's a Python sample:
+After initializing the instance, dive in with one of our **[Client SDKs](#client-sdks)** to write or retrieve data. To illustrate, here's a Python sample:
 
 ```python
 import time
