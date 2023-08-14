@@ -8,7 +8,7 @@ license = "MPL-2.0"
 description = "ReductStore Client SDK for Rust."
 repository = "https://github.com/reductstore/reductstore"
 readme = "README.md"
-keywords = ["database", "time-series", "blob", "storage", "reductstore", "client", "sdk", "rust"]
+keywords = ["database", "time-series", "client", "sdk", "reductstore"]
 categories = ["database"]
 
 

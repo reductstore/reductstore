@@ -8,7 +8,7 @@ license = "MPL-2.0"
 description = "Base crate for ReductStore"
 repository = "https://github.com/reductstore/reduc-rs"
 readme = "README.md"
-keywords = ["database", "time-series", "blob", "storage", "reductstore", "client", "sdk", "rust"]
+keywords = ["database", "time-series", "blob", "storage", "reductstore"]
 categories = ["database"]
 
 
