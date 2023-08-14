@@ -64,8 +64,8 @@ import asyncio
 from reduct import Client, Bucket
 
 async def main():
-# Create a client for interacting with a ReductStore service
-async with Client("http://localhost:8383") as client:
+    # Create a client for interacting with a ReductStore service
+    async with Client("http://localhost:8383") as client:
         # Create a bucket and store a reference to it in the `bucket` variable
         bucket: Bucket = await client.create_bucket("my-bucket", exist_ok=True)
 
@@ -75,8 +75,8 @@ async with Client("http://localhost:8383") as client:
 
         # Read data from the bucket
         async with bucket.read("entry-1", ts) as record:
-        data = await record.read_all()
-        print(data)
+            data = await record.read_all()
+            print(data)
 
 # Run the main function
 loop = asyncio.get_event_loop()
