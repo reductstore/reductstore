@@ -346,11 +346,14 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - name: Publish crate
+      - name: Login
         run: |
           cargo login ${{ secrets.CRATES_IO_TOKEN }}
-          cargo publish -p reductstore
-          cargo
+      - name: Publish reduct-base
+        run: cargo publish -p reduct-base
+      - name: Publish reduct-macros
+        run: cargo publish -p reduct-macros
+
 
   make_release:
     runs-on: ubuntu-latest
