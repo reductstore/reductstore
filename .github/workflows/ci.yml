@@ -359,6 +359,8 @@ jobs:
         run: cargo publish -p reduct-macros
       - name: Publish reduct-rs
         run: cargo publish -p reduct-rs
+      - name: Publish reduct-rs
+        run: cargo publish -p reductstore
 
   make_release:
     runs-on: ubuntu-latest
