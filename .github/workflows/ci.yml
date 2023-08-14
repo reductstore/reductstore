@@ -349,7 +349,8 @@ jobs:
       - name: Publish crate
         run: |
           cargo login ${{ secrets.CRATES_IO_TOKEN }}
-          cargo publish --no-verify
+          cargo publish -p reductstore
+          cargo
 
   make_release:
     runs-on: ubuntu-latest
