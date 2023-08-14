@@ -348,6 +348,10 @@ jobs:
         with:
           toolchain: stable
           override: true
+      - uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
       - name: Login
         run: |
           cargo login ${{ secrets.CRATES_IO_TOKEN }}
@@ -358,8 +362,9 @@ jobs:
         continue-on-error: true
         run: cargo publish -p reduct-macros
       - name: Publish reduct-rs
+        continue-on-error: true
         run: cargo publish -p reduct-rs
-      - name: Publish reduct-rs
+      - name: Publish reductstore
         run: cargo publish -p reductstore
 
   make_release:
