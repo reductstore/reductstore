@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2023-08-14
+
 ### Added
 
 - reductstore: Build docker image for ARM32 platform, [PR-328](https://github.com/reductstore/reductstore/pull/328)
@@ -501,7 +503,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.6.0...HEAD
+
+[1.6.0]: https://github.com/reductstore/reductstore/compare/v1.5.1...v1.6.0
 
 [1.5.1]: https://github.com/reductstore/reductstore/compare/v1.5.0...v1.5.1
 
