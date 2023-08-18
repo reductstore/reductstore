@@ -5,6 +5,8 @@ extern crate core;
 use std::time::SystemTime;
 use std::{env, fs};
 
+const WEB_CONSOLE_VERSION: &str = "v1.3.0";
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // build protos
     prost_build::Config::new()
@@ -21,7 +23,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // download web console
     let mut writer = vec![];
     let resp = http_req::request::get(
-        "https://github.com/reductstore/web-console/releases/download/v1.2.2/web-console.build.zip",
+        &format!(
+            "https://github.com/reductstore/web-console/releases/download/{}/web-console.build.zip",
+            WEB_CONSOLE_VERSION
+        ),
         &mut writer,
     )
     .expect("Failed to download Web Console");
