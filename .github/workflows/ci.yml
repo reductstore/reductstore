@@ -67,10 +67,9 @@ jobs:
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
-          override: true
 
       - name: Run Tests
         run: cargo test --release -p reductstore
@@ -345,10 +344,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
-          override: true
       - uses: arduino/setup-protoc@v1
         with:
           version: '3.x'
