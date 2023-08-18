@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - reductstore: Update dependencies, min. rust v1.67.0, [PR-341](https://github.com/reductstore/reductstore/pull/341)
+- reductstore: use Web Console v1.3.0, [PR-342](https://github.com/reductstore/reductstore/pull/342)
 
 ## [1.6.0] - 2023-08-14
 
