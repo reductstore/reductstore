@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::{Alias, Config};
-use anyhow::{Context, Error};
+use anyhow::Error;
 use clap::{arg, Command};
 use url::Url;
 

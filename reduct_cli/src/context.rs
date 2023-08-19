@@ -3,11 +3,8 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clap::__macro_refs::once_cell::sync::OnceCell;
 use dirs::home_dir;
 use std::env::current_dir;
-use std::iter::Once;
-use std::sync::Mutex;
 
 #[derive(Debug)]
 pub(crate) struct Context {

@@ -1,5 +1,4 @@
-use crate::context::Context;
-use clap::{Command, Subcommand};
+use clap::Command;
 
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
