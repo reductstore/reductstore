@@ -42,12 +42,27 @@ impl ContextBuilder {
         ContextBuilder { config }
     }
 
-    pub(crate) fn config_dir(mut self, config_dir: &str) -> Self {
+    pub(crate) fn config_path(mut self, config_dir: &str) -> Self {
         self.config.config_path = config_dir.to_string();
         self
     }
 
     pub(crate) fn build(self) -> Context {
         self.config
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use rstest::fixture;
+    use tempfile::tempdir;
+
+    #[fixture]
+    pub(crate) fn context() -> Context {
+        let tmp_dir = tempdir().unwrap();
+        ContextBuilder::new()
+            .config_path(tmp_dir.into_path().join("config.toml").to_str().unwrap())
+            .build()
     }
 }

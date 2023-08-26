@@ -1,3 +1,4 @@
+use crate::context::Context;
 use clap::Command;
 
 // Copyright 2023 ReductStore
@@ -12,10 +13,14 @@ pub(crate) fn alias_cmd() -> Command {
         .subcommand(add::add_alias_cmd())
 }
 
-pub(crate) fn alias_handler(matches: Option<(&str, &clap::ArgMatches)>) -> anyhow::Result<()> {
+pub(crate) fn alias_handler(
+    ctx: &Context,
+    matches: Option<(&str, &clap::ArgMatches)>,
+) -> anyhow::Result<()> {
     if let Some(("alias", matches)) = matches {
         match matches.subcommand() {
             Some(("add", args)) => add::add_alias(
+                ctx,
                 args.get_one::<String>("NAME").unwrap(),
                 args.get_one::<String>("URL").unwrap(),
                 args.get_one::<String>("TOKEN").unwrap_or(&String::new()),
