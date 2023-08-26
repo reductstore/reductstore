@@ -5,10 +5,8 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use url::Url;
-
-use crate::context::Context as CliContext;
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub(crate) struct Alias {
@@ -68,14 +66,12 @@ impl ConfigFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstest::{fixture, rstest};
+    use rstest::rstest;
     use std::fs;
     use std::fs::File;
-    use std::io::{Read, Write};
-    use tempfile::tempdir;
+    use std::io::Write;
 
     use crate::context::tests::context;
-    use crate::context::ContextBuilder;
 
     #[rstest]
     fn test_load(context: CliContext) {

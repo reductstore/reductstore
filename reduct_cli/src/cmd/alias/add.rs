@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::{Alias, Config, ConfigFile};
+use crate::config::{Alias, ConfigFile};
 use anyhow::Error;
 use clap::{arg, Command};
 use url::Url;
@@ -12,7 +12,7 @@ use crate::context::Context;
 
 pub(super) fn add_alias(ctx: &Context, name: &str, url: &str, token: &str) -> anyhow::Result<()> {
     let mut config_file = ConfigFile::load(ctx.config_path())?;
-    let mut config = config_file.mut_config();
+    let config = config_file.mut_config();
     if config.aliases.contains_key(name) {
         return Err(Error::msg(format!("Alias '{}' already exists", name)));
     }
@@ -39,14 +39,9 @@ pub(super) fn add_alias_cmd() -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
 
     use crate::context::tests::context;
-    use reduct_rs::HttpError;
+
     use rstest::rstest;
 
     #[rstest]

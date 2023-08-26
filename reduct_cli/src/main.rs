@@ -8,10 +8,9 @@ mod config;
 mod context;
 
 use crate::cmd::alias::{alias_cmd, alias_handler};
-use crate::context::{Context as CliContext, ContextBuilder};
+use crate::context::ContextBuilder;
 
 use clap::{crate_description, crate_name, crate_version, Command};
-use once_cell::sync::OnceCell;
 
 fn cli() -> Command {
     Command::new(crate_name!())
