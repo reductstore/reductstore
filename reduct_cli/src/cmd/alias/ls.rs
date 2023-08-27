@@ -23,11 +23,10 @@ pub(super) fn ls_aliases_cmd() -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Alias;
-    use crate::context::tests::{context, output, MockOutput};
-    use mockall::predicate::eq;
+
+    use crate::context::tests::context;
+
     use rstest::rstest;
-    use std::ffi::c_int;
 
     #[rstest]
     fn test_list_aliases(context: CliContext) {

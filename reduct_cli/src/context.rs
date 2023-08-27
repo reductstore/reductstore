@@ -5,7 +5,6 @@
 
 use dirs::home_dir;
 use std::env::current_dir;
-use std::fmt::Debug;
 
 pub(crate) trait Output {
     fn print(&self, message: &str);
@@ -125,7 +124,7 @@ pub(crate) mod tests {
 
         // add a default alias
         let mut config_file = ConfigFile::load(ctx.config_path()).unwrap();
-        let mut config = config_file.mut_config();
+        let config = config_file.mut_config();
         config.aliases.insert(
             "default".to_string(),
             Alias {
