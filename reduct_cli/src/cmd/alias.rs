@@ -3,19 +3,21 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::Context;
+use crate::context::CliContext;
 use clap::Command;
 
 mod add;
+mod ls;
 
 pub(crate) fn alias_cmd() -> Command {
     Command::new("alias")
         .about("Manage aliases for different ReductStore instances")
         .subcommand(add::add_alias_cmd())
+        .subcommand(ls::ls_aliases_cmd())
 }
 
 pub(crate) fn alias_handler(
-    ctx: &Context,
+    ctx: &CliContext,
     matches: Option<(&str, &clap::ArgMatches)>,
 ) -> anyhow::Result<()> {
     match matches {
@@ -25,6 +27,7 @@ pub(crate) fn alias_handler(
             args.get_one::<String>("URL").unwrap(),
             args.get_one::<String>("TOKEN").unwrap_or(&String::new()),
         )?,
+        Some(("ls", _)) => ls::list_aliases(ctx)?,
         _ => {}
     }
 
@@ -38,7 +41,7 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_alias_handler_add(context: Context) {
+    fn test_alias_handler_add(context: CliContext) {
         let matches =
             alias_cmd().get_matches_from(vec!["alias", "add", "test", "XXX", "test_token"]);
         assert_eq!(
@@ -48,6 +51,16 @@ mod tests {
                 .to_string(),
             "relative URL without a base",
             "Check handling of alias add command"
+        );
+    }
+
+    #[rstest]
+    fn test_alias_handler_ls(context: CliContext) {
+        let matches = alias_cmd().get_matches_from(vec!["alias", "ls"]);
+        assert_eq!(
+            alias_handler(&context, matches.subcommand()).unwrap(),
+            (),
+            "Check handling of alias ls command"
         );
     }
 }

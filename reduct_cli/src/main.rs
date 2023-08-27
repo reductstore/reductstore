@@ -6,7 +6,6 @@
 mod cmd;
 mod config;
 mod context;
-
 use crate::cmd::alias::{alias_cmd, alias_handler};
 use crate::context::ContextBuilder;
 
@@ -21,7 +20,11 @@ fn cli() -> Command {
 
 fn main() -> anyhow::Result<()> {
     let ctx = ContextBuilder::new().build();
-    alias_handler(&ctx, alias_cmd().get_matches().subcommand())?;
+    let matches = cli().get_matches();
+    match matches.subcommand() {
+        Some(("alias", args)) => alias_handler(&ctx, args.subcommand()),
+        _ => Ok(()),
+    }?;
 
     Ok(())
 }

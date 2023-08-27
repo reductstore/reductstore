@@ -72,7 +72,7 @@ mod tests {
     use std::io::Write;
 
     use crate::context::tests::context;
-    use crate::context::Context as CliContext;
+    use crate::context::CliContext;
 
     #[rstest]
     fn test_load(context: CliContext) {
@@ -121,7 +121,7 @@ mod tests {
 
     #[rstest]
     fn test_empty_config(context: CliContext) {
-        let config_file = ConfigFile::load(context.config_path()).unwrap();
+        let config_file = ConfigFile::load(&format!("{}.empty", context.config_path())).unwrap();
         assert_eq!(config_file.config().aliases.len(), 0);
     }
 }

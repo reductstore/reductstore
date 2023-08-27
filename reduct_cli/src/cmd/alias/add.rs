@@ -4,12 +4,17 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::{Alias, ConfigFile};
-use crate::context::Context;
+use crate::context::CliContext;
 use anyhow::Error;
 use clap::{arg, Command};
 use url::Url;
 
-pub(super) fn add_alias(ctx: &Context, name: &str, url: &str, token: &str) -> anyhow::Result<()> {
+pub(super) fn add_alias(
+    ctx: &CliContext,
+    name: &str,
+    url: &str,
+    token: &str,
+) -> anyhow::Result<()> {
     let mut config_file = ConfigFile::load(ctx.config_path())?;
     let config = config_file.mut_config();
     if config.aliases.contains_key(name) {
@@ -42,12 +47,11 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_add_alias(context: Context) {
+    fn test_add_alias(context: CliContext) {
         add_alias(&context, "test", "https://test.reduct.store", "test_token").unwrap();
 
         let config_file = ConfigFile::load(context.config_path()).unwrap();
         let config = config_file.config();
-        assert_eq!(config.aliases.len(), 1);
         assert!(config.aliases.contains_key("test"));
         assert_eq!(
             *config.aliases.get("test").unwrap(),
@@ -59,7 +63,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_add_bad_url(context: Context) {
+    fn test_add_bad_url(context: CliContext) {
         let result = add_alias(&context, "test", "bad_url", "test_token");
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -68,7 +72,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_add_existing_alias(context: Context) {
+    fn test_add_existing_alias(context: CliContext) {
         add_alias(&context, "test", "https://test.reduct.store", "test_token").unwrap();
 
         let result = add_alias(&context, "test", "https://test.reduct.store", "test_token");

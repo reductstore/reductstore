@@ -5,26 +5,49 @@
 
 use dirs::home_dir;
 use std::env::current_dir;
+use std::fmt::Debug;
 
-#[derive(Debug)]
-pub(crate) struct Context {
-    config_path: String,
+pub(crate) trait Output {
+    fn print(&self, message: &str);
+
+    fn history(&self) -> Vec<String>;
 }
 
-impl Context {
+struct StdoutOutput;
+
+impl Output for StdoutOutput {
+    fn print(&self, message: &str) {
+        println!("{}", message);
+    }
+
+    fn history(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+pub(crate) struct CliContext {
+    config_path: String,
+    output: Box<dyn Output>,
+}
+
+impl CliContext {
     pub(crate) fn config_path(&self) -> &str {
         &self.config_path
+    }
+    pub(crate) fn output(&self) -> &dyn Output {
+        &*self.output
     }
 }
 
 pub(crate) struct ContextBuilder {
-    config: Context,
+    config: CliContext,
 }
 
 impl ContextBuilder {
     pub(crate) fn new() -> Self {
-        let mut config = Context {
+        let mut config = CliContext {
             config_path: String::new(),
+            output: Box::new(StdoutOutput {}),
         };
         config.config_path = match home_dir() {
             Some(path) => path
@@ -47,7 +70,12 @@ impl ContextBuilder {
         self
     }
 
-    pub(crate) fn build(self) -> Context {
+    pub(crate) fn output(mut self, output: Box<dyn Output>) -> Self {
+        self.config.output = output;
+        self
+    }
+
+    pub(crate) fn build(self) -> CliContext {
         self.config
     }
 }
@@ -55,14 +83,57 @@ impl ContextBuilder {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::config::{Alias, ConfigFile};
     use rstest::fixture;
+    use std::cell::RefCell;
     use tempfile::tempdir;
 
+    pub struct MockOutput {
+        history: RefCell<Vec<String>>,
+    }
+
+    impl Output for MockOutput {
+        fn print(&self, message: &str) {
+            self.history.borrow_mut().push(message.to_string());
+        }
+
+        fn history(&self) -> Vec<String> {
+            self.history.borrow().clone()
+        }
+    }
+
+    impl MockOutput {
+        pub fn new() -> Self {
+            MockOutput {
+                history: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
     #[fixture]
-    pub(crate) fn context() -> Context {
+    pub(crate) fn output() -> Box<MockOutput> {
+        Box::new(MockOutput::new())
+    }
+
+    #[fixture]
+    pub(crate) fn context(output: Box<dyn Output>) -> CliContext {
         let tmp_dir = tempdir().unwrap();
-        ContextBuilder::new()
+        let ctx = ContextBuilder::new()
             .config_path(tmp_dir.into_path().join("config.toml").to_str().unwrap())
-            .build()
+            .output(output)
+            .build();
+
+        // add a default alias
+        let mut config_file = ConfigFile::load(ctx.config_path()).unwrap();
+        let mut config = config_file.mut_config();
+        config.aliases.insert(
+            "default".to_string(),
+            Alias {
+                url: url::Url::parse("https://default.store").unwrap(),
+                token: "test_token".to_string(),
+            },
+        );
+        config_file.save().unwrap();
+        ctx
     }
 }
