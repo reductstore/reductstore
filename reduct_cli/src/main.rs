@@ -21,10 +21,7 @@ fn cli() -> Command {
 
 fn main() -> anyhow::Result<()> {
     let ctx = ContextBuilder::new().build();
-
-    let matches = cli().get_matches();
-    let ret = matches.subcommand();
-    alias_handler(&ctx, ret)?;
+    alias_handler(&ctx, alias_cmd().get_matches().subcommand())?;
 
     Ok(())
 }

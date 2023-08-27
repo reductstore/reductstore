@@ -72,6 +72,7 @@ mod tests {
     use std::io::Write;
 
     use crate::context::tests::context;
+    use crate::context::Context as CliContext;
 
     #[rstest]
     fn test_load(context: CliContext) {

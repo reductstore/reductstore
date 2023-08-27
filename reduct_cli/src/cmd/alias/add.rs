@@ -4,11 +4,10 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::{Alias, ConfigFile};
+use crate::context::Context;
 use anyhow::Error;
 use clap::{arg, Command};
 use url::Url;
-
-use crate::context::Context;
 
 pub(super) fn add_alias(ctx: &Context, name: &str, url: &str, token: &str) -> anyhow::Result<()> {
     let mut config_file = ConfigFile::load(ctx.config_path())?;
@@ -39,9 +38,7 @@ pub(super) fn add_alias_cmd() -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::context::tests::context;
-
     use rstest::rstest;
 
     #[rstest]
