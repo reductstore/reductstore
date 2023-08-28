@@ -1,9 +1,11 @@
 [package]
 name = "reductstore"
-version = "1.6.0"
-authors = ["Alexey Timin <atimin@reduct.store>"]
-edition = "2021"
-rust-version = "1.66.0"
+
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
 license = "BUSL-1.1"
 description = "ReductStore is a time series database designed specifically for storing and managing large amounts of blob data."
 homepage = "https://reduct.store"
@@ -12,7 +14,7 @@ repository = "https://github.com/reductstore/reductstore"
 
 keywords = ["database", "time-series", "blob", "storage", "reductstore"]
 categories = ["database-implementations", "command-line-utilities", "database"]
-include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "../README.md", "../LICENSE"]
+include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LICENSE"]
 
 [lib]
 crate-type = ["staticlib"]
