@@ -53,7 +53,7 @@ mime_guess = "2.0.4"
 [build-dependencies]
 prost-build = "0.11.9"
 prost-wkt-build = "0.4.2"
-http_req  = {version="0.9.2", default-features = false, features = ["rust-tls"]}
+reqwest = { version = "0.11.6", default-features = false, features = ["rustls-tls", "blocking"] }
 chrono = "0.4.26"
 
 [dev-dependencies]
