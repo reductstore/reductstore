@@ -1441,7 +1441,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "chrono",
  "int-enum",
@@ -1452,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1460,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-rs"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "async-channel",
  "async-stream",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "axum",
  "axum-server",
