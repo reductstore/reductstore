@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- reductstore: README and LICENSE in reductstore crate, [PR-357](https://github.com/reductstore/reductstore/pull/347)
+- reductstore: README and LICENSE in reductstore crate, [PR-347](https://github.com/reductstore/reductstore/pull/347)
+
+### Security
+
+- reductstore: Update `rustls` with patched `rustls-webpki`, [PR-349](https://github.com/reductstore/reductstore/pull/349)
 
 ## [1.6.0] - 2023-08-14
 

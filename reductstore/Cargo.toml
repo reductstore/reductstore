@@ -45,7 +45,7 @@ tower = "0.4.12"
 futures-util = "0.3.28"
 tokio-util = "0.7.8"
 axum-server = { version = "0.5.0", features = ["tls-rustls"] }
-rustls = "0.21.1"
+rustls = "0.21.6"
 mime_guess = "2.0.3"
 
 [build-dependencies]
