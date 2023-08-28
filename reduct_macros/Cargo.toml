@@ -1,9 +1,12 @@
 [package]
 name = "reduct-macros"
-version = "1.6.0"
-edition = "2021"
+
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
 license = "MPL-2.0"
-authors = ["Alexey Timin <atimin@reduct.store>"]
 description = "Macros crate for ReductStore"
 readme = "README.md"
 keywords = ["database", "time-series", "blob", "storage", "reductstore"]

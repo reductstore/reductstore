@@ -30,14 +30,14 @@ parts:
     rust-path: ["reductstore"]
 
     override-pull: |
+      curl https://sh.rustup.rs -sSf | sh -s -- -y
+      source "$HOME/.cargo/env"
       craftctl default
       cargo install cargo-get
       VERSION="$(~/.cargo/bin/cargo-get get package.version --entry reductstore/)-git$(git rev-parse --short HEAD)"
       echo "ReductStore v${VERSION}"
       craftctl set version="${VERSION}"
     override-build: |
-      curl https://sh.rustup.rs -sSf | sh -s -- -y
-      source "$HOME/.cargo/env"
       snapcraftctl build
 
     build-packages:
