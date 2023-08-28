@@ -8,6 +8,7 @@ use clap::Command;
 
 mod add;
 mod ls;
+mod rm;
 
 pub(crate) fn alias_cmd() -> Command {
     Command::new("alias")
