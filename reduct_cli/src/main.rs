@@ -6,6 +6,7 @@
 mod cmd;
 mod config;
 mod context;
+mod reduct;
 
 use crate::cmd::alias::{alias_cmd, alias_handler};
 use crate::context::ContextBuilder;

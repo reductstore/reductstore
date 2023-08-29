@@ -5,6 +5,7 @@
 
 use crate::config::find_alias;
 use crate::context::CliContext;
+use crate::reduct::build_client;
 use clap::{arg, Command};
 use reduct_rs::ReductClient;
 
@@ -15,12 +16,7 @@ pub(super) fn check_server_cmd() -> Command {
 }
 
 pub(super) async fn check_server(ctx: &CliContext, alias: &str) -> anyhow::Result<()> {
-    let alias = find_alias(ctx, alias)?;
-
-    let client = ReductClient::builder()
-        .url(alias.url.as_str())
-        .api_token(alias.token.as_str())
-        .build();
+    let client = build_client(ctx, alias)?;
     client.alive().await?;
     Ok(())
 }
