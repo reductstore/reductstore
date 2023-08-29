@@ -2,6 +2,8 @@
 // Licensed under the Business Source License 1.1
 extern crate core;
 
+use reqwest::blocking::get;
+use reqwest::StatusCode;
 use std::time::SystemTime;
 use std::{env, fs};
 
@@ -21,26 +23,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     // download web console
-    let mut writer = vec![];
-    let resp = http_req::request::get(
-        &format!(
-            "https://github.com/reductstore/web-console/releases/download/{}/web-console.build.zip",
-            WEB_CONSOLE_VERSION
-        ),
-        &mut writer,
-    )
+    let mut resp = get(&format!(
+        "https://github.com/reductstore/web-console/releases/download/{}/web-console.build.zip",
+        WEB_CONSOLE_VERSION
+    ))
     .expect("Failed to download Web Console");
-    if resp.status_code() != 200.into() {
-        if resp.status_code() == 302.into() {
-            http_req::request::get(&resp.headers().get("location").unwrap(), &mut writer)
+    if resp.status() != StatusCode::OK {
+        if resp.status() == StatusCode::FOUND {
+            resp = get(resp.headers().get("location").unwrap().to_str().unwrap())
                 .expect("Failed to download Web Console");
         } else {
-            panic!("Failed to download Web Console: {}", resp.reason());
+            panic!("Failed to download Web Console: {}", resp.status());
         }
     }
     fs::write(
         format!("{}/console.zip", env::var("OUT_DIR").unwrap()),
-        writer,
+        resp.bytes().unwrap(),
     )
     .expect("Failed to write console.zip");
 

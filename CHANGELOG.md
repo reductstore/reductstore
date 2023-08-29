@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: Update dependencies, min. rust v1.67.0, [PR-341](https://github.com/reductstore/reductstore/pull/341)
 - reductstore: use Web Console v1.3.0, [PR-342](https://github.com/reductstore/reductstore/pull/342)
 
+## [1.6.1] - 2023-08-28
+
+### Fixed
+
+- reductstore: README and LICENSE in reductstore crate, [PR-347](https://github.com/reductstore/reductstore/pull/347)
+
+### Security
+
+- reductstore: Update `rustls` with patched `rustls-webpki`, [PR-349](https://github.com/reductstore/reductstore/pull/349)
+
 ## [1.6.0] - 2023-08-14
 
 ### Added
@@ -508,7 +518,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.6.1...HEAD
+
+[1.6.1]: https://github.com/reductstore/reductstore/compare/v1.6.0...v1.6.1
 
 [1.6.0]: https://github.com/reductstore/reductstore/compare/v1.5.1...v1.6.0
 
