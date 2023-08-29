@@ -5,8 +5,8 @@
 use crate::context::CliContext;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::ops::Deref;
+use std::collections::BTreeMap;
+
 use std::path::PathBuf;
 use url::Url;
 

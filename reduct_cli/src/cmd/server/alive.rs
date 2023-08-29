@@ -5,7 +5,7 @@
 
 use crate::config::find_alias;
 use crate::context::CliContext;
-use clap::{arg, crate_name, Command};
+use clap::{arg, Command};
 use reduct_rs::ReductClient;
 
 pub(super) fn check_server_cmd() -> Command {
