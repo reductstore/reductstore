@@ -132,6 +132,13 @@ pub(crate) mod tests {
                 token: "test_token".to_string(),
             },
         );
+        config.aliases.insert(
+            "local".to_string(),
+            Alias {
+                url: url::Url::parse("http://localhost:8383").unwrap(),
+                token: std::env::var("RS_API_TOKEN").unwrap_or_default(),
+            },
+        );
         config_file.save().unwrap();
         ctx
     }

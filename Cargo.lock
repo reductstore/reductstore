@@ -1558,6 +1558,7 @@ dependencies = [
  "rstest",
  "serde",
  "tempfile",
+ "tokio",
  "toml",
  "url",
 ]

@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use reqwest::Method;
+use reqwest::{Method, Url};
 
 use std::sync::Arc;
 
@@ -46,7 +46,8 @@ impl ReductClientBuilder {
 
     /// Set the URL of the ReductStore instance to connect to.
     pub fn url(mut self, url: &str) -> Self {
-        self.url = format!("{}{}", url.to_string(), API_BASE);
+        let url = Url::parse(url).expect("Invalid URL");
+        self.url = format!("{}{}", url.origin().ascii_serialization(), API_BASE);
         self
     }
 

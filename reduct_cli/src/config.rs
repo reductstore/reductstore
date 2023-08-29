@@ -2,13 +2,15 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use crate::context::CliContext;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Deref;
 use std::path::PathBuf;
 use url::Url;
 
-#[derive(Deserialize, Serialize, PartialEq, Debug)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub(crate) struct Alias {
     pub url: Url,
     pub token: String,
@@ -16,7 +18,7 @@ pub(crate) struct Alias {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub(crate) struct Config {
-    pub aliases: HashMap<String, Alias>,
+    pub aliases: BTreeMap<String, Alias>,
 }
 
 pub(crate) struct ConfigFile {
@@ -30,7 +32,7 @@ impl ConfigFile {
             Ok(config) => Ok(toml::from_str(&config)
                 .with_context(|| format!("Failed to parse config file {:?}", path))?),
             Err(_) => Ok(Config {
-                aliases: HashMap::new(),
+                aliases: BTreeMap::new(),
             }),
         };
 
@@ -60,6 +62,18 @@ impl ConfigFile {
 
     pub fn mut_config(&mut self) -> &mut Config {
         &mut self.config
+    }
+}
+
+pub(crate) fn find_alias(ctx: &CliContext, alias: &str) -> anyhow::Result<Alias> {
+    let config_file = ConfigFile::load(ctx.config_path())?;
+    let config = config_file.config();
+    match config.aliases.get(alias) {
+        Some(alias) => Ok((*alias).clone()),
+        None => Err(anyhow::Error::msg(format!(
+            "Alias '{}' does not exist",
+            alias
+        ))),
     }
 }
 

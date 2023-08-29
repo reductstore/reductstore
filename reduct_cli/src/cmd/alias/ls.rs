@@ -32,8 +32,11 @@ mod tests {
     fn test_list_aliases(context: CliContext) {
         list_aliases(&context).unwrap();
         assert_eq!(
-            context.output().history().get(0).unwrap(),
-            "default: https://default.store/"
+            context.output().history(),
+            vec![
+                "default: https://default.store/",
+                "local: http://localhost:8383/"
+            ]
         );
     }
 }
