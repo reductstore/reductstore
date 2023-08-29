@@ -3,11 +3,9 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::find_alias;
 use crate::context::CliContext;
 use crate::reduct::build_client;
 use clap::{arg, Command};
-use reduct_rs::ReductClient;
 
 pub(super) fn check_server_cmd() -> Command {
     Command::new("alive")
