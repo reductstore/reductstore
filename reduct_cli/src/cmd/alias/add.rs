@@ -6,7 +6,7 @@
 use crate::config::{Alias, ConfigFile};
 use crate::context::CliContext;
 use anyhow::Error;
-use clap::{arg, Command};
+use clap::{arg, Arg, Command};
 use url::Url;
 
 pub(super) fn add_alias(
@@ -36,8 +36,20 @@ pub(super) fn add_alias_cmd() -> Command {
     Command::new("add")
         .about("Add an alias")
         .arg(arg!(<NAME> "The name of the alias to create").required(true))
-        .arg(arg!(<URL> "The URL of the ReductStore instance").required(true))
-        .arg(arg!(<TOKEN> "The token to use for authentication").required(false))
+        .arg(
+            Arg::new("URL")
+                .long("url")
+                .short('L')
+                .help("The URL of the ReductStore instance")
+                .required(true),
+        )
+        .arg(
+            Arg::new("TOKEN")
+                .long("token")
+                .short('t')
+                .help("The token to use for authentication")
+                .required(false),
+        )
 }
 
 #[cfg(test)]

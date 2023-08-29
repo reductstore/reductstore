@@ -1,15 +1,14 @@
 [package]
-name = "reduct_cli"
-rust-version = "1.67.0"
-version = "0.1.0"
-edition = "2021"
-description = "A CLI for ReductStore written in Rust"
+name = "reduct-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A CLI client for ReductStore written in Rust"
 
 [dependencies]
-reduct-rs = { path = "../reduct_rs", version = "1.6.0" }
+reduct-rs = { path = "../reduct_rs", version = "1.7.0-dev" }
 clap = { version = "4.3.23", features = ["cargo"] }
 dirs = "5.0.1"
 toml = "0.7.6"

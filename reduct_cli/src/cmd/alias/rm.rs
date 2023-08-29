@@ -3,10 +3,51 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::config::ConfigFile;
+use crate::context::CliContext;
+use anyhow::Error;
 use clap::{arg, Command};
 
-pub(super) fn add_alias_cmd() -> Command {
+pub(super) fn remove_alias(ctx: &CliContext, name: &str) -> anyhow::Result<()> {
+    let mut config_file = ConfigFile::load(ctx.config_path())?;
+    let config = config_file.mut_config();
+    if !config.aliases.contains_key(name) {
+        return Err(Error::msg(format!("Alias '{}' does not exist", name)));
+    }
+
+    config.aliases.remove(name);
+    config_file.save()?;
+    Ok(())
+}
+
+pub(super) fn rm_alias_cmd() -> Command {
     Command::new("rm")
         .about("Remove an alias")
         .arg(arg!(<NAME> "The name of the alias to remove").required(true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::tests::context;
+    use rstest::rstest;
+
+    #[rstest]
+    fn test_remove_alias(context: CliContext) {
+        remove_alias(&context, "default").unwrap();
+
+        let config_file = ConfigFile::load(context.config_path()).unwrap();
+        let config = config_file.config();
+        assert!(!config.aliases.contains_key("default"));
+    }
+
+    #[rstest]
+    fn test_remove_alias_not_found(context: CliContext) {
+        let result = remove_alias(&context, "test");
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "Alias 'test' does not exist"
+        );
+    }
 }

@@ -1547,6 +1547,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reduct-cli"
+version = "1.7.0-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dirs",
+ "mockall",
+ "reduct-rs",
+ "rstest",
+ "serde",
+ "tempfile",
+ "toml",
+ "url",
+]
+
+[[package]]
 name = "reduct-macros"
 version = "1.7.0-dev"
 dependencies = [
@@ -1571,22 +1587,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "reduct_cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "dirs",
- "mockall",
- "reduct-rs",
- "rstest",
- "serde",
- "tempfile",
- "toml",
- "url",
 ]
 
 [[package]]

@@ -13,8 +13,10 @@ mod rm;
 pub(crate) fn alias_cmd() -> Command {
     Command::new("alias")
         .about("Manage aliases for different ReductStore instances")
+        .arg_required_else_help(true)
         .subcommand(add::add_alias_cmd())
         .subcommand(ls::ls_aliases_cmd())
+        .subcommand(rm::rm_alias_cmd())
 }
 
 pub(crate) fn alias_handler(
@@ -29,7 +31,8 @@ pub(crate) fn alias_handler(
             args.get_one::<String>("TOKEN").unwrap_or(&String::new()),
         )?,
         Some(("ls", _)) => ls::list_aliases(ctx)?,
-        _ => {}
+        Some(("rm", args)) => rm::remove_alias(ctx, args.get_one::<String>("NAME").unwrap())?,
+        _ => (),
     }
 
     Ok(())
@@ -43,8 +46,7 @@ mod tests {
 
     #[rstest]
     fn test_alias_handler_add(context: CliContext) {
-        let matches =
-            alias_cmd().get_matches_from(vec!["alias", "add", "test", "XXX", "test_token"]);
+        let matches = alias_cmd().get_matches_from(vec!["alias", "add", "test", "-L", "XXX"]);
         assert_eq!(
             alias_handler(&context, matches.subcommand())
                 .err()
@@ -62,6 +64,19 @@ mod tests {
             alias_handler(&context, matches.subcommand()).unwrap(),
             (),
             "Check handling of alias ls command"
+        );
+    }
+
+    #[rstest]
+    fn test_alias_handler_rm(context: CliContext) {
+        let matches = alias_cmd().get_matches_from(vec!["alias", "rm", "test"]);
+        assert_eq!(
+            alias_handler(&context, matches.subcommand())
+                .err()
+                .unwrap()
+                .to_string(),
+            "Alias 'test' does not exist",
+            "Check handling of alias rm command"
         );
     }
 }

@@ -6,6 +6,7 @@
 mod cmd;
 mod config;
 mod context;
+
 use crate::cmd::alias::{alias_cmd, alias_handler};
 use crate::context::ContextBuilder;
 
@@ -14,6 +15,7 @@ use clap::{crate_description, crate_name, crate_version, Command};
 fn cli() -> Command {
     Command::new(crate_name!())
         .version(crate_version!())
+        .arg_required_else_help(true)
         .about(crate_description!())
         .subcommand(alias_cmd())
 }
