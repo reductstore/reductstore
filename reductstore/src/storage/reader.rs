@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::{ts_to_us, Block};
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 use bytes::Bytes;
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ impl RecordReader {
         block: &Block,
         record_index: usize,
         chunk_size: u64,
-    ) -> Result<RecordReader, HttpError> {
+    ) -> Result<RecordReader, ReductError> {
         let mut file = OpenOptions::new().read(true).open(path)?;
         let record = &block.records[record_index];
         let offset = record.begin;
@@ -66,7 +66,7 @@ impl RecordReader {
     ///
     /// * `Option<Bytes>` - The next chunk of data. If it is None, the record is finished.
     /// * `HTTPError` - If the data cannot be read.
-    pub fn read(&mut self) -> Result<Option<Bytes>, HttpError> {
+    pub fn read(&mut self) -> Result<Option<Bytes>, ReductError> {
         if self.is_done() {
             return Ok(None);
         }

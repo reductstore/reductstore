@@ -23,10 +23,10 @@ pub(crate) async fn server_handler(
 ) -> anyhow::Result<()> {
     match matches {
         Some(("alive", args)) => {
-            alive::check_server(ctx, args.get_one::<String>("ALIAS").unwrap()).await?
+            alive::check_server(ctx, args.get_one::<String>("ALIAS_OR_URL").unwrap()).await?
         }
         Some(("status", args)) => {
-            status::get_server_status(ctx, args.get_one::<String>("ALIAS").unwrap()).await?
+            status::get_server_status(ctx, args.get_one::<String>("ALIAS_OR_URL").unwrap()).await?
         }
         _ => (),
     }

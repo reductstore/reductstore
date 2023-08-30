@@ -12,7 +12,7 @@ use futures::TryStream;
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Method};
 
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -98,7 +98,7 @@ impl WriteRecordBuilder {
     }
 
     /// Send the write record request.
-    pub async fn send(self) -> Result<(), HttpError> {
+    pub async fn send(self) -> Result<(), ReductError> {
         let timestamp = self
             .timestamp
             .unwrap_or_else(|| from_system_time(SystemTime::now()));

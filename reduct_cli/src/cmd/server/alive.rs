@@ -10,11 +10,13 @@ use clap::{arg, Command};
 pub(super) fn check_server_cmd() -> Command {
     Command::new("alive")
         .about("Check if a ReductStore instance is alive")
-        .arg(arg!(<ALIAS> "Alias of the ReductStore instance to check").required(true))
+        .arg(
+            arg!(<ALIAS_OR_URL> "Alias or URL of the ReductStore instance to check").required(true),
+        )
 }
 
-pub(super) async fn check_server(ctx: &CliContext, alias: &str) -> anyhow::Result<()> {
-    let client = build_client(ctx, alias)?;
+pub(super) async fn check_server(ctx: &CliContext, alias_or_url: &str) -> anyhow::Result<()> {
+    let client = build_client(ctx, alias_or_url)?;
     client.alive().await?;
     Ok(())
 }
@@ -29,23 +31,5 @@ mod tests {
     #[tokio::test]
     async fn test_check_server(context: CliContext) {
         check_server(&context, "local").await.unwrap();
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_check_server_invalid_alias(context: CliContext) {
-        let result = check_server(&context, "invalid").await;
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Alias 'invalid' does not exist"
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_check_server_no_connection(context: CliContext) {
-        let result = check_server(&context, "default").await;
-        assert!(result.is_err());
     }
 }

@@ -16,7 +16,7 @@ use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reduct_base::msg::entry_api::EntryInfo;
 
@@ -78,7 +78,7 @@ impl Bucket {
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
-    ) -> Result<Bucket, HttpError> {
+    ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         std::fs::create_dir_all(&path)?;
 
@@ -103,10 +103,10 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn restore(path: PathBuf) -> Result<Bucket, HttpError> {
+    pub fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
-            HttpError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
+            ReductError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
         })?;
 
         let settings = Self::fill_settings(settings.into(), Self::defaults());
@@ -153,7 +153,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, HttpError> {
+    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, ReductError> {
         if !self.entries.contains_key(key) {
             let entry = Entry::new(
                 &key,
@@ -178,9 +178,9 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&Entry` - The entry or an HTTPError
-    pub fn get_entry(&self, name: &str) -> Result<&Entry, HttpError> {
+    pub fn get_entry(&self, name: &str) -> Result<&Entry, ReductError> {
         let entry = self.entries.get(name).ok_or_else(|| {
-            HttpError::not_found(&format!(
+            ReductError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",
                 name, self.name
             ))
@@ -197,9 +197,9 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub fn get_mut_entry(&mut self, name: &str) -> Result<&mut Entry, HttpError> {
+    pub fn get_mut_entry(&mut self, name: &str) -> Result<&mut Entry, ReductError> {
         let entry = self.entries.get_mut(name).ok_or_else(|| {
-            HttpError::not_found(&format!(
+            ReductError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",
                 name, self.name
             ))
@@ -208,7 +208,7 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub fn info(&self) -> Result<FullBucketInfo, HttpError> {
+    pub fn info(&self) -> Result<FullBucketInfo, ReductError> {
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
@@ -254,7 +254,7 @@ impl Bucket {
         content_size: u64,
         content_type: String,
         labels: Labels,
-    ) -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
+    ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
         self.keep_quota_for(content_size)?;
         let entry = self.get_or_create_entry(name)?;
         entry.begin_write(time, content_size, content_type, labels)
@@ -275,7 +275,7 @@ impl Bucket {
         &self,
         name: &str,
         time: u64,
-    ) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
+    ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
         let entry = self.get_entry(name)?;
         entry.begin_read(time)
     }
@@ -296,7 +296,7 @@ impl Bucket {
         &mut self,
         name: &str,
         time: u64,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
         let entry = self.get_mut_entry(name)?;
         entry.next(time)
     }
@@ -310,7 +310,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `HTTPError` - The error if any.
-    pub fn remove_entry(&mut self, name: &str) -> Result<(), HttpError> {
+    pub fn remove_entry(&mut self, name: &str) -> Result<(), ReductError> {
         _ = self.get_entry(name)?;
 
         let path = self.path.join(name);
@@ -319,7 +319,7 @@ impl Bucket {
         Ok(())
     }
 
-    fn keep_quota_for(&mut self, content_size: u64) -> Result<(), HttpError> {
+    fn keep_quota_for(&mut self, content_size: u64) -> Result<(), ReductError> {
         match self.settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
             QuotaType::FIFO => {
@@ -368,7 +368,7 @@ impl Bucket {
                     }
 
                     if !success {
-                        return Err(HttpError::internal_server_error(
+                        return Err(ReductError::internal_server_error(
                             format!("Failed to keep quota of '{}'", self.name()).as_str(),
                         ));
                     }
@@ -400,7 +400,7 @@ impl Bucket {
         &self.settings
     }
 
-    pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), HttpError> {
+    pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), ReductError> {
         self.settings = Self::fill_settings(settings, self.settings.clone());
         for entry in self.entries.values_mut() {
             entry.set_settings(EntrySettings {
@@ -430,13 +430,13 @@ impl Bucket {
         settings
     }
 
-    fn save_settings(&self) -> Result<(), HttpError> {
+    fn save_settings(&self) -> Result<(), ReductError> {
         let path = self.path.join(SETTINGS_NAME);
         let mut buf = BytesMut::new();
         ProtoBucketSettings::from(self.settings.clone())
             .encode(&mut buf)
             .map_err(|e| {
-                HttpError::internal_server_error(
+                ReductError::internal_server_error(
                     format!("Failed to encode bucket settings: {}", e).as_str(),
                 )
             })?;
@@ -536,7 +536,7 @@ mod tests {
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).err(),
-            Some(HttpError::not_found(
+            Some(ReductError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
             ))
         );
@@ -560,7 +560,7 @@ mod tests {
         let result = write(&mut bucket, "test-2", 1, b"0123456789___");
         assert_eq!(
             result.err(),
-            Some(HttpError::internal_server_error(
+            Some(ReductError::internal_server_error(
                 "Failed to keep quota of 'test'"
             ))
         );
@@ -573,7 +573,7 @@ mod tests {
         bucket.remove_entry("test-1").unwrap();
         assert_eq!(
             bucket.get_entry("test-1").err(),
-            Some(HttpError::not_found(
+            Some(ReductError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
             ))
         );
@@ -583,7 +583,7 @@ mod tests {
     fn test_remove_entry_not_found(mut bucket: Bucket) {
         assert_eq!(
             bucket.remove_entry("test-1").err(),
-            Some(HttpError::not_found(
+            Some(ReductError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
             ))
         );
@@ -594,7 +594,7 @@ mod tests {
         entry_name: &str,
         time: u64,
         content: &'static [u8],
-    ) -> Result<(), HttpError> {
+    ) -> Result<(), ReductError> {
         let writer = bucket.begin_write(
             entry_name,
             time,
@@ -609,7 +609,7 @@ mod tests {
         Ok(())
     }
 
-    fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, HttpError> {
+    fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, ReductError> {
         let reader = bucket.begin_read(entry_name, time)?;
         let data = reader.write().unwrap().read()?.unwrap();
         Ok(data.to_vec())

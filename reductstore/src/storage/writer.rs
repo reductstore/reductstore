@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
-use reduct_base::error::{ErrorCode, HttpError};
+use reduct_base::error::{ErrorCode, ReductError};
 
 /// RecordWriter is used to write a record to a file.
 pub struct RecordWriter {
@@ -42,7 +42,7 @@ impl RecordWriter {
         record_index: usize,
         content_length: u64,
         block_manager: Arc<RwLock<T>>,
-    ) -> Result<RecordWriter, HttpError>
+    ) -> Result<RecordWriter, ReductError>
     where
         T: ManageBlock + 'static,
     {
@@ -60,7 +60,7 @@ impl RecordWriter {
         })
     }
 
-    pub fn write(&mut self, chunk: Chunk) -> Result<(), HttpError> {
+    pub fn write(&mut self, chunk: Chunk) -> Result<(), ReductError> {
         let (data, last) = match chunk {
             Chunk::Data(data) => (data, false),
             Chunk::Last(data) => (data, true),
@@ -87,12 +87,12 @@ impl RecordWriter {
         Ok(())
     }
 
-    fn write_impl(&mut self, buf: Bytes, last: bool) -> Result<(), HttpError> {
+    fn write_impl(&mut self, buf: Bytes, last: bool) -> Result<(), ReductError> {
         let mut writer = &self.file;
 
         self.written_bytes += buf.len() as u64;
         if self.written_bytes > self.content_length {
-            return Err(HttpError::bad_request(
+            return Err(ReductError::bad_request(
                 "Content is bigger than in content-length",
             ));
         }
@@ -101,7 +101,7 @@ impl RecordWriter {
 
         if last {
             if self.written_bytes < self.content_length {
-                return Err(HttpError::bad_request(
+                return Err(ReductError::bad_request(
                     "Content is smaller than in content-length",
                 ));
             }
@@ -151,11 +151,11 @@ mod tests {
         BlockManager {}
 
         impl ManageBlock for BlockManager {
-            fn load(&self, begin_time: u64) -> Result<Block, HttpError>;
-            fn save(&mut self, block: Block) -> Result<(), HttpError>;
-            fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Block, HttpError>;
-            fn finish(&mut self, block: &Block) -> Result<(), HttpError>;
-            fn remove(&mut self, block_id: u64) -> Result<(), HttpError>;
+            fn load(&self, begin_time: u64) -> Result<Block, ReductError>;
+            fn save(&mut self, block: Block) -> Result<(), ReductError>;
+            fn start(&mut self, begin_time: u64, max_block_size: u64) -> Result<Block, ReductError>;
+            fn finish(&mut self, block: &Block) -> Result<(), ReductError>;
+            fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
 
         }
     }
@@ -204,7 +204,7 @@ mod tests {
 
         assert_eq!(
             writer.write(Chunk::Last(Bytes::from("1234"))),
-            Err(HttpError::bad_request(
+            Err(ReductError::bad_request(
                 "Content is smaller than in content-length"
             ))
         );
@@ -232,7 +232,7 @@ mod tests {
 
         assert_eq!(
             writer.write(Chunk::Last(Bytes::from("123400000"))),
-            Err(HttpError::bad_request(
+            Err(ReductError::bad_request(
                 "Content is bigger than in content-length"
             ))
         );

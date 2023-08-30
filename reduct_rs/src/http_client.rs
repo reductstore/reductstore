@@ -4,24 +4,32 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::client::Result;
-use reduct_base::error::{ErrorCode, HttpError, IntEnum};
+use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reqwest::header::HeaderValue;
-use reqwest::{Method, RequestBuilder, Response};
+use reqwest::{Method, RequestBuilder, Response, Url};
 
 /// Internal HTTP client to wrap reqwest.
 pub(crate) struct HttpClient {
-    base_url: String,
+    base_url: Url,
     api_token: String,
     client: reqwest::Client,
 }
 
 impl HttpClient {
-    pub fn new(base_url: &str, api_token: &str) -> Self {
-        Self {
-            base_url: base_url.to_string(),
+    pub fn new(base_url: &str, api_token: &str) -> Result<Self> {
+        Ok(Self {
+            base_url: Url::parse(base_url)?,
             api_token: format!("Bearer {}", api_token),
             client: reqwest::Client::new(),
-        }
+        })
+    }
+
+    pub fn url(&self) -> &str {
+        &self.base_url.as_str()[..self.base_url.as_str().len() - 7] // Remove /api/v1
+    }
+
+    pub fn api_token(&self) -> &str {
+        &self.api_token[7..] // Remove Bearer
     }
 
     /// Send and receive JSON data from the server.
@@ -56,7 +64,7 @@ impl HttpClient {
 
         let response = self.send_request(request).await?;
         response.json::<Out>().await.map_err(|e| {
-            HttpError::new(
+            ReductError::new(
                 ErrorCode::Unknown,
                 &format!("Failed to parse response: {}", e.to_string()),
             )
@@ -108,7 +116,7 @@ impl HttpClient {
                         .to_str()
                         .unwrap()
                         .to_string();
-                    Err(HttpError::new(status, &error_msg))
+                    Err(ReductError::new(status, &error_msg))
                 }
             }
             Err(e) => Err(map_error(e)),
@@ -118,7 +126,7 @@ impl HttpClient {
 }
 
 /// Map reqwest errors to our own error type.
-pub(crate) fn map_error(error: reqwest::Error) -> HttpError {
+pub(crate) fn map_error(error: reqwest::Error) -> ReductError {
     let status = if error.is_connect() {
         ErrorCode::ConnectionError
     } else if error.is_timeout() {
@@ -127,5 +135,5 @@ pub(crate) fn map_error(error: reqwest::Error) -> HttpError {
         ErrorCode::Unknown
     };
 
-    HttpError::new(status, &error.to_string())
+    ReductError::new(status, &error.to_string())
 }

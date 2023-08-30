@@ -5,7 +5,7 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
 use crate::storage::reader::RecordReader;
-use reduct_base::error::{ErrorCode, HttpError};
+use reduct_base::error::{ErrorCode, ReductError};
 
 use std::collections::BTreeSet;
 
@@ -38,20 +38,20 @@ impl Query for ContinuousQuery {
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
         match self.query.next(block_indexes, block_manager) {
             Ok((record, last)) => {
                 self.next_start = record.read().unwrap().timestamp() + 1;
                 self.count += 1;
                 Ok((record, last))
             }
-            Err(HttpError {
+            Err(ReductError {
                 status: ErrorCode::NoContent,
                 ..
             }) => {
                 self.query = HistoricalQuery::new(self.next_start, u64::MAX, self.options.clone());
                 self.query.state = QueryState::Running(self.count);
-                Err(HttpError {
+                Err(ReductError {
                     status: ErrorCode::NoContent,
                     message: "No content".to_string(),
                 })
@@ -95,14 +95,14 @@ mod tests {
         }
         assert_eq!(
             query.next(&block_indexes, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
         assert_eq!(
             query.next(&block_indexes, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })

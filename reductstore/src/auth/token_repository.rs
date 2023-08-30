@@ -14,7 +14,7 @@ use prost_wkt_types::Timestamp;
 
 use crate::auth::proto::token::Permissions as ProtoPermissions;
 use crate::auth::proto::{Token as ProtoToken, TokenRepo as ProtoTokenRepo, TokenRepo};
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 
@@ -36,7 +36,7 @@ pub trait ManageTokens {
         &mut self,
         name: &str,
         permissions: Permissions,
-    ) -> Result<TokenCreateResponse, HttpError>;
+    ) -> Result<TokenCreateResponse, ReductError>;
 
     /// Update a token
     ///
@@ -44,7 +44,7 @@ pub trait ManageTokens {
     ///
     /// `name` - The name of the token
     /// `permissions` - The permissions of the token
-    fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), HttpError>;
+    fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), ReductError>;
 
     /// Find a token by name
     ///
@@ -54,13 +54,13 @@ pub trait ManageTokens {
     ///
     /// # Returns
     /// The token without value
-    fn find_by_name(&self, name: &str) -> Result<Token, HttpError>;
+    fn find_by_name(&self, name: &str) -> Result<Token, ReductError>;
 
     /// Get token list
     ///
     /// # Returns
     /// The token list, it the authentication is disabled, it returns an empty list
-    fn get_token_list(&self) -> Result<Vec<Token>, HttpError>;
+    fn get_token_list(&self) -> Result<Vec<Token>, ReductError>;
 
     /// Validate a token
     ///
@@ -70,7 +70,7 @@ pub trait ManageTokens {
     /// # Returns
     ///
     /// Token with given value
-    fn validate_token(&self, header: Option<&str>) -> Result<Token, HttpError>;
+    fn validate_token(&self, header: Option<&str>) -> Result<Token, ReductError>;
 
     /// Remove a token
     ///
@@ -80,7 +80,7 @@ pub trait ManageTokens {
     /// # Returns
     ///
     /// `Ok(())` if the token was removed successfully
-    fn remove_token(&mut self, name: &str) -> Result<(), HttpError>;
+    fn remove_token(&mut self, name: &str) -> Result<(), ReductError>;
 
     /// Remove a bucket from all tokens and save the repository
     /// to the file system
@@ -90,7 +90,7 @@ pub trait ManageTokens {
     ///
     /// # Returns
     /// `Ok(())` if the bucket was removed successfully
-    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HttpError>;
+    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError>;
 }
 
 /// The TokenRepository trait is used to store and retrieve tokens.
@@ -99,9 +99,11 @@ struct TokenRepository {
     repo: HashMap<String, Token>,
 }
 
-pub fn parse_bearer_token(authorization_header: &str) -> Result<String, HttpError> {
+pub fn parse_bearer_token(authorization_header: &str) -> Result<String, ReductError> {
     if !authorization_header.starts_with("Bearer ") {
-        return Err(HttpError::unauthorized("No bearer token in request header"));
+        return Err(ReductError::unauthorized(
+            "No bearer token in request header",
+        ));
     }
 
     let token = authorization_header[7..].to_string();
@@ -226,7 +228,7 @@ impl TokenRepository {
     }
 
     /// Save the token repository to the file system
-    fn save_repo(&mut self) -> Result<(), HttpError> {
+    fn save_repo(&mut self) -> Result<(), ReductError> {
         let repo = TokenRepo {
             tokens: self
                 .repo
@@ -236,9 +238,9 @@ impl TokenRepository {
         };
         let mut buf = Vec::new();
         repo.encode(&mut buf)
-            .map_err(|_| HttpError::internal_server_error("Could not encode token repository"))?;
+            .map_err(|_| ReductError::internal_server_error("Could not encode token repository"))?;
         std::fs::write(&self.config_path, buf).map_err(|err| {
-            HttpError::internal_server_error(
+            ReductError::internal_server_error(
                 format!(
                     "Could not write token repository to {}: {}",
                     self.config_path.as_path().display(),
@@ -257,15 +259,17 @@ impl ManageTokens for TokenRepository {
         &mut self,
         name: &str,
         permissions: Permissions,
-    ) -> Result<TokenCreateResponse, HttpError> {
+    ) -> Result<TokenCreateResponse, ReductError> {
         // Check if the token isn't empty
         if name.is_empty() {
-            return Err(HttpError::unprocessable_entity("Token name can't be empty"));
+            return Err(ReductError::unprocessable_entity(
+                "Token name can't be empty",
+            ));
         }
 
         // Check if the token already exists
         if self.repo.contains_key(name) {
-            return Err(HttpError::conflict(
+            return Err(ReductError::conflict(
                 format!("Token '{}' already exists", name).as_str(),
             ));
         }
@@ -291,7 +295,7 @@ impl ManageTokens for TokenRepository {
         Ok(TokenCreateResponse { value, created_at })
     }
 
-    fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), HttpError> {
+    fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), ReductError> {
         debug!("Updating token '{}'", name);
 
         match self.repo.get(name) {
@@ -303,13 +307,13 @@ impl ManageTokens for TokenRepository {
                 Ok(())
             }
 
-            None => Err(HttpError::not_found(
+            None => Err(ReductError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
             )),
         }
     }
 
-    fn find_by_name(&self, name: &str) -> Result<Token, HttpError> {
+    fn find_by_name(&self, name: &str) -> Result<Token, ReductError> {
         match self.repo.get(name) {
             Some(token) => Ok(Token {
                 name: token.name.clone(),
@@ -317,13 +321,13 @@ impl ManageTokens for TokenRepository {
                 created_at: token.created_at.clone(),
                 permissions: token.permissions.clone(),
             }),
-            None => Err(HttpError::not_found(
+            None => Err(ReductError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
             )),
         }
     }
 
-    fn get_token_list(&self) -> Result<Vec<Token>, HttpError> {
+    fn get_token_list(&self) -> Result<Vec<Token>, ReductError> {
         let mut sorted: Vec<_> = self.repo.iter().collect();
         sorted.sort_by_key(|item| item.0);
         Ok(sorted
@@ -337,7 +341,7 @@ impl ManageTokens for TokenRepository {
             .collect())
     }
 
-    fn validate_token(&self, header: Option<&str>) -> Result<Token, HttpError> {
+    fn validate_token(&self, header: Option<&str>) -> Result<Token, ReductError> {
         let value = parse_bearer_token(header.unwrap_or(""))?;
 
         match self.repo.values().find(|token| token.value == value) {
@@ -350,17 +354,17 @@ impl ManageTokens for TokenRepository {
                     permissions: token.permissions.clone(),
                 })
             }
-            None => Err(HttpError::unauthorized("Invalid token")),
+            None => Err(ReductError::unauthorized("Invalid token")),
         }
     }
 
-    fn remove_token(&mut self, name: &str) -> Result<(), HttpError> {
+    fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
         if name == INIT_TOKEN_NAME {
-            return Err(HttpError::bad_request("Cannot remove init token"));
+            return Err(ReductError::bad_request("Cannot remove init token"));
         }
 
         if self.repo.remove(name).is_none() {
-            Err(HttpError::not_found(
+            Err(ReductError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
             ))
         } else {
@@ -368,7 +372,7 @@ impl ManageTokens for TokenRepository {
         }
     }
 
-    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), HttpError> {
+    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
                 permissions.read.retain(|b| b != bucket);
@@ -394,23 +398,23 @@ impl ManageTokens for NoAuthRepository {
         &mut self,
         _name: &str,
         _permissions: Permissions,
-    ) -> Result<TokenCreateResponse, HttpError> {
-        Err(HttpError::bad_request("Authentication is disabled"))
+    ) -> Result<TokenCreateResponse, ReductError> {
+        Err(ReductError::bad_request("Authentication is disabled"))
     }
 
-    fn update_token(&mut self, _name: &str, _permissions: Permissions) -> Result<(), HttpError> {
-        Err(HttpError::bad_request("Authentication is disabled"))
+    fn update_token(&mut self, _name: &str, _permissions: Permissions) -> Result<(), ReductError> {
+        Err(ReductError::bad_request("Authentication is disabled"))
     }
 
-    fn find_by_name(&self, _name: &str) -> Result<Token, HttpError> {
-        Err(HttpError::bad_request("Authentication is disabled"))
+    fn find_by_name(&self, _name: &str) -> Result<Token, ReductError> {
+        Err(ReductError::bad_request("Authentication is disabled"))
     }
 
-    fn get_token_list(&self) -> Result<Vec<Token>, HttpError> {
+    fn get_token_list(&self) -> Result<Vec<Token>, ReductError> {
         Ok(vec![])
     }
 
-    fn validate_token(&self, _header: Option<&str>) -> Result<Token, HttpError> {
+    fn validate_token(&self, _header: Option<&str>) -> Result<Token, ReductError> {
         Ok(Token {
             name: "AUTHENTICATION-DISABLED".to_string(),
             value: "".to_string(),
@@ -423,11 +427,11 @@ impl ManageTokens for NoAuthRepository {
         })
     }
 
-    fn remove_token(&mut self, _name: &str) -> Result<(), HttpError> {
+    fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
         Ok(())
     }
 
-    fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), HttpError> {
+    fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Ok(())
     }
 }
@@ -482,7 +486,9 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::unprocessable_entity("Token name can't be empty"))
+            Err(ReductError::unprocessable_entity(
+                "Token name can't be empty"
+            ))
         );
     }
 
@@ -510,7 +516,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::conflict("Token 'test' already exists"))
+            Err(ReductError::conflict("Token 'test' already exists"))
         );
     }
 
@@ -565,7 +571,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::bad_request("Authentication is disabled"))
+            Err(ReductError::bad_request("Authentication is disabled"))
         );
     }
 
@@ -621,7 +627,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::not_found("Token 'test' doesn't exist"))
+            Err(ReductError::not_found("Token 'test' doesn't exist"))
         );
     }
 
@@ -673,7 +679,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::bad_request("Authentication is disabled"))
+            Err(ReductError::bad_request("Authentication is disabled"))
         );
     }
 
@@ -706,7 +712,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::not_found("Token 'test' doesn't exist"))
+            Err(ReductError::not_found("Token 'test' doesn't exist"))
         );
     }
 
@@ -717,7 +723,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::bad_request("Authentication is disabled"))
+            Err(ReductError::bad_request("Authentication is disabled"))
         );
     }
 
@@ -795,7 +801,7 @@ mod tests {
         let repo = setup("init-token");
         let token = repo.validate_token(Some("Bearer invalid-value"));
 
-        assert_eq!(token, Err(HttpError::unauthorized("Invalid token")));
+        assert_eq!(token, Err(ReductError::unauthorized("Invalid token")));
     }
 
     #[test]
@@ -836,7 +842,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::bad_request("Cannot remove init token"))
+            Err(ReductError::bad_request("Cannot remove init token"))
         );
     }
 
@@ -847,7 +853,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::not_found("Token 'test' doesn't exist"))
+            Err(ReductError::not_found("Token 'test' doesn't exist"))
         );
     }
 
@@ -872,7 +878,7 @@ mod tests {
 
         assert_eq!(
             token,
-            Err(HttpError::not_found("Token 'test' doesn't exist"))
+            Err(ReductError::not_found("Token 'test' doesn't exist"))
         );
     }
 

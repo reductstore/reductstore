@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::storage::bucket::Bucket;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, ServerInfo};
@@ -53,7 +53,7 @@ impl Storage {
     /// # Returns
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
-    pub fn info(&self) -> Result<ServerInfo, HttpError> {
+    pub fn info(&self) -> Result<ServerInfo, ReductError> {
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
@@ -85,16 +85,16 @@ impl Storage {
         &mut self,
         name: &str,
         settings: BucketSettings,
-    ) -> Result<&mut Bucket, HttpError> {
+    ) -> Result<&mut Bucket, ReductError> {
         let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
         if !regex.is_match(name) {
-            return Err(HttpError::unprocessable_entity(
+            return Err(ReductError::unprocessable_entity(
                 "Bucket name can contain only letters, digests and [-,_] symbols",
             ));
         }
 
         if self.buckets.contains_key(name) {
-            return Err(HttpError::conflict(
+            return Err(ReductError::conflict(
                 format!("Bucket '{}' already exists", name).as_str(),
             ));
         }
@@ -114,10 +114,10 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn get_bucket(&self, name: &str) -> Result<&Bucket, HttpError> {
+    pub fn get_bucket(&self, name: &str) -> Result<&Bucket, ReductError> {
         match self.buckets.get(name) {
             Some(bucket) => Ok(bucket),
-            None => Err(HttpError::not_found(
+            None => Err(ReductError::not_found(
                 format!("Bucket '{}' is not found", name).as_str(),
             )),
         }
@@ -132,10 +132,10 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn get_mut_bucket(&mut self, name: &str) -> Result<&mut Bucket, HttpError> {
+    pub fn get_mut_bucket(&mut self, name: &str) -> Result<&mut Bucket, ReductError> {
         match self.buckets.get_mut(name) {
             Some(bucket) => Ok(bucket),
-            None => Err(HttpError::not_found(
+            None => Err(ReductError::not_found(
                 format!("Bucket '{}' is not found", name).as_str(),
             )),
         }
@@ -150,19 +150,19 @@ impl Storage {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub fn remove_bucket(&mut self, name: &str) -> Result<(), HttpError> {
+    pub fn remove_bucket(&mut self, name: &str) -> Result<(), ReductError> {
         match self.buckets.remove(name) {
             Some(_) => {
                 remove_dir_all(&self.data_path.join(name))?;
                 Ok(())
             }
-            None => Err(HttpError::not_found(
+            None => Err(ReductError::not_found(
                 format!("Bucket '{}' is not found", name).as_str(),
             )),
         }
     }
 
-    pub fn get_bucket_list(&self) -> Result<BucketInfoList, HttpError> {
+    pub fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
         let mut buckets = Vec::new();
         for bucket in self.buckets.values() {
             buckets.push(bucket.info()?.info);
@@ -291,7 +291,7 @@ mod tests {
         let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
             result.err(),
-            Some(HttpError::unprocessable_entity(
+            Some(ReductError::unprocessable_entity(
                 "Bucket name can contain only letters, digests and [-,_] symbols"
             ))
         );
@@ -308,7 +308,7 @@ mod tests {
         let result = storage.create_bucket("test", BucketSettings::default());
         assert_eq!(
             result.err(),
-            Some(HttpError::conflict("Bucket 'test' already exists"))
+            Some(ReductError::conflict("Bucket 'test' already exists"))
         );
     }
 
@@ -330,7 +330,7 @@ mod tests {
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
-            Some(HttpError::not_found("Bucket 'test' is not found"))
+            Some(ReductError::not_found("Bucket 'test' is not found"))
         );
     }
 
@@ -348,7 +348,7 @@ mod tests {
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
-            Some(HttpError::not_found("Bucket 'test' is not found"))
+            Some(ReductError::not_found("Bucket 'test' is not found"))
         );
     }
 
@@ -358,7 +358,7 @@ mod tests {
         let result = storage.remove_bucket("test");
         assert_eq!(
             result,
-            Err(HttpError::not_found("Bucket 'test' is not found"))
+            Err(ReductError::not_found("Bucket 'test' is not found"))
         );
     }
 
@@ -378,7 +378,7 @@ mod tests {
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
-            Some(HttpError::not_found("Bucket 'test' is not found"))
+            Some(ReductError::not_found("Bucket 'test' is not found"))
         );
     }
 

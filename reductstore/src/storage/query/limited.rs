@@ -6,7 +6,7 @@ use crate::storage::query::base::QueryState::Running;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
 use crate::storage::reader::RecordReader;
-use reduct_base::error::{ErrorCode, HttpError};
+use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
@@ -30,12 +30,12 @@ impl Query for LimitedQuery {
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
         // TODO: It could be done better, maybe it make sense to move the limit into HistoricalQuery instead of manipulating the state here.
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
                 self.query.state = QueryState::Done;
-                return Err(HttpError {
+                return Err(ReductError {
                     status: ErrorCode::NoContent,
                     message: "No content".to_string(),
                 });
@@ -85,7 +85,7 @@ mod tests {
 
         assert_eq!(
             query.next(&block_indexes, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })

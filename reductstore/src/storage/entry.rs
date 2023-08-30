@@ -12,7 +12,7 @@ use crate::storage::writer::RecordWriter;
 use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -43,7 +43,7 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, HttpError> {
+    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
         Ok(Self {
             name: name.to_string(),
@@ -56,7 +56,7 @@ impl Entry {
         })
     }
 
-    pub fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, HttpError> {
+    pub fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, ReductError> {
         let mut record_count = 0;
         let mut size = 0;
         let mut block_index = BTreeSet::new();
@@ -129,7 +129,7 @@ impl Entry {
         content_size: u64,
         content_type: String,
         labels: Labels,
-    ) -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
+    ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
         #[derive(PartialEq)]
         enum RecordType {
             Latest,
@@ -167,7 +167,7 @@ impl Entry {
                     .iter()
                     .any(|record| record.timestamp == proto_time)
                 {
-                    return Err(HttpError::conflict(&format!(
+                    return Err(ReductError::conflict(&format!(
                         "A record with timestamp {} already exists",
                         time
                     )));
@@ -234,9 +234,9 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) fn begin_read(&self, time: u64) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
+    pub(crate) fn begin_read(&self, time: u64) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
         debug!("Reading record for ts={}", time);
-        let not_found_err = Err(HttpError::not_found(&format!(
+        let not_found_err = Err(ReductError::not_found(&format!(
             "No record with timestamp {}",
             time
         )));
@@ -268,14 +268,14 @@ impl Entry {
 
         let record = &block.records[record_index.unwrap()];
         if record.state == record::State::Started as i32 {
-            return Err(HttpError::too_early(&format!(
+            return Err(ReductError::too_early(&format!(
                 "Record with timestamp {} is still being written",
                 time
             )));
         }
 
         if record.state == record::State::Errored as i32 {
-            return Err(HttpError::internal_server_error(&format!(
+            return Err(ReductError::internal_server_error(&format!(
                 "Record with timestamp {} is broken",
                 time
             )));
@@ -299,7 +299,12 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(&mut self, start: u64, end: u64, options: QueryOptions) -> Result<u64, HttpError> {
+    pub fn query(
+        &mut self,
+        start: u64,
+        end: u64,
+        options: QueryOptions,
+    ) -> Result<u64, ReductError> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
@@ -319,17 +324,20 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub fn next(&mut self, query_id: u64) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
+    pub fn next(
+        &mut self,
+        query_id: u64,
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
         self.remove_expired_query();
         let query = self
             .queries
             .get_mut(&query_id)
-            .ok_or_else(|| HttpError::not_found(&format!("Query {} not found", query_id)))?;
+            .ok_or_else(|| ReductError::not_found(&format!("Query {} not found", query_id)))?;
         query.next(&self.block_index, &mut self.block_manager.write().unwrap())
     }
 
     /// Returns stats about the entry.
-    pub fn info(&self) -> Result<EntryInfo, HttpError> {
+    pub fn info(&self) -> Result<EntryInfo, ReductError> {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
             (0, 0)
         } else {
@@ -370,9 +378,9 @@ impl Entry {
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub fn try_remove_oldest_block(&mut self) -> Result<(), HttpError> {
+    pub fn try_remove_oldest_block(&mut self) -> Result<(), ReductError> {
         if self.block_index.is_empty() {
-            return Err(HttpError::internal_server_error("No block to remove"));
+            return Err(ReductError::internal_server_error("No block to remove"));
         }
 
         let oldest_block_id = *self.block_index.first().unwrap();
@@ -402,7 +410,7 @@ impl Entry {
         self.settings = settings;
     }
 
-    fn start_new_block(&mut self, time: u64) -> Result<Block, HttpError> {
+    fn start_new_block(&mut self, time: u64) -> Result<Block, ReductError> {
         let block = self
             .block_manager
             .write()
@@ -410,7 +418,7 @@ impl Entry {
             .start(time, self.settings.max_block_size)?;
         self.block_index
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));
-        Ok::<Block, HttpError>(block)
+        Ok::<Block, ReductError>(block)
     }
 
     fn remove_expired_query(&mut self) {
@@ -608,7 +616,7 @@ mod tests {
         let err = write_stub_record(&mut entry, 1000000);
         assert_eq!(
             err.err(),
-            Some(HttpError::conflict(
+            Some(ReductError::conflict(
                 "A record with timestamp 1000000 already exists"
             ))
         );
@@ -621,7 +629,7 @@ mod tests {
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),
-            Some(HttpError::not_found("No record with timestamp 1000"))
+            Some(ReductError::not_found("No record with timestamp 1000"))
         );
     }
 
@@ -632,7 +640,7 @@ mod tests {
         let writer = entry.begin_read(1000);
         assert_eq!(
             writer.err(),
-            Some(HttpError::not_found("No record with timestamp 1000"))
+            Some(ReductError::not_found("No record with timestamp 1000"))
         );
     }
 
@@ -643,7 +651,7 @@ mod tests {
         let writer = entry.begin_read(2000000);
         assert_eq!(
             writer.err(),
-            Some(HttpError::not_found("No record with timestamp 2000000"))
+            Some(ReductError::not_found("No record with timestamp 2000000"))
         );
     }
 
@@ -663,7 +671,7 @@ mod tests {
         let reader = entry.begin_read(1000000);
         assert_eq!(
             reader.err(),
-            Some(HttpError::too_early(
+            Some(ReductError::too_early(
                 "Record with timestamp 1000000 is still being written"
             ))
         );
@@ -678,7 +686,7 @@ mod tests {
         let reader = entry.begin_read(2000000);
         assert_eq!(
             reader.err(),
-            Some(HttpError::not_found("No record with timestamp 2000000"))
+            Some(ReductError::not_found("No record with timestamp 2000000"))
         );
     }
 
@@ -752,11 +760,11 @@ mod tests {
 
         assert_eq!(
             entry.next(id).err(),
-            Some(HttpError::no_content("No content"))
+            Some(ReductError::no_content("No content"))
         );
         assert_eq!(
             entry.next(id).err(),
-            Some(HttpError::not_found(&format!("Query {} not found", id)))
+            Some(ReductError::not_found(&format!("Query {} not found", id)))
         );
     }
 
@@ -784,7 +792,7 @@ mod tests {
 
         assert_eq!(
             entry.next(id).err(),
-            Some(HttpError::no_content("No content"))
+            Some(ReductError::no_content("No content"))
         );
 
         write_stub_record(&mut entry, 2000000).unwrap();
@@ -796,7 +804,7 @@ mod tests {
         sleep(Duration::from_millis(600));
         assert_eq!(
             entry.next(id).err(),
-            Some(HttpError::not_found(&format!("Query {} not found", id)))
+            Some(ReductError::not_found(&format!("Query {} not found", id)))
         );
     }
 
@@ -851,7 +859,7 @@ mod tests {
     fn test_try_remove_block_from_empty_entry(mut entry: Entry) {
         assert_eq!(
             entry.try_remove_oldest_block(),
-            Err(HttpError::internal_server_error("No block to remove"))
+            Err(ReductError::internal_server_error("No block to remove"))
         );
     }
 
@@ -873,7 +881,7 @@ mod tests {
         tempfile::tempdir().unwrap().into_path()
     }
 
-    fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), HttpError> {
+    fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), ReductError> {
         let writer = entry.begin_write(
             time,
             data.len() as u64,
@@ -887,7 +895,7 @@ mod tests {
         x
     }
 
-    fn write_stub_record(entry: &mut Entry, time: u64) -> Result<(), HttpError> {
+    fn write_stub_record(entry: &mut Entry, time: u64) -> Result<(), ReductError> {
         write_record(entry, time, b"0123456789".to_vec())
     }
 }

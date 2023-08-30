@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - reduct-cli: Add `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
+- reduct-rs: Add `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
+- reductstore: Add `healthcheck` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 
 ### Changed
 
 - reductstore: Update dependencies, min. rust v1.67.0, [PR-341](https://github.com/reductstore/reductstore/pull/341)
-- reductstore: use Web Console v1.3.0, [PR-342](https://github.com/reductstore/reductstore/pull/342)
+- reductstore: use Web Console v1.3.0, [PR-345](https://github.com/reductstore/reductstore/pull/342)
+- reduct-base: Rename `HttpError` -> `ReductError`, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 
 ### Fixed
 
@@ -28,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- reductstore: Update `rustls` with patched `rustls-webpki`, [PR-349](https://github.com/reductstore/reductstore/pull/349)
+- reductstore: Update `rustls` with
+  patched `rustls-webpki`, [PR-349](https://github.com/reductstore/reductstore/pull/349)
 
 ## [1.6.0] - 2023-08-14
 
@@ -466,7 +470,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed:
 
 - Searching start block in Entry List request, [PR-61](https://github.com/reductstore/reductstore/pull/61)
-- Qborting GET requests, [PR-64](https://github.com/reductstore/reductstore/pull/64)
+- Aborting GET requests, [PR-64](https://github.com/reductstore/reductstore/pull/64)
 
 ### Changed:
 

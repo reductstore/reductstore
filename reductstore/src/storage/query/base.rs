@@ -3,7 +3,7 @@
 
 use crate::storage::block_manager::BlockManager;
 use crate::storage::reader::RecordReader;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -42,7 +42,7 @@ pub trait Query {
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError>;
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError>;
 
     /// Get the state of the query.
     fn state(&self) -> &QueryState;

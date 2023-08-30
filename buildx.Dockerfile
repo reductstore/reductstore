@@ -32,6 +32,7 @@ COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 
 RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET} --package reductstore
+RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET} --package reduct-cli
 
 RUN mkdir /data
 
@@ -39,7 +40,11 @@ FROM ubuntu:22.04
 
 ARG CARGO_TARGET
 COPY --from=builder /src/target/${CARGO_TARGET}/release/reductstore /usr/local/bin/reductstore
+COPY --from=builder /src/target/${CARGO_TARGET}/release/reduct-cli /usr/local/bin/reduct-cli
 COPY --from=builder /data /data
+
+HEALTHCHECK --interval=5s --timeout=3s \
+  CMD reduct-cli server alive http://localhost:8383 || exit 1
 
 EXPOSE 8383
 

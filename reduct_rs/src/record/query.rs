@@ -13,7 +13,7 @@ use bytes::BytesMut;
 use chrono::Duration;
 use futures::Stream;
 use futures_util::{pin_mut, StreamExt};
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryInfo;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Method;
@@ -145,7 +145,9 @@ impl QueryBuilder {
     }
 
     /// Set the query to be continuous.
-    pub async fn send(self) -> Result<impl Stream<Item = Result<Record, HttpError>>, HttpError> {
+    pub async fn send(
+        self,
+    ) -> Result<impl Stream<Item = Result<Record, ReductError>>, ReductError> {
         let mut url = format!("/b/{}/{}/q", self.bucket, self.entry);
         if let Some(start) = self.start {
             url.push_str(&format!("?start={}", start));
@@ -225,7 +227,7 @@ async fn parse_batched_records(
     headers: HeaderMap,
     rx: Receiver<Bytes>,
     head_only: bool,
-) -> Result<impl Stream<Item = Result<(Record, bool), HttpError>>, HttpError> {
+) -> Result<impl Stream<Item = Result<(Record, bool), ReductError>>, ReductError> {
     //sort headers by names
     let mut sorted_headers: Vec<_> = headers
         .clone()

@@ -10,7 +10,7 @@ use crate::storage::block_manager::{find_first_block, BlockManager, ManageBlock}
 use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::reader::RecordReader;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 pub struct HistoricalQuery {
     start_time: u64,
@@ -39,7 +39,7 @@ impl Query for HistoricalQuery {
         &mut self,
         block_index: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), HttpError> {
+    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
         self.last_update = Instant::now();
 
         let check_next_block = |start, stop| -> bool {
@@ -117,7 +117,7 @@ impl Query for HistoricalQuery {
 
         if records.is_empty() {
             self.state = QueryState::Done;
-            return Err(HttpError::no_content("No content"));
+            return Err(ReductError::no_content("No content"));
         }
 
         records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
@@ -227,7 +227,7 @@ mod tests {
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
@@ -269,7 +269,7 @@ mod tests {
         }
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
@@ -306,7 +306,7 @@ mod tests {
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
@@ -354,7 +354,7 @@ mod tests {
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
@@ -377,7 +377,7 @@ mod tests {
 
         assert_eq!(
             query.next(&index, &mut block_manager).err(),
-            Some(HttpError {
+            Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })

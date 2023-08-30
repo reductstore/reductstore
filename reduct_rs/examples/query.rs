@@ -5,13 +5,13 @@
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use reduct_rs::{HttpError, ReductClient};
+use reduct_rs::{ReductClient, ReductError};
 use std::str::from_utf8;
 
 use tokio;
 
 #[tokio::main]
-async fn main() -> Result<(), HttpError> {
+async fn main() -> Result<(), ReductError> {
     let client = ReductClient::builder().url("http://127.0.0.1:8383").build();
 
     println!("Server v{:?}", client.server_info().await?.version);
