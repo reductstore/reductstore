@@ -10,19 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - reduct-cli: Add `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
-- reduct-rs:
-  Add `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-344](https://github.com/reductstore/reductstore/pull/344)
+- reduct-rs: Add `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
+- reductstore: Add `healthchek` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 
 ### Changed
 
 - reductstore: Update dependencies, min. rust v1.67.0, [PR-341](https://github.com/reductstore/reductstore/pull/341)
 - reductstore: use Web Console v1.3.0, [PR-345](https://github.com/reductstore/reductstore/pull/342)
-- reduct-base: Rename `HttpError` -> `ReductError`, [PR-344](https://github.com/reductstore/reductstore/pull/344)
+- reduct-base: Rename `HttpError` -> `ReductError`, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 
 ### Fixed
 
-- reduct-rs: Normalize instance URL
-  in `ClientBuilder.url`, [PR-343](https://github.com/reductstore/reductstore/pull/343)
+- reduct-rs: Normalize instance URL in `ClientBuilder.url`, [PR-343](https://github.com/reductstore/reductstore/pull/343)
 
 ## [1.6.1] - 2023-08-28
 
