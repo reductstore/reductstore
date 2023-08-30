@@ -2,6 +2,7 @@
 
 members = [
     "reductstore",
+    "reduct_cli",
     "reduct_rs",
     "reduct_base",
     "reduct_macros"
