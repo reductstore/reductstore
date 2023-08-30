@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reduct-cli: Add `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
 - reduct-rs: Add `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
-- reductstore: Add `healthchek` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
+- reductstore: Add `healthcheck` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 
 ### Changed
 
