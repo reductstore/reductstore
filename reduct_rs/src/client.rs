@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::bucket::BucketBuilder;
 use crate::http_client::HttpClient;
 use crate::Bucket;
-use reduct_base::error::HttpError;
+use reduct_base::error::{ErrorCode, ReductError};
 
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
@@ -20,7 +20,7 @@ pub struct ReductClientBuilder {
     api_token: String,
 }
 
-pub type Result<T> = std::result::Result<T, HttpError>;
+pub type Result<T> = std::result::Result<T, ReductError>;
 
 static API_BASE: &str = "/api/v1";
 
@@ -36,12 +36,23 @@ impl ReductClientBuilder {
     ///
     /// # Panics
     ///
-    /// Panics if the URL is not set.
+    /// Panics if the URL is not set or invalid.
     pub fn build(self) -> ReductClient {
-        assert!(!self.url.is_empty(), "URL must be set");
-        ReductClient {
-            http_client: Arc::new(HttpClient::new(&self.url, &self.api_token)),
+        self.try_build().unwrap()
+    }
+
+    /// Try to build the ReductClient.
+    pub fn try_build(self) -> Result<ReductClient> {
+        if self.url.is_empty() {
+            return Err(ReductError::new(
+                ErrorCode::UrlParseError,
+                "URL must be set",
+            ));
         }
+        ReductError::new(ErrorCode::UrlParseError, "URL must be set");
+        Ok(ReductClient {
+            http_client: Arc::new(HttpClient::new(&self.url, &self.api_token)?),
+        })
     }
 
     /// Set the URL of the ReductStore instance to connect to.
@@ -78,6 +89,16 @@ impl ReductClient {
     /// ```
     pub fn builder() -> ReductClientBuilder {
         ReductClientBuilder::new()
+    }
+
+    /// Get the URL of the ReductStore instance.
+    pub fn url(&self) -> &str {
+        self.http_client.url()
+    }
+
+    /// Get the API token.
+    pub fn api_token(&self) -> &str {
+        self.http_client.api_token()
     }
 
     /// Get the server info.

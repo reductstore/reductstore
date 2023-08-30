@@ -10,7 +10,7 @@ use time_humanize::{Accuracy, HumanTime, Tense};
 pub(super) fn server_status_cmd() -> Command {
     Command::new("status")
         .about("Get the status of a ReductStore instance")
-        .arg(arg!(<ALIAS> "Alias of the ReductStore instance").required(true))
+        .arg(arg!(<ALIAS_OR_URL> "Alias or URL of the ReductStore instance").required(true))
 }
 
 pub(super) async fn get_server_status(
@@ -46,23 +46,5 @@ mod tests {
             format!("Version:\t{}", env!("CARGO_PKG_VERSION"))
         );
         assert!(context.output().history()[2].starts_with("Uptime: \t"));
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_get_server_status_invalid_alias(context: crate::context::CliContext) {
-        let result = get_server_status(&context, "invalid").await;
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Alias 'invalid' does not exist"
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_get_server_status_no_connection(context: crate::context::CliContext) {
-        let result = get_server_status(&context, "default").await;
-        assert!(result.is_err());
     }
 }

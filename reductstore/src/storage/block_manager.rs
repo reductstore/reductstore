@@ -14,7 +14,7 @@ use std::sync::{Arc, RwLock, Weak};
 use crate::storage::proto::*;
 use crate::storage::reader::RecordReader;
 use crate::storage::writer::RecordWriter;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
 
@@ -83,7 +83,7 @@ impl BlockManager {
         block_manager: Arc<RwLock<BlockManager>>,
         block: &Block,
         record_index: usize,
-    ) -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
+    ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
         let ts = block.begin_time.clone().unwrap();
         let path = block_manager.read().unwrap().path_to_data(&ts);
 
@@ -117,7 +117,7 @@ impl BlockManager {
         &mut self,
         block: &Block,
         record_index: usize,
-    ) -> Result<Arc<RwLock<RecordReader>>, HttpError> {
+    ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
         let reader = Arc::new(RwLock::new(RecordReader::new(
@@ -197,7 +197,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was loaded successfully.
-    fn load(&self, block_id: u64) -> Result<Block, HttpError>;
+    fn load(&self, block_id: u64) -> Result<Block, ReductError>;
 
     /// Save block descriptor to disk.
     ///
@@ -208,7 +208,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was saved successfully.
-    fn save(&mut self, block: Block) -> Result<(), HttpError>;
+    fn save(&mut self, block: Block) -> Result<(), ReductError>;
 
     /// Start a new block
     ///
@@ -220,7 +220,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was created successfully.
-    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, HttpError>;
+    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, ReductError>;
 
     /// Finish a block by truncating the file to the actual size.
     ///
@@ -231,14 +231,14 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was finished successfully.
-    fn finish(&mut self, block: &Block) -> Result<(), HttpError>;
+    fn finish(&mut self, block: &Block) -> Result<(), ReductError>;
 
     /// Remove a block from disk if there are no readers or writers.
-    fn remove(&mut self, block_id: u64) -> Result<(), HttpError>;
+    fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
 }
 
 impl ManageBlock for BlockManager {
-    fn load(&self, block_id: u64) -> Result<Block, HttpError> {
+    fn load(&self, block_id: u64) -> Result<Block, ReductError> {
         if let Some(block) = self.last_block.as_ref() {
             if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
                 return Ok(block.clone());
@@ -248,17 +248,17 @@ impl ManageBlock for BlockManager {
         let proto_ts = us_to_ts(&block_id);
         let buf = std::fs::read(self.path_to_desc(&proto_ts))?;
         let block = Block::decode(Bytes::from(buf)).map_err(|e| {
-            HttpError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
+            ReductError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
         })?;
 
         Ok(block)
     }
 
-    fn save(&mut self, block: Block) -> Result<(), HttpError> {
+    fn save(&mut self, block: Block) -> Result<(), ReductError> {
         let path = self.path_to_desc(block.begin_time.as_ref().unwrap());
         let mut buf = BytesMut::new();
         block.encode(&mut buf).map_err(|e| {
-            HttpError::internal_server_error(&format!("Failed to encode block descriptor: {}", e))
+            ReductError::internal_server_error(&format!("Failed to encode block descriptor: {}", e))
         })?;
         let mut file = std::fs::File::create(path.clone())?;
         file.write_all(&buf)?;
@@ -267,7 +267,7 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, HttpError> {
+    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, ReductError> {
         let mut block = Block::default();
         block.begin_time = Some(us_to_ts(&block_id));
 
@@ -280,7 +280,7 @@ impl ManageBlock for BlockManager {
         Ok(block)
     }
 
-    fn finish(&mut self, block: &Block) -> Result<(), HttpError> {
+    fn finish(&mut self, block: &Block) -> Result<(), ReductError> {
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -292,9 +292,9 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    fn remove(&mut self, block_id: u64) -> Result<(), HttpError> {
+    fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
         if !self.clean_readers_or_writers(block_id) {
-            return Err(HttpError::internal_server_error(&format!(
+            return Err(ReductError::internal_server_error(&format!(
                 "Cannot remove block {} because it is still in use",
                 block_id
             )));
@@ -448,7 +448,7 @@ mod tests {
 
             assert_eq!(
                 bm_ref.write().unwrap().remove(block_id).err(),
-                Some(HttpError::internal_server_error(&format!(
+                Some(ReductError::internal_server_error(&format!(
                     "Cannot remove block {} because it is still in use",
                     block_id
                 )))
@@ -479,7 +479,7 @@ mod tests {
 
             assert_eq!(
                 bm.remove(block_id).err(),
-                Some(HttpError::internal_server_error(&format!(
+                Some(ReductError::internal_server_error(&format!(
                     "Cannot remove block {} because it is still in use",
                     block_id
                 )))

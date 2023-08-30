@@ -12,7 +12,7 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::Stream;
 
 use futures_util::StreamExt;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
@@ -21,7 +21,7 @@ use std::pin::Pin;
 use std::time::SystemTime;
 
 pub type Labels = HashMap<String, String>;
-pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>>>>;
+pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>>>>;
 
 pub use write_record::WriteRecordBuilder;
 
@@ -74,7 +74,7 @@ impl Record {
     /// Content of the record
     ///
     /// This consumes the record and returns bytes
-    pub async fn bytes(mut self) -> Result<Bytes, HttpError> {
+    pub async fn bytes(mut self) -> Result<Bytes, ReductError> {
         if let Some(data) = &mut self.data {
             let mut bytes = BytesMut::new();
             while let Some(chunk) = data.next().await {
@@ -86,7 +86,7 @@ impl Record {
         }
     }
 
-    pub fn stream_bytes(self) -> Pin<Box<dyn Stream<Item = Result<Bytes, HttpError>>>> {
+    pub fn stream_bytes(self) -> Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>>>> {
         if let Some(data) = self.data {
             return data;
         } else {

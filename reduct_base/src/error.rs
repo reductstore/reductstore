@@ -7,11 +7,13 @@ pub use int_enum::IntEnum;
 use std::error::Error;
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 use std::time::SystemTimeError;
+use url::ParseError;
 
 /// HTTP status codes + communication errors.
 #[repr(i16)]
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone, IntEnum)]
 pub enum ErrorCode {
+    UrlParseError = -4,
     ConnectionError = -3,
     Timeout = -2,
     Unknown = -1,
@@ -62,7 +64,7 @@ pub enum ErrorCode {
 
 /// An HTTP error, we use it for error handling.
 #[derive(PartialEq, Debug)]
-pub struct HttpError {
+pub struct ReductError {
     /// The HTTP status code.
     pub status: ErrorCode,
 
@@ -70,41 +72,51 @@ pub struct HttpError {
     pub message: String,
 }
 
-impl Display for HttpError {
+impl Display for ReductError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
         write!(f, "[{:?}] {}", self.status, self.message)
     }
 }
 
-impl From<std::io::Error> for HttpError {
+impl From<std::io::Error> for ReductError {
     fn from(err: std::io::Error) -> Self {
         // An IO error is an internal reductstore error
-        HttpError {
+        ReductError {
             status: ErrorCode::InternalServerError,
             message: err.to_string(),
         }
     }
 }
 
-impl From<SystemTimeError> for HttpError {
+impl From<SystemTimeError> for ReductError {
     fn from(err: SystemTimeError) -> Self {
         // A system time error is an internal reductstore error
-        HttpError {
+        ReductError {
             status: ErrorCode::InternalServerError,
             message: err.to_string(),
         }
     }
 }
 
-impl Error for HttpError {
+impl From<ParseError> for ReductError {
+    fn from(err: ParseError) -> Self {
+        // A parse error is an internal reductstore error
+        ReductError {
+            status: ErrorCode::UrlParseError,
+            message: err.to_string(),
+        }
+    }
+}
+
+impl Error for ReductError {
     fn description(&self) -> &str {
         &self.message
     }
 }
 
-impl HttpError {
+impl ReductError {
     pub fn new(status: ErrorCode, message: &str) -> Self {
-        HttpError {
+        ReductError {
             status,
             message: message.to_string(),
         }
@@ -122,80 +134,80 @@ impl HttpError {
         format!("[{:?}] {}", self.status, self.message)
     }
 
-    pub fn ok() -> HttpError {
-        HttpError {
+    pub fn ok() -> ReductError {
+        ReductError {
             status: ErrorCode::OK,
             message: "".to_string(),
         }
     }
 
     /// Create a no content error.
-    pub fn no_content(msg: &str) -> HttpError {
-        HttpError {
+    pub fn no_content(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::NoContent,
             message: msg.to_string(),
         }
     }
 
     /// Create a not found error.
-    pub fn not_found(msg: &str) -> HttpError {
-        HttpError {
+    pub fn not_found(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::NotFound,
             message: msg.to_string(),
         }
     }
 
     /// Create a conflict error.
-    pub fn conflict(msg: &str) -> HttpError {
-        HttpError {
+    pub fn conflict(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::Conflict,
             message: msg.to_string(),
         }
     }
 
     /// Create a bad request error.
-    pub fn bad_request(msg: &str) -> HttpError {
-        HttpError {
+    pub fn bad_request(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::BadRequest,
             message: msg.to_string(),
         }
     }
 
     /// Create an unauthorized error.
-    pub fn unauthorized(msg: &str) -> HttpError {
-        HttpError {
+    pub fn unauthorized(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::Unauthorized,
             message: msg.to_string(),
         }
     }
 
     /// Create a forbidden error.
-    pub fn forbidden(msg: &str) -> HttpError {
-        HttpError {
+    pub fn forbidden(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::Forbidden,
             message: msg.to_string(),
         }
     }
 
     /// Create an unprocessable entity error.
-    pub fn unprocessable_entity(msg: &str) -> HttpError {
-        HttpError {
+    pub fn unprocessable_entity(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::UnprocessableEntity,
             message: msg.to_string(),
         }
     }
 
     /// Create a too early error.
-    pub fn too_early(msg: &str) -> HttpError {
-        HttpError {
+    pub fn too_early(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::TooEarly,
             message: msg.to_string(),
         }
     }
 
     /// Create a bad request error.
-    pub fn internal_server_error(msg: &str) -> HttpError {
-        HttpError {
+    pub fn internal_server_error(msg: &str) -> ReductError {
+        ReductError {
             status: ErrorCode::InternalServerError,
             message: msg.to_string(),
         }

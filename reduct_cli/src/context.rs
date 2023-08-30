@@ -115,7 +115,12 @@ pub(crate) mod tests {
     }
 
     #[fixture]
-    pub(crate) fn context(output: Box<dyn Output>) -> CliContext {
+    pub(crate) fn current_token() -> String {
+        std::env::var("RS_API_TOKEN").unwrap_or_default()
+    }
+
+    #[fixture]
+    pub(crate) fn context(output: Box<dyn Output>, current_token: String) -> CliContext {
         let tmp_dir = tempdir().unwrap();
         let ctx = ContextBuilder::new()
             .config_path(tmp_dir.into_path().join("config.toml").to_str().unwrap())
@@ -136,7 +141,7 @@ pub(crate) mod tests {
             "local".to_string(),
             Alias {
                 url: url::Url::parse("http://localhost:8383").unwrap(),
-                token: std::env::var("RS_API_TOKEN").unwrap_or_default(),
+                token: current_token,
             },
         );
         config_file.save().unwrap();

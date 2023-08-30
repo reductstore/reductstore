@@ -6,7 +6,7 @@
 use crate::http_client::{map_error, HttpClient};
 use crate::record::{from_system_time, Labels, Record};
 use futures_util::StreamExt;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 use reqwest::Method;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -55,7 +55,7 @@ impl ReadRecordBuilder {
     /// # Returns
     ///
     /// A [`Record`] object containing the record data.
-    pub async fn send(self) -> Result<Record, HttpError> {
+    pub async fn send(self) -> Result<Record, ReductError> {
         let mut url = format!("/b/{}/{}", self.bucket, self.entry);
         if let Some(timestamp) = self.timestamp {
             url = format!("{}?ts={}", url, &timestamp.to_string());

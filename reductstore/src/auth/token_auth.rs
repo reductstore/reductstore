@@ -3,7 +3,7 @@
 
 use crate::auth::policy::Policy;
 use crate::auth::token_repository::ManageTokens;
-use reduct_base::error::HttpError;
+use reduct_base::error::ReductError;
 
 /// Authorization by token
 pub struct TokenAuthorization {
@@ -35,7 +35,7 @@ impl TokenAuthorization {
         authorization_header: Option<&str>,
         repo: &dyn ManageTokens,
         policy: Plc,
-    ) -> Result<(), HttpError>
+    ) -> Result<(), ReductError>
     where
         Plc: Policy,
     {
@@ -78,11 +78,13 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(HttpError::unauthorized("No bearer token in request header"))
+            Err(ReductError::unauthorized(
+                "No bearer token in request header"
+            ))
         );
 
         let result = auth.check(Some("Bearer invalid"), repo.as_ref(), FullAccessPolicy {});
-        assert_eq!(result, Err(HttpError::unauthorized("Invalid token")));
+        assert_eq!(result, Err(ReductError::unauthorized("Invalid token")));
 
         let result = auth.check(Some("Bearer test"), repo.as_ref(), FullAccessPolicy {});
         assert!(result.is_ok());

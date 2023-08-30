@@ -22,7 +22,7 @@ use crate::http_frontend::server_api::create_server_api_routes;
 use crate::http_frontend::token_api::create_token_api_routes;
 use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
-use reduct_base::error::HttpError as BaseHttpError;
+use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
 pub use reduct_base::error::ErrorCode;
