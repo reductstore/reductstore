@@ -42,7 +42,7 @@ pub struct HttpServerState {
     pub base_path: String,
 }
 
-#[derive(Twin)]
+#[derive(Twin, PartialEq)]
 pub struct HttpError(BaseHttpError);
 
 impl HttpError {

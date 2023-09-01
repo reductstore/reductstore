@@ -19,6 +19,7 @@ def test__create_bucket_ok(base_url, session, bucket_name):
 
     assert resp.headers['Content-Type'] == "application/json"
 
+
 def test__create_bucket_quota_type_null(base_url, session, bucket_name):
     """Should create a bucket if quota_type is null"""
     resp = session.post(f'{base_url}/b/{bucket_name}', json={"quota_type": None})
@@ -62,22 +63,6 @@ def test__create_bucket_custom(base_url, session, bucket_name):
     data = json.loads(resp.content)
     assert data['settings'] == {"max_block_records": 256, "max_block_size": 500, "quota_type": "NONE",
                                 "quota_size": 0}
-
-
-def test__create_twice_bucket(base_url, session, bucket_name):
-    """Should not create a bucket twice with the same name"""
-    session.post(f'{base_url}/b/{bucket_name}')
-    resp = session.post(f'{base_url}/b/{bucket_name}')
-
-    assert resp.status_code == 409
-    assert "already exists" in resp.headers["x-reduct-error"]
-
-
-def test__get_bucket_not_exist(base_url, session, bucket_name):
-    """Should return error if the bucket is not found"""
-    resp = session.get(f'{base_url}/b/{bucket_name}')
-    assert resp.status_code == 404
-    assert "is not found" in resp.headers["x-reduct-error"]
 
 
 @requires_env("API_TOKEN")
@@ -170,13 +155,6 @@ def test__update_bucket_with_full_access_token(base_url, session, bucket_name, t
     assert resp.status_code == 403
 
 
-def test__update_bucket_not_found(base_url, session, bucket_name):
-    """Should not update setting if no bucket is found"""
-    resp = session.put(f'{base_url}/b/{bucket_name}',
-                       json={"max_block_size": 1000, "quota_type": "FIFO", "quota_size": 500})
-    assert resp.status_code == 404
-
-
 def test__remove_bucket_ok(base_url, session, bucket_name):
     """Should remove a bucket"""
     resp = session.post(f'{base_url}/b/{bucket_name}')
@@ -187,13 +165,6 @@ def test__remove_bucket_ok(base_url, session, bucket_name):
 
     resp = session.get(f'{base_url}/b/{bucket_name}')
     assert resp.status_code == 404
-
-
-def test__remove_bucket_not_exist(base_url, session, bucket_name):
-    """Should return an error if  bucket doesn't exist"""
-    resp = session.delete(f'{base_url}/b/{bucket_name}')
-    assert resp.status_code == 404
-    assert "is not found" in resp.headers["x-reduct-error"]
 
 
 @requires_env("API_TOKEN")

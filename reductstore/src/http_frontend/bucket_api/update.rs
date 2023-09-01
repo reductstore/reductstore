@@ -28,6 +28,7 @@ pub async fn update_bucket(
 mod tests {
     use super::*;
     use crate::http_frontend::tests::{components, headers};
+    use reduct_base::error::ErrorCode;
     use rstest::rstest;
 
     #[rstest]
@@ -41,5 +42,23 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_bucket_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+        let err = update_bucket(
+            State(components),
+            Path("not-found".to_string()),
+            headers,
+            BucketSettingsAxum::default(),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(
+            err,
+            HttpError::new(ErrorCode::NotFound, "Bucket 'not-found' is not found",)
+        )
     }
 }

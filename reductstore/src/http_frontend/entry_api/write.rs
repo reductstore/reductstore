@@ -150,11 +150,8 @@ mod tests {
         components: Arc<HttpServerState>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
+        #[future] empty_body: BodyStream,
     ) {
-        let emtpy_stream: Empty<Bytes> = Empty::new();
-        let request = Request::builder().body(emtpy_stream).unwrap();
-        let body = BodyStream::from_request(request, &()).await.unwrap();
-
         write_record(
             State(Arc::clone(&components)),
             headers,
@@ -163,7 +160,7 @@ mod tests {
                 "ts".to_string(),
                 "1".to_string(),
             )])),
-            body,
+            empty_body.await,
         )
         .await
         .unwrap();
@@ -183,6 +180,68 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_bucket_not_found(
+        components: Arc<HttpServerState>,
+        headers: HeaderMap,
+        #[future] empty_body: BodyStream,
+    ) {
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "XXX".to_string()),
+            ("entry_name".to_string(), "entry-1".to_string()),
+        ]));
+        let err = write_record(
+            State(Arc::clone(&components)),
+            headers,
+            path,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "1".to_string(),
+            )])),
+            empty_body.await,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err,
+            HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_bad_ts(
+        components: Arc<HttpServerState>,
+        headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        #[future] empty_body: BodyStream,
+    ) {
+        let err = write_record(
+            State(Arc::clone(&components)),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "bad".to_string(),
+            )])),
+            empty_body.await,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err,
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'ts' must be an unix timestamp in microseconds",
+            )
+        );
+    }
+
     #[fixture]
     pub fn headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -191,5 +250,12 @@ mod tests {
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
 
         headers
+    }
+
+    #[fixture]
+    async fn empty_body() -> BodyStream {
+        let emtpy_stream: Empty<Bytes> = Empty::new();
+        let request = Request::builder().body(emtpy_stream).unwrap();
+        BodyStream::from_request(request, &()).await.unwrap()
     }
 }

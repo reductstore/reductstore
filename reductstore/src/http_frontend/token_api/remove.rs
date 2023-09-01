@@ -28,6 +28,7 @@ mod tests {
     use super::*;
     use crate::http_frontend::tests::{components, headers};
 
+    use reduct_base::error::ErrorCode;
     use rstest::rstest;
 
     #[rstest]
@@ -35,5 +36,18 @@ mod tests {
     async fn test_remove_token(components: Arc<HttpServerState>, headers: HeaderMap) {
         let token = remove_token(State(components), Path("test".to_string()), headers).await;
         assert!(token.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_token_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+        let err = remove_token(State(components), Path("not-found".to_string()), headers)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            HttpError::new(ErrorCode::NotFound, "Token 'not-found' doesn't exist")
+        )
     }
 }
