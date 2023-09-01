@@ -139,6 +139,8 @@ mod tests {
 
     use crate::http_frontend::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
+    use reduct_base::error::ErrorCode;
+    use reduct_base::error::ErrorCode::NotFound;
     use rstest::*;
 
     #[rstest]
@@ -224,5 +226,107 @@ mod tests {
             response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
             Bytes::from(body)
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_single_read_bucket_not_found(
+        components: Arc<HttpServerState>,
+        headers: HeaderMap,
+    ) {
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "XXX".to_string()),
+            ("entry_name".to_string(), "entru-1".to_string()),
+        ]));
+        let err = read_single_record(
+            State(Arc::clone(&components)),
+            path,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "0".to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err, HttpError::new(NotFound, "Bucket 'XXX' is not found"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_single_read_ts_not_found(
+        components: Arc<HttpServerState>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let err = read_single_record(
+            State(Arc::clone(&components)),
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "1".to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err, HttpError::new(NotFound, "No record with timestamp 1"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_single_read_bad_ts(
+        components: Arc<HttpServerState>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let err = read_single_record(
+            State(Arc::clone(&components)),
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "bad".to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err,
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'ts' must be an unix timestamp in microseconds"
+            )
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_single_read_query_not_found(
+        components: Arc<HttpServerState>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let err = read_single_record(
+            State(Arc::clone(&components)),
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![("q".to_string(), "1".to_string())])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err, HttpError::new(NotFound, "Query 1 not found"));
     }
 }

@@ -34,6 +34,7 @@ mod tests {
 
     use crate::http_frontend::tests::{components, headers};
 
+    use reduct_base::error::ErrorCode;
     use reduct_base::msg::token_api::Permissions;
     use rstest::rstest;
 
@@ -50,5 +51,26 @@ mod tests {
         .unwrap()
         .0;
         assert!(token.value.starts_with("new-token"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_token_already_exists(
+        components: Arc<HttpServerState>,
+        headers: HeaderMap,
+    ) {
+        let err = create_token(
+            State(components),
+            Path("test".to_string()),
+            headers,
+            PermissionsAxum(Permissions::default()),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(
+            err,
+            HttpError::new(ErrorCode::Conflict, "Token 'test' already exists")
+        );
     }
 }

@@ -70,4 +70,41 @@ mod tests {
             ErrorCode::NotFound
         );
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_bucket_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+        let path = HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "XXX".to_string()),
+            ("entry_name".to_string(), "entry-1".to_string()),
+        ]);
+        let err = remove_entry(State(Arc::clone(&components)), Path(path), headers)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found",)
+        )
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_entry_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+        let path = HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "bucket-1".to_string()),
+            ("entry_name".to_string(), "XXX".to_string()),
+        ]);
+        let err = remove_entry(State(Arc::clone(&components)), Path(path), headers)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            HttpError::new(
+                ErrorCode::NotFound,
+                "Entry 'XXX' not found in bucket 'bucket-1'",
+            )
+        )
+    }
 }

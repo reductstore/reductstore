@@ -36,6 +36,7 @@ mod tests {
 
     use rstest::rstest;
 
+    use reduct_base::error::ErrorCode;
     use std::sync::Arc;
 
     #[rstest]
@@ -45,5 +46,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(info.0.info.name, "bucket-1");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_bucket_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+        let err = get_bucket(State(components), Path("not-found".to_string()), headers)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            HttpError::new(ErrorCode::NotFound, "Bucket 'not-found' is not found")
+        )
     }
 }

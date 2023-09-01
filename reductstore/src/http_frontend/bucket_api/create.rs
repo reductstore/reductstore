@@ -35,6 +35,7 @@ mod tests {
 
     use rstest::rstest;
 
+    use reduct_base::error::ErrorCode;
     use std::sync::Arc;
 
     #[rstest]
@@ -48,5 +49,26 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_already_exists(
+        components: Arc<HttpServerState>,
+        headers: HeaderMap,
+    ) {
+        let err = create_bucket(
+            State(components),
+            Path("bucket-1".to_string()),
+            headers,
+            BucketSettingsAxum::default(),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(
+            err,
+            HttpError::new(ErrorCode::Conflict, "Bucket 'bucket-1' already exists",)
+        )
     }
 }
