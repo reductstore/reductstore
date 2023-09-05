@@ -1,6 +1,8 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use regex::Regex;
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::str::FromStr;
 
@@ -71,6 +73,24 @@ impl Env {
         return value;
     }
 
+    pub fn matches<T: FromStr + Display + Default + PartialEq>(
+        &mut self,
+        pattern: &str,
+        masked: bool,
+    ) -> BTreeMap<String, T> {
+        let mut matches = BTreeMap::new();
+        let pattern = Regex::new(pattern).unwrap();
+        for (key, _) in std::env::vars() {
+            if let Some(result) = pattern.captures(&key) {
+                matches.insert(
+                    result.get(1).unwrap().as_str().to_string(),
+                    self.get(&key, T::default(), masked),
+                );
+            }
+        }
+
+        matches
+    }
     /// Get pretty printed message.
     pub fn message(&self) -> &String {
         &self.message
@@ -80,26 +100,23 @@ impl Env {
 #[cfg(test)]
 mod tests {
     use crate::core::env::{new_env, Env};
+    use rstest::{fixture, rstest};
 
-    #[test]
-    fn make_env() {
+    #[rstest]
+    fn make_env(mut env: Env) {
         let env = new_env();
         assert_eq!(env.message(), "");
     }
 
-    #[test]
-    fn default_values() {
-        let mut env = setup();
-
+    #[rstest]
+    fn default_values(mut env: Env) {
         let value = env.get("TEST__", String::from("default"), false);
         assert_eq!(value, "default");
         assert_eq!(env.message(), "\tTEST__ = default (default)\n");
     }
 
-    #[test]
-    fn masked_values() {
-        let mut env = setup();
-
+    #[rstest]
+    fn masked_values(mut env: Env) {
         std::env::set_var("TEST", "123");
 
         let value = env.get("TEST", String::from("default"), true);
@@ -107,7 +124,19 @@ mod tests {
         assert_eq!(env.message(), "\tTEST = *** \n");
     }
 
-    fn setup() -> Env {
+    #[rstest]
+    fn test_matches(mut env: Env) {
+        std::env::set_var("RS_BUCKET_TEST_QUOTA_TYPE", "test");
+        std::env::set_var("RS_BUCKET_TEST2_QUOTA_TYPE", "test2");
+
+        let matches = env.matches::<String>("RS_BUCKET_(.+)_QUOTA_TYPE", false);
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches.get("TEST").unwrap(), "test");
+        assert_eq!(matches.get("TEST2").unwrap(), "test2");
+    }
+
+    #[fixture]
+    fn env() -> Env {
         std::env::remove_var("TEST");
         Env::new()
     }

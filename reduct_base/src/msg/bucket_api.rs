@@ -1,3 +1,5 @@
+use std::fmt::Display;
+use std::str::FromStr;
 // Copyright 2023 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -22,6 +24,27 @@ impl From<i32> for QuotaType {
             0 => QuotaType::NONE,
             1 => QuotaType::FIFO,
             _ => QuotaType::NONE,
+        }
+    }
+}
+
+impl FromStr for QuotaType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "NONE" => Ok(QuotaType::NONE),
+            "FIFO" => Ok(QuotaType::FIFO),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for QuotaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QuotaType::NONE => write!(f, "NONE"),
+            QuotaType::FIFO => write!(f, "FIFO"),
         }
     }
 }
