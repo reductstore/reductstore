@@ -66,6 +66,7 @@ async fn main() {
     } else {
         "https"
     };
+
     info!(
         "Run HTTP reductstore on {}://{}:{}{}",
         scheme, cfg.host, cfg.port, cfg.api_base_path

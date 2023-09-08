@@ -13,7 +13,7 @@
 use crate::core::env::Env;
 use log::{log, warn};
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
-use reduct_base::msg::token_api::Permissions;
+use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -37,71 +37,103 @@ pub struct Bucket {
     pub settings: BucketSettings,
 }
 
-/// Provisioned token
-pub struct Token {
-    pub name: String,
-    pub permissions: Permissions,
-}
-
 impl Cfg {
     pub fn from_env(env: &mut Env) -> Self {
         let mut cfg = Cfg {
-            log_level: env.get("RS_LOG_LEVEL", "INFO".to_string(), false),
-            host: env.get("RS_HOST", "0.0.0.0".to_string(), false),
-            port: env.get("RS_PORT", 8383, false),
-            api_base_path: env.get("RS_API_BASE_PATH", "/".to_string(), false),
-            data_path: env.get("RS_DATA_PATH", "/data".to_string(), false),
-            api_token: env.get("RS_API_TOKEN", "".to_string(), true),
-            cert_path: env.get("RS_CERT_PATH", "".to_string(), true),
-            cert_key_path: env.get("RS_CERT_KEY_PATH", "".to_string(), true),
-            buckets: HashMap::new(),
-            tokens: HashMap::new(),
+            log_level: env.get("RS_LOG_LEVEL", "INFO".to_string()),
+            host: env.get("RS_HOST", "0.0.0.0".to_string()),
+            port: env.get("RS_PORT", 8383),
+            api_base_path: env.get("RS_API_BASE_PATH", "/".to_string()),
+            data_path: env.get("RS_DATA_PATH", "/data".to_string()),
+            api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
+            cert_path: env.get_masked("RS_CERT_PATH", "".to_string()),
+            cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
+            buckets: Self::parse_buckets(env),
+            tokens: Self::parse_tokens(env),
         };
 
+        cfg
+    }
+
+    fn parse_buckets(env: &mut Env) -> HashMap<String, Bucket> {
         let mut buckets = HashMap::<String, (String, BucketSettings)>::new();
-        for (id, name) in env.matches("RS_BUCKET_(.*)_NAME", false) {
+        for (id, name) in env.matches("RS_BUCKET_(.*)_NAME") {
             buckets.insert(id, (name, BucketSettings::default()));
         }
 
-        macro_rules! parse_settings {
-            ($resource:literal, $name:ident, $buckets:ident, $key:literal, $type:ty) => {
-                for (id, value) in
-                    env.matches::<String>(&format!("RS_{}_(.*)_{}", $resource, $key), false)
-                {
-                    if let Some(bucket) = $buckets.get_mut(&id) {
-                        let (name, settings) = bucket;
-                        if let Ok($name) = <$type>::from_str(&value) {
-                            settings.$name = Some($name);
-                        } else {
-                            warn!("Invalid {} {} for {} '{}'", $key, value, $resource, name);
-                        }
-                    } else {
-                        warn!(
-                            "No name found for provision RS_{}_{}_{}: ignored",
-                            $resource, id, $key
-                        );
-                    }
-                }
+        for bucket in buckets.values_mut() {
+            bucket.1.quota_type = env.get_optional(&format!("RS_BUCKET_{}_QUOTA_TYPE", bucket.0));
+            bucket.1.quota_size = env.get_optional(&format!("RS_BUCKET_{}_QUOTA_SIZE", bucket.0));
+            bucket.1.max_block_size =
+                env.get_optional(&format!("RS_BUCKET_{}_MAX_BLOCK_SIZE", bucket.0));
+            bucket.1.max_block_records =
+                env.get_optional(&format!("RS_BUCKET_{}_MAX_BLOCK_RECORDS", bucket.0));
+        }
+        // parse_settings!("BUCKET", quota_type, bucket, "QUOTA_TYPE", QuotaType);
+        // parse_settings!("BUCKET", quota_size, bucket, "QUOTA_SIZE", u64);
+        // parse_settings!("BUCKET", max_block_size, bucket, "MAX_BLOCK_SIZE", u64);
+        // parse_settings!(
+        //     "BUCKET",
+        //     max_block_records,
+        //     buckets,
+        //     "MAX_BLOCK_RECORDS",
+        //     u64
+        // );
+
+        buckets
+            .into_iter()
+            .map(|(id, (name, settings))| (id, Bucket { name, settings }))
+            .collect()
+    }
+
+    fn parse_tokens(env: &mut Env) -> HashMap<String, Token> {
+        let mut tokens = HashMap::<String, Token>::new();
+        for (id, name) in env.matches("RS_TOKEN_(.*)_NAME") {
+            let token = Token {
+                name,
+                created_at: chrono::Utc::now(),
+                ..Token::default()
             };
+            tokens.insert(id, token);
         }
 
-        parse_settings!("BUCKET", quota_type, buckets, "QUOTA_TYPE", QuotaType);
-        parse_settings!("BUCKET", quota_size, buckets, "QUOTA_SIZE", u64);
-        parse_settings!("BUCKET", max_block_size, buckets, "MAX_BLOCK_SIZE", u64);
-        parse_settings!(
-            "BUCKET",
-            max_block_records,
-            buckets,
-            "MAX_BLOCK_RECORDS",
-            u64
-        );
+        for (id, token) in &mut tokens {
+            token.value =
+                env.get_masked::<String>(&format!("RS_TOKEN_{}_VALUE", id), "".to_string());
+        }
 
-        // let mut tokens = HashMap::<String, (String, Permissions)>::new();
-        // for (id, name) in env.matches("RS_TOKEN_(.*)_NAME", false) {
-        //     tokens.insert(id, (name, Permissions::default()));
-        // }
-        //
-        // parse_settings!("TOKEN", full_access, tokens, "FULL_ACCESS", bool);
-        cfg
+        tokens.retain(|_, token| {
+            if token.value.is_empty() {
+                warn!("Token '{}' has no value. Drop it.", token.name);
+                false
+            } else {
+                true
+            }
+        });
+
+        let mut parse_list_env = |env: &mut Env, name: String| -> Vec<String> {
+            env.get_optional::<String>(&name)
+                .unwrap_or_default()
+                .split(",")
+                .map(|s| s.to_string())
+                .collect()
+        };
+
+        // Parse permissions
+        for (id, token) in &mut tokens {
+            let read = parse_list_env(env, format!("RS_TOKEN_{}_READ", id));
+            let write = parse_list_env(env, format!("RS_TOKEN_{}_WRITE", id));
+            let permissions = Permissions {
+                full_access: env
+                    .get_optional(&format!("RS_TOKEN_{}_FULL_ACCESS", id))
+                    .unwrap_or_default(),
+                read,
+                write,
+            };
+
+            token.permissions = Some(permissions);
+        }
+
+        tokens
     }
 }

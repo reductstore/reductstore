@@ -16,6 +16,10 @@ pub fn new_env() -> Box<Env> {
     Box::new(Env::new())
 }
 
+pub trait EnvValue: FromStr + Display + Default + PartialEq {}
+
+impl<T: FromStr + Display + Default + PartialEq> EnvValue for T {}
+
 impl Env {
     /// Create a new environment.
     pub fn new() -> Env {
@@ -35,12 +39,45 @@ impl Env {
     /// # Returns
     ///
     /// The value of the environment variable.
-    pub fn get<T: FromStr + Display + Default + PartialEq>(
-        &mut self,
-        key: &str,
-        default_value: T,
-        masked: bool,
-    ) -> T {
+    pub(crate) fn get<T: EnvValue>(&mut self, key: &str, default_value: T) -> T {
+        self.get_impl(key, default_value, false)
+    }
+
+    /// Get a value from the environment.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key to get.
+    /// * `default_value` - The default value to return if the key is not found.
+    ///
+    /// # Returns
+    ///
+    /// The value of the environment variable.
+    pub(crate) fn get_masked<T: EnvValue>(&mut self, key: &str, default_value: T) -> T {
+        self.get_impl(key, default_value, true)
+    }
+
+    /// Get a value from the environment. without default value
+    pub(crate) fn get_optional<T: EnvValue>(&mut self, key: &str) -> Option<T> {
+        let mut additional = String::new();
+        let value: T = match std::env::var(key) {
+            Ok(value) => match value.parse() {
+                Ok(value) => value,
+                Err(_) => {
+                    return None;
+                }
+            },
+            Err(_) => {
+                return None;
+            }
+        };
+
+        self.message
+            .push_str(&format!("\t{} = {} {}\n", key, value, additional));
+        return Some(value);
+    }
+
+    fn get_impl<T: EnvValue>(&mut self, key: &str, default_value: T, masked: bool) -> T {
         let mut additional = String::new();
         let value: T = match std::env::var(key) {
             Ok(value) => match value.parse() {
@@ -76,7 +113,6 @@ impl Env {
     pub fn matches<T: FromStr + Display + Default + PartialEq>(
         &mut self,
         pattern: &str,
-        masked: bool,
     ) -> BTreeMap<String, T> {
         let mut matches = BTreeMap::new();
         let pattern = Regex::new(pattern).unwrap();
@@ -84,7 +120,7 @@ impl Env {
             if let Some(result) = pattern.captures(&key) {
                 matches.insert(
                     result.get(1).unwrap().as_str().to_string(),
-                    self.get(&key, T::default(), masked),
+                    self.get(&key, T::default()),
                 );
             }
         }
@@ -110,7 +146,7 @@ mod tests {
 
     #[rstest]
     fn default_values(mut env: Env) {
-        let value = env.get("TEST__", String::from("default"), false);
+        let value = env.get("TEST__", String::from("default"));
         assert_eq!(value, "default");
         assert_eq!(env.message(), "\tTEST__ = default (default)\n");
     }
@@ -119,7 +155,7 @@ mod tests {
     fn masked_values(mut env: Env) {
         std::env::set_var("TEST", "123");
 
-        let value = env.get("TEST", String::from("default"), true);
+        let value = env.get_masked("TEST", String::from("default"));
         assert_eq!(value, "123");
         assert_eq!(env.message(), "\tTEST = *** \n");
     }
@@ -129,7 +165,7 @@ mod tests {
         std::env::set_var("RS_BUCKET_TEST_QUOTA_TYPE", "test");
         std::env::set_var("RS_BUCKET_TEST2_QUOTA_TYPE", "test2");
 
-        let matches = env.matches::<String>("RS_BUCKET_(.+)_QUOTA_TYPE", false);
+        let matches = env.matches::<String>("RS_BUCKET_(.+)_QUOTA_TYPE");
         assert_eq!(matches.len(), 2);
         assert_eq!(matches.get("TEST").unwrap(), "test");
         assert_eq!(matches.get("TEST2").unwrap(), "test2");
