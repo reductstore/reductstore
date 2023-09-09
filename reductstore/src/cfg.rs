@@ -6,18 +6,18 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::create_token_repository;
 use crate::core::env::Env;
 use crate::http_frontend::Componentes;
-use crate::storage::bucket::Bucket;
+
 use crate::storage::storage::Storage;
 use bytesize::ByteSize;
-use futures_util::future::err;
-use log::{error, info, log, warn};
-use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
+
+use log::{error, info, warn};
+use reduct_base::error::ErrorCode;
+use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter, Pointer};
+use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
-use std::str::FromStr;
+
 use tokio::sync::RwLock;
 
 /// Database configuration
@@ -39,7 +39,7 @@ pub struct Cfg {
 impl Cfg {
     pub fn from_env() -> Self {
         let mut env = Env::new();
-        let mut cfg = Cfg {
+        let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", "INFO".to_string()),
             host: env.get("RS_HOST", "0.0.0.0".to_string()),
             port: env.get("RS_PORT", 8383),
@@ -85,7 +85,7 @@ impl Cfg {
                 }
             };
 
-            if let (Ok(permissions)) = permissions {
+            if let Ok(permissions) = permissions {
                 info!("Provisioned token '{}' with {:?}", token.name, permissions);
             } else {
                 error!(
@@ -106,14 +106,14 @@ impl Cfg {
     }
 
     async fn provision_storage(&self) -> RwLock<Storage> {
-        let mut storage = RwLock::new(Storage::new(PathBuf::from(self.data_path.clone())));
+        let storage = RwLock::new(Storage::new(PathBuf::from(self.data_path.clone())));
         for (name, settings) in &self.buckets {
             let mut storage = storage.write().await;
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => Ok(bucket.settings().clone()),
                 Err(e) => {
                     if e.status() == ErrorCode::Conflict {
-                        let mut bucket = storage.get_mut_bucket(&name).unwrap();
+                        let bucket = storage.get_mut_bucket(&name).unwrap();
                         bucket.set_settings(settings.clone()).unwrap();
                         Ok(bucket.settings().clone())
                     } else {
@@ -122,7 +122,7 @@ impl Cfg {
                 }
             };
 
-            if let (Ok(settings)) = settings {
+            if let Ok(settings) = settings {
                 info!("Provisioned bucket '{}' with: {:?}", name, settings);
             } else {
                 error!(
@@ -157,7 +157,7 @@ impl Cfg {
 
         buckets
             .into_iter()
-            .map(|(id, (name, settings))| (name, settings))
+            .map(|(_id, (name, settings))| (name, settings))
             .collect()
     }
 
@@ -186,7 +186,7 @@ impl Cfg {
             }
         });
 
-        let mut parse_list_env = |env: &mut Env, name: String| -> Vec<String> {
+        let parse_list_env = |env: &mut Env, name: String| -> Vec<String> {
             env.get_optional::<String>(&name)
                 .unwrap_or_default()
                 .split(",")

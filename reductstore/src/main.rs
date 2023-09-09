@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
 
 use axum_server::tls_rustls::RustlsConfig;
 
@@ -10,16 +9,11 @@ use axum_server::Handle;
 use log::info;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
-use reductstore::asset::asset_manager::ZipAssetManager;
-use reductstore::auth::token_auth::TokenAuthorization;
-use reductstore::auth::token_repository::create_token_repository;
 use reductstore::cfg::Cfg;
-use reductstore::core::env::Env;
+
 use reductstore::core::logger::Logger;
-use reductstore::http_frontend::{create_axum_app, Componentes};
-use reductstore::storage::storage::Storage;
+use reductstore::http_frontend::create_axum_app;
 
 #[tokio::main]
 async fn main() {

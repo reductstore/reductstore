@@ -147,7 +147,7 @@ mod tests {
     use rstest::{fixture, rstest};
 
     #[rstest]
-    fn make_env(mut env: Env) {
+    fn make_env(_env: Env) {
         let env = new_env();
         assert_eq!(env.message(), "");
     }
