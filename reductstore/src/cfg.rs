@@ -1,21 +1,24 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-/*
- let host = env.get::<String>("RS_HOST", "0.0.0.0".to_string(), false);
-   let port = env.get::<i32>("RS_PORT", 8383, false);
-   let api_base_path = env.get::<String>("RS_API_BASE_PATH", "/".to_string(), false);
-   let data_path = env.get::<String>("RS_DATA_PATH", "/data".to_string(), false);
-   let api_token = env.get::<String>("RS_API_TOKEN", "".to_string(), true);
-   let cert_path = env.get::<String>("RS_CERT_PATH", "".to_string(), true);
-   let cert_key_path = env.get::<String>("RS_CERT_KEY_PATH", "".to_string(), true);
-*/
+use crate::asset::asset_manager::ZipAssetManager;
+use crate::auth::token_auth::TokenAuthorization;
+use crate::auth::token_repository::create_token_repository;
 use crate::core::env::Env;
-use log::{log, warn};
+use crate::http_frontend::Componentes;
+use crate::storage::bucket::Bucket;
+use crate::storage::storage::Storage;
+use bytesize::ByteSize;
+use futures_util::future::err;
+use log::{error, info, log, warn};
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter, Pointer};
+use std::path::PathBuf;
 use std::str::FromStr;
+use tokio::sync::RwLock;
 
 /// Database configuration
 pub struct Cfg {
@@ -27,18 +30,15 @@ pub struct Cfg {
     pub api_token: String,
     pub cert_path: String,
     pub cert_key_path: String,
-    pub buckets: HashMap<String, Bucket>,
+    pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
-}
 
-/// Provisioned bucket
-pub struct Bucket {
-    pub name: String,
-    pub settings: BucketSettings,
+    env: Env,
 }
 
 impl Cfg {
-    pub fn from_env(env: &mut Env) -> Self {
+    pub fn from_env() -> Self {
+        let mut env = Env::new();
         let mut cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", "INFO".to_string()),
             host: env.get("RS_HOST", "0.0.0.0".to_string()),
@@ -48,41 +48,116 @@ impl Cfg {
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
             cert_path: env.get_masked("RS_CERT_PATH", "".to_string()),
             cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
-            buckets: Self::parse_buckets(env),
-            tokens: Self::parse_tokens(env),
+            buckets: Self::parse_buckets(&mut env),
+            tokens: Self::parse_tokens(&mut env),
+
+            env,
         };
 
         cfg
     }
 
-    fn parse_buckets(env: &mut Env) -> HashMap<String, Bucket> {
+    pub async fn build(&self) -> Componentes {
+        let storage = self.provision_storage().await;
+        let token_repo = RwLock::new(create_token_repository(
+            PathBuf::from(self.data_path.clone()),
+            &self.api_token,
+        ));
+
+        for (name, token) in &self.tokens {
+            let mut token_repo = token_repo.write().await;
+            let permissions = match token_repo
+                .generate_token(&name, token.permissions.clone().unwrap_or_default())
+            {
+                Ok(_) => {
+                    // replace the generated token
+                    token_repo.get_mut_token(&name).unwrap().clone_from(token);
+                    Ok(token.permissions.clone().unwrap_or_default())
+                }
+                Err(e) => {
+                    if e.status() == ErrorCode::Conflict {
+                        // replace the existing token
+                        token_repo.get_mut_token(&name).unwrap().clone_from(token);
+                        Ok(token.permissions.clone().unwrap_or_default())
+                    } else {
+                        Err(e)
+                    }
+                }
+            };
+
+            if let (Ok(permissions)) = permissions {
+                info!("Provisioned token '{}' with {:?}", token.name, permissions);
+            } else {
+                error!(
+                    "Failed to provision token '{}': {}",
+                    name,
+                    permissions.err().unwrap()
+                );
+            }
+        }
+
+        Componentes {
+            storage,
+            token_repo,
+            auth: TokenAuthorization::new(&self.api_token),
+            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            base_path: self.api_base_path.clone(),
+        }
+    }
+
+    async fn provision_storage(&self) -> RwLock<Storage> {
+        let mut storage = RwLock::new(Storage::new(PathBuf::from(self.data_path.clone())));
+        for (name, settings) in &self.buckets {
+            let mut storage = storage.write().await;
+            let settings = match storage.create_bucket(&name, settings.clone()) {
+                Ok(bucket) => Ok(bucket.settings().clone()),
+                Err(e) => {
+                    if e.status() == ErrorCode::Conflict {
+                        let mut bucket = storage.get_mut_bucket(&name).unwrap();
+                        bucket.set_settings(settings.clone()).unwrap();
+                        Ok(bucket.settings().clone())
+                    } else {
+                        Err(e)
+                    }
+                }
+            };
+
+            if let (Ok(settings)) = settings {
+                info!("Provisioned bucket '{}' with: {:?}", name, settings);
+            } else {
+                error!(
+                    "Failed to provision bucket '{}': {}",
+                    name,
+                    settings.err().unwrap()
+                );
+            }
+        }
+        storage
+    }
+
+    fn parse_buckets(env: &mut Env) -> HashMap<String, BucketSettings> {
         let mut buckets = HashMap::<String, (String, BucketSettings)>::new();
         for (id, name) in env.matches("RS_BUCKET_(.*)_NAME") {
             buckets.insert(id, (name, BucketSettings::default()));
         }
 
-        for bucket in buckets.values_mut() {
-            bucket.1.quota_type = env.get_optional(&format!("RS_BUCKET_{}_QUOTA_TYPE", bucket.0));
-            bucket.1.quota_size = env.get_optional(&format!("RS_BUCKET_{}_QUOTA_SIZE", bucket.0));
-            bucket.1.max_block_size =
-                env.get_optional(&format!("RS_BUCKET_{}_MAX_BLOCK_SIZE", bucket.0));
-            bucket.1.max_block_records =
-                env.get_optional(&format!("RS_BUCKET_{}_MAX_BLOCK_RECORDS", bucket.0));
+        for (id, bucket) in &mut buckets {
+            let mut settings = &mut bucket.1;
+            settings.quota_type = env.get_optional(&format!("RS_BUCKET_{}_QUOTA_TYPE", id));
+
+            settings.quota_size = env
+                .get_optional::<ByteSize>(&format!("RS_BUCKET_{}_QUOTA_SIZE", id))
+                .map(|s| s.as_u64());
+            settings.max_block_size = env
+                .get_optional::<ByteSize>(&format!("RS_BUCKET_{}_MAX_BLOCK_SIZE", id))
+                .map(|s| s.as_u64());
+            settings.max_block_records =
+                env.get_optional(&format!("RS_BUCKET_{}_MAX_BLOCK_RECORDS", id));
         }
-        // parse_settings!("BUCKET", quota_type, bucket, "QUOTA_TYPE", QuotaType);
-        // parse_settings!("BUCKET", quota_size, bucket, "QUOTA_SIZE", u64);
-        // parse_settings!("BUCKET", max_block_size, bucket, "MAX_BLOCK_SIZE", u64);
-        // parse_settings!(
-        //     "BUCKET",
-        //     max_block_records,
-        //     buckets,
-        //     "MAX_BLOCK_RECORDS",
-        //     u64
-        // );
 
         buckets
             .into_iter()
-            .map(|(id, (name, settings))| (id, Bucket { name, settings }))
+            .map(|(id, (name, settings))| (name, settings))
             .collect()
     }
 
@@ -135,5 +210,11 @@ impl Cfg {
         }
 
         tokens
+    }
+}
+
+impl Display for Cfg {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.env.message())
     }
 }

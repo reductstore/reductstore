@@ -32,7 +32,7 @@ pub trait ManageTokens {
     /// # Returns
     ///
     /// token value and creation time
-    fn create_token(
+    fn generate_token(
         &mut self,
         name: &str,
         permissions: Permissions,
@@ -46,7 +46,7 @@ pub trait ManageTokens {
     /// `permissions` - The permissions of the token
     fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), ReductError>;
 
-    /// Find a token by name
+    /// Get a token by name
     ///
     /// # Arguments
     ///
@@ -54,7 +54,17 @@ pub trait ManageTokens {
     ///
     /// # Returns
     /// The token without value
-    fn find_by_name(&self, name: &str) -> Result<Token, ReductError>;
+    fn get_token(&self, name: &str) -> Result<&Token, ReductError>;
+
+    /// Get a token by name (mutable)
+    ///
+    /// # Arguments
+    ///
+    /// `name` - The name of the token
+    ///
+    /// # Returns
+    /// The token without value
+    fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError>;
 
     /// Get token list
     ///
@@ -255,7 +265,7 @@ impl TokenRepository {
 }
 
 impl ManageTokens for TokenRepository {
-    fn create_token(
+    fn generate_token(
         &mut self,
         name: &str,
         permissions: Permissions,
@@ -313,14 +323,18 @@ impl ManageTokens for TokenRepository {
         }
     }
 
-    fn find_by_name(&self, name: &str) -> Result<Token, ReductError> {
+    fn get_token(&self, name: &str) -> Result<&Token, ReductError> {
         match self.repo.get(name) {
-            Some(token) => Ok(Token {
-                name: token.name.clone(),
-                value: "".to_string(),
-                created_at: token.created_at.clone(),
-                permissions: token.permissions.clone(),
-            }),
+            Some(token) => Ok(token),
+            None => Err(ReductError::not_found(
+                format!("Token '{}' doesn't exist", name).as_str(),
+            )),
+        }
+    }
+
+    fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
+        match self.repo.get_mut(name) {
+            Some(token) => Ok(token),
             None => Err(ReductError::not_found(
                 format!("Token '{}' doesn't exist", name).as_str(),
             )),
@@ -394,7 +408,7 @@ impl NoAuthRepository {
 }
 
 impl ManageTokens for NoAuthRepository {
-    fn create_token(
+    fn generate_token(
         &mut self,
         _name: &str,
         _permissions: Permissions,
@@ -406,7 +420,11 @@ impl ManageTokens for NoAuthRepository {
         Err(ReductError::bad_request("Authentication is disabled"))
     }
 
-    fn find_by_name(&self, _name: &str) -> Result<Token, ReductError> {
+    fn get_token(&self, _name: &str) -> Result<&Token, ReductError> {
+        Err(ReductError::bad_request("Authentication is disabled"))
+    }
+
+    fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
         Err(ReductError::bad_request("Authentication is disabled"))
     }
 
@@ -475,7 +493,7 @@ mod tests {
     #[test]
     pub fn test_create_empty_token() {
         let mut repo = setup("init-token");
-        let token = repo.create_token(
+        let token = repo.generate_token(
             "",
             Permissions {
                 full_access: true,
@@ -495,7 +513,7 @@ mod tests {
     #[test]
     pub fn test_create_existing_token() {
         let mut repo = setup("init-token");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -505,7 +523,7 @@ mod tests {
         )
         .unwrap();
 
-        let token = repo.create_token(
+        let token = repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -524,7 +542,7 @@ mod tests {
     pub fn test_create_token() {
         let mut repo = setup("init-token");
         let token = repo
-            .create_token(
+            .generate_token(
                 "test",
                 Permissions {
                     full_access: true,
@@ -543,7 +561,7 @@ mod tests {
     pub fn test_create_token_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut repo = TokenRepository::new(path.clone(), "test");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -560,7 +578,7 @@ mod tests {
     #[test]
     pub fn test_create_token_no_init_token() {
         let mut repo = setup("");
-        let token = repo.create_token(
+        let token = repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -581,7 +599,7 @@ mod tests {
     #[test]
     pub fn test_update_token_ok() {
         let mut repo = setup("init-token");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -604,7 +622,7 @@ mod tests {
 
         assert_eq!(token, ());
 
-        let token = repo.find_by_name("test").unwrap();
+        let token = repo.get_token("test").unwrap().clone();
 
         assert_eq!(token.name, "test");
 
@@ -635,7 +653,7 @@ mod tests {
     pub fn test_update_token_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut repo = TokenRepository::new(path.clone(), "test");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -656,7 +674,7 @@ mod tests {
         .unwrap();
 
         let repo = TokenRepository::new(path.clone(), "test");
-        let token = repo.find_by_name("test").unwrap();
+        let token = repo.get_token("test").unwrap().clone();
 
         assert_eq!(token.name, "test");
 
@@ -689,7 +707,7 @@ mod tests {
     #[test]
     pub fn test_find_by_name() {
         let mut repo = setup("init-token");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -699,7 +717,7 @@ mod tests {
         )
         .unwrap();
 
-        let token = repo.find_by_name("test").unwrap();
+        let token = repo.get_token("test").unwrap();
 
         assert_eq!(token.name, "test");
         assert_eq!(token.value, "");
@@ -708,7 +726,7 @@ mod tests {
     #[test]
     pub fn test_find_by_name_not_found() {
         let repo = setup("init-token");
-        let token = repo.find_by_name("test");
+        let token = repo.get_token("test");
 
         assert_eq!(
             token,
@@ -719,7 +737,7 @@ mod tests {
     #[test]
     pub fn test_find_by_name_no_init_token() {
         let repo = setup("");
-        let token = repo.find_by_name("test");
+        let token = repo.get_token("test");
 
         assert_eq!(
             token,
@@ -733,7 +751,7 @@ mod tests {
     #[test]
     pub fn test_get_token_list() {
         let mut repo = setup("init-token");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -766,7 +784,7 @@ mod tests {
     pub fn test_validate_token() {
         let mut repo = setup("init-token");
         let value = repo
-            .create_token(
+            .generate_token(
                 "test",
                 Permissions {
                     full_access: true,
@@ -820,7 +838,7 @@ mod tests {
     #[test]
     pub fn test_remove_token() {
         let mut repo = setup("init-token");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -861,7 +879,7 @@ mod tests {
     pub fn test_remove_token_persistent() {
         let path = tempdir().unwrap().into_path();
         let mut repo = TokenRepository::new(path.clone(), "test");
-        repo.create_token(
+        repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
@@ -874,7 +892,7 @@ mod tests {
         repo.remove_token("test").unwrap();
 
         let repo = TokenRepository::new(path.clone(), "test");
-        let token = repo.find_by_name("test");
+        let token = repo.get_token("test");
 
         assert_eq!(
             token,

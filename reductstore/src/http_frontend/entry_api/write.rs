@@ -3,7 +3,7 @@
 
 use crate::auth::policy::WriteAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{ErrorCode, HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, ErrorCode, HttpError};
 use crate::storage::entry::Labels;
 use crate::storage::writer::Chunk;
 use axum::extract::{BodyStream, Path, Query, State};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 // POST /:bucket/:entry?ts=<number>
 pub async fn write_record(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -147,7 +147,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
@@ -183,7 +183,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bucket_not_found(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         headers: HeaderMap,
         #[future] empty_body: BodyStream,
     ) {
@@ -214,7 +214,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bad_ts(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,

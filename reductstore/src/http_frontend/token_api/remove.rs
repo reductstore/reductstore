@@ -3,14 +3,14 @@
 
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // DELETE /tokens/:name
 pub async fn remove_token(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
@@ -33,14 +33,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_token(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_remove_token(components: Arc<Componentes>, headers: HeaderMap) {
         let token = remove_token(State(components), Path("test".to_string()), headers).await;
         assert!(token.is_ok());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_token_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_remove_token_not_found(components: Arc<Componentes>, headers: HeaderMap) {
         let err = remove_token(State(components), Path("not-found".to_string()), headers)
             .await
             .err()

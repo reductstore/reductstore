@@ -18,7 +18,7 @@ use reductstore::auth::token_repository::create_token_repository;
 use reductstore::cfg::Cfg;
 use reductstore::core::env::Env;
 use reductstore::core::logger::Logger;
-use reductstore::http_frontend::{create_axum_app, HttpServerState};
+use reductstore::http_frontend::{create_axum_app, Componentes};
 use reductstore::storage::storage::Storage;
 
 #[tokio::main]
@@ -44,22 +44,12 @@ async fn main() {
         git_ref
     );
 
-    let mut env = Env::new();
-    let cfg = Cfg::from_env(&mut env);
+    let cfg = Cfg::from_env();
     Logger::init(&cfg.log_level);
 
-    info!("Configuration: \n {}", env.message());
+    info!("Configuration: \n {}", cfg);
 
-    let components = HttpServerState {
-        storage: RwLock::new(Storage::new(PathBuf::from(cfg.data_path.clone()))),
-        auth: TokenAuthorization::new(&cfg.api_token),
-        token_repo: RwLock::new(create_token_repository(
-            PathBuf::from(cfg.data_path),
-            &cfg.api_token,
-        )),
-        console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
-        base_path: cfg.api_base_path.clone(),
-    };
+    let components = cfg.build().await;
 
     let scheme = if cfg.cert_path.is_empty() {
         "http"

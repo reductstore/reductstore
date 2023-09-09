@@ -4,14 +4,14 @@
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::token_api::TokenAxum;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /tokens/:token_name
 pub async fn get_token(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<TokenAxum, HttpError> {
@@ -22,7 +22,8 @@ pub async fn get_token(
             .token_repo
             .read()
             .await
-            .find_by_name(&token_name)?,
+            .get_token(&token_name)?
+            .clone(),
     ))
 }
 
@@ -37,7 +38,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_get_token(components: Arc<Componentes>, headers: HeaderMap) {
         let token = get_token(State(components), Path("test".to_string()), headers)
             .await
             .unwrap()
@@ -47,7 +48,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_get_token_not_found(components: Arc<Componentes>, headers: HeaderMap) {
         let err = get_token(State(components), Path("not-found".to_string()), headers)
             .await
             .err()

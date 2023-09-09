@@ -3,7 +3,7 @@
 
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // DELETE /b/:bucket_name
 pub async fn remove_bucket(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
@@ -34,7 +34,7 @@ pub async fn remove_bucket(
 mod tests {
     use super::*;
 
-    use crate::http_frontend::HttpServerState;
+    use crate::http_frontend::Componentes;
 
     use crate::http_frontend::tests::{components, headers};
 
@@ -45,7 +45,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_remove_bucket(components: Arc<Componentes>, headers: HeaderMap) {
         remove_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();
@@ -53,7 +53,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_remove_bucket_not_found(components: Arc<Componentes>, headers: HeaderMap) {
         let err = remove_bucket(State(components), Path("not-found".to_string()), headers)
             .await
             .err()
@@ -66,16 +66,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_from_permission(
-        components: Arc<HttpServerState>,
-        headers: HeaderMap,
-    ) {
+    async fn test_remove_bucket_from_permission(components: Arc<Componentes>, headers: HeaderMap) {
         let token = components
             .token_repo
             .read()
             .await
-            .find_by_name("test")
-            .unwrap();
+            .get_token("test")
+            .unwrap()
+            .clone();
         assert_eq!(
             token.permissions.unwrap().read,
             vec!["bucket-1".to_string(), "bucket-2".to_string()]
@@ -93,8 +91,9 @@ mod tests {
             .token_repo
             .read()
             .await
-            .find_by_name("test")
-            .unwrap();
+            .get_token("test")
+            .unwrap()
+            .clone();
         assert_eq!(
             token.permissions.unwrap().read,
             vec!["bucket-2".to_string()]

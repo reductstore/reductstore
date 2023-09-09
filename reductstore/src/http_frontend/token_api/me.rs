@@ -4,7 +4,7 @@
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::token_api::TokenAxum;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 
 use axum::extract::State;
 use axum::headers::HeaderMap;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // // GET /me
 pub async fn me(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     headers: HeaderMap,
 ) -> Result<TokenAxum, HttpError> {
     check_permissions(&components, headers.clone(), AuthenticatedPolicy {}).await?;
@@ -34,7 +34,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_me(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_me(components: Arc<Componentes>, headers: HeaderMap) {
         let token = me(State(components), headers).await.unwrap().0;
         assert_eq!(token.name, "init-token");
     }

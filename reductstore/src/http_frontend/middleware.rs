@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 use log::{debug, error};
 
 use crate::auth::policy::Policy;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 
 pub async fn default_headers<B>(
     request: Request<B>,
@@ -55,7 +55,7 @@ pub async fn print_statuses<B>(
 }
 
 pub async fn check_permissions<P>(
-    components: &HttpServerState,
+    components: &Componentes,
     headers: HeaderMap,
     policy: P,
 ) -> Result<(), HttpError>

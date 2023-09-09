@@ -60,21 +60,29 @@ impl Env {
     /// Get a value from the environment. without default value
     pub(crate) fn get_optional<T: EnvValue>(&mut self, key: &str) -> Option<T> {
         let mut additional = String::new();
-        let value: T = match std::env::var(key) {
-            Ok(value) => match value.parse() {
-                Ok(value) => value,
+        let value = match std::env::var(key) {
+            Ok(value) => match T::from_str(&value) {
+                Ok(value) => Ok(value),
                 Err(_) => {
-                    return None;
+                    additional.push_str("(invalid)");
+                    Err(value)
                 }
             },
-            Err(_) => {
-                return None;
-            }
+            Err(_) => Err(String::new()),
         };
 
-        self.message
-            .push_str(&format!("\t{} = {} {}\n", key, value, additional));
-        return Some(value);
+        let print_value = match &value {
+            Ok(value) => value.to_string(),
+            Err(e) => e.clone(),
+        };
+
+        if !print_value.is_empty() {
+            // Add to the message
+            self.message
+                .push_str(&format!("\t{} = {} {}\n", key, print_value, additional));
+        }
+
+        value.ok()
     }
 
     fn get_impl<T: EnvValue>(&mut self, key: &str, default_value: T, masked: bool) -> T {

@@ -4,7 +4,7 @@
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
 use crate::http_frontend::token_api::{PermissionsAxum, TokenCreateResponseAxum};
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // POST /tokens/:token_name
 pub async fn create_token(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
     permissions: PermissionsAxum,
@@ -24,7 +24,7 @@ pub async fn create_token(
             .token_repo
             .write()
             .await
-            .create_token(&token_name, permissions.into())?,
+            .generate_token(&token_name, permissions.into())?,
     ))
 }
 
@@ -40,7 +40,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_create_token(components: Arc<Componentes>, headers: HeaderMap) {
         let token = create_token(
             State(components),
             Path("new-token".to_string()),
@@ -55,10 +55,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token_already_exists(
-        components: Arc<HttpServerState>,
-        headers: HeaderMap,
-    ) {
+    async fn test_create_token_already_exists(components: Arc<Componentes>, headers: HeaderMap) {
         let err = create_token(
             State(components),
             Path("test".to_string()),
