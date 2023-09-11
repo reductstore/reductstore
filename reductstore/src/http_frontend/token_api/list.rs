@@ -40,6 +40,8 @@ mod tests {
         let list = list_tokens(State(components), headers).await.unwrap().0;
         assert_eq!(list.tokens.len(), 2);
         assert_eq!(list.tokens[0].name, "init-token");
+        assert!(list.tokens[0].value.is_empty(), "Token value MUST be empty");
         assert_eq!(list.tokens[1].name, "test");
+        assert!(list.tokens[1].value.is_empty(), "Token value MUST be empty");
     }
 }

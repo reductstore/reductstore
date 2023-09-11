@@ -17,14 +17,14 @@ pub async fn get_token(
 ) -> Result<TokenAxum, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
 
-    Ok(TokenAxum::from(
-        components
-            .token_repo
-            .read()
-            .await
-            .get_token(&token_name)?
-            .clone(),
-    ))
+    let mut token = components
+        .token_repo
+        .read()
+        .await
+        .get_token(&token_name)?
+        .clone();
+    token.value.clear();
+    Ok(TokenAxum::from(token))
 }
 
 #[cfg(test)]
@@ -44,6 +44,7 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(token.name, "test");
+        assert!(token.value.is_empty(), "Token value MUST be empty")
     }
 
     #[rstest]

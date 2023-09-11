@@ -3,27 +3,53 @@
 
 use regex::Regex;
 use std::collections::BTreeMap;
+use std::env::{VarError, Vars};
 use std::fmt::Display;
 use std::str::FromStr;
 
-/// A helper class to read environment variables.
-pub struct Env {
-    message: String,
+/// A trait to get environment variables.
+/// This is used to mock the environment in tests.
+pub trait GetEnv {
+    fn get(&self, key: &str) -> Result<String, VarError>;
+    fn all(&self) -> BTreeMap<String, String>;
 }
 
-/// Create a new environment in a box for C++ integration.
-pub fn new_env() -> Box<Env> {
-    Box::new(Env::new())
+/// The default implementation of GetEnv.
+/// This uses the standard library.
+#[derive(Default)]
+pub struct StdEnvGetter {}
+
+impl GetEnv for StdEnvGetter {
+    fn get(&self, key: &str) -> Result<String, VarError> {
+        std::env::var(key)
+    }
+
+    fn all(&self) -> BTreeMap<String, String> {
+        std::env::vars().into_iter().collect()
+    }
+}
+
+/// A helper class to read environment variables.
+pub struct Env<EnvGetter: GetEnv = StdEnvGetter> {
+    getter: EnvGetter,
+    message: String,
 }
 
 pub trait EnvValue: FromStr + Display + Default + PartialEq {}
 
 impl<T: FromStr + Display + Default + PartialEq> EnvValue for T {}
 
-impl Env {
+impl Default for Env {
+    fn default() -> Self {
+        Env::new(StdEnvGetter::default())
+    }
+}
+
+impl<EnvGetter: GetEnv> Env<EnvGetter> {
     /// Create a new environment.
-    pub fn new() -> Env {
-        Env {
+    pub fn new(getter: EnvGetter) -> Env<EnvGetter> {
+        Env::<EnvGetter> {
+            getter,
             message: String::new(),
         }
     }
@@ -60,7 +86,7 @@ impl Env {
     /// Get a value from the environment. without default value
     pub(crate) fn get_optional<T: EnvValue>(&mut self, key: &str) -> Option<T> {
         let mut additional = String::new();
-        let value = match std::env::var(key) {
+        let value = match self.getter.get(key) {
             Ok(value) => match T::from_str(&value) {
                 Ok(value) => Ok(value),
                 Err(_) => {
@@ -87,7 +113,7 @@ impl Env {
 
     fn get_impl<T: EnvValue>(&mut self, key: &str, default_value: T, masked: bool) -> T {
         let mut additional = String::new();
-        let value: T = match std::env::var(key) {
+        let value: T = match self.getter.get(key) {
             Ok(value) => match value.parse() {
                 Ok(value) => value,
                 Err(_) => {
@@ -124,7 +150,7 @@ impl Env {
     ) -> BTreeMap<String, T> {
         let mut matches = BTreeMap::new();
         let pattern = Regex::new(pattern).unwrap();
-        for (key, _) in std::env::vars() {
+        for (key, _) in self.getter.all() {
             if let Some(result) = pattern.captures(&key) {
                 matches.insert(
                     result.get(1).unwrap().as_str().to_string(),
@@ -143,12 +169,12 @@ impl Env {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::env::{new_env, Env};
+    use crate::core::env::Env;
     use rstest::{fixture, rstest};
 
     #[rstest]
     fn make_env(_env: Env) {
-        let env = new_env();
+        let env = Env::default();
         assert_eq!(env.message(), "");
     }
 
@@ -182,6 +208,6 @@ mod tests {
     #[fixture]
     fn env() -> Env {
         std::env::remove_var("TEST");
-        Env::new()
+        Env::default()
     }
 }

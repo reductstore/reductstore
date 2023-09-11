@@ -11,6 +11,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use reductstore::cfg::Cfg;
+use reductstore::core::env::{Env, StdEnvGetter};
 
 use reductstore::core::logger::Logger;
 use reductstore::http_frontend::create_axum_app;
@@ -38,7 +39,7 @@ async fn main() {
         git_ref
     );
 
-    let cfg = Cfg::from_env();
+    let cfg = Cfg::from_env(StdEnvGetter::default());
     Logger::init(&cfg.log_level);
 
     info!("Configuration: \n {}", cfg);

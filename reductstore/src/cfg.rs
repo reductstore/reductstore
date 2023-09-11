@@ -4,7 +4,7 @@
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::create_token_repository;
-use crate::core::env::Env;
+use crate::core::env::{Env, GetEnv};
 use crate::http_frontend::Componentes;
 
 use crate::storage::storage::Storage;
@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use tokio::sync::RwLock;
 
 /// Database configuration
-pub struct Cfg {
+pub struct Cfg<EnvGetter: GetEnv> {
     pub log_level: String,
     pub host: String,
     pub port: i32,
@@ -33,12 +33,12 @@ pub struct Cfg {
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
 
-    env: Env,
+    env: Env<EnvGetter>,
 }
 
-impl Cfg {
-    pub fn from_env() -> Self {
-        let mut env = Env::new();
+impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
+    pub fn from_env(mut env_getter: EnvGetter) -> Self {
+        let mut env = Env::new(env_getter);
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", "INFO".to_string()),
             host: env.get("RS_HOST", "0.0.0.0".to_string()),
@@ -135,7 +135,7 @@ impl Cfg {
         storage
     }
 
-    fn parse_buckets(env: &mut Env) -> HashMap<String, BucketSettings> {
+    fn parse_buckets(env: &mut Env<EnvGetter>) -> HashMap<String, BucketSettings> {
         let mut buckets = HashMap::<String, (String, BucketSettings)>::new();
         for (id, name) in env.matches("RS_BUCKET_(.*)_NAME") {
             buckets.insert(id, (name, BucketSettings::default()));
@@ -161,7 +161,7 @@ impl Cfg {
             .collect()
     }
 
-    fn parse_tokens(env: &mut Env) -> HashMap<String, Token> {
+    fn parse_tokens(env: &mut Env<EnvGetter>) -> HashMap<String, Token> {
         let mut tokens = HashMap::<String, Token>::new();
         for (id, name) in env.matches("RS_TOKEN_(.*)_NAME") {
             let token = Token {
@@ -186,7 +186,7 @@ impl Cfg {
             }
         });
 
-        let parse_list_env = |env: &mut Env, name: String| -> Vec<String> {
+        let parse_list_env = |env: &mut Env<EnvGetter>, name: String| -> Vec<String> {
             env.get_optional::<String>(&name)
                 .unwrap_or_default()
                 .split(",")
@@ -213,8 +213,222 @@ impl Cfg {
     }
 }
 
-impl Display for Cfg {
+impl<EnvGetter: GetEnv> Display for Cfg<EnvGetter> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::env::EnvValue;
+    use mockall::mock;
+    use mockall::predicate::eq;
+    use rstest::{fixture, rstest};
+    use std::collections::BTreeMap;
+    use std::env::{VarError, Vars};
+    use std::str::FromStr;
+
+    mock! {
+        EnvGetter {}
+        impl GetEnv for EnvGetter {
+            fn get(&self, key: &str) -> Result<String, VarError>;
+            fn all(&self) -> BTreeMap<String,String>;
+        }
+    }
+
+    #[rstest]
+    fn test_default_settings(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.log_level, "INFO");
+        assert_eq!(cfg.host, "0.0.0.0");
+        assert_eq!(cfg.port, 8383);
+        assert_eq!(cfg.api_base_path, "/");
+        assert_eq!(cfg.data_path, "/data");
+        assert_eq!(cfg.api_token, "");
+        assert_eq!(cfg.cert_path, "");
+        assert_eq!(cfg.cert_key_path, "");
+
+        assert_eq!(cfg.buckets.len(), 0);
+        assert_eq!(cfg.tokens.len(), 0);
+    }
+
+    #[rstest]
+    fn test_log_level(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOG_LEVEL"))
+            .times(1)
+            .return_const(Ok("DEBUG".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.log_level, "DEBUG");
+    }
+
+    #[rstest]
+    fn test_host(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_HOST"))
+            .times(1)
+            .return_const(Ok("127.0.0.1".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.host, "127.0.0.1");
+    }
+
+    #[rstest]
+    fn test_port(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_PORT"))
+            .times(1)
+            .return_const(Ok("1234".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.port, 1234);
+    }
+
+    #[rstest]
+    fn test_api_base_path(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_API_BASE_PATH"))
+            .times(1)
+            .return_const(Ok("/api".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.api_base_path, "/api");
+    }
+
+    #[rstest]
+    fn test_data_path(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_DATA_PATH"))
+            .times(1)
+            .return_const(Ok("/tmp".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.data_path, "/tmp");
+    }
+
+    #[rstest]
+    fn test_api_token(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_API_TOKEN"))
+            .times(1)
+            .return_const(Ok("XXX".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.api_token, "XXX");
+    }
+
+    #[rstest]
+    fn test_cert_path(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_CERT_PATH"))
+            .times(1)
+            .return_const(Ok("/tmp/cert.pem".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.cert_path, "/tmp/cert.pem");
+    }
+
+    #[rstest]
+    fn test_cert_key_path(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_CERT_KEY_PATH"))
+            .times(1)
+            .return_const(Ok("/tmp/cert.key".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.cert_key_path, "/tmp/cert.key");
+    }
+
+    #[fixture]
+    fn env_getter() -> MockEnvGetter {
+        let mut mock_getter = MockEnvGetter::new();
+        mock_getter.expect_all().returning(|| BTreeMap::new());
+        return mock_getter;
+    }
+
+    mod provision {
+        use super::*;
+        use reduct_base::msg::bucket_api::QuotaType::FIFO;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_buckets(mut env_getter: MockEnvGetter) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_BUCKET_1_NAME"))
+                .times(1)
+                .return_const(Ok("bucket1".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_BUCKET_2_NAME"))
+                .times(1)
+                .return_const(Ok("bucket2".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_BUCKET_1_QUOTA_TYPE"))
+                .times(1)
+                .return_const(Ok("size".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_BUCKET_1_QUOTA_SIZE"))
+                .times(1)
+                .return_const(Ok("1GB".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_BUCKET_1_MAX_BLOCK_SIZE"))
+                .times(1)
+                .return_const(Ok("1MB".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_BUCKET_1_MAX_BLOCK_RECORDS"))
+                .times(1)
+                .return_const(Ok("1000".to_string()));
+
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_getter);
+            let components = cfg.build().await;
+
+            let storage = components.storage.read().await;
+            let bucket1 = storage.get_bucket("bucket1").unwrap();
+
+            assert_eq!(bucket1.settings().quota_type, Some(FIFO));
+            assert_eq!(bucket1.settings().quota_size, Some(1_000_000_000));
+            assert_eq!(bucket1.settings().max_block_size, Some(1_000_000));
+            assert_eq!(bucket1.settings().max_block_records, Some(1000));
+        }
     }
 }

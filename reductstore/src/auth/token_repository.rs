@@ -707,20 +707,21 @@ mod tests {
     #[test]
     pub fn test_find_by_name() {
         let mut repo = setup("init-token");
-        repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        )
-        .unwrap();
+        let generated_token = repo
+            .generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .unwrap();
 
         let token = repo.get_token("test").unwrap();
 
         assert_eq!(token.name, "test");
-        assert_eq!(token.value, "");
+        assert_eq!(token.value, generated_token.value);
     }
 
     #[test]
