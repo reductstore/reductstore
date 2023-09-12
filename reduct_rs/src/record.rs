@@ -80,7 +80,7 @@ impl Record {
             while let Some(chunk) = data.next().await {
                 bytes.extend_from_slice(&chunk?);
             }
-            return Ok(bytes.into());
+            Ok(bytes.into())
         } else {
             panic!("Record has no data");
         }
@@ -88,7 +88,7 @@ impl Record {
 
     pub fn stream_bytes(self) -> Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>>>> {
         if let Some(data) = self.data {
-            return data;
+            data
         } else {
             panic!("Record has no data");
         }

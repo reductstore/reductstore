@@ -8,8 +8,6 @@ use futures_util::StreamExt;
 use reduct_rs::{ReductClient, ReductError};
 use std::str::from_utf8;
 
-use tokio;
-
 #[tokio::main]
 async fn main() -> Result<(), ReductError> {
     let client = ReductClient::builder().url("http://127.0.0.1:8383").build();
@@ -43,10 +41,7 @@ async fn main() -> Result<(), ReductError> {
     while let Some(record) = query.next().await {
         let record = record?;
         println!("Record: {:?}", record);
-        println!(
-            "Data: {}",
-            from_utf8(&record.bytes().await?.to_vec()).unwrap()
-        );
+        println!("Data: {}", from_utf8(&record.bytes().await?).unwrap());
     }
 
     Ok(())

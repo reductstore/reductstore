@@ -94,7 +94,7 @@ impl ReadRecordBuilder {
                 .unwrap()
                 .parse::<u64>()
                 .unwrap(),
-            labels: labels,
+            labels,
             content_type: response
                 .headers()
                 .get("content-type")

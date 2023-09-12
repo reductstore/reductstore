@@ -8,8 +8,6 @@ use reduct_rs::{ReductClient, ReductError};
 use std::str::from_utf8;
 use std::time::SystemTime;
 
-use tokio;
-
 #[tokio::main]
 async fn main() -> Result<(), ReductError> {
     let client = ReductClient::builder().url("http://127.0.0.1:8383").build();
@@ -31,10 +29,7 @@ async fn main() -> Result<(), ReductError> {
         .await?;
 
     println!("Record: {:?}", record);
-    println!(
-        "Data: {}",
-        from_utf8(&record.bytes().await?.to_vec()).unwrap()
-    );
+    println!("Data: {}", from_utf8(&record.bytes().await?).unwrap());
 
     Ok(())
 }

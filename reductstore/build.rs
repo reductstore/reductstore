@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     // download web console
-    let mut resp = get(&format!(
+    let mut resp = get(format!(
         "https://github.com/reductstore/web-console/releases/download/{}/web-console.build.zip",
         WEB_CONSOLE_VERSION
     ))
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let commit = match std::process::Command::new("git")
-        .args(&["rev-parse", "--short", "HEAD"])
+        .args(["rev-parse", "--short", "HEAD"])
         .output()
     {
         Ok(output) => String::from_utf8(output.stdout).expect("Failed to get commit"),
