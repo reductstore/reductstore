@@ -377,49 +377,80 @@ mod tests {
         return mock_getter;
     }
 
+    #[fixture]
+    fn env_with_buckets() -> MockEnvGetter {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut mock_getter = MockEnvGetter::new();
+        mock_getter
+            .expect_get()
+            .with(eq("RS_DATA_PATH"))
+            .return_const(Ok(tmp.into_path().to_str().unwrap().to_string()));
+        mock_getter.expect_all().returning(|| {
+            let mut map = BTreeMap::new();
+            map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
+            map
+        });
+        mock_getter
+            .expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("bucket1".to_string()));
+        mock_getter
+    }
+
+    #[fixture]
+    fn env_with_tokens() -> MockEnvGetter {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut mock_getter = MockEnvGetter::new();
+        mock_getter
+            .expect_get()
+            .with(eq("RS_DATA_PATH"))
+            .return_const(Ok(tmp.into_path().to_str().unwrap().to_string()));
+        mock_getter
+            .expect_get()
+            .with(eq("RS_API_TOKEN"))
+            .return_const(Ok("XXX".to_string()));
+        mock_getter.expect_all().returning(|| {
+            let mut map = BTreeMap::new();
+            map.insert("RS_TOKEN_1_NAME".to_string(), "token1".to_string());
+            map
+        });
+        mock_getter
+            .expect_get()
+            .with(eq("RS_TOKEN_1_NAME"))
+            .return_const(Ok("token1".to_string()));
+        mock_getter
+    }
+
     mod provision {
         use super::*;
+        use crate::storage::bucket::Bucket;
         use reduct_base::msg::bucket_api::QuotaType::FIFO;
 
         #[rstest]
         #[tokio::test]
-        async fn test_buckets(mut env_getter: MockEnvGetter) {
-            env_getter
-                .expect_get()
-                .with(eq("RS_BUCKET_1_NAME"))
-                .times(1)
-                .return_const(Ok("bucket1".to_string()));
-            env_getter
-                .expect_get()
-                .with(eq("RS_BUCKET_2_NAME"))
-                .times(1)
-                .return_const(Ok("bucket2".to_string()));
-            env_getter
+        async fn test_buckets(mut env_with_buckets: MockEnvGetter) {
+            env_with_buckets
                 .expect_get()
                 .with(eq("RS_BUCKET_1_QUOTA_TYPE"))
-                .times(1)
-                .return_const(Ok("size".to_string()));
-            env_getter
+                .return_const(Ok("FIFO".to_string()));
+            env_with_buckets
                 .expect_get()
                 .with(eq("RS_BUCKET_1_QUOTA_SIZE"))
-                .times(1)
                 .return_const(Ok("1GB".to_string()));
-            env_getter
+            env_with_buckets
                 .expect_get()
                 .with(eq("RS_BUCKET_1_MAX_BLOCK_SIZE"))
-                .times(1)
                 .return_const(Ok("1MB".to_string()));
-            env_getter
+            env_with_buckets
                 .expect_get()
                 .with(eq("RS_BUCKET_1_MAX_BLOCK_RECORDS"))
-                .times(1)
                 .return_const(Ok("1000".to_string()));
 
-            env_getter
+            env_with_buckets
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
 
-            let cfg = Cfg::from_env(env_getter);
+            let cfg = Cfg::from_env(env_with_buckets);
             let components = cfg.build().await;
 
             let storage = components.storage.read().await;
@@ -429,6 +460,62 @@ mod tests {
             assert_eq!(bucket1.settings().quota_size, Some(1_000_000_000));
             assert_eq!(bucket1.settings().max_block_size, Some(1_000_000));
             assert_eq!(bucket1.settings().max_block_records, Some(1000));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_buckets_defaults(mut env_with_buckets: MockEnvGetter) {
+            env_with_buckets
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_with_buckets);
+            let components = cfg.build().await;
+
+            let storage = components.storage.read().await;
+            let bucket1 = storage.get_bucket("bucket1").unwrap();
+
+            assert_eq!(
+                bucket1.settings(),
+                &Bucket::defaults(),
+                "use defaults if env vars are not set"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_tokens(mut env_with_tokens: MockEnvGetter) {
+            env_with_tokens
+                .expect_get()
+                .with(eq("RS_TOKEN_1_VALUE"))
+                .return_const(Ok("TOKEN".to_string()));
+            env_with_tokens
+                .expect_get()
+                .with(eq("RS_TOKEN_1_FULL_ACCESS"))
+                .return_const(Ok("true".to_string()));
+            env_with_tokens
+                .expect_get()
+                .with(eq("RS_TOKEN_1_READ"))
+                .return_const(Ok("bucket1,bucket2".to_string()));
+            env_with_tokens
+                .expect_get()
+                .with(eq("RS_TOKEN_1_WRITE"))
+                .return_const(Ok("bucket1".to_string()));
+            env_with_tokens
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_with_tokens);
+            let components = cfg.build().await;
+
+            let repo = components.token_repo.read().await;
+            let token1 = repo.get_token("token1").unwrap().clone();
+            assert_eq!(token1.value, "TOKEN");
+
+            let permissions = token1.permissions.unwrap();
+            assert_eq!(permissions.full_access, true);
+            assert_eq!(permissions.read, vec!["bucket1", "bucket2"]);
+            assert_eq!(permissions.write, vec!["bucket1"]);
         }
     }
 }
