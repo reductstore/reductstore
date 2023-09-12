@@ -11,7 +11,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use reductstore::cfg::Cfg;
-use reductstore::core::env::{Env, StdEnvGetter};
+use reductstore::core::env::StdEnvGetter;
 
 use reductstore::core::logger::Logger;
 use reductstore::http_frontend::create_axum_app;

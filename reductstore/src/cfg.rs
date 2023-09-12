@@ -37,7 +37,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
 }
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
-    pub fn from_env(mut env_getter: EnvGetter) -> Self {
+    pub fn from_env(env_getter: EnvGetter) -> Self {
         let mut env = Env::new(env_getter);
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", "INFO".to_string()),
@@ -222,13 +222,12 @@ impl<EnvGetter: GetEnv> Display for Cfg<EnvGetter> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::env::EnvValue;
+
     use mockall::mock;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
-    use std::env::{VarError, Vars};
-    use std::str::FromStr;
+    use std::env::VarError;
 
     mock! {
         EnvGetter {}

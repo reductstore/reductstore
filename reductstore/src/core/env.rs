@@ -3,7 +3,7 @@
 
 use regex::Regex;
 use std::collections::BTreeMap;
-use std::env::{VarError, Vars};
+use std::env::VarError;
 use std::fmt::Display;
 use std::str::FromStr;
 
