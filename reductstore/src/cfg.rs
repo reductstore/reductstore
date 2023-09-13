@@ -3,7 +3,7 @@
 
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
-use crate::auth::token_repository::create_token_repository;
+use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
 use crate::http_frontend::Componentes;
 
@@ -57,15 +57,24 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         cfg
     }
 
-    pub async fn build(&self) -> Componentes {
-        let storage = self.provision_storage().await;
-        let token_repo = RwLock::new(create_token_repository(
-            PathBuf::from(self.data_path.clone()),
-            &self.api_token,
-        ));
+    pub fn build(&self) -> Componentes {
+        let storage = self.provision_storage();
+        let token_repo = self.provision_tokens();
+
+        Componentes {
+            storage: RwLock::new(storage),
+            token_repo: RwLock::new(token_repo),
+            auth: TokenAuthorization::new(&self.api_token),
+            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            base_path: self.api_base_path.clone(),
+        }
+    }
+
+    fn provision_tokens(&self) -> Box<dyn ManageTokens + Send + Sync> {
+        let mut token_repo =
+            create_token_repository(PathBuf::from(self.data_path.clone()), &self.api_token);
 
         for (name, token) in &self.tokens {
-            let mut token_repo = token_repo.write().await;
             let permissions = match token_repo
                 .generate_token(&name, token.permissions.clone().unwrap_or_default())
             {
@@ -95,20 +104,12 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 );
             }
         }
-
-        Componentes {
-            storage,
-            token_repo,
-            auth: TokenAuthorization::new(&self.api_token),
-            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
-            base_path: self.api_base_path.clone(),
-        }
+        token_repo
     }
 
-    async fn provision_storage(&self) -> RwLock<Storage> {
-        let storage = RwLock::new(Storage::new(PathBuf::from(self.data_path.clone())));
+    fn provision_storage(&self) -> Storage {
+        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()));
         for (name, settings) in &self.buckets {
-            let mut storage = storage.write().await;
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => Ok(bucket.settings().clone()),
                 Err(e) => {
@@ -210,6 +211,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         }
 
         tokens
+            .into_iter()
+            .map(|(_, token)| (token.name.clone(), token))
+            .collect()
     }
 }
 
@@ -423,6 +427,7 @@ mod tests {
     mod provision {
         use super::*;
         use crate::storage::bucket::Bucket;
+        use reduct_base::error::ReductError;
         use reduct_base::msg::bucket_api::QuotaType::FIFO;
 
         #[rstest]
@@ -450,7 +455,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_buckets);
-            let components = cfg.build().await;
+            let components = cfg.build();
 
             let storage = components.storage.read().await;
             let bucket1 = storage.get_bucket("bucket1").unwrap();
@@ -469,7 +474,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_buckets);
-            let components = cfg.build().await;
+            let components = cfg.build();
 
             let storage = components.storage.read().await;
             let bucket1 = storage.get_bucket("bucket1").unwrap();
@@ -505,7 +510,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_tokens);
-            let components = cfg.build().await;
+            let components = cfg.build();
 
             let repo = components.token_repo.read().await;
             let token1 = repo.get_token("token1").unwrap().clone();
@@ -515,6 +520,25 @@ mod tests {
             assert_eq!(permissions.full_access, true);
             assert_eq!(permissions.read, vec!["bucket1", "bucket2"]);
             assert_eq!(permissions.write, vec!["bucket1"]);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_tokens_no_value(mut env_with_tokens: MockEnvGetter) {
+            env_with_tokens
+                .expect_get()
+                .with(eq("RS_TOKEN_1_VALUE"))
+                .return_const(Err(VarError::NotPresent));
+            env_with_tokens
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_with_tokens);
+            let components = cfg.build();
+
+            let repo = components.token_repo.read().await;
+            let err = repo.get_token("token1").err().unwrap();
+            assert_eq!(err, ReductError::not_found("Token 'token1' doesn't exist"));
         }
     }
 }
