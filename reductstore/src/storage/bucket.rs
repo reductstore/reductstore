@@ -611,7 +611,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_info(mut provisioned_bucket: Bucket) {
+    fn test_provisioned_info(provisioned_bucket: Bucket) {
         let info = provisioned_bucket.info().unwrap().info;
         assert_eq!(info.is_provisioned, true);
     }

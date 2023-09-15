@@ -11,7 +11,6 @@ use log::{debug, warn};
 use prost::bytes::Bytes;
 use prost::Message;
 use prost_wkt_types::Timestamp;
-use tempfile::tempdir;
 
 use crate::auth::proto::token::Permissions as ProtoPermissions;
 use crate::auth::proto::{Token as ProtoToken, TokenRepo as ProtoTokenRepo, TokenRepo};
@@ -704,14 +703,14 @@ mod tests {
     // find_by_name tests
     //----------------
     #[rstest]
-    fn test_find_by_name(mut repo: Box<dyn ManageTokens>) {
+    fn test_find_by_name(repo: Box<dyn ManageTokens>) {
         let token = repo.get_token("test").unwrap();
         assert_eq!(token.name, "test");
         assert!(token.value.starts_with("test-"));
     }
 
     #[rstest]
-    fn test_find_by_name_not_found(mut repo: Box<dyn ManageTokens>) {
+    fn test_find_by_name_not_found(repo: Box<dyn ManageTokens>) {
         let token = repo.get_token("test-1");
         assert_eq!(
             token,
@@ -732,7 +731,7 @@ mod tests {
     // get_token_list tests
     //------------
     #[rstest]
-    fn test_get_token_list(mut repo: Box<dyn ManageTokens>) {
+    fn test_get_token_list(repo: Box<dyn ManageTokens>) {
         let token_list = repo.get_token_list().unwrap();
 
         assert_eq!(token_list.len(), 2);

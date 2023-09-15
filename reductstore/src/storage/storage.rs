@@ -3,7 +3,7 @@
 
 use log::info;
 use std::collections::BTreeMap;
-use std::fmt::format;
+
 use std::fs::remove_dir_all;
 use std::path::PathBuf;
 
