@@ -75,32 +75,29 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             create_token_repository(PathBuf::from(self.data_path.clone()), &self.api_token);
 
         for (name, token) in &self.tokens {
-            let permissions = match token_repo
+            let is_generated = match token_repo
                 .generate_token(&name, token.permissions.clone().unwrap_or_default())
             {
-                Ok(_) => {
-                    // replace the generated token
-                    token_repo.get_mut_token(&name).unwrap().clone_from(token);
-                    Ok(token.permissions.clone().unwrap_or_default())
-                }
+                Ok(_) => Ok(()),
                 Err(e) => {
                     if e.status() == ErrorCode::Conflict {
-                        // replace the existing token
-                        token_repo.get_mut_token(&name).unwrap().clone_from(token);
-                        Ok(token.permissions.clone().unwrap_or_default())
+                        Ok(())
                     } else {
                         Err(e)
                     }
                 }
             };
 
-            if let Ok(permissions) = permissions {
-                info!("Provisioned token '{}' with {:?}", token.name, permissions);
+            if let Err(err) = is_generated {
+                error!("Failed to provision token '{}': {}", name, err);
             } else {
-                error!(
-                    "Failed to provision token '{}': {}",
-                    name,
-                    permissions.err().unwrap()
+                let update_token = token_repo.get_mut_token(&name).unwrap();
+                update_token.clone_from(token);
+                update_token.is_provisioned = true;
+
+                info!(
+                    "Provisioned token '{}' with {:?}",
+                    update_token.name, update_token.permissions
                 );
             }
         }
@@ -111,10 +108,14 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         let mut storage = Storage::new(PathBuf::from(self.data_path.clone()));
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
-                Ok(bucket) => Ok(bucket.settings().clone()),
+                Ok(bucket) => {
+                    bucket.set_provisioned(true);
+                    Ok(bucket.settings().clone())
+                }
                 Err(e) => {
                     if e.status() == ErrorCode::Conflict {
                         let bucket = storage.get_mut_bucket(&name).unwrap();
+                        bucket.set_provisioned(true);
                         bucket.set_settings(settings.clone()).unwrap();
                         Ok(bucket.settings().clone())
                     } else {
@@ -460,6 +461,7 @@ mod tests {
             let storage = components.storage.read().await;
             let bucket1 = storage.get_bucket("bucket1").unwrap();
 
+            assert!(bucket1.is_provisioned());
             assert_eq!(bucket1.settings().quota_type, Some(FIFO));
             assert_eq!(bucket1.settings().quota_size, Some(1_000_000_000));
             assert_eq!(bucket1.settings().max_block_size, Some(1_000_000));
@@ -515,6 +517,7 @@ mod tests {
             let repo = components.token_repo.read().await;
             let token1 = repo.get_token("token1").unwrap().clone();
             assert_eq!(token1.value, "TOKEN");
+            assert!(token1.is_provisioned);
 
             let permissions = token1.permissions.unwrap();
             assert_eq!(permissions.full_access, true);
