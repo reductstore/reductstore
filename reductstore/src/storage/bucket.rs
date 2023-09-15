@@ -60,6 +60,7 @@ pub struct Bucket {
     path: PathBuf,
     entries: BTreeMap<String, Entry>,
     settings: BucketSettings,
+    is_provisioned: bool,
 }
 
 impl Bucket {
@@ -88,6 +89,7 @@ impl Bucket {
             path,
             entries: BTreeMap::new(),
             settings,
+            is_provisioned: false,
         };
 
         bucket.save_settings()?;
@@ -131,6 +133,7 @@ impl Bucket {
             path,
             entries,
             settings,
+            is_provisioned: false,
         })
     }
 
@@ -227,6 +230,7 @@ impl Bucket {
                 entry_count: self.entries.len() as u64,
                 oldest_record,
                 latest_record,
+                is_provisioned: self.is_provisioned,
             },
             settings: self.settings.clone(),
             entries,
@@ -401,6 +405,13 @@ impl Bucket {
     }
 
     pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), ReductError> {
+        if self.is_provisioned {
+            return Err(ReductError::conflict(&format!(
+                "Can't change settings of provisioned bucket '{}'",
+                self.name()
+            )));
+        }
+
         self.settings = Self::fill_settings(settings, self.settings.clone());
         for entry in self.entries.values_mut() {
             entry.set_settings(EntrySettings {
@@ -410,6 +421,16 @@ impl Bucket {
         }
         self.save_settings()?;
         Ok(())
+    }
+
+    /// Mark bucket as provisioned to protect
+    pub fn set_provisioned(&mut self, provisioned: bool) {
+        self.is_provisioned = provisioned;
+    }
+
+    /// Check if bucket is provisioned
+    pub fn is_provisioned(&self) -> bool {
+        self.is_provisioned
     }
 
     /// Fill in missing settings with defaults
@@ -589,6 +610,24 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_provisioned_info(mut provisioned_bucket: Bucket) {
+        let info = provisioned_bucket.info().unwrap().info;
+        assert_eq!(info.is_provisioned, true);
+    }
+
+    #[rstest]
+    fn test_provisioned_settings(mut provisioned_bucket: Bucket) {
+        let err = provisioned_bucket
+            .set_settings(BucketSettings::default())
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            ReductError::conflict("Can't change settings of provisioned bucket 'test'")
+        );
+    }
+
     fn write(
         bucket: &mut Bucket,
         entry_name: &str,
@@ -633,5 +672,12 @@ mod tests {
     #[fixture]
     fn bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
         Bucket::new("test", &path, settings).unwrap()
+    }
+
+    #[fixture]
+    fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
+        let mut bucket = Bucket::new("test", &path, settings).unwrap();
+        bucket.set_provisioned(true);
+        bucket
     }
 }

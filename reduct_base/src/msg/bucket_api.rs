@@ -75,6 +75,8 @@ pub struct BucketInfo {
     pub oldest_record: u64,
     /// Latest record in bucket
     pub latest_record: u64,
+    /// Provisioned
+    pub is_provisioned: bool,
 }
 
 /// Full bucket information
