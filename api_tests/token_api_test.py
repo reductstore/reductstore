@@ -84,6 +84,7 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "created_at": created_at,
         "value": "",
         "permissions": permissions,
+        "is_provisioned": False,
     }
 
 

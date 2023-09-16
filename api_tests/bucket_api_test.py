@@ -97,15 +97,17 @@ def test__get_bucket_stats(base_url, session, bucket_name):
                                 'name': 'entry_1',
                                 'oldest_record': 1000000,
                                 'record_count': 1,
-                                'size': 8},
+                                'size': 8
+                                },
                                {'block_count': 1,
                                 'latest_record': 2000000,
                                 'name': 'entry_2',
                                 'oldest_record': 2000000,
                                 'record_count': 1,
-                                'size': 11}]
+                                'size': 11
+                                }]
     assert data['info'] == dict(name=bucket_name, entry_count=2, size=19, latest_record=2000000,
-                                oldest_record=1000000)
+                                oldest_record=1000000, is_provisioned=False)
 
 
 def test__update_bucket_ok(base_url, session, bucket_name):

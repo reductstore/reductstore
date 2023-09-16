@@ -115,8 +115,10 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 Err(e) => {
                     if e.status() == ErrorCode::Conflict {
                         let bucket = storage.get_mut_bucket(&name).unwrap();
-                        bucket.set_provisioned(true);
+                        bucket.set_provisioned(false);
                         bucket.set_settings(settings.clone()).unwrap();
+                        bucket.set_provisioned(true);
+
                         Ok(bucket.settings().clone())
                     } else {
                         Err(e)
