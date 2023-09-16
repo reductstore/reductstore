@@ -2,7 +2,8 @@
 
 * [💡 Getting Started](README.md)
 * [😯 How Does It Work?](how-does-it-work.md)
-* [⚙ HTTP API Reference](http-api/README.md)
+* [⚙ Configuration](configuration.md)
+* [💫 HTTP API Reference](http-api/README.md)
   * [Server API](http-api/server-api.md)
   * [Bucket API](http-api/bucket-api.md)
   * [Entry API](http-api/entry-api.md)
@@ -10,6 +11,7 @@
 
 ## SDKs
 
+* [Rust Client SDK](https://docs.rs/crate/reduct-rs/latest)
 * [Python Client SDK](https://py.reduct.store)
 * [JavaScript Client SDK](https://js.reduct.store)
 * [C++ Client SDK](https://cpp.reduct.store)
