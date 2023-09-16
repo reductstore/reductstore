@@ -119,7 +119,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
@@ -177,7 +177,7 @@ Name of entry
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 

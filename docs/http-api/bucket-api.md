@@ -122,7 +122,7 @@ Size of quota in bytes (default: 0)
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
@@ -170,7 +170,7 @@ Size of quota in bytes
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
@@ -206,7 +206,7 @@ Name of bucket to remove
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 

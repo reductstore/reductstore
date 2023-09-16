@@ -105,7 +105,7 @@ A list of bucket names for write access. Default: []
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
