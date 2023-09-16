@@ -33,7 +33,7 @@ use crate::http_frontend::entry_api::remove::remove_entry;
 use crate::http_frontend::entry_api::write::write_record;
 use crate::http_frontend::HttpError;
 
-use crate::http_frontend::HttpServerState;
+use crate::http_frontend::Componentes;
 
 pub struct MethodExtractor {
     name: String,
@@ -106,7 +106,7 @@ fn check_and_extract_ts_or_query_id(
 #[derive(IntoResponse, Twin)]
 pub struct QueryInfoAxum(QueryInfo);
 
-pub fn create_entry_api_routes() -> axum::Router<Arc<HttpServerState>> {
+pub fn create_entry_api_routes() -> axum::Router<Arc<Componentes>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
         .route("/:bucket_name/:entry_name", get(read_single_record))

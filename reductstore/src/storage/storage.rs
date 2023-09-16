@@ -3,6 +3,7 @@
 
 use log::info;
 use std::collections::BTreeMap;
+
 use std::fs::remove_dir_all;
 use std::path::PathBuf;
 
@@ -151,6 +152,15 @@ impl Storage {
     ///
     /// * HTTPError - An error if the bucket doesn't exist
     pub fn remove_bucket(&mut self, name: &str) -> Result<(), ReductError> {
+        if let Some(bucket) = self.buckets.get(name) {
+            if bucket.is_provisioned() {
+                return Err(ReductError::conflict(&format!(
+                    "Can't remove provisioned bucket '{}'",
+                    bucket.name()
+                )));
+            }
+        }
+
         match self.buckets.remove(name) {
             Some(_) => {
                 remove_dir_all(&self.data_path.join(name))?;
@@ -179,14 +189,13 @@ mod tests {
     use crate::storage::writer::Chunk;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
+    use rstest::{fixture, rstest};
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
 
-    #[test]
-    fn test_info() {
-        let storage = Storage::new(tempdir().unwrap().into_path());
-
+    #[rstest]
+    fn test_info(storage: Storage) {
         sleep(Duration::from_secs(1)); // uptime is 1 second
 
         let info = storage.info().unwrap();
@@ -206,11 +215,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_recover_from_fs() {
-        let path = tempdir().unwrap().into_path();
-        let mut storage = Storage::new(path.clone());
-
+    #[rstest]
+    fn test_recover_from_fs(mut storage: Storage) {
         let bucket_settings = BucketSettings {
             quota_size: Some(100),
             quota_type: Some(QuotaType::FIFO),
@@ -255,7 +261,7 @@ mod tests {
                 .unwrap();
         }
 
-        let storage = Storage::new(path);
+        let storage = Storage::new(storage.data_path);
         assert_eq!(
             storage.info().unwrap(),
             ServerInfo {
@@ -276,18 +282,16 @@ mod tests {
         assert_eq!(bucket.settings(), &bucket_settings);
     }
 
-    #[test]
-    fn test_create_bucket() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
+    #[rstest]
+    fn test_create_bucket(mut storage: Storage) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
         assert_eq!(bucket.name(), "test");
     }
 
-    #[test]
-    fn test_create_bucket_with_invalid_name() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
+    #[rstest]
+    fn test_create_bucket_with_invalid_name(mut storage: Storage) {
         let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
             result.err(),
@@ -297,9 +301,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_create_bucket_with_existing_name() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
+    #[rstest]
+    fn test_create_bucket_with_existing_name(mut storage: Storage) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -312,9 +315,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_get_bucket() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
+    #[rstest]
+    fn test_get_bucket(mut storage: Storage) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -324,9 +326,8 @@ mod tests {
         assert_eq!(bucket.name(), "test");
     }
 
-    #[test]
-    fn test_get_bucket_with_non_existing_name() {
-        let storage = Storage::new(tempdir().unwrap().into_path());
+    #[rstest]
+    fn test_get_bucket_with_non_existing_name(storage: Storage) {
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
@@ -334,9 +335,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_remove_bucket() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
+    #[rstest]
+    fn test_remove_bucket(mut storage: Storage) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -352,9 +352,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_remove_bucket_with_non_existing_name() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
+    #[rstest]
+    fn test_remove_bucket_with_non_existing_name(mut storage: Storage) {
         let result = storage.remove_bucket("test");
         assert_eq!(
             result,
@@ -362,10 +361,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_remove_bucket_persistent() {
-        let path = tempdir().unwrap().into_path();
-        let mut storage = Storage::new(path.clone());
+    #[rstest]
+    fn test_remove_bucket_persistent(path: PathBuf, mut storage: Storage) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -382,10 +379,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_get_bucket_list() {
-        let mut storage = Storage::new(tempdir().unwrap().into_path());
-
+    #[rstest]
+    fn test_get_bucket_list(mut storage: Storage) {
         storage.create_bucket("test1", Bucket::defaults()).unwrap();
         storage.create_bucket("test2", Bucket::defaults()).unwrap();
 
@@ -393,5 +388,28 @@ mod tests {
         assert_eq!(bucket_list.buckets.len(), 2);
         assert_eq!(bucket_list.buckets[0].name, "test1");
         assert_eq!(bucket_list.buckets[1].name, "test2");
+    }
+
+    #[rstest]
+    fn test_provisioned_remove(mut storage: Storage) {
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
+        bucket.set_provisioned(true);
+        let err = storage.remove_bucket("test").err().unwrap();
+        assert_eq!(
+            err,
+            ReductError::conflict("Can't remove provisioned bucket 'test'")
+        );
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        tempdir().unwrap().into_path()
+    }
+
+    #[fixture]
+    fn storage(path: PathBuf) -> Storage {
+        Storage::new(path)
     }
 }

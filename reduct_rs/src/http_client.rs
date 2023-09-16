@@ -66,7 +66,7 @@ impl HttpClient {
         response.json::<Out>().await.map_err(|e| {
             ReductError::new(
                 ErrorCode::Unknown,
-                &format!("Failed to parse response: {}", e.to_string()),
+                &format!("Failed to parse response: {}", e),
             )
         })
     }
@@ -93,11 +93,9 @@ impl HttpClient {
 
     /// Prepare a request with the correct headers.
     pub fn request(&self, method: Method, path: &str) -> RequestBuilder {
-        let request = self
-            .client
-            .request(method, &format!("{}{}", self.base_url, path))
-            .header("Authorization", &self.api_token);
-        request
+        self.client
+            .request(method, format!("{}{}", self.base_url, path))
+            .header("Authorization", &self.api_token)
     }
 
     /// Send a request and handle errors.

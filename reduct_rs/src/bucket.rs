@@ -398,7 +398,7 @@ mod tests {
 
                 bucket
                     .write_record("entry-3")
-                    .timestamp_us((i as u64) * 1000_000)
+                    .timestamp_us((i as u64) * 1_000_000)
                     .data(Bytes::from(bodies[i].clone()))
                     .send()
                     .await
@@ -426,7 +426,7 @@ mod tests {
             }
 
             let record = query.next().await.unwrap().unwrap();
-            assert_eq!(record.timestamp_us(), 1000_000);
+            assert_eq!(record.timestamp_us(), 1_000_000);
             assert_eq!(record.content_length(), size);
             assert_eq!(record.content_type(), "application/octet-stream");
 
@@ -438,7 +438,7 @@ mod tests {
             }
 
             let record = query.next().await.unwrap().unwrap();
-            assert_eq!(record.timestamp_us(), 2000_000);
+            assert_eq!(record.timestamp_us(), 2_000_000);
             assert_eq!(record.content_length(), size);
             assert_eq!(record.content_type(), "application/octet-stream");
 

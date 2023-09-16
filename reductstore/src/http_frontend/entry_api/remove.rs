@@ -3,7 +3,7 @@
 
 use crate::auth::policy::WriteAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 use std::collections::HashMap;
 
 use axum::extract::{Path, State};
@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 // DELETE /b/:bucket_name/:entry_name
 pub async fn remove_entry(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(path): Path<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
@@ -47,7 +47,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_entry(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_remove_entry(components: Arc<Componentes>, headers: HeaderMap) {
         let path = HashMap::from_iter(vec![
             ("bucket_name".to_string(), "bucket-1".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
@@ -73,7 +73,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_remove_bucket_not_found(components: Arc<Componentes>, headers: HeaderMap) {
         let path = HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
@@ -90,7 +90,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_entry_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_remove_entry_not_found(components: Arc<Componentes>, headers: HeaderMap) {
         let path = HashMap::from_iter(vec![
             ("bucket_name".to_string(), "bucket-1".to_string()),
             ("entry_name".to_string(), "XXX".to_string()),

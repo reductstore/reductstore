@@ -31,6 +31,8 @@ pub struct Token {
     pub created_at: DateTime<Utc>,
     /// Permissions
     pub permissions: Option<Permissions>,
+    /// Provisioned
+    pub is_provisioned: bool,
 }
 
 /// Response for created token

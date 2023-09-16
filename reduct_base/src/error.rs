@@ -130,10 +130,6 @@ impl ReductError {
         &self.message
     }
 
-    pub fn to_string(&self) -> String {
-        format!("[{:?}] {}", self.status, self.message)
-    }
-
     pub fn ok() -> ReductError {
         ReductError {
             status: ErrorCode::OK,

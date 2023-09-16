@@ -3,7 +3,7 @@
 
 use crate::auth::policy::ReadAccessPolicy;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 use crate::storage::query::base::QueryOptions;
 
 use axum::extract::{Path, Query, State};
@@ -20,7 +20,7 @@ use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
 pub async fn query(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -131,7 +131,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
@@ -167,7 +167,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_bad_limit(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {

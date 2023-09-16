@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 //
 
+use crate::http_frontend::Componentes;
 use crate::http_frontend::HttpError;
-use crate::http_frontend::HttpServerState;
 use axum::extract::State;
 
 use axum::headers::HeaderMap;
@@ -17,9 +17,7 @@ use mime_guess::mime;
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
-pub async fn redirect_to_index(
-    State(components): State<Arc<HttpServerState>>,
-) -> impl IntoResponse {
+pub async fn redirect_to_index(State(components): State<Arc<Componentes>>) -> impl IntoResponse {
     let base_path = components.base_path.clone();
     let mut headers = HeaderMap::new();
     headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
@@ -27,7 +25,7 @@ pub async fn redirect_to_index(
 }
 
 pub async fn show_ui(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {
     let base_path = components.base_path.clone();
@@ -79,7 +77,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_img_decoding(components: Arc<HttpServerState>) {
+    async fn test_img_decoding(components: Arc<Componentes>) {
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
         let response = show_ui(State(components), request)
             .await

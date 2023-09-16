@@ -30,7 +30,7 @@ The method returns a list of tokens with names and creation dates. To use this m
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 {% endswagger %}
@@ -58,11 +58,11 @@ Name of token to show
 ```
 {% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="Access token is empty or invalid" %}
+{% swagger-response status="401: Unauthorized" description="Current access token is empty or invalid" %}
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Current access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
@@ -105,11 +105,58 @@ A list of bucket names for write access. Default: []
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
 {% swagger-response status="409: Conflict" description="Token with the same name already exists" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="422: Unprocessable Entity" description="Speciefied bucket doesn" %}
+
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger method="put" path="/:token_name" baseUrl="/api/v1/tokens" summary="Update an access token" %}
+{% swagger-description %}
+The method updates an access token with given permissions as a JSON document in the request body. To use this method, you need an access token with full access.
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name=":token_name" required="true" %}
+Name of new token
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="full_access" type="Boolean" required="false" %}
+Create a token with full acces. Default: false
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="read" type="String[]" required="false" %}
+A list of bucket names for read access. Default: []
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="write" type="String[]" required="false" %}
+A list of bucket names for write access. Default: []
+{% endswagger-parameter %}
+
+{% swagger-response status="200: OK" description="Returns value and timestamp of token" %}
+```javascript
+{
+    "value": "string",        // hash value of the token
+    "created_at": "string"    // date as ISO string
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="Access token is empty or invalid" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="409: Conflict" description="Access token is provisioned" %}
 
 {% endswagger-response %}
 
@@ -139,15 +186,18 @@ Name of new token
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="Token with the given name doesn" %}
+{% swagger-response status="404: Not Found" description="Token with the given name doesn't exist" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="409: Conflict" description="Token is provisioned" %}
 
 {% endswagger-response %}
 {% endswagger %}
-
 
 {% swagger method="get" path="" baseUrl="/api/v1/me" summary="Get full information about current API token" %}
 {% swagger-description %}

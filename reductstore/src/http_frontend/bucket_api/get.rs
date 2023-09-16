@@ -4,15 +4,15 @@
 use crate::auth::policy::AuthenticatedPolicy;
 use crate::http_frontend::bucket_api::FullBucketInfoAxum;
 use crate::http_frontend::middleware::check_permissions;
+use crate::http_frontend::Componentes;
 use crate::http_frontend::HttpError;
-use crate::http_frontend::HttpServerState;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /b/:bucket_name
 pub async fn get_bucket(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullBucketInfoAxum, HttpError> {
@@ -30,7 +30,7 @@ pub async fn get_bucket(
 mod tests {
     use super::*;
 
-    use crate::http_frontend::HttpServerState;
+    use crate::http_frontend::Componentes;
 
     use crate::http_frontend::tests::{components, headers};
 
@@ -41,7 +41,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_get_bucket(components: Arc<Componentes>, headers: HeaderMap) {
         let info = get_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();
@@ -50,7 +50,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket_not_found(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_get_bucket_not_found(components: Arc<Componentes>, headers: HeaderMap) {
         let err = get_bucket(State(components), Path("not-found".to_string()), headers)
             .await
             .err()

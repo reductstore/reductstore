@@ -4,7 +4,7 @@
 use crate::auth::policy::FullAccessPolicy;
 use crate::http_frontend::bucket_api::BucketSettingsAxum;
 use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{HttpError, HttpServerState};
+use crate::http_frontend::{Componentes, HttpError};
 
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // POST /b/:bucket_name
 pub async fn create_bucket(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     settings: BucketSettingsAxum,
@@ -31,7 +31,7 @@ mod tests {
     use super::*;
 
     use crate::http_frontend::tests::{components, headers};
-    use crate::http_frontend::HttpServerState;
+    use crate::http_frontend::Componentes;
 
     use rstest::rstest;
 
@@ -40,7 +40,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket(components: Arc<HttpServerState>, headers: HeaderMap) {
+    async fn test_create_bucket(components: Arc<Componentes>, headers: HeaderMap) {
         create_bucket(
             State(components),
             Path("bucket-3".to_string()),
@@ -53,10 +53,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_already_exists(
-        components: Arc<HttpServerState>,
-        headers: HeaderMap,
-    ) {
+    async fn test_create_bucket_already_exists(components: Arc<Componentes>, headers: HeaderMap) {
         let err = create_bucket(
             State(components),
             Path("bucket-1".to_string()),

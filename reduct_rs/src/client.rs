@@ -237,7 +237,6 @@ pub(crate) mod tests {
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use rstest::{fixture, rstest};
-    use tokio;
 
     mod serve_api {
         use super::*;
@@ -331,7 +330,7 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn test_list_tokens(#[future] client: ReductClient) {
             let tokens = client.await.list_tokens().await.unwrap();
-            assert!(tokens.len() >= 1);
+            assert!(!tokens.is_empty());
         }
 
         #[rstest]

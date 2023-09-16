@@ -4,6 +4,7 @@ extern crate core;
 
 use reqwest::blocking::get;
 use reqwest::StatusCode;
+use std::path::Path;
 use std::time::SystemTime;
 use std::{env, fs};
 
@@ -22,8 +23,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .expect("Failed to compile protos");
 
-    // download web console
-    let mut resp = get(&format!(
+    download_web_console();
+
+    // get build time and commit
+    let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let commit = match std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+    {
+        Ok(output) => String::from_utf8(output.stdout).expect("Failed to get commit"),
+        Err(_) => env::var("GIT_COMMIT").unwrap_or("unknown".to_string()),
+    };
+
+    println!("cargo:rustc-env=BUILD_TIME={}", build_time);
+    println!("cargo:rustc-env=COMMIT={}", commit);
+    Ok(())
+}
+
+fn download_web_console() {
+    if Path::exists(Path::new(&format!(
+        "{}/console.zip",
+        env::var("OUT_DIR").unwrap()
+    ))) {
+        return;
+    }
+
+    let mut resp = get(format!(
         "https://github.com/reductstore/web-console/releases/download/{}/web-console.build.zip",
         WEB_CONSOLE_VERSION
     ))
@@ -41,19 +67,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         resp.bytes().unwrap(),
     )
     .expect("Failed to write console.zip");
-
-    // get build time and commit
-    let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let commit = match std::process::Command::new("git")
-        .args(&["rev-parse", "--short", "HEAD"])
-        .output()
-    {
-        Ok(output) => String::from_utf8(output.stdout).expect("Failed to get commit"),
-        Err(_) => env::var("GIT_COMMIT").unwrap_or("unknown".to_string()),
-    };
-
-    println!("cargo:rustc-env=BUILD_TIME={}", build_time);
-    println!("cargo:rustc-env=COMMIT={}", commit);
-    Ok(())
 }

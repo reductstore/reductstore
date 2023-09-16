@@ -4,6 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::msg::entry_api::EntryInfo;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
+use std::str::FromStr;
 
 /// Quota type
 ///
@@ -22,6 +24,27 @@ impl From<i32> for QuotaType {
             0 => QuotaType::NONE,
             1 => QuotaType::FIFO,
             _ => QuotaType::NONE,
+        }
+    }
+}
+
+impl FromStr for QuotaType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "NONE" => Ok(QuotaType::NONE),
+            "FIFO" => Ok(QuotaType::FIFO),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for QuotaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QuotaType::NONE => write!(f, "NONE"),
+            QuotaType::FIFO => write!(f, "FIFO"),
         }
     }
 }
@@ -52,6 +75,8 @@ pub struct BucketInfo {
     pub oldest_record: u64,
     /// Latest record in bucket
     pub latest_record: u64,
+    /// Provisioned
+    pub is_provisioned: bool,
 }
 
 /// Full bucket information

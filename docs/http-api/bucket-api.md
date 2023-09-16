@@ -38,7 +38,8 @@ Name of bucket
         "entry_count": "integer", // number of entries in the bucket
         "size": "integer",        // size of stored data in the bucket in bytes
         "oldest_record": "integer", // unix timestamp of oldest record in microseconds
-        "latest_record": "integer"  // unix timestamp of latest record in microseconds
+        "latest_record": "integer",  // unix timestamp of latest record in microseconds
+        "is_provisioned": "bool"  // true if the bucket provisioned and can't be changed via API
     },
     "entries": [        // list of entry stats
         {
@@ -121,7 +122,7 @@ Size of quota in bytes (default: 0)
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
@@ -169,11 +170,15 @@ Size of quota in bytes
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="Bucket doesn" %}
+{% swagger-response status="404: Not Found" description="Bucket doesn't exist" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="409: Conflict" description="Bucket is provisioned" %}
 
 {% endswagger-response %}
 
@@ -201,11 +206,15 @@ Name of bucket to remove
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
 
 {% endswagger-response %}
 
 {% swagger-response status="404: Not Found" description="Bucket does not exists" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="409: Conflict" description="Bucket is provisioned" %}
 
 {% endswagger-response %}
 {% endswagger %}

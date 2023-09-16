@@ -1,14 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-pub mod asset;
-pub mod auth;
-pub mod core;
-pub mod http_frontend;
-pub mod storage;
-
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
 
 use axum_server::tls_rustls::RustlsConfig;
 
@@ -16,17 +9,12 @@ use axum_server::Handle;
 use log::info;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
-use crate::asset::asset_manager::ZipAssetManager;
-use crate::auth::token_auth::TokenAuthorization;
-use crate::auth::token_repository::create_token_repository;
-use crate::storage::storage::Storage;
+use reductstore::cfg::Cfg;
+use reductstore::core::env::StdEnvGetter;
 
-use crate::core::env::Env;
-use crate::core::logger::Logger;
-
-use crate::http_frontend::{create_axum_app, HttpServerState};
+use reductstore::core::logger::Logger;
+use reductstore::http_frontend::create_axum_app;
 
 #[tokio::main]
 async fn main() {
@@ -39,63 +27,54 @@ async fn main() {
         env!("COMMIT"),
         env!("BUILD_TIME")
     );
-    info!("License: BUSL-1.1");
 
-    let mut env = Env::new();
-
-    let log_level = env.get::<String>("RS_LOG_LEVEL", "INFO".to_string(), false);
-    let host = env.get::<String>("RS_HOST", "0.0.0.0".to_string(), false);
-    let port = env.get::<i32>("RS_PORT", 8383, false);
-    let api_base_path = env.get::<String>("RS_API_BASE_PATH", "/".to_string(), false);
-    let data_path = env.get::<String>("RS_DATA_PATH", "/data".to_string(), false);
-    let api_token = env.get::<String>("RS_API_TOKEN", "".to_string(), true);
-    let cert_path = env.get::<String>("RS_CERT_PATH", "".to_string(), true);
-    let cert_key_path = env.get::<String>("RS_CERT_KEY_PATH", "".to_string(), true);
-
-    Logger::init(&log_level);
-
-    info!("Configuration: \n {}", env.message());
-
-    let components = HttpServerState {
-        storage: RwLock::new(Storage::new(PathBuf::from(data_path.clone()))),
-        auth: TokenAuthorization::new(&api_token),
-        token_repo: RwLock::new(create_token_repository(
-            PathBuf::from(data_path),
-            &api_token,
-        )),
-        console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
-        base_path: api_base_path.clone(),
+    let git_ref = if version.ends_with("-dev") {
+        env!("COMMIT").to_string()
+    } else {
+        format!("v{}", version)
     };
 
-    let scheme = if cert_path.is_empty() {
+    info!(
+        "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
+        git_ref
+    );
+
+    let cfg = Cfg::from_env(StdEnvGetter::default());
+    Logger::init(&cfg.log_level);
+    info!("Configuration: \n {}", cfg);
+
+    let components = cfg.build();
+
+    let scheme = if cfg.cert_path.is_empty() {
         "http"
     } else {
         "https"
     };
+
     info!(
         "Run HTTP reductstore on {}://{}:{}{}",
-        scheme, host, port, api_base_path
+        scheme, cfg.host, cfg.port, cfg.api_base_path
     );
 
     let addr = SocketAddr::new(
-        IpAddr::from_str(&host).expect("Invalid host address"),
-        port as u16,
+        IpAddr::from_str(&cfg.host).expect("Invalid host address"),
+        cfg.port as u16,
     );
 
-    let app = create_axum_app(&api_base_path, Arc::new(components));
+    let app = create_axum_app(&cfg.api_base_path, Arc::new(components));
 
     let handle = Handle::new();
     tokio::spawn(shutdown_ctrl_c(handle.clone()));
     tokio::spawn(shutdown_signal(handle.clone()));
 
-    if cert_path.is_empty() {
+    if cfg.cert_path.is_empty() {
         axum_server::bind(addr)
             .handle(handle)
             .serve(app.into_make_service())
             .await
             .unwrap();
     } else {
-        let config = RustlsConfig::from_pem_file(cert_path, cert_key_path)
+        let config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.cert_key_path)
             .await
             .unwrap();
         axum_server::bind_rustls(addr, config)

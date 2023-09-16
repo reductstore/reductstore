@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- reduct-cli: Add `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
-- reduct-rs: Add `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
-- reductstore: Add `healthcheck` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
+- reduct-cli: `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
+- reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
+- reductstore: `healthcheck` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
+- reductstore: provisioning with environment variables, [PR-352](https://github.com/reductstore/reductstore/pull/352)
 
 ### Changed
 

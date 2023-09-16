@@ -4,8 +4,8 @@
 use crate::auth::policy::ReadAccessPolicy;
 use crate::http_frontend::entry_api::{check_and_extract_ts_or_query_id, MethodExtractor};
 use crate::http_frontend::middleware::check_permissions;
+use crate::http_frontend::Componentes;
 use crate::http_frontend::HttpError;
-use crate::http_frontend::HttpServerState;
 use crate::storage::bucket::Bucket;
 
 use crate::storage::reader::RecordReader;
@@ -24,7 +24,7 @@ use std::task::{Context, Poll};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub async fn read_single_record(
-    State(components): State<Arc<HttpServerState>>,
+    State(components): State<Arc<Componentes>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -148,7 +148,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_ts(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
@@ -184,7 +184,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_query(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
@@ -230,10 +230,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_single_read_bucket_not_found(
-        components: Arc<HttpServerState>,
-        headers: HeaderMap,
-    ) {
+    async fn test_single_read_bucket_not_found(components: Arc<Componentes>, headers: HeaderMap) {
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entru-1".to_string()),
@@ -258,7 +255,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_ts_not_found(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
@@ -282,7 +279,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_bad_ts(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
@@ -312,7 +309,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_query_not_found(
-        components: Arc<HttpServerState>,
+        components: Arc<Componentes>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
