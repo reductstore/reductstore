@@ -92,7 +92,7 @@ impl BlockManager {
             path,
             block,
             record_index,
-            content_length,
+            content_length as usize,
             Arc::clone(&block_manager),
         )?));
 

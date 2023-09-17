@@ -130,12 +130,14 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<Componentes>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Empty;
     use std::collections::HashMap;
 
     use crate::auth::token_repository::create_token_repository;
     use crate::storage::writer::Chunk;
-    use axum::extract::Path;
+    use axum::extract::{BodyStream, FromRequest, Path};
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
+    use axum::http::Request;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::Permissions;
@@ -202,5 +204,12 @@ mod tests {
             ("entry_name".to_string(), "entry-1".to_string()),
         ]));
         path
+    }
+
+    #[fixture]
+    pub async fn empty_body() -> BodyStream {
+        let emtpy_stream: Empty<Bytes> = Empty::new();
+        let request = Request::builder().body(emtpy_stream).unwrap();
+        BodyStream::from_request(request, &()).await.unwrap()
     }
 }

@@ -5,7 +5,8 @@ mod query;
 mod read_batched;
 mod read_single;
 mod remove;
-mod write;
+mod write_batched;
+mod write_single;
 
 use axum::async_trait;
 
@@ -30,7 +31,7 @@ use std::sync::Arc;
 use crate::api::entry::read_batched::read_batched_records;
 use crate::api::entry::read_single::read_single_record;
 use crate::api::entry::remove::remove_entry;
-use crate::api::entry::write::write_record;
+use crate::api::entry::write_single::write_record;
 use crate::api::HttpError;
 
 use crate::api::Componentes;

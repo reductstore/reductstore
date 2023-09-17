@@ -14,8 +14,8 @@ use reduct_base::error::{ErrorCode, ReductError};
 /// RecordWriter is used to write a record to a file.
 pub struct RecordWriter {
     file: File,
-    written_bytes: u64,
-    content_length: u64,
+    written_bytes: usize,
+    content_length: usize,
     record_index: usize,
     block_id: u64,
     block_manager: Arc<RwLock<dyn ManageBlock>>,
@@ -40,7 +40,7 @@ impl RecordWriter {
         path: PathBuf,
         block: &Block,
         record_index: usize,
-        content_length: u64,
+        content_length: usize,
         block_manager: Arc<RwLock<T>>,
     ) -> Result<RecordWriter, ReductError>
     where
@@ -87,10 +87,18 @@ impl RecordWriter {
         Ok(())
     }
 
+    pub fn content_length(&self) -> usize {
+        self.content_length
+    }
+
+    pub fn written(&self) -> usize {
+        self.written_bytes
+    }
+
     fn write_impl(&mut self, buf: Bytes, last: bool) -> Result<(), ReductError> {
         let mut writer = &self.file;
 
-        self.written_bytes += buf.len() as u64;
+        self.written_bytes += buf.len();
         if self.written_bytes > self.content_length {
             return Err(ReductError::bad_request(
                 "Content is bigger than in content-length",

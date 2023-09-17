@@ -57,7 +57,7 @@ pub async fn write_record(
             ))?
             .to_str()
             .unwrap()
-            .parse::<u64>()
+            .parse::<usize>()
             .map_err(|_| {
                 HttpError::new(
                     ErrorCode::UnprocessableEntity,
@@ -120,7 +120,7 @@ pub async fn write_record(
             Ok(())
         }
         Err(e) => {
-            // drain the stream in the case if a reduct_rs doesn't support Expect: 100-continue
+            // drain the stream in the case if a client doesn't support Expect: 100-continue
             if !headers.contains_key(Expect::name()) {
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}
@@ -142,7 +142,7 @@ mod tests {
     use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
 
-    use crate::api::tests::{components, path_to_entry_1};
+    use crate::api::tests::{components, empty_body, path_to_entry_1};
 
     #[rstest]
     #[tokio::test]
@@ -250,12 +250,5 @@ mod tests {
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
 
         headers
-    }
-
-    #[fixture]
-    async fn empty_body() -> BodyStream {
-        let emtpy_stream: Empty<Bytes> = Empty::new();
-        let request = Request::builder().body(emtpy_stream).unwrap();
-        BodyStream::from_request(request, &()).await.unwrap()
     }
 }

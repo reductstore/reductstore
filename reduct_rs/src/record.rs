@@ -20,7 +20,7 @@ use std::pin::Pin;
 
 use std::time::SystemTime;
 
-pub type Labels = HashMap<String, String>;
+pub use reduct_base::batch::Labels;
 pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>>>>;
 
 pub use write_record::WriteRecordBuilder;

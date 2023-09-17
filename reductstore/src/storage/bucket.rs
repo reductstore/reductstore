@@ -255,7 +255,7 @@ impl Bucket {
         &mut self,
         name: &str,
         time: u64,
-        content_size: u64,
+        content_size: usize,
         content_type: String,
         labels: Labels,
     ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
@@ -323,11 +323,11 @@ impl Bucket {
         Ok(())
     }
 
-    fn keep_quota_for(&mut self, content_size: u64) -> Result<(), ReductError> {
+    fn keep_quota_for(&mut self, content_size: usize) -> Result<(), ReductError> {
         match self.settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
             QuotaType::FIFO => {
-                let mut size = self.info()?.info.size + content_size;
+                let mut size = self.info()?.info.size + content_size as u64;
                 while size > self.settings.quota_size.unwrap_or(0) {
                     debug!(
                         "Need more space. Remove an oldest block from bucket '{}'",
@@ -377,7 +377,7 @@ impl Bucket {
                         ));
                     }
 
-                    size = self.info()?.info.size + content_size;
+                    size = self.info()?.info.size + content_size as u64;
                 }
 
                 // Remove empty entries
@@ -637,7 +637,7 @@ mod tests {
         let writer = bucket.begin_write(
             entry_name,
             time,
-            content.len() as u64,
+            content.len(),
             "".to_string(),
             Labels::new(),
         )?;
