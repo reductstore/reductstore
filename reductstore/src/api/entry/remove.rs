@@ -1,9 +1,9 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::{Componentes, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{Componentes, HttpError};
 use std::collections::HashMap;
 
 use axum::extract::{Path, State};
@@ -41,7 +41,7 @@ pub async fn remove_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::tests::{components, headers};
+    use crate::api::tests::{components, headers};
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
 

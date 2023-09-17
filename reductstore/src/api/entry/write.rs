@@ -1,9 +1,9 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::{Componentes, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{Componentes, ErrorCode, HttpError};
 use crate::storage::entry::Labels;
 use crate::storage::writer::Chunk;
 use axum::extract::{BodyStream, Path, Query, State};
@@ -142,7 +142,7 @@ mod tests {
     use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
 
-    use crate::http_frontend::tests::{components, path_to_entry_1};
+    use crate::api::tests::{components, path_to_entry_1};
 
     #[rstest]
     #[tokio::test]

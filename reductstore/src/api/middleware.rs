@@ -7,8 +7,8 @@ use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error};
 
+use crate::api::{Componentes, HttpError};
 use crate::auth::policy::Policy;
-use crate::http_frontend::{Componentes, HttpError};
 
 pub async fn default_headers<B>(
     request: Request<B>,

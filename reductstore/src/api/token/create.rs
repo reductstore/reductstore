@@ -1,10 +1,10 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::token::{PermissionsAxum, TokenCreateResponseAxum};
+use crate::api::{Componentes, HttpError};
 use crate::auth::policy::FullAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::token_api::{PermissionsAxum, TokenCreateResponseAxum};
-use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 
@@ -32,7 +32,7 @@ pub async fn create_token(
 mod tests {
     use super::*;
 
-    use crate::http_frontend::tests::{components, headers};
+    use crate::api::tests::{components, headers};
 
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::token_api::Permissions;

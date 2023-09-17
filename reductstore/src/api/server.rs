@@ -15,8 +15,8 @@ use axum::routing::{get, head};
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_macros::{IntoResponse, Twin};
 
-use crate::http_frontend::token_api::me::me;
-use crate::http_frontend::Componentes;
+use crate::api::token::me::me;
+use crate::api::Componentes;
 
 #[derive(IntoResponse, Twin)]
 pub struct ServerInfoAxum(ServerInfo);

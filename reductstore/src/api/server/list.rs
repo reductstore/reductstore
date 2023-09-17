@@ -1,10 +1,10 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::server::BucketInfoListAxum;
+use crate::api::{Componentes, HttpError};
 use crate::auth::policy::AuthenticatedPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::server_api::BucketInfoListAxum;
-use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::State;
 use axum::headers::HeaderMap;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ pub async fn list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::tests::{components, headers};
+    use crate::api::tests::{components, headers};
     use rstest::rstest;
 
     #[rstest]

@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 //
 
-use crate::http_frontend::Componentes;
-use crate::http_frontend::HttpError;
+use crate::api::Componentes;
+use crate::api::HttpError;
 use axum::extract::State;
 
 use axum::headers::HeaderMap;
@@ -72,7 +72,7 @@ mod tests {
     use super::*;
     use axum::body::HttpBody;
 
-    use crate::http_frontend::tests::components;
+    use crate::api::tests::components;
     use rstest::rstest;
 
     #[rstest]

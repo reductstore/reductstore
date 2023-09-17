@@ -12,27 +12,27 @@ use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::api::bucket::create_bucket_api_routes;
+use crate::api::entry::create_entry_api_routes;
+use crate::api::middleware::{default_headers, print_statuses};
+use crate::api::server::create_server_api_routes;
+use crate::api::token::create_token_api_routes;
+use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
-use crate::http_frontend::bucket_api::create_bucket_api_routes;
-use crate::http_frontend::entry_api::create_entry_api_routes;
-use crate::http_frontend::middleware::{default_headers, print_statuses};
-use crate::http_frontend::server_api::create_server_api_routes;
-use crate::http_frontend::token_api::create_token_api_routes;
-use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
 pub use reduct_base::error::ErrorCode;
 
-mod bucket_api;
-mod entry_api;
+mod bucket;
+mod entry;
 mod middleware;
-mod server_api;
-mod token_api;
-mod ui_api;
+mod server;
+mod token;
+mod ui;
 
 pub struct Componentes {
     pub storage: RwLock<Storage>,

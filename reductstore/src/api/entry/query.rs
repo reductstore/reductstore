@@ -1,9 +1,9 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::{Componentes, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{Componentes, HttpError};
 use crate::storage::query::base::QueryOptions;
 
 use axum::extract::{Path, Query, State};
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 
-use crate::http_frontend::entry_api::QueryInfoAxum;
+use crate::api::entry::QueryInfoAxum;
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
 use std::time::Duration;
@@ -125,7 +125,7 @@ pub async fn query(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{components, headers, path_to_entry_1};
     use rstest::*;
 
     #[rstest]

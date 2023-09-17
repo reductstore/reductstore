@@ -27,13 +27,13 @@ use reduct_base::msg::entry_api::QueryInfo;
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
 
-use crate::http_frontend::entry_api::read_batched::read_batched_records;
-use crate::http_frontend::entry_api::read_single::read_single_record;
-use crate::http_frontend::entry_api::remove::remove_entry;
-use crate::http_frontend::entry_api::write::write_record;
-use crate::http_frontend::HttpError;
+use crate::api::entry::read_batched::read_batched_records;
+use crate::api::entry::read_single::read_single_record;
+use crate::api::entry::remove::remove_entry;
+use crate::api::entry::write::write_record;
+use crate::api::HttpError;
 
-use crate::http_frontend::Componentes;
+use crate::api::Componentes;
 
 pub struct MethodExtractor {
     name: String,
