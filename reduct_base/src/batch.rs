@@ -54,7 +54,7 @@ pub fn sort_headers_by_name(headers: &HeaderMap) -> Vec<(String, HeaderValue)> {
         .into_iter()
         .map(|(key, value)| (key.unwrap().as_str().to_string(), value))
         .collect();
-    sorted_headers.sort_by(|(name1, _), (name2, _)| name1.cmp(name2));
+    sorted_headers.sort_by(|(name1, _), (name2, _)| name2.cmp(name1));
     sorted_headers
 }
 
