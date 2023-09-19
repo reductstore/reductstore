@@ -14,7 +14,6 @@ use futures::stream::Stream;
 use futures_util::StreamExt;
 use reduct_base::error::ReductError;
 
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 

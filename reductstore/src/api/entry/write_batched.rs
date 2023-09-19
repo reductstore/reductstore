@@ -7,16 +7,16 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Componentes, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::storage::entry::Labels;
+
 use crate::storage::writer::{Chunk, RecordWriter};
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use futures_util::StreamExt;
-use log::{debug, error};
+use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name};
 use std::collections::HashMap;
-use std::future::Future;
+
 use std::sync::{Arc, RwLock};
 
 // POST /:bucket/:entry?ts=<number>
@@ -24,7 +24,7 @@ pub async fn write_records(
     State(components): State<Arc<Componentes>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(_params): Query<HashMap<String, String>>,
     mut stream: BodyStream,
 ) -> Result<(), HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
@@ -39,7 +39,7 @@ pub async fn write_records(
 
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_name(&headers);
-    let mut record_headers: Vec<_> = record_headers
+    let record_headers: Vec<_> = record_headers
         .iter()
         .filter(|(k, _)| k.as_str().starts_with("x-reduct-time-"))
         .collect();
@@ -133,10 +133,10 @@ mod tests {
     use super::*;
     use crate::api::entry::write_batched::write_records;
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
-    use axum::body::{Empty, Full};
+    use axum::body::Full;
     use axum::extract::FromRequest;
     use axum::http::Request;
-    use rstest::{fixture, rstest};
+    use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
@@ -204,7 +204,7 @@ mod tests {
         components: Arc<Componentes>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] empty_body: BodyStream,
+        #[future] _empty_body: BodyStream,
     ) {
         headers.insert("content-length", "48".parse().unwrap());
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
@@ -230,7 +230,7 @@ mod tests {
         .await
         .unwrap();
 
-        let mut storage = components.storage.read().await;
+        let storage = components.storage.read().await;
         let bucket = storage.get_bucket("bucket-1").unwrap();
         {
             let reader = bucket.begin_read("entry-1", 1).unwrap();

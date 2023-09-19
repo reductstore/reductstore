@@ -135,10 +135,6 @@ pub async fn write_record(
 mod tests {
     use super::*;
 
-    use axum::body::Empty;
-    use axum::extract::FromRequest;
-    use axum::http::Request;
-
     use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
 
