@@ -241,7 +241,7 @@ async fn parse_batched_records(
         for (name, value) in sorted_headers {
             if name.starts_with("x-reduct-time-") {
                 let timestamp = name[14..].parse::<u64>().unwrap();
-                let (content_length, content_type, labels) = parse_batched_header(value.to_str().unwrap());
+                let (content_length, content_type, labels) = parse_batched_header(value.to_str().unwrap()).unwrap();
                 let last =  headers.get("x-reduct-last") == Some(&HeaderValue::from_str("true").unwrap());
 
                 records_count += 1;
