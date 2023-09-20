@@ -304,7 +304,7 @@ impl Entry {
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         self.remove_expired_query();
-        self.queries.insert(id, build_query(start, end, options));
+        self.queries.insert(id, build_query(start, end, options)?);
 
         Ok(id)
     }
