@@ -530,7 +530,7 @@ mod tests {
 
         assert_eq!(token.value.len(), 37);
         assert_eq!(token.value, "test-".to_string() + &token.value[5..]);
-        assert!(token.created_at.second() > 0);
+        assert!(token.created_at.timestamp() > 0);
     }
 
     #[test]
