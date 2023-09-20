@@ -484,7 +484,7 @@ pub fn create_token_repository(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Timelike;
+
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
@@ -553,7 +553,7 @@ mod tests {
 
         assert_eq!(token.value.len(), 39);
         assert_eq!(token.value, "test-1-".to_string() + &token.value[7..]);
-        assert!(token.created_at.second() > 0);
+        assert!(token.created_at.timestamp() > 0);
     }
 
     #[rstest]
@@ -669,7 +669,7 @@ mod tests {
 
     #[rstest]
     fn test_update_provisioned_token(mut repo: Box<dyn ManageTokens>) {
-        let mut token = repo.get_mut_token("test").unwrap();
+        let token = repo.get_mut_token("test").unwrap();
         token.is_provisioned = true;
 
         let token = repo.update_token("test", Permissions::default());
@@ -864,7 +864,7 @@ mod tests {
 
     #[rstest]
     fn test_remove_provisioned_token(mut repo: Box<dyn ManageTokens>) {
-        let mut token = repo.get_mut_token("test").unwrap();
+        let token = repo.get_mut_token("test").unwrap();
         token.is_provisioned = true;
 
         let err = repo.remove_token("test").err().unwrap();
