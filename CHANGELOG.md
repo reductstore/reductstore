@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+# [1.6.2] - 2023-09-20
+
 ### Fixed
 
 - reductstore: Panic for a bad time interval in `GET /b/:bucket/:entry/q`, [PR-357](https://github.com/reductstore/reductstore/pull/357)
@@ -517,7 +519,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.6.2...HEAD
+
+[1.6.2]: https://github.com/reductstore/reductstore/compare/v1.6.1...v1.6.2
 
 [1.6.1]: https://github.com/reductstore/reductstore/compare/v1.6.0...v1.6.1
 
