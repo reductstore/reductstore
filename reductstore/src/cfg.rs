@@ -146,7 +146,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         }
 
         for (id, bucket) in &mut buckets {
-            let mut settings = &mut bucket.1;
+            let settings = &mut bucket.1;
             settings.quota_type = env.get_optional(&format!("RS_BUCKET_{}_QUOTA_TYPE", id));
 
             settings.quota_size = env

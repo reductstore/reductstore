@@ -113,7 +113,7 @@ mod tests {
     #[rstest]
     fn test_save(context: CliContext) {
         let mut config_file = ConfigFile::load(context.config_path()).unwrap();
-        let mut config = config_file.mut_config();
+        let config = config_file.mut_config();
         config.aliases = vec![(
             "test".to_string(),
             Alias {
