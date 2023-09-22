@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 
 use axum::extract::{Path, State};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // DELETE /b/:bucket_name
 pub async fn remove_bucket(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
@@ -34,7 +34,7 @@ pub async fn remove_bucket(
 mod tests {
     use super::*;
 
-    use crate::api::Componentes;
+    use crate::api::Components;
 
     use crate::api::tests::{components, headers};
 
@@ -45,7 +45,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_remove_bucket(components: Arc<Components>, headers: HeaderMap) {
         remove_bucket(State(components), Path("bucket-1".to_string()), headers)
             .await
             .unwrap();
@@ -53,7 +53,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_not_found(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_remove_bucket_not_found(components: Arc<Components>, headers: HeaderMap) {
         let err = remove_bucket(State(components), Path("not-found".to_string()), headers)
             .await
             .err()
@@ -66,7 +66,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_from_permission(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_remove_bucket_from_permission(components: Arc<Components>, headers: HeaderMap) {
         let token = components
             .token_repo
             .read()

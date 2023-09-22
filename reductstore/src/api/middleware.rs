@@ -5,9 +5,10 @@ use axum::http::{HeaderMap, Request};
 
 use axum::middleware::Next;
 use axum::response::IntoResponse;
+use futures_util::StreamExt;
 use log::{debug, error};
 
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::Policy;
 
 pub async fn default_headers<B>(
@@ -55,7 +56,7 @@ pub async fn print_statuses<B>(
 }
 
 pub async fn check_permissions<P>(
-    components: &Componentes,
+    components: &Components,
     headers: HeaderMap,
     policy: P,
 ) -> Result<(), HttpError>

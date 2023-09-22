@@ -3,7 +3,7 @@
 
 use crate::api::bucket::BucketSettingsAxum;
 use crate::api::middleware::check_permissions;
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 // PUT /b/:bucket_name
 pub async fn update_bucket(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     settings: BucketSettingsAxum,
@@ -33,7 +33,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_update_bucket(components: Arc<Components>, headers: HeaderMap) {
         update_bucket(
             State(components),
             Path("bucket-1".to_string()),
@@ -46,7 +46,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket_not_found(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_update_bucket_not_found(components: Arc<Components>, headers: HeaderMap) {
         let err = update_bucket(
             State(components),
             Path("not-found".to_string()),

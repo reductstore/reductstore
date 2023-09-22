@@ -3,7 +3,7 @@
 
 use crate::api::middleware::check_permissions;
 use crate::api::token::TokenListAxum;
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::State;
 use axum::headers::HeaderMap;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // GET /tokens
 pub async fn list_tokens(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<TokenListAxum, HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
@@ -36,7 +36,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_token_list(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_token_list(components: Arc<Components>, headers: HeaderMap) {
         let list = list_tokens(State(components), headers).await.unwrap().0;
         assert_eq!(list.tokens.len(), 2);
         assert_eq!(list.tokens[0].name, "init-token");

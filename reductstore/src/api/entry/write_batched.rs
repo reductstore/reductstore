@@ -1,30 +1,25 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-// Copyright 2023 ReductStore
-// Licensed under the Business Source License 1.1
-
 use crate::api::middleware::check_permissions;
-use crate::api::{Componentes, ErrorCode, HttpError};
+use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-
 use crate::storage::writer::{Chunk, RecordWriter};
-use axum::extract::{BodyStream, Path, Query, State};
+use axum::extract::{BodyStream, Path, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name};
+use reduct_base::error::ReductError;
 use std::collections::HashMap;
-
 use std::sync::{Arc, RwLock};
 
-// POST /:bucket/:entry?ts=<number>
-pub async fn write_records(
-    State(components): State<Arc<Componentes>>,
+// POST /:bucket/:entry/batch
+pub async fn write_batched_records(
+    State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
-    Query(_params): Query<HashMap<String, String>>,
     mut stream: BodyStream,
 ) -> Result<(), HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
@@ -43,73 +38,84 @@ pub async fn write_records(
         .iter()
         .filter(|(k, _)| k.as_str().starts_with("x-reduct-time-"))
         .collect();
-    let mut rest = Bytes::new();
 
-    let process_request = async {
-        for (name, value) in record_headers.iter() {
-            let writer =
-                get_next_writer(&components, bucket_name, entry_name, name.as_str(), value).await?;
+    let process_stream = async {
+        let write_chunk = |writer_lock: Arc<RwLock<RecordWriter>>,
+                           chunk: Bytes|
+         -> Result<Option<Bytes>, ReductError> {
+            let mut writer = writer_lock.write().unwrap();
+            let to_write = writer.content_length() - writer.written();
+            if chunk.len() < to_write {
+                writer.write(Chunk::Data(chunk))?;
+                Ok(None)
+            } else {
+                let chuck_to_write = chunk.slice(0..to_write);
+                writer.write(Chunk::Last(chuck_to_write))?;
+                Ok(Some(chunk.slice(to_write..)))
+            }
+        };
 
-            let mut writer = writer.write().unwrap();
-            let mut write_chunk = |chunk: Bytes| -> Result<Option<Bytes>, HttpError> {
-                let to_write = writer.content_length() - writer.written();
-                if chunk.len() < to_write {
-                    writer.write(Chunk::Data(chunk))?;
-                    Ok(None)
-                } else {
-                    let (to_write, for_next) = chunk.split_at(to_write);
-                    writer.write(Chunk::Last(Bytes::copy_from_slice(to_write)))?;
-                    Ok(Some(Bytes::copy_from_slice(for_next)))
+        let mut it = record_headers.iter();
+        let mut current_writer: Option<_> = None;
+        while let Some(chunk) = stream.next().await {
+            let mut chunk = chunk?;
+
+            while !chunk.is_empty() {
+                if current_writer.is_none() {
+                    let (name, value) = it
+                        .next()
+                        .ok_or(ReductError::bad_request("Content is longer than expected"))?;
+                    current_writer = Some(
+                        get_writer(&components, bucket_name, entry_name, name.as_str(), value)
+                            .await?,
+                    );
                 }
-            };
 
-            if rest.is_empty() {
-                match stream.next().await {
-                    Some(chunk) => {
-                        rest = chunk.unwrap();
+                match write_chunk(current_writer.clone().unwrap(), chunk) {
+                    Ok(None) => {
+                        chunk = Bytes::new();
                     }
-                    None => {
-                        break;
+                    Ok(Some(new_chunk)) => {
+                        chunk = new_chunk;
+                        current_writer = None;
+                    }
+                    Err(err) => {
+                        return Err(err.into());
                     }
                 }
             }
+        }
 
-            match write_chunk(rest)? {
-                Some(data) => {
-                    rest = data;
-                }
-                None => {
-                    rest = Bytes::new();
-                }
-            }
+        if it.next().is_some() {
+            return Err(ReductError::bad_request("Content is shorter than expected").into());
         }
 
         Ok(())
     };
 
-    match process_request.await {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            // drain the stream in the case if a client doesn't support Expect: 100-continue
-            if !headers.contains_key(Expect::name()) {
-                debug!("draining the stream");
-                while let Some(_) = stream.next().await {}
-            }
-
-            Err(e)
+    if let Err(err) = process_stream.await {
+        if !headers
+            .get(Expect::name())
+            .eq(&Some(&HeaderValue::from_static("100-continue")))
+        {
+            debug!("draining the stream");
+            while let Some(_) = stream.next().await {}
         }
+        return Err(err);
     }
+
+    Ok(())
 }
 
-async fn get_next_writer(
-    components: &Arc<Componentes>,
+async fn get_writer(
+    components: &Arc<Components>,
     bucket_name: &str,
     entry_name: &str,
     name: &str,
     value: &HeaderValue,
-) -> Result<Arc<RwLock<RecordWriter>>, HttpError> {
+) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
     let time = name[14..].parse::<u64>().map_err(|_| {
-        HttpError::new(
+        ReductError::new(
             ErrorCode::UnprocessableEntity,
             &format!(
                 "Invalid header'{}': must be an unix timestamp in microseconds",
@@ -131,30 +137,29 @@ async fn get_next_writer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::entry::write_batched::write_records;
-    use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
+    use crate::api::entry::write_batched::write_batched_records;
+    use crate::api::tests::{components, headers, path_to_entry_1};
     use axum::body::Full;
     use axum::extract::FromRequest;
     use axum::http::Request;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
 
     #[rstest]
     #[tokio::test]
     async fn test_write_record_bad_timestamp(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] empty_body: BodyStream,
+        #[future] body_stream: BodyStream,
     ) {
         headers.insert("content-length", "10".parse().unwrap());
         headers.insert("x-reduct-time-xxx", "10".parse().unwrap());
 
-        let err = write_records(
+        let err = write_batched_records(
             State(components),
             headers,
             path_to_entry_1,
-            Query(HashMap::new()),
-            empty_body.await,
+            body_stream.await,
         )
         .await
         .err()
@@ -171,22 +176,20 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-
     async fn test_write_batched_invalid_header(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] empty_body: BodyStream,
+        #[future] body_stream: BodyStream,
     ) {
         headers.insert("content-length", "10".parse().unwrap());
         headers.insert("x-reduct-time-1", "".parse().unwrap());
 
-        let err = write_records(
+        let err = write_batched_records(
             State(components),
             headers,
             path_to_entry_1,
-            Query(HashMap::new()),
-            empty_body.await,
+            body_stream.await,
         )
         .await
         .err()
@@ -194,17 +197,17 @@ mod tests {
 
         assert_eq!(
             err,
-            HttpError::new(ErrorCode::UnprocessableEntity, "Invalid batched header",)
+            HttpError::new(ErrorCode::UnprocessableEntity, "Invalid batched header")
         );
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_records(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] _empty_body: BodyStream,
+        #[future] body_stream: BodyStream,
     ) {
         headers.insert("content-length", "48".parse().unwrap());
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
@@ -214,17 +217,12 @@ mod tests {
         );
         headers.insert("x-reduct-time-3", "18,text/plain".parse().unwrap());
 
-        let body = Full::new(Bytes::from(
-            "1234567890abcdef1234567890abcdef1234567890abcdef",
-        ));
-        let request = Request::builder().body(body).unwrap();
-        let stream = BodyStream::from_request(request, &()).await.unwrap();
+        let stream = body_stream.await;
 
-        write_records(
+        write_batched_records(
             State(Arc::clone(&components)),
             headers,
             path_to_entry_1,
-            Query(HashMap::new()),
             stream,
         )
         .await
@@ -262,5 +260,15 @@ mod tests {
                 Some(Bytes::from("ef1234567890abcdef"))
             );
         }
+    }
+
+    #[fixture]
+    async fn body_stream() -> BodyStream {
+        let body = Full::new(Bytes::from(
+            "1234567890abcdef1234567890abcdef1234567890abcdef",
+        ));
+        let request = Request::builder().body(body).unwrap();
+        let stream = BodyStream::from_request(request, &()).await.unwrap();
+        stream
     }
 }

@@ -2,12 +2,12 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::{Componentes, ErrorCode, HttpError};
+use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::storage::entry::Labels;
 use crate::storage::writer::Chunk;
 use axum::extract::{BodyStream, Path, Query, State};
-use axum::headers::{Expect, Header, HeaderMap};
+use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 // POST /:bucket/:entry?ts=<number>
 pub async fn write_record(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -121,7 +121,10 @@ pub async fn write_record(
         }
         Err(e) => {
             // drain the stream in the case if a client doesn't support Expect: 100-continue
-            if !headers.contains_key(Expect::name()) {
+            if !headers
+                .get(Expect::name())
+                .eq(&Some(&HeaderValue::from_static("100-continue")))
+            {
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}
             }
@@ -143,7 +146,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
@@ -179,7 +182,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bucket_not_found(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         headers: HeaderMap,
         #[future] empty_body: BodyStream,
     ) {
@@ -210,7 +213,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bad_ts(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,

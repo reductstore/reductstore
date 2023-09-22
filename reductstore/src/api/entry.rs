@@ -8,33 +8,27 @@ mod remove;
 mod write_batched;
 mod write_single;
 
-use axum::async_trait;
-
-use axum::extract::FromRequest;
-use axum::http::header::HeaderMap;
-use axum::http::{Request, StatusCode};
-use axum::response::{IntoResponse, Response};
-
-use std::collections::HashMap;
-
-use axum::headers;
-use axum::headers::HeaderMapExt;
-
-use axum::routing::{delete, get, head, post};
-
-use crate::storage::storage::Storage;
-use reduct_base::error::ErrorCode;
-use reduct_base::msg::entry_api::QueryInfo;
-use reduct_macros::{IntoResponse, Twin};
-use std::sync::Arc;
-
 use crate::api::entry::read_batched::read_batched_records;
 use crate::api::entry::read_single::read_single_record;
 use crate::api::entry::remove::remove_entry;
+use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;
+use crate::api::Components;
 use crate::api::HttpError;
-
-use crate::api::Componentes;
+use crate::storage::storage::Storage;
+use axum::async_trait;
+use axum::extract::FromRequest;
+use axum::headers;
+use axum::headers::HeaderMapExt;
+use axum::http::header::HeaderMap;
+use axum::http::{Request, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, head, post};
+use reduct_base::error::ErrorCode;
+use reduct_base::msg::entry_api::QueryInfo;
+use reduct_macros::{IntoResponse, Twin};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct MethodExtractor {
     name: String,
@@ -107,9 +101,13 @@ fn check_and_extract_ts_or_query_id(
 #[derive(IntoResponse, Twin)]
 pub struct QueryInfoAxum(QueryInfo);
 
-pub fn create_entry_api_routes() -> axum::Router<Arc<Componentes>> {
+pub fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
+        .route(
+            "/:bucket_name/:entry_name/batch",
+            post(write_batched_records),
+        )
         .route("/:bucket_name/:entry_name", get(read_single_record))
         .route("/:bucket_name/:entry_name", head(read_single_record))
         .route("/:bucket_name/:entry_name/batch", get(read_batched_records))

@@ -34,7 +34,7 @@ mod server;
 mod token;
 mod ui;
 
-pub struct Componentes {
+pub struct Components {
     pub storage: RwLock<Storage>,
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
@@ -102,7 +102,7 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(api_base_path: &String, components: Arc<Componentes>) -> Router {
+pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> Router {
     let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
 
     let app = Router::new()
@@ -144,7 +144,7 @@ mod tests {
     use rstest::fixture;
 
     #[fixture]
-    pub(crate) fn components() -> Arc<Componentes> {
+    pub(crate) fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
         let mut storage = Storage::new(data_path.clone());
@@ -179,7 +179,7 @@ mod tests {
 
         token_repo.generate_token("test", permissions).unwrap();
 
-        let components = Componentes {
+        let components = Components {
             storage: RwLock::new(storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),

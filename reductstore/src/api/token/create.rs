@@ -3,7 +3,7 @@
 
 use crate::api::middleware::check_permissions;
 use crate::api::token::{PermissionsAxum, TokenCreateResponseAxum};
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // POST /tokens/:token_name
 pub async fn create_token(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
     permissions: PermissionsAxum,
@@ -40,7 +40,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_create_token(components: Arc<Components>, headers: HeaderMap) {
         let token = create_token(
             State(components),
             Path("new-token".to_string()),
@@ -55,7 +55,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token_already_exists(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_create_token_already_exists(components: Arc<Components>, headers: HeaderMap) {
         let err = create_token(
             State(components),
             Path("test".to_string()),

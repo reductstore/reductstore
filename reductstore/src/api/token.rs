@@ -24,7 +24,7 @@ use crate::api::token::create::create_token;
 use crate::api::token::get::get_token;
 use crate::api::token::list::list_tokens;
 use crate::api::token::remove::remove_token;
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
 use reduct_macros::{IntoResponse, Twin};
@@ -63,7 +63,7 @@ where
     }
 }
 
-pub fn create_token_api_routes() -> axum::Router<Arc<Componentes>> {
+pub fn create_token_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/", get(list_tokens))
         .route("/:token_name", post(create_token))

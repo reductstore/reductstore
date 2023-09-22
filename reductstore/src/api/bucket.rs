@@ -24,7 +24,7 @@ use crate::api::bucket::head::head_bucket;
 use crate::api::bucket::remove::remove_bucket;
 use crate::api::bucket::update::update_bucket;
 
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
 use reduct_macros::{IntoResponse, Twin};
 //
@@ -66,7 +66,7 @@ where
     }
 }
 
-pub fn create_bucket_api_routes() -> axum::Router<Arc<Componentes>> {
+pub fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name", get(get_bucket))
         .route("/:bucket_name", head(head_bucket))

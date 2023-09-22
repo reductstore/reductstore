@@ -32,7 +32,12 @@ pub fn parse_batched_header(header: &str) -> Result<(usize, String, Labels), Red
     let (content_type, rest) = rest
         .split_once(',')
         .unwrap_or((rest, "application/octet-stream"));
-    let content_type = content_type.trim().to_string();
+
+    let content_type = if content_type.is_empty() {
+        "application/octet-stream".to_string()
+    } else {
+        content_type.trim().to_string()
+    };
 
     let mut labels = Labels::new();
     let mut rest = rest.to_string();

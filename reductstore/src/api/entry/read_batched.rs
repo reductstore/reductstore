@@ -3,7 +3,7 @@
 
 use crate::api::entry::MethodExtractor;
 use crate::api::middleware::check_permissions;
-use crate::api::{Componentes, ErrorCode, HttpError};
+use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::Bucket;
 
@@ -24,7 +24,7 @@ use std::task::{Context, Poll};
 
 // GET /:bucket/:entry/batch?q=<number>
 pub async fn read_batched_records(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -207,7 +207,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_batched_read(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,

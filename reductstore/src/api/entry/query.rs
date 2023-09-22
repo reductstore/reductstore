@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::query::base::QueryOptions;
 
@@ -20,7 +20,7 @@ use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
 pub async fn query(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -131,7 +131,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
@@ -167,7 +167,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_bad_limit(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
