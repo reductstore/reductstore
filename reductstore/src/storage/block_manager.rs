@@ -13,7 +13,7 @@ use std::sync::{Arc, RwLock, Weak};
 
 use crate::storage::proto::*;
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::RecordWriter;
+use crate::storage::writer::{RecordWriter, WriteChunk};
 use reduct_base::error::ReductError;
 
 pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;

@@ -472,7 +472,7 @@ impl Bucket {
 mod tests {
     use super::*;
     use crate::storage::entry::Labels;
-    use crate::storage::writer::Chunk;
+    use crate::storage::writer::{Chunk, WriteChunk};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 

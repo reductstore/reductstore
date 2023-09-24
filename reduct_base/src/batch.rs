@@ -9,6 +9,12 @@ use std::collections::HashMap;
 
 pub type Labels = HashMap<String, String>;
 
+pub struct RecordHeader {
+    pub content_length: usize,
+    pub content_type: String,
+    pub labels: Labels,
+}
+
 /// Parse a batched header into a content length, content type, and labels.
 ///
 /// # Arguments
@@ -20,7 +26,7 @@ pub type Labels = HashMap<String, String>;
 /// * `content_length` - The content length of the batched header.
 /// * `content_type` - The content type of the batched header.
 /// * `labels` - The labels of the batched header.
-pub fn parse_batched_header(header: &str) -> Result<(usize, String, Labels), ReductError> {
+pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
     let (content_length, rest) = header
         .split_once(',')
         .ok_or(ReductError::unprocessable_entity("Invalid batched header"))?;
@@ -60,7 +66,11 @@ pub fn parse_batched_header(header: &str) -> Result<(usize, String, Labels), Red
         };
     }
 
-    Ok((content_length, content_type, labels))
+    Ok(RecordHeader {
+        content_length,
+        content_type,
+        labels,
+    })
 }
 
 pub fn sort_headers_by_name(headers: &HeaderMap) -> Vec<(String, HeaderValue)> {

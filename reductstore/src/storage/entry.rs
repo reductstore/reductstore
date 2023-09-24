@@ -432,7 +432,7 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
-    use crate::storage::writer::Chunk;
+    use crate::storage::writer::{Chunk, WriteChunk};
     use std::fs::File;
 
     use rstest::{fixture, rstest};

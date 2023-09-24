@@ -4,15 +4,15 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::storage::writer::{Chunk, RecordWriter};
+use crate::storage::writer::{Chunk, RecordWriter, WriteChunk};
 use axum::extract::{BodyStream, Path, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::debug;
-use reduct_base::batch::{parse_batched_header, sort_headers_by_name};
+use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
 use reduct_base::error::ReductError;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, RwLock};
 
 // POST /:bucket/:entry/batch
@@ -34,59 +34,79 @@ pub async fn write_batched_records(
 
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_name(&headers);
-    let record_headers: Vec<_> = record_headers
-        .iter()
-        .filter(|(k, _)| k.as_str().starts_with("x-reduct-time-"))
-        .collect();
 
     let process_stream = async {
-        let write_chunk = |writer_lock: Arc<RwLock<RecordWriter>>,
-                           chunk: Bytes|
-         -> Result<Option<Bytes>, ReductError> {
-            let mut writer = writer_lock.write().unwrap();
-            let to_write = writer.content_length() - writer.written();
-            if chunk.len() < to_write {
-                writer.write(Chunk::Data(chunk))?;
-                Ok(None)
-            } else {
-                let chuck_to_write = chunk.slice(0..to_write);
-                writer.write(Chunk::Last(chuck_to_write))?;
-                Ok(Some(chunk.slice(to_write..)))
-            }
-        };
+        let mut timed_headers: Vec<(u64, RecordHeader)> = Vec::new();
+        for (k, v) in record_headers
+            .iter()
+            .filter(|(k, _)| k.as_str().starts_with("x-reduct-time-"))
+        {
+            let time = k[14..].parse::<u64>().map_err(|_| {
+                ReductError::new(
+                    ErrorCode::UnprocessableEntity,
+                    &format!(
+                        "Invalid header'{}': must be an unix timestamp in microseconds",
+                        k
+                    ),
+                )
+            })?;
 
-        let mut it = record_headers.iter();
-        let mut current_writer: Option<_> = None;
+            let header = parse_batched_header(v.to_str().unwrap())?;
+            timed_headers.push((time, header));
+        }
+
+        check_content_length(&headers, &timed_headers)?;
+
+        let mut writers: Vec<Arc<RwLock<dyn WriteChunk + Sync + Send>>> = Vec::new();
+        let mut error_map = BTreeMap::new();
+        for (time, header) in timed_headers {
+            writers.push(
+                get_writer(
+                    &components,
+                    bucket_name,
+                    entry_name,
+                    time,
+                    header,
+                    &mut error_map,
+                )
+                .await,
+            );
+        }
+
+        let mut index = 0;
         while let Some(chunk) = stream.next().await {
             let mut chunk = chunk?;
 
-            while !chunk.is_empty() {
-                if current_writer.is_none() {
-                    let (name, value) = it
-                        .next()
-                        .ok_or(ReductError::bad_request("Content is longer than expected"))?;
-                    current_writer = Some(
-                        get_writer(&components, bucket_name, entry_name, name.as_str(), value)
-                            .await?,
-                    );
+            let write_chunk = |index: usize, chunk: Bytes| -> Result<Option<Bytes>, ReductError> {
+                let mut writer = writers[index].write().unwrap();
+                let to_write = writer.content_length() - writer.written();
+                if chunk.len() < to_write {
+                    writer.write(Chunk::Data(chunk))?;
+                    Ok(None)
+                } else {
+                    let chuck_to_write = chunk.slice(0..to_write);
+                    writer.write(Chunk::Last(chuck_to_write))?;
+                    Ok(Some(chunk.slice(to_write..)))
                 }
+            };
 
-                match write_chunk(current_writer.clone().unwrap(), chunk) {
+            while !chunk.is_empty() {
+                match write_chunk(index, chunk) {
                     Ok(None) => {
                         chunk = Bytes::new();
                     }
                     Ok(Some(new_chunk)) => {
                         chunk = new_chunk;
-                        current_writer = None;
+                        index += 1;
                     }
                     Err(err) => {
-                        return Err(err.into());
+                        return Err::<(), HttpError>(err.into());
                     }
                 }
             }
         }
 
-        if it.next().is_some() {
+        if writers.len() < index {
             return Err(ReductError::bad_request("Content is shorter than expected").into());
         }
 
@@ -107,31 +127,117 @@ pub async fn write_batched_records(
     Ok(())
 }
 
+fn check_content_length(
+    headers: &HeaderMap,
+    timed_headers: &Vec<(u64, RecordHeader)>,
+) -> Result<(), ReductError> {
+    let total_content_length: usize = timed_headers
+        .iter()
+        .map(|(_, header)| header.content_length)
+        .sum();
+
+    if total_content_length
+        != headers
+            .get("content-length")
+            .ok_or(ReductError::unprocessable_entity(
+                "content-length header is required",
+            ))?
+            .to_str()
+            .unwrap()
+            .parse::<usize>()
+            .map_err(|_| ReductError::unprocessable_entity("Invalid content-length header"))?
+    {
+        return Err(ReductError::unprocessable_entity(
+            "content-length header does not match the sum of the content-lengths in the headers",
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
 async fn get_writer(
     components: &Arc<Components>,
     bucket_name: &str,
     entry_name: &str,
-    name: &str,
-    value: &HeaderValue,
-) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
-    let time = name[14..].parse::<u64>().map_err(|_| {
-        ReductError::new(
-            ErrorCode::UnprocessableEntity,
-            &format!(
-                "Invalid header'{}': must be an unix timestamp in microseconds",
-                name
-            ),
-        )
-    })?;
-
-    let writer = {
+    time: u64,
+    record_header: RecordHeader,
+    error_map: &mut BTreeMap<u64, ReductError>,
+) -> Arc<RwLock<dyn WriteChunk + Send + Sync>> {
+    let get_writer = async move {
         let mut storage = components.storage.write().await;
         let bucket = storage.get_mut_bucket(bucket_name)?;
 
-        let (content_length, content_type, labels) = parse_batched_header(value.to_str().unwrap())?;
-        bucket.begin_write(entry_name, time, content_length, content_type, labels)
+        bucket.begin_write(
+            entry_name,
+            time,
+            record_header.content_length,
+            record_header.content_type,
+            record_header.labels,
+        )
     };
-    Ok(writer?)
+
+    match get_writer.await {
+        Ok(writer) => {
+            error_map.insert(time, ReductError::ok());
+            writer
+        }
+        Err(err) => {
+            error_map.insert(time, err);
+            Arc::new(RwLock::new(ChunkDrainer::new(record_header.content_length)))
+        }
+    }
+}
+
+struct ChunkDrainer {
+    written: usize,
+    content_length: usize,
+}
+
+impl ChunkDrainer {
+    fn new(content_length: usize) -> Self {
+        Self {
+            written: 0,
+            content_length,
+        }
+    }
+}
+
+impl WriteChunk for ChunkDrainer {
+    fn write(&mut self, chunk: Chunk) -> Result<(), ReductError> {
+        match chunk {
+            Chunk::Data(chunk) => {
+                self.written += chunk.len();
+                if self.written > self.content_length {
+                    return Err(ReductError::bad_request(
+                        "Content is bigger than in content-length",
+                    ));
+                }
+            }
+            Chunk::Last(chunk) => {
+                self.written += chunk.len();
+                if self.written > self.content_length {
+                    return Err(ReductError::bad_request(
+                        "Content is bigger than in content-length",
+                    ));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn content_length(&self) -> usize {
+        self.content_length
+    }
+
+    fn written(&self) -> usize {
+        self.written
+    }
+
+    fn is_done(&self) -> bool {
+        self.written == self.content_length
+    }
 }
 
 #[cfg(test)]

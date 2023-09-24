@@ -134,7 +134,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::auth::token_repository::create_token_repository;
-    use crate::storage::writer::Chunk;
+    use crate::storage::writer::{Chunk, WriteChunk};
     use axum::extract::{BodyStream, FromRequest, Path};
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
     use axum::http::Request;

@@ -5,7 +5,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::storage::entry::Labels;
-use crate::storage::writer::Chunk;
+use crate::storage::writer::{Chunk, WriteChunk};
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;

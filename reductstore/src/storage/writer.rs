@@ -11,20 +11,6 @@ use crate::storage::block_manager::ManageBlock;
 use crate::storage::proto::{record, ts_to_us, Block};
 use reduct_base::error::{ErrorCode, ReductError};
 
-/// RecordWriter is used to write a record to a file.
-pub struct RecordWriter {
-    file: File,
-    written_bytes: usize,
-    content_length: usize,
-    record_index: usize,
-    block_id: u64,
-    block_manager: Arc<RwLock<dyn ManageBlock>>,
-}
-
-unsafe impl Send for RecordWriter {}
-
-unsafe impl Sync for RecordWriter {}
-
 /// Chunk is a chunk of data to write into a record.
 pub enum Chunk {
     /// chunk of data to write into a record
@@ -35,32 +21,25 @@ pub enum Chunk {
     Error,
 }
 
-impl RecordWriter {
-    pub fn new<T>(
-        path: PathBuf,
-        block: &Block,
-        record_index: usize,
-        content_length: usize,
-        block_manager: Arc<RwLock<T>>,
-    ) -> Result<RecordWriter, ReductError>
-    where
-        T: ManageBlock + 'static,
-    {
-        let mut file = OpenOptions::new().write(true).create(true).open(path)?;
-        let offset = block.records[record_index].begin;
-        file.seek(SeekFrom::Start(offset))?;
+pub trait WriteChunk {
+    fn write(&mut self, chunk: Chunk) -> Result<(), ReductError>;
+    fn content_length(&self) -> usize;
+    fn written(&self) -> usize;
+    fn is_done(&self) -> bool;
+}
 
-        Ok(Self {
-            file,
-            written_bytes: 0,
-            content_length,
-            record_index,
-            block_id: ts_to_us(&block.begin_time.clone().unwrap()),
-            block_manager,
-        })
-    }
+/// RecordWriter is used to write a record to a file.
+pub struct RecordWriter {
+    file: File,
+    written_bytes: usize,
+    content_length: usize,
+    record_index: usize,
+    block_id: u64,
+    block_manager: Arc<RwLock<dyn ManageBlock + Send + Sync>>,
+}
 
-    pub fn write(&mut self, chunk: Chunk) -> Result<(), ReductError> {
+impl WriteChunk for RecordWriter {
+    fn write(&mut self, chunk: Chunk) -> Result<(), ReductError> {
         let (data, last) = match chunk {
             Chunk::Data(data) => (data, false),
             Chunk::Last(data) => (data, true),
@@ -87,12 +66,42 @@ impl RecordWriter {
         Ok(())
     }
 
-    pub fn content_length(&self) -> usize {
+    fn content_length(&self) -> usize {
         self.content_length
     }
 
-    pub fn written(&self) -> usize {
+    fn written(&self) -> usize {
         self.written_bytes
+    }
+
+    fn is_done(&self) -> bool {
+        self.written_bytes == self.content_length
+    }
+}
+
+impl RecordWriter {
+    pub fn new<T>(
+        path: PathBuf,
+        block: &Block,
+        record_index: usize,
+        content_length: usize,
+        block_manager: Arc<RwLock<T>>,
+    ) -> Result<RecordWriter, ReductError>
+    where
+        T: ManageBlock + 'static + Send + Sync,
+    {
+        let mut file = OpenOptions::new().write(true).create(true).open(path)?;
+        let offset = block.records[record_index].begin;
+        file.seek(SeekFrom::Start(offset))?;
+
+        Ok(Self {
+            file,
+            written_bytes: 0,
+            content_length,
+            record_index,
+            block_id: ts_to_us(&block.begin_time.clone().unwrap()),
+            block_manager,
+        })
     }
 
     fn write_impl(&mut self, buf: Bytes, last: bool) -> Result<(), ReductError> {
@@ -118,10 +127,6 @@ impl RecordWriter {
         }
 
         Ok(())
-    }
-
-    pub fn is_done(&self) -> bool {
-        self.written_bytes == self.content_length
     }
 
     fn on_update(&mut self, state: record::State) {

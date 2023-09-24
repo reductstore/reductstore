@@ -81,7 +81,7 @@ pub(crate) mod tests {
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::proto::record::{Label, State as RecordState};
     use crate::storage::proto::Record;
-    use crate::storage::writer::Chunk;
+    use crate::storage::writer::{Chunk, WriteChunk};
     use bytes::Bytes;
     use prost_wkt_types::Timestamp;
     use rstest::fixture;
