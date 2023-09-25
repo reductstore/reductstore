@@ -7,12 +7,16 @@ use crate::auth::policy::WriteAccessPolicy;
 use crate::storage::writer::{Chunk, RecordWriter, WriteChunk};
 use axum::extract::{BodyStream, Path, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
+use axum::http::HeaderName;
+use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::format;
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 // POST /:bucket/:entry/batch
@@ -21,7 +25,7 @@ pub async fn write_batched_records(
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     mut stream: BodyStream,
-) -> Result<(), HttpError> {
+) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     check_permissions(
         &components,
@@ -34,6 +38,7 @@ pub async fn write_batched_records(
 
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_name(&headers);
+    let mut error_map = BTreeMap::new();
 
     let process_stream = async {
         let mut timed_headers: Vec<(u64, RecordHeader)> = Vec::new();
@@ -58,7 +63,6 @@ pub async fn write_batched_records(
         check_content_length(&headers, &timed_headers)?;
 
         let mut writers: Vec<Arc<RwLock<dyn WriteChunk + Sync + Send>>> = Vec::new();
-        let mut error_map = BTreeMap::new();
         for (time, header) in timed_headers {
             writers.push(
                 get_writer(
@@ -121,10 +125,18 @@ pub async fn write_batched_records(
             debug!("draining the stream");
             while let Some(_) = stream.next().await {}
         }
-        return Err(err);
+        return Err::<HeaderMap, HttpError>(err);
     }
 
-    Ok(())
+    let mut headers = HeaderMap::new();
+    error_map.iter().for_each(|(time, err)| {
+        headers.insert(
+            HeaderName::from_str(&format!("x-reduct-error-{}", time)).unwrap(),
+            HeaderValue::from_str(&format!("{},\"{}\"", err.status(), err.message())).unwrap(),
+        );
+    });
+
+    Ok(headers.into())
 }
 
 fn check_content_length(
@@ -178,10 +190,7 @@ async fn get_writer(
     };
 
     match get_writer.await {
-        Ok(writer) => {
-            error_map.insert(time, ReductError::ok());
-            writer
-        }
+        Ok(writer) => writer,
         Err(err) => {
             error_map.insert(time, err);
             Arc::new(RwLock::new(ChunkDrainer::new(record_header.content_length)))
@@ -360,6 +369,66 @@ mod tests {
             let mut reader = reader.write().unwrap();
             assert!(reader.labels().is_empty());
             assert_eq!(reader.content_type(), "text/plain");
+            assert_eq!(reader.content_length(), 18);
+            assert_eq!(
+                reader.read().unwrap(),
+                Some(Bytes::from("ef1234567890abcdef"))
+            );
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_error(
+        components: Arc<Components>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        #[future] body_stream: BodyStream,
+    ) {
+        {
+            let mut storage = components.storage.write().await;
+            storage
+                .get_mut_bucket("bucket-1")
+                .unwrap()
+                .begin_write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
+                .unwrap();
+        }
+
+        headers.insert("content-length", "48".parse().unwrap());
+        headers.insert("x-reduct-time-1", "10,".parse().unwrap());
+        headers.insert("x-reduct-time-2", "20,".parse().unwrap());
+        headers.insert("x-reduct-time-3", "18,".parse().unwrap());
+
+        let stream = body_stream.await;
+
+        let resp = write_batched_records(
+            State(Arc::clone(&components)),
+            headers,
+            path_to_entry_1,
+            stream,
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let headers = resp.headers();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(
+            headers.get("x-reduct-error-2").unwrap(),
+            &HeaderValue::from_static("409,\"A record with timestamp 2 already exists\"")
+        );
+
+        let storage = components.storage.read().await;
+        let bucket = storage.get_bucket("bucket-1").unwrap();
+        {
+            let reader = bucket.begin_read("entry-1", 1).unwrap();
+            let mut reader = reader.write().unwrap();
+            assert_eq!(reader.content_length(), 10);
+            assert_eq!(reader.read().unwrap(), Some(Bytes::from("1234567890")));
+        }
+        {
+            let reader = bucket.begin_read("entry-1", 3).unwrap();
+            let mut reader = reader.write().unwrap();
             assert_eq!(reader.content_length(), 18);
             assert_eq!(
                 reader.read().unwrap(),

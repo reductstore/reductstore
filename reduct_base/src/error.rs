@@ -78,6 +78,12 @@ impl Display for ReductError {
     }
 }
 
+impl Display for ErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+        write!(f, "{}", self.int_value())
+    }
+}
+
 impl From<std::io::Error> for ReductError {
     fn from(err: std::io::Error) -> Self {
         // An IO error is an internal reductstore error
