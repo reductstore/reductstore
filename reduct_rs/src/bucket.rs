@@ -3,17 +3,20 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::client::Result;
-use crate::http_client::HttpClient;
-use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
+use std::sync::Arc;
+
 use reqwest::Method;
 
+use reduct_base::error::ErrorCode;
+use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
+use reduct_base::msg::entry_api::EntryInfo;
+
+use crate::client::Result;
+use crate::http_client::HttpClient;
 use crate::record::query::QueryBuilder;
 use crate::record::read_record::ReadRecordBuilder;
 use crate::record::WriteRecordBuilder;
-use reduct_base::error::ErrorCode;
-use reduct_base::msg::entry_api::EntryInfo;
-use std::sync::Arc;
+use crate::WriteBatchBuilder;
 
 /// A bucket to store data in.
 pub struct Bucket {
@@ -161,6 +164,14 @@ impl Bucket {
     }
 
     /// Create a record to write to the bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The entry to write to.
+    ///
+    /// # Returns
+    ///
+    /// Returns a record builder.
     pub fn write_record(&self, entry: &str) -> WriteRecordBuilder {
         WriteRecordBuilder::new(
             self.name.clone(),
@@ -169,7 +180,32 @@ impl Bucket {
         )
     }
 
+    /// Create a batch to write to the bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The entry to write to.
+    ///
+    /// # Returns
+    ///
+    /// Returns a batch builder.
+    pub fn write_batch(&self, entry: &str) -> WriteBatchBuilder {
+        WriteBatchBuilder::new(
+            self.name.clone(),
+            entry.to_string(),
+            Arc::clone(&self.http_client),
+        )
+    }
+
     /// Create a record to write to the bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The entry to write to.
+    ///
+    /// # Returns
+    ///
+    /// Returns a record builder.
     pub fn read_record(&self, entry: &str) -> ReadRecordBuilder {
         ReadRecordBuilder::new(
             self.name.clone(),
@@ -207,16 +243,18 @@ impl Bucket {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bytes::Bytes;
     use chrono::Duration;
     use futures_util::{pin_mut, StreamExt};
+    use rstest::{fixture, rstest};
+
+    use reduct_base::error::ErrorCode;
 
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
+    use crate::record::RecordBuilder;
 
-    use reduct_base::error::ErrorCode;
-    use rstest::{fixture, rstest};
+    use super::*;
 
     #[rstest]
     #[tokio::test]
@@ -478,6 +516,61 @@ mod tests {
                 .status
                 == ErrorCode::NotFound
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_batched_write(#[future] bucket: Bucket) {
+        let bucket: Bucket = bucket.await;
+        let mut batch = bucket.write_batch("test");
+
+        let record1 = RecordBuilder::new()
+            .timestamp_us(1000)
+            .data(Bytes::from("Hey,"))
+            .add_label("test".into(), "1".into())
+            .content_type("text/plain".into())
+            .build();
+
+        let stream = futures_util::stream::iter(vec![Ok(Bytes::from("World"))]);
+
+        let record2 = RecordBuilder::new()
+            .timestamp_us(2000)
+            .stream(Box::pin(stream))
+            .add_label("test".into(), "2".into())
+            .content_type("text/plain".into())
+            .content_length(5)
+            .build();
+
+        batch
+            .add_record(record1)
+            .add_record(record2)
+            .send()
+            .await
+            .unwrap();
+
+        let record = bucket
+            .read_record("test")
+            .timestamp_us(1000)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(record.content_length(), 4);
+        assert_eq!(record.content_type(), "text/plain");
+        assert_eq!(record.labels().get("test"), Some(&"1".to_string()));
+        assert_eq!(record.bytes().await.unwrap(), Bytes::from("Hey,"));
+
+        let record = bucket
+            .read_record("test")
+            .timestamp_us(2000)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(record.content_length(), 5);
+        assert_eq!(record.content_type(), "text/plain");
+        assert_eq!(record.labels().get("test"), Some(&"2".to_string()));
+        assert_eq!(record.bytes().await.unwrap(), Bytes::from("World"));
     }
 
     #[fixture]

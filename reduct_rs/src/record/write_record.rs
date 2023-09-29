@@ -28,14 +28,6 @@ pub struct WriteRecordBuilder {
     client: Arc<HttpClient>,
 }
 
-pub struct WritableRecord {
-    pub timestamp: u64,
-    pub labels: Labels,
-    pub content_type: String,
-    pub content_length: Option<u64>,
-    pub data: Option<Body>,
-}
-
 impl WriteRecordBuilder {
     pub(crate) fn new(bucket: String, entry: String, client: Arc<HttpClient>) -> Self {
         Self {

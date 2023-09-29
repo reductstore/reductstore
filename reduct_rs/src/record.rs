@@ -5,7 +5,7 @@
 
 pub mod query;
 pub mod read_record;
-mod write_batched_records;
+pub mod write_batched_records;
 pub mod write_record;
 
 use bytes::{Bytes, BytesMut};
@@ -13,45 +13,21 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::Stream;
 
 use futures_util::StreamExt;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 
+use async_stream::stream;
+use futures::TryStream;
+use futures_util::future::err;
 use std::time::SystemTime;
 
 pub use reduct_base::batch::Labels;
 
-pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>>>>;
+pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>> + Send + Sync>>;
 
 pub use write_record::WriteRecordBuilder;
-
-pub trait RecordMut {
-    /// Set the timestamp of the record to write as a unix timestamp in microseconds.
-    fn set_timestamp_us(&mut self, timestamp: u64);
-
-    /// Set the timestamp of the record to write.
-    fn set_timestamp(&mut self, timestamp: SystemTime);
-
-    /// Set the labels of the record to write.
-    /// This replaces all existing labels.
-    fn set_labels(&mut self, labels: Labels);
-
-    /// Add a label to the record to write.
-    fn add_label(&mut self, key: String, value: String);
-
-    /// Set the content type of the record to write.
-    fn set_content_type(&mut self, content_type: String);
-
-    /// Set the content length of the record to write
-    fn set_content_length(&mut self, content_length: usize);
-
-    /// Set the content of the record
-    fn set_bytes(&mut self, bytes: Bytes);
-
-    /// Set the content of the record as a stream
-    fn set_stream_bytes(&mut self, stream: RecordStream);
-}
 
 impl Debug for Record {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -71,6 +47,10 @@ pub struct Record {
     content_type: String,
     content_length: usize,
     data: Option<RecordStream>,
+}
+
+pub struct RecordBuilder {
+    record: Record,
 }
 
 impl Record {
@@ -111,61 +91,95 @@ impl Record {
                 }
                 Ok(bytes.into())
             } else {
-                panic!("Record has no data");
+                Ok(Bytes::new())
             }
         })
     }
 
     /// Content of the record as a stream
-    pub fn stream_bytes(self) -> Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>>>> {
+    pub fn stream_bytes(
+        self,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>> + Sync + Send>> {
         if let Some(data) = self.data {
             data
         } else {
-            panic!("Record has no data");
+            let stream = stream! {
+               yield Ok(Bytes::new());
+            };
+            Box::pin(stream)
         }
     }
 }
 
-impl RecordMut for Record {
+impl RecordBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            record: Record {
+                timestamp: from_system_time(SystemTime::now()),
+                labels: Default::default(),
+                content_type: "application/octet-stream".to_string(),
+                content_length: 0,
+                data: None,
+            },
+        }
+    }
+
     /// Set the timestamp of the record to write as a unix timestamp in microseconds.
-    fn set_timestamp_us(&mut self, timestamp: u64) {
-        self.timestamp = timestamp;
+    pub fn timestamp_us(mut self, timestamp: u64) -> Self {
+        self.record.timestamp = timestamp;
+        self
     }
 
     /// Set the timestamp of the record to write.
-    fn set_timestamp(&mut self, timestamp: SystemTime) {
-        self.timestamp = from_system_time(timestamp);
+    pub fn timestamp(mut self, timestamp: SystemTime) -> Self {
+        self.record.timestamp = from_system_time(timestamp);
+        self
     }
 
     /// Set the labels of the record to write.
     /// This replaces all existing labels.
-    fn set_labels(&mut self, labels: Labels) {
-        self.labels = labels;
+    pub fn labels(mut self, labels: Labels) -> Self {
+        self.record.labels = labels;
+        self
     }
 
     /// Add a label to the record to write.
-    fn add_label(&mut self, key: String, value: String) {
-        self.labels.insert(key, value);
+    pub fn add_label(mut self, key: String, value: String) -> Self {
+        self.record.labels.insert(key, value);
+        self
     }
 
     /// Set the content type of the record to write.
-    fn set_content_type(&mut self, content_type: String) {
-        self.content_type = content_type;
+    pub fn content_type(mut self, content_type: String) -> Self {
+        self.record.content_type = content_type;
+        self
     }
 
     /// Set the content length of the record to write
-    fn set_content_length(&mut self, content_length: usize) {
-        self.content_length = content_length;
+    pub fn content_length(mut self, content_length: usize) -> Self {
+        self.record.content_length = content_length;
+        self
     }
 
     /// Set the content of the record
-    fn set_bytes(&mut self, bytes: Bytes) {
-        self.data = Some(Box::pin(futures::stream::once(async move { Ok(bytes) })));
+    ///
+    /// Overwrites content length
+    pub fn data(mut self, bytes: Bytes) -> Self {
+        self.record.content_length = bytes.len();
+        self.record.data = Some(Box::pin(futures::stream::once(async move { Ok(bytes) })));
+        self
     }
 
     /// Set the content of the record as a stream
-    fn set_stream_bytes(&mut self, stream: RecordStream) {
-        self.data = Some(stream);
+    pub fn stream(mut self, stream: RecordStream) -> Self {
+        self.record.data = Some(stream);
+        self
+    }
+
+    /// Build the record
+    /// This consumes the builder
+    pub fn build(self) -> Record {
+        self.record
     }
 }
 
