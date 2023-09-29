@@ -4,7 +4,7 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::storage::writer::{Chunk, RecordWriter, WriteChunk};
+use crate::storage::writer::{Chunk, WriteChunk};
 use axum::extract::{BodyStream, Path, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
 use axum::http::HeaderName;
@@ -15,7 +15,7 @@ use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::format;
+
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 

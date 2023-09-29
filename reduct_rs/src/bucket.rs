@@ -522,7 +522,7 @@ mod tests {
     #[tokio::test]
     async fn test_batched_write(#[future] bucket: Bucket) {
         let bucket: Bucket = bucket.await;
-        let mut batch = bucket.write_batch("test");
+        let batch = bucket.write_batch("test");
 
         let record1 = RecordBuilder::new()
             .timestamp_us(1000)

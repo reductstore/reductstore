@@ -91,7 +91,11 @@ mod tests {
     #[rstest]
     fn test_parse_batched_header_row() {
         let header = "123, text/plain, label1=value1, label2=value2";
-        let (content_length, content_type, labels) = parse_batched_header(header).unwrap();
+        let RecordHeader {
+            content_length,
+            content_type,
+            labels,
+        } = parse_batched_header(header).unwrap();
         assert_eq!(content_length, 123);
         assert_eq!(content_type, "text/plain");
         assert_eq!(labels.len(), 2);
@@ -102,7 +106,11 @@ mod tests {
     #[rstest]
     fn test_parse_batched_header_row_quotes() {
         let header = "123, text/plain, label1=\"[1, 2, 3]\", label2=\"value2\"";
-        let (content_length, content_type, labels) = parse_batched_header(header).unwrap();
+        let RecordHeader {
+            content_length,
+            content_type,
+            labels,
+        } = parse_batched_header(header).unwrap();
         assert_eq!(content_length, 123);
         assert_eq!(content_type, "text/plain");
         assert_eq!(labels.len(), 2);
@@ -113,7 +121,11 @@ mod tests {
     #[rstest]
     fn test_parse_header_no_labels() {
         let header = "123, text/plain";
-        let (content_length, content_type, labels) = parse_batched_header(header).unwrap();
+        let RecordHeader {
+            content_length,
+            content_type,
+            labels,
+        } = parse_batched_header(header).unwrap();
         assert_eq!(content_length, 123);
         assert_eq!(content_type, "text/plain");
         assert_eq!(labels.len(), 0);

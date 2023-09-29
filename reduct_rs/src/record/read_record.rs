@@ -8,7 +8,7 @@ use crate::record::{from_system_time, Labels, Record};
 use futures_util::StreamExt;
 use reduct_base::error::ReductError;
 use reqwest::Method;
-use std::fmt::Debug;
+
 use std::sync::Arc;
 use std::time::SystemTime;
 

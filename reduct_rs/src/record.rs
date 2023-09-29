@@ -13,14 +13,13 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::Stream;
 
 use futures_util::StreamExt;
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 
 use async_stream::stream;
-use futures::TryStream;
-use futures_util::future::err;
+
 use std::time::SystemTime;
 
 pub use reduct_base::batch::Labels;
@@ -82,7 +81,7 @@ impl Record {
     /// Content of the record
     ///
     /// This consumes the record and returns bytes
-    pub fn bytes(mut self) -> Pin<Box<dyn futures::Future<Output = Result<Bytes, ReductError>>>> {
+    pub fn bytes(self) -> Pin<Box<dyn futures::Future<Output = Result<Bytes, ReductError>>>> {
         Box::pin(async move {
             if let Some(mut data) = self.data {
                 let mut bytes = BytesMut::new();

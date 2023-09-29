@@ -7,10 +7,10 @@ use crate::http_client::HttpClient;
 use crate::Record;
 use async_stream::stream;
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Method};
 use std::collections::VecDeque;
-use std::pin::pin;
+
 use std::sync::Arc;
 
 /// Builder for writing multiple records in a single request.
@@ -45,7 +45,7 @@ impl WriteBatchBuilder {
 
     /// Build the request and send it to the server.
     pub async fn send(mut self) -> Result<(), crate::ReductError> {
-        let mut request = self.client.request(
+        let request = self.client.request(
             Method::POST,
             &format!("/b/{}/{}/batch", self.bucket, self.entry),
         );
