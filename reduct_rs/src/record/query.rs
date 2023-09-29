@@ -4,8 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::http_client::HttpClient;
-use crate::record::from_system_time;
-use crate::{Labels, Record, RecordStream};
+use crate::record::{from_system_time, Record};
+use crate::{Labels, RecordStream};
 use async_channel::{unbounded, Receiver};
 use async_stream::stream;
 use bytes::Bytes;

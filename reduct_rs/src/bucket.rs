@@ -215,7 +215,6 @@ mod tests {
     use crate::client::tests::{bucket_settings, client};
     use crate::client::ReductClient;
 
-    use crate::record::Record;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
@@ -356,7 +355,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_head_record(#[future] bucket: Bucket) {
-        let record: Record = bucket
+        let record = bucket
             .await
             .read_record("entry-1")
             .timestamp_us(1000)
