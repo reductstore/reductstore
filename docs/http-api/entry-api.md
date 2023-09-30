@@ -70,6 +70,44 @@ A value of a label assigned to the record
 {% endswagger-response %}
 {% endswagger %}
 
+{% swagger method="post" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/batch" summary="Write batched entries" %}
+{% swagger-description %}
+This method allows multiple records to be written in a single request. A client should describe the records in headers in the following format:
+
+`x-reduct-time-: <CONTENT_LENGTH>,<CONTENT_TYPE>, [LABEL=VALUE]`
+
+For example: `x-reduct-time-192312381273: 100,text/plain,x=y,a="[a,b]"`&#x20;
+
+The body must contain the concatenated records sorted by timestamp. The method returns an HTTP error if the header format or data length is incorrect. It also returns an individual status and error message for each record if the write operation fails:
+
+&#x20;`x-reduct-error-: <STATUS_CODE>,<ERROR_MESSAGE>.`
+{% endswagger-description %}
+
+{% swagger-response status="200: OK" description="The request was valid. However, some records may not be written. Check headers." %}
+
+{% endswagger-response %}
+
+{% swagger-response status="400: Bad Request" description="Posted content bigger or smaller than content-length" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="401: Unauthorized" description="Access token is invalid or empty" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="403: Forbidden" description="Access token does not have write permissions" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="404: Not Found" description="Bucket is not found" %}
+
+{% endswagger-response %}
+
+{% swagger-response status="422: Unprocessable Entity" description="Bad timestamp or header format" %}
+
+{% endswagger-response %}
+{% endswagger %}
+
 {% swagger method="get" path=" " baseUrl="/api/v1/b/:bucket_name/:entry_name " summary="Get a record from an entry" fullWidth="false" %}
 {% swagger-description %}
 The method finds a record for the given timestamp and sends its content in the HTTP response body. It also sends additional information in headers:
@@ -119,7 +157,7 @@ A UNIX timestamp in microseconds. If it is empty, the latest record is returned.
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 
 {% endswagger-response %}
 
@@ -177,7 +215,7 @@ Name of entry
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have enough permissions" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 
 {% endswagger-response %}
 
@@ -279,11 +317,11 @@ Maximum number of records in the query. Default: unlimited.
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have read permissions" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket or entry doesn't exist" %}
+{% swagger-response status="404: Not Found" description="The bucket or entry doesn" %}
 
 {% endswagger-response %}
 
@@ -291,8 +329,6 @@ Maximum number of records in the query. Default: unlimited.
 
 {% endswagger-response %}
 {% endswagger %}
-
-
 
 {% swagger method="delete" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name  " summary="Remove entry" %}
 {% swagger-description %}
@@ -307,11 +343,11 @@ Since v1.6, you can remove a specific entry from a bucket with the entire histor
 
 {% endswagger-response %}
 
-{% swagger-response status="403: Forbidden" description="Access token doesn't have write permissions" %}
+{% swagger-response status="403: Forbidden" description="Access token doesn" %}
 
 {% endswagger-response %}
 
-{% swagger-response status="404: Not Found" description="The bucket or entry doesn't exist" %}
+{% swagger-response status="404: Not Found" description="The bucket or entry doesn" %}
 
 {% endswagger-response %}
 {% endswagger %}
