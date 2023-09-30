@@ -15,8 +15,8 @@ use axum::routing::{get, head};
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_macros::{IntoResponse, Twin};
 
-use crate::http_frontend::token_api::me::me;
-use crate::http_frontend::Componentes;
+use crate::api::token::me::me;
+use crate::api::Components;
 
 #[derive(IntoResponse, Twin)]
 pub struct ServerInfoAxum(ServerInfo);
@@ -24,7 +24,7 @@ pub struct ServerInfoAxum(ServerInfo);
 #[derive(IntoResponse, Twin)]
 pub struct BucketInfoListAxum(BucketInfoList);
 
-pub fn create_server_api_routes() -> axum::Router<Arc<Componentes>> {
+pub fn create_server_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/list", get(list::list))
         .route("/info", get(info::info))

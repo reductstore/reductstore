@@ -9,7 +9,7 @@ use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 use std::time::SystemTimeError;
 use url::ParseError;
 
-/// HTTP status codes + communication errors.
+/// HTTP status codes + client errors (negative).
 #[repr(i16)]
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone, IntEnum)]
 pub enum ErrorCode {
@@ -17,6 +17,7 @@ pub enum ErrorCode {
     ConnectionError = -3,
     Timeout = -2,
     Unknown = -1,
+
     Continue = 100,
     OK = 200,
     Created = 201,
@@ -75,6 +76,12 @@ pub struct ReductError {
 impl Display for ReductError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
         write!(f, "[{:?}] {}", self.status, self.message)
+    }
+}
+
+impl Display for ErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+        write!(f, "{}", self.int_value())
     }
 }
 

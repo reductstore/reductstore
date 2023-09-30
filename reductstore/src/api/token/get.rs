@@ -1,17 +1,17 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::token::TokenAxum;
+use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::token_api::TokenAxum;
-use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /tokens/:token_name
 pub async fn get_token(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<TokenAxum, HttpError> {
@@ -31,14 +31,14 @@ pub async fn get_token(
 mod tests {
     use super::*;
 
-    use crate::http_frontend::tests::{components, headers};
+    use crate::api::tests::{components, headers};
 
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_get_token(components: Arc<Components>, headers: HeaderMap) {
         let token = get_token(State(components), Path("test".to_string()), headers)
             .await
             .unwrap()
@@ -49,7 +49,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token_not_found(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_get_token_not_found(components: Arc<Components>, headers: HeaderMap) {
         let err = get_token(State(components), Path("not-found".to_string()), headers)
             .await
             .err()

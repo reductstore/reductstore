@@ -12,7 +12,7 @@ use futures::TryStream;
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Method};
 
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -119,11 +119,10 @@ impl WriteRecordBuilder {
 
         if let Some(data) = self.data {
             request = request.body(data);
+            self.client.send_request(request).await?;
+            Ok(())
         } else {
-            request = request.header(CONTENT_LENGTH, 0);
+            Err(ReductError::new(ErrorCode::BadRequest, "No data provided"))
         }
-
-        self.client.send_request(request).await?;
-        Ok(())
     }
 }

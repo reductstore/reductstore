@@ -186,7 +186,7 @@ impl Storage {
 mod tests {
     use super::*;
     use crate::storage::entry::Labels;
-    use crate::storage::writer::Chunk;
+    use crate::storage::writer::{Chunk, WriteChunk};
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use rstest::{fixture, rstest};

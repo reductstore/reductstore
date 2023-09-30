@@ -1,9 +1,9 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{Componentes, HttpError};
 use crate::storage::query::base::QueryOptions;
 
 use axum::extract::{Path, Query, State};
@@ -13,14 +13,14 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 
-use crate::http_frontend::entry_api::QueryInfoAxum;
+use crate::api::entry::QueryInfoAxum;
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
 pub async fn query(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -125,13 +125,13 @@ pub async fn query(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{components, headers, path_to_entry_1};
     use rstest::*;
 
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
@@ -167,7 +167,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_bad_limit(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {

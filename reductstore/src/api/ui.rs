@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 //
 
-use crate::http_frontend::Componentes;
-use crate::http_frontend::HttpError;
+use crate::api::Components;
+use crate::api::HttpError;
 use axum::extract::State;
 
 use axum::headers::HeaderMap;
@@ -17,7 +17,7 @@ use mime_guess::mime;
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
-pub async fn redirect_to_index(State(components): State<Arc<Componentes>>) -> impl IntoResponse {
+pub async fn redirect_to_index(State(components): State<Arc<Components>>) -> impl IntoResponse {
     let base_path = components.base_path.clone();
     let mut headers = HeaderMap::new();
     headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
@@ -25,7 +25,7 @@ pub async fn redirect_to_index(State(components): State<Arc<Componentes>>) -> im
 }
 
 pub async fn show_ui(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {
     let base_path = components.base_path.clone();
@@ -72,12 +72,12 @@ mod tests {
     use super::*;
     use axum::body::HttpBody;
 
-    use crate::http_frontend::tests::components;
+    use crate::api::tests::components;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_img_decoding(components: Arc<Componentes>) {
+    async fn test_img_decoding(components: Arc<Components>) {
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
         let response = show_ui(State(components), request)
             .await

@@ -11,6 +11,7 @@ mod record;
 pub use bucket::Bucket;
 pub use client::ReductClient;
 pub use record::read_record::ReadRecordBuilder;
+pub use record::write_batched_records::WriteBatchBuilder;
 pub use record::write_record::WriteRecordBuilder;
 pub use record::{Labels, Record, RecordStream};
 pub use reduct_base::error::{ErrorCode, ReductError};

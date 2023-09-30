@@ -1,13 +1,13 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{Componentes, ErrorCode, HttpError};
 use crate::storage::entry::Labels;
-use crate::storage::writer::Chunk;
+use crate::storage::writer::{Chunk, WriteChunk};
 use axum::extract::{BodyStream, Path, Query, State};
-use axum::headers::{Expect, Header, HeaderMap};
+use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 // POST /:bucket/:entry?ts=<number>
 pub async fn write_record(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -57,7 +57,7 @@ pub async fn write_record(
             ))?
             .to_str()
             .unwrap()
-            .parse::<u64>()
+            .parse::<usize>()
             .map_err(|_| {
                 HttpError::new(
                     ErrorCode::UnprocessableEntity,
@@ -120,8 +120,11 @@ pub async fn write_record(
             Ok(())
         }
         Err(e) => {
-            // drain the stream in the case if a reduct_rs doesn't support Expect: 100-continue
-            if !headers.contains_key(Expect::name()) {
+            // drain the stream in the case if a client doesn't support Expect: 100-continue
+            if !headers
+                .get(Expect::name())
+                .eq(&Some(&HeaderValue::from_static("100-continue")))
+            {
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}
             }
@@ -135,19 +138,15 @@ pub async fn write_record(
 mod tests {
     use super::*;
 
-    use axum::body::Empty;
-    use axum::extract::FromRequest;
-    use axum::http::Request;
-
     use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
 
-    use crate::http_frontend::tests::{components, path_to_entry_1};
+    use crate::api::tests::{components, empty_body, path_to_entry_1};
 
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
@@ -183,7 +182,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bucket_not_found(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         headers: HeaderMap,
         #[future] empty_body: BodyStream,
     ) {
@@ -214,7 +213,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bad_ts(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
@@ -250,12 +249,5 @@ mod tests {
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
 
         headers
-    }
-
-    #[fixture]
-    async fn empty_body() -> BodyStream {
-        let emtpy_stream: Empty<Bytes> = Empty::new();
-        let request = Request::builder().body(emtpy_stream).unwrap();
-        BodyStream::from_request(request, &()).await.unwrap()
     }
 }

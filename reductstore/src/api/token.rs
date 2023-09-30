@@ -20,11 +20,11 @@ use axum::routing::{delete, get, post};
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
-use crate::http_frontend::token_api::create::create_token;
-use crate::http_frontend::token_api::get::get_token;
-use crate::http_frontend::token_api::list::list_tokens;
-use crate::http_frontend::token_api::remove::remove_token;
-use crate::http_frontend::{Componentes, HttpError};
+use crate::api::token::create::create_token;
+use crate::api::token::get::get_token;
+use crate::api::token::list::list_tokens;
+use crate::api::token::remove::remove_token;
+use crate::api::{Components, HttpError};
 
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
 use reduct_macros::{IntoResponse, Twin};
@@ -63,7 +63,7 @@ where
     }
 }
 
-pub fn create_token_api_routes() -> axum::Router<Arc<Componentes>> {
+pub fn create_token_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/", get(list_tokens))
         .route("/:token_name", post(create_token))

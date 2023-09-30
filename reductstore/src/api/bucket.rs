@@ -18,13 +18,13 @@ use axum::{async_trait, headers};
 use bytes::Bytes;
 use hyper::HeaderMap;
 
-use crate::http_frontend::bucket_api::create::create_bucket;
-use crate::http_frontend::bucket_api::get::get_bucket;
-use crate::http_frontend::bucket_api::head::head_bucket;
-use crate::http_frontend::bucket_api::remove::remove_bucket;
-use crate::http_frontend::bucket_api::update::update_bucket;
+use crate::api::bucket::create::create_bucket;
+use crate::api::bucket::get::get_bucket;
+use crate::api::bucket::head::head_bucket;
+use crate::api::bucket::remove::remove_bucket;
+use crate::api::bucket::update::update_bucket;
 
-use crate::http_frontend::{Componentes, HttpError};
+use crate::api::{Components, HttpError};
 use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
 use reduct_macros::{IntoResponse, Twin};
 //
@@ -66,7 +66,7 @@ where
     }
 }
 
-pub fn create_bucket_api_routes() -> axum::Router<Arc<Componentes>> {
+pub fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name", get(get_bucket))
         .route("/:bucket_name", head(head_bucket))

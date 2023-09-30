@@ -126,7 +126,7 @@ impl Entry {
     pub fn begin_write(
         &mut self,
         time: u64,
-        content_size: u64,
+        content_size: usize,
         content_type: String,
         labels: Labels,
     ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
@@ -179,6 +179,7 @@ impl Entry {
             (block, RecordType::Latest)
         };
 
+        let content_size = content_size as u64;
         let has_no_space = block.size + content_size > self.settings.max_block_size;
         let has_too_many_records =
             block.records.len() + 1 >= self.settings.max_block_records as usize;
@@ -198,7 +199,7 @@ impl Entry {
         let record = Record {
             timestamp: Some(us_to_ts(&time)),
             begin: block.size,
-            end: block.size + content_size as u64,
+            end: block.size + content_size,
             content_type,
             state: record::State::Started as i32,
             labels: labels
@@ -431,7 +432,7 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
-    use crate::storage::writer::Chunk;
+    use crate::storage::writer::{Chunk, WriteChunk};
     use std::fs::File;
 
     use rstest::{fixture, rstest};
@@ -882,12 +883,8 @@ mod tests {
     }
 
     fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), ReductError> {
-        let writer = entry.begin_write(
-            time,
-            data.len() as u64,
-            "text/plain".to_string(),
-            Labels::new(),
-        )?;
+        let writer =
+            entry.begin_write(time, data.len(), "text/plain".to_string(), Labels::new())?;
         let x = writer
             .write()
             .unwrap()

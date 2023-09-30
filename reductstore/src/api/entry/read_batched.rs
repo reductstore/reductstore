@@ -1,10 +1,10 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::entry::MethodExtractor;
+use crate::api::middleware::check_permissions;
+use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
-use crate::http_frontend::entry_api::MethodExtractor;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{Componentes, ErrorCode, HttpError};
 use crate::storage::bucket::Bucket;
 
 use crate::storage::reader::RecordReader;
@@ -24,7 +24,7 @@ use std::task::{Context, Poll};
 
 // GET /:bucket/:entry/batch?q=<number>
 pub async fn read_batched_records(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -198,7 +198,7 @@ mod tests {
 
     use axum::body::HttpBody;
 
-    use crate::http_frontend::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
     use rstest::*;
 
@@ -207,7 +207,7 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_batched_read(
-        components: Arc<Componentes>,
+        components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,

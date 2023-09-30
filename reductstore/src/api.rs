@@ -12,29 +12,29 @@ use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::api::bucket::create_bucket_api_routes;
+use crate::api::entry::create_entry_api_routes;
+use crate::api::middleware::{default_headers, print_statuses};
+use crate::api::server::create_server_api_routes;
+use crate::api::token::create_token_api_routes;
+use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
-use crate::http_frontend::bucket_api::create_bucket_api_routes;
-use crate::http_frontend::entry_api::create_entry_api_routes;
-use crate::http_frontend::middleware::{default_headers, print_statuses};
-use crate::http_frontend::server_api::create_server_api_routes;
-use crate::http_frontend::token_api::create_token_api_routes;
-use crate::http_frontend::ui_api::{redirect_to_index, show_ui};
 use crate::storage::storage::Storage;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
 pub use reduct_base::error::ErrorCode;
 
-mod bucket_api;
-mod entry_api;
+mod bucket;
+mod entry;
 mod middleware;
-mod server_api;
-mod token_api;
-mod ui_api;
+mod server;
+mod token;
+mod ui;
 
-pub struct Componentes {
+pub struct Components {
     pub storage: RwLock<Storage>,
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
@@ -102,7 +102,7 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(api_base_path: &String, components: Arc<Componentes>) -> Router {
+pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> Router {
     let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
 
     let app = Router::new()
@@ -130,19 +130,21 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<Componentes>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Empty;
     use std::collections::HashMap;
 
     use crate::auth::token_repository::create_token_repository;
-    use crate::storage::writer::Chunk;
-    use axum::extract::Path;
+    use crate::storage::writer::{Chunk, WriteChunk};
+    use axum::extract::{BodyStream, FromRequest, Path};
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
+    use axum::http::Request;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
 
     #[fixture]
-    pub(crate) fn components() -> Arc<Componentes> {
+    pub(crate) fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
         let mut storage = Storage::new(data_path.clone());
@@ -177,7 +179,7 @@ mod tests {
 
         token_repo.generate_token("test", permissions).unwrap();
 
-        let components = Componentes {
+        let components = Components {
             storage: RwLock::new(storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
@@ -202,5 +204,12 @@ mod tests {
             ("entry_name".to_string(), "entry-1".to_string()),
         ]));
         path
+    }
+
+    #[fixture]
+    pub async fn empty_body() -> BodyStream {
+        let emtpy_stream: Empty<Bytes> = Empty::new();
+        let request = Request::builder().body(emtpy_stream).unwrap();
+        BodyStream::from_request(request, &()).await.unwrap()
     }
 }

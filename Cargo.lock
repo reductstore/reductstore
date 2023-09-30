@@ -1534,6 +1534,7 @@ name = "reduct-base"
 version = "1.7.0-dev"
 dependencies = [
  "chrono",
+ "http",
  "int-enum",
  "rstest",
  "serde",

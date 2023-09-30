@@ -42,10 +42,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn download_web_console() {
-    if Path::exists(Path::new(&format!(
-        "{}/console.zip",
-        env::var("OUT_DIR").unwrap()
-    ))) {
+    let out_dir = env::var("OUT_DIR").unwrap();
+    if Path::exists(Path::new(&format!("{}/console.zip", out_dir))) {
         return;
     }
 
@@ -62,9 +60,6 @@ fn download_web_console() {
             panic!("Failed to download Web Console: {}", resp.status());
         }
     }
-    fs::write(
-        format!("{}/console.zip", env::var("OUT_DIR").unwrap()),
-        resp.bytes().unwrap(),
-    )
-    .expect("Failed to write console.zip");
+    fs::write(format!("{}/console.zip", out_dir), resp.bytes().unwrap())
+        .expect("Failed to write console.zip");
 }

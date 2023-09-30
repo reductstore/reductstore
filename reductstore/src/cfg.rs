@@ -1,11 +1,11 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::Components;
 use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
-use crate::http_frontend::Componentes;
 
 use crate::storage::storage::Storage;
 use bytesize::ByteSize;
@@ -57,11 +57,11 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         cfg
     }
 
-    pub fn build(&self) -> Componentes {
+    pub fn build(&self) -> Components {
         let storage = self.provision_storage();
         let token_repo = self.provision_tokens();
 
-        Componentes {
+        Components {
             storage: RwLock::new(storage),
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),

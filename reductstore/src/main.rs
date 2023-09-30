@@ -13,8 +13,8 @@ use std::sync::Arc;
 use reductstore::cfg::Cfg;
 use reductstore::core::env::StdEnvGetter;
 
+use reductstore::api::create_axum_app;
 use reductstore::core::logger::Logger;
-use reductstore::http_frontend::create_axum_app;
 
 #[tokio::main]
 async fn main() {

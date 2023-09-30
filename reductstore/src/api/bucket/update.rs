@@ -1,17 +1,17 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::bucket::BucketSettingsAxum;
+use crate::api::middleware::check_permissions;
+use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
-use crate::http_frontend::bucket_api::BucketSettingsAxum;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // PUT /b/:bucket_name
 pub async fn update_bucket(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     settings: BucketSettingsAxum,
@@ -27,13 +27,13 @@ pub async fn update_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_frontend::tests::{components, headers};
+    use crate::api::tests::{components, headers};
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_update_bucket(components: Arc<Components>, headers: HeaderMap) {
         update_bucket(
             State(components),
             Path("bucket-1".to_string()),
@@ -46,7 +46,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket_not_found(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_update_bucket_not_found(components: Arc<Components>, headers: HeaderMap) {
         let err = update_bucket(
             State(components),
             Path("not-found".to_string()),

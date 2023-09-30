@@ -34,7 +34,7 @@ It guarantees that your data will not overflow your hard disk and batches record
 - Optimized for small objects (less than 1 MB)
 - Labeling data for annotation and filtering
 - Iterative data querying
-- Batching records in an HTTP response
+- Batching records in an HTTP response for write and read operations
 - Embedded Web Console
 - Token authorization for managing data access
 

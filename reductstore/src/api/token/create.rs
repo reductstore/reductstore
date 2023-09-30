@@ -1,10 +1,10 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::middleware::check_permissions;
+use crate::api::token::{PermissionsAxum, TokenCreateResponseAxum};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
-use crate::http_frontend::middleware::check_permissions;
-use crate::http_frontend::token_api::{PermissionsAxum, TokenCreateResponseAxum};
-use crate::http_frontend::{Componentes, HttpError};
 use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // POST /tokens/:token_name
 pub async fn create_token(
-    State(components): State<Arc<Componentes>>,
+    State(components): State<Arc<Components>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
     permissions: PermissionsAxum,
@@ -32,7 +32,7 @@ pub async fn create_token(
 mod tests {
     use super::*;
 
-    use crate::http_frontend::tests::{components, headers};
+    use crate::api::tests::{components, headers};
 
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::token_api::Permissions;
@@ -40,7 +40,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_create_token(components: Arc<Components>, headers: HeaderMap) {
         let token = create_token(
             State(components),
             Path("new-token".to_string()),
@@ -55,7 +55,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token_already_exists(components: Arc<Componentes>, headers: HeaderMap) {
+    async fn test_create_token_already_exists(components: Arc<Components>, headers: HeaderMap) {
         let err = create_token(
             State(components),
             Path("test".to_string()),

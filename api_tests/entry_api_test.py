@@ -578,3 +578,39 @@ def test_remove_with_bucket_write_permissions(
         headers={"Authorization": f"Bearer {token_write_bucket}"},
     )
     assert resp.status_code == 200
+
+def test_write_batched_records(base_url, session, bucket):
+    """Should write batched records"""
+    ts = 1000
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/batch",
+        data=b"x"*1000_000 + b"y"*1000_000 + b"z"*1000_000,
+        headers={
+            "x-reduct-time-1000": "1000000,",
+            "x-reduct-time-1100": "1000000,",
+            "x-reduct-time-1200": "1000000,",
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/entry/q?start={1000}")
+    assert resp.status_code == 200
+    query_id = int(json.loads(resp.content)["id"])
+
+    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.content == b"x"*1000_000
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["x-reduct-time"] == "1000"
+
+    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.content == b"y"*1000_000
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["x-reduct-time"] == "1100"
+
+    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.content == b"z"*1000_000
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["x-reduct-time"] == "1200"
