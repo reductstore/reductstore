@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
 - reductstore: `healthcheck` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 - reductstore: provisioning with environment variables, [PR-352](https://github.com/reductstore/reductstore/pull/352)
+- reductstore,reduct-rs: batched write API, [PR-355](https://github.com/reductstore/reductstore/pull/355)
 
 ### Changed
 
