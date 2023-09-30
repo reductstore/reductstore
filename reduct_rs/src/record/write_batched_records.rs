@@ -8,9 +8,10 @@ use crate::Record;
 use async_stream::stream;
 use futures_util::StreamExt;
 use reqwest::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Method};
-use std::collections::VecDeque;
+use reqwest::{Body, Method, StatusCode};
+use std::collections::{BTreeMap, VecDeque};
 
+use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use std::sync::Arc;
 
 /// Builder for writing multiple records in a single request.
@@ -20,6 +21,8 @@ pub struct WriteBatchBuilder {
     records: VecDeque<Record>,
     client: Arc<HttpClient>,
 }
+
+type FailedRecordMap = BTreeMap<u64, ReductError>;
 
 impl WriteBatchBuilder {
     pub(crate) fn new(bucket: String, entry: String, client: Arc<HttpClient>) -> Self {
@@ -44,7 +47,15 @@ impl WriteBatchBuilder {
     }
 
     /// Build the request and send it to the server.
-    pub async fn send(mut self) -> Result<(), crate::ReductError> {
+    ///
+    /// # Returns
+    ///
+    /// Returns a map of timestamps to errors for any records that failed to write.
+    ///
+    /// # Errors
+    ///
+    /// * `ReductError` - If the request was not successful.
+    pub async fn send(mut self) -> Result<FailedRecordMap, ReductError> {
         let request = self.client.request(
             Method::POST,
             &format!("/b/{}/{}/batch", self.bucket, self.entry),
@@ -93,11 +104,31 @@ impl WriteBatchBuilder {
              }
         };
 
-        let _ = client
+        let response = client
             .send_request(request.body(Body::wrap_stream(stream)))
             .await?;
-        // todo: check response
 
-        Ok(())
+        let mut failed_records = FailedRecordMap::new();
+        response
+            .headers()
+            .iter()
+            .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
+            .for_each(|(key, value)| {
+                let record_ts = key
+                    .as_str()
+                    .trim_start_matches("x-reduct-error-")
+                    .parse::<u64>()
+                    .unwrap();
+                let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
+                failed_records.insert(
+                    record_ts,
+                    ReductError::new(
+                        ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                        message,
+                    ),
+                );
+            });
+
+        Ok(failed_records)
     }
 }

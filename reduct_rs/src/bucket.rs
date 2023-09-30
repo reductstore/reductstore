@@ -541,12 +541,13 @@ mod tests {
             .content_length(5)
             .build();
 
-        batch
+        let error_map = batch
             .add_record(record1)
             .add_record(record2)
             .send()
             .await
             .unwrap();
+        assert!(error_map.is_empty());
 
         let record = bucket
             .read_record("test")
@@ -571,6 +572,43 @@ mod tests {
         assert_eq!(record.content_type(), "text/plain");
         assert_eq!(record.labels().get("test"), Some(&"2".to_string()));
         assert_eq!(record.bytes().await.unwrap(), Bytes::from("World"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_batched_write_with_error(#[future] bucket: Bucket) {
+        let bucket: Bucket = bucket.await;
+        bucket
+            .write_record("test")
+            .timestamp_us(1000)
+            .data(Bytes::from("xxx"))
+            .send()
+            .await
+            .unwrap();
+
+        let batch = bucket.write_batch("test");
+        let record1 = RecordBuilder::new()
+            .timestamp_us(1000)
+            .data(Bytes::from("Hey,"))
+            .build();
+        let record2 = RecordBuilder::new()
+            .timestamp_us(2000)
+            .data(Bytes::from("World"))
+            .build();
+
+        let error_map = batch
+            .add_record(record1)
+            .add_record(record2)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(error_map.len(), 1);
+        assert_eq!(error_map.get(&1000).unwrap().status, ErrorCode::Conflict);
+        assert_eq!(
+            error_map.get(&1000).unwrap().message,
+            "A record with timestamp 1000 already exists"
+        );
     }
 
     #[fixture]

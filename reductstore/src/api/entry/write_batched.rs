@@ -132,7 +132,7 @@ pub async fn write_batched_records(
     error_map.iter().for_each(|(time, err)| {
         headers.insert(
             HeaderName::from_str(&format!("x-reduct-error-{}", time)).unwrap(),
-            HeaderValue::from_str(&format!("{},\"{}\"", err.status(), err.message())).unwrap(),
+            HeaderValue::from_str(&format!("{},{}", err.status(), err.message())).unwrap(),
         );
     });
 
@@ -415,7 +415,7 @@ mod tests {
         assert_eq!(headers.len(), 1);
         assert_eq!(
             headers.get("x-reduct-error-2").unwrap(),
-            &HeaderValue::from_static("409,\"A record with timestamp 2 already exists\"")
+            &HeaderValue::from_static("409,A record with timestamp 2 already exists")
         );
 
         let storage = components.storage.read().await;
