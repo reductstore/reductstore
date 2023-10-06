@@ -81,7 +81,7 @@ Now the database needs to ingest data. Take one of the officially supported SDKs
 * [For Rust](https://docs.rs/crate/reduct-rs/latest)
 * [For Python](https://py.reduct.store/en/latest/)
 * [For JavaScript/NodeJS/TypeScript](https://js.reduct.store/en/latest/)
-* [For C++](http://127.0.0.1:5000/s/MkBn6aEPqOga84oEP49Z/)
+* [For C++](https://cpp.reduct.store)
 
 If you can't find your programming language in the list, you can still use [the ReductStore HTTP API](http-api/) or ping us. If you are serious about using it, we can help you with integration.
 
