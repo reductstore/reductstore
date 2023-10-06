@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: use Web Console v1.3.0, [PR-345](https://github.com/reductstore/reductstore/pull/342)
 - reductstore: Move some Python API tests in Rust part, [PR-351](https://github.com/reductstore/reductstore/pull/351)
 - reduct-base: Rename `HttpError` -> `ReductError`, [PR-350](https://github.com/reductstore/reductstore/pull/350)
+- docs: update Getting Started, [PR-358](https://github.com/reductstore/reductstore/pull/358)
 
 ### Fixed
 
