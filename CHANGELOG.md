@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2023-10-06
+
 ### Added
 
 - reduct-cli: `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
@@ -540,7 +542,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.7.0...HEAD
+
+[1.7.0]: https://github.com/reductstore/reductstore/compare/v1.6.2...v1.7.0
 
 [1.6.2]: https://github.com/reductstore/reductstore/compare/v1.6.1...v1.6.2
 

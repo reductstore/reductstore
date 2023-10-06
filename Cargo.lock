@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.7.0-dev"
+version = "1.7.0"
 dependencies = [
  "chrono",
  "http",
@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-cli"
-version = "1.7.0-dev"
+version = "1.7.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1562,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.7.0-dev"
+version = "1.7.0"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1570,7 +1570,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-rs"
-version = "1.7.0-dev"
+version = "1.7.0"
 dependencies = [
  "async-channel",
  "async-stream",
@@ -1589,7 +1589,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.7.0-dev"
+version = "1.7.0"
 dependencies = [
  "axum",
  "axum-server",
