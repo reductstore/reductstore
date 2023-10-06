@@ -360,6 +360,7 @@ jobs:
     name: Update Azure Marketplace
     needs:
       - merge_digests
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Azure Login
         uses: azure/login@v1
