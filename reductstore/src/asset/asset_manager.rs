@@ -97,6 +97,7 @@ impl ManageStaticAsset for ZipAssetManager {
     }
 }
 
+/// Empty asset manager that does not support any files
 struct NoAssetManager;
 
 impl ManageStaticAsset for NoAssetManager {

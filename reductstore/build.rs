@@ -8,8 +8,6 @@ use std::path::Path;
 use std::time::SystemTime;
 use std::{env, fs};
 
-const WEB_CONSOLE_VERSION: &str = "v1.3.0";
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // build protos
     prost_build::Config::new()
@@ -41,7 +39,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(feature = "web-console")]
 fn download_web_console() {
+    const WEB_CONSOLE_VERSION: &str = "v1.3.0";
+
     let out_dir = env::var("OUT_DIR").unwrap();
     if Path::exists(Path::new(&format!("{}/console.zip", out_dir))) {
         return;
@@ -63,3 +64,6 @@ fn download_web_console() {
     fs::write(format!("{}/console.zip", out_dir), resp.bytes().unwrap())
         .expect("Failed to write console.zip");
 }
+
+#[cfg(not(feature = "web-console"))]
+fn download_web_console() {}

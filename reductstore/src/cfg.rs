@@ -13,6 +13,7 @@ use log::{error, info, warn};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
+use serde::de::Unexpected::Bytes;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
@@ -60,8 +61,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub fn build(&self) -> Components {
         let storage = self.provision_storage();
         let token_repo = self.provision_tokens();
-        let console =
-            create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip")));
+
+        let console = create_asset_manager(load_console());
 
         Components {
             storage: RwLock::new(storage),
@@ -220,6 +221,18 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             .map(|(_, token)| (token.name.clone(), token))
             .collect()
     }
+}
+
+#[cfg(feature = "web-console")]
+fn load_console() -> &'static [u8] {
+    info!("Load Web Console");
+    include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))
+}
+
+#[cfg(not(feature = "web-console"))]
+fn load_console() -> &'static [u8] {
+    info!("Web Console is disabled");
+    b""
 }
 
 impl<EnvGetter: GetEnv> Display for Cfg<EnvGetter> {
