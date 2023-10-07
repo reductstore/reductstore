@@ -70,7 +70,7 @@ A value of a label assigned to the record
 {% endswagger-response %}
 {% endswagger %}
 
-{% swagger method="post" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/batch" summary="Write batched entries" %}
+{% swagger method="post" path="" baseUrl="/api/v1/b/:bucket_name/:entry_name/batch" summary="Write batch of records" %}
 {% swagger-description %}
 This method allows multiple records to be written in a single request. A client should describe the records in headers in the following format:
 
