@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::Components;
-use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
@@ -18,6 +17,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
+use crate::asset::asset_manager::create_asset_manager;
 use tokio::sync::RwLock;
 
 /// Database configuration
@@ -60,12 +60,14 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub fn build(&self) -> Components {
         let storage = self.provision_storage();
         let token_repo = self.provision_tokens();
+        let console =
+            create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip")));
 
         Components {
             storage: RwLock::new(storage),
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
-            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            console,
             base_path: self.api_base_path.clone(),
         }
     }
