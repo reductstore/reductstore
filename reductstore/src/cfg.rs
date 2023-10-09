@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::Components;
-use crate::asset::asset_manager::ZipAssetManager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
@@ -14,10 +13,12 @@ use log::{error, info, warn};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
+use serde::de::Unexpected::Bytes;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
+use crate::asset::asset_manager::create_asset_manager;
 use tokio::sync::RwLock;
 
 /// Database configuration
@@ -61,11 +62,13 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         let storage = self.provision_storage();
         let token_repo = self.provision_tokens();
 
+        let console = create_asset_manager(load_console());
+
         Components {
             storage: RwLock::new(storage),
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
-            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            console,
             base_path: self.api_base_path.clone(),
         }
     }
@@ -218,6 +221,18 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             .map(|(_, token)| (token.name.clone(), token))
             .collect()
     }
+}
+
+#[cfg(feature = "web-console")]
+fn load_console() -> &'static [u8] {
+    info!("Load Web Console");
+    include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))
+}
+
+#[cfg(not(feature = "web-console"))]
+fn load_console() -> &'static [u8] {
+    info!("Web Console is disabled");
+    b""
 }
 
 impl<EnvGetter: GetEnv> Display for Cfg<EnvGetter> {

@@ -10,9 +10,22 @@ use zip::ZipArchive;
 
 use reduct_base::error::ReductError;
 
+pub trait ManageStaticAsset {
+    /// Read a file from the zip archive.
+    ///
+    /// # Arguments
+    ///
+    /// * `relative_path` - The relative path to the file.
+    ///
+    /// # Returns
+    ///
+    /// The file content as string.
+    fn read(&self, relative_path: &str) -> Result<Bytes, ReductError>;
+}
+
 /// Asset manager that reads files from a zip archive as hex string and returns them as string
-pub struct ZipAssetManager {
-    path: Option<TempDir>,
+struct ZipAssetManager {
+    path: TempDir,
 }
 
 impl ZipAssetManager {
@@ -26,9 +39,13 @@ impl ZipAssetManager {
     /// # Returns
     ///
     /// The asset manager.
+    ///
+    /// # Panics
+    ///
+    /// If the zip archive is empty.
     pub fn new(zipped_content: &[u8]) -> ZipAssetManager {
         if zipped_content.len() == 0 {
-            return ZipAssetManager { path: None };
+            panic!("Empty zip archive")
         }
 
         let cursor = Cursor::new(zipped_content);
@@ -55,28 +72,14 @@ impl ZipAssetManager {
             }
         }
 
-        ZipAssetManager {
-            path: Some(temp_dir),
-        }
+        ZipAssetManager { path: temp_dir }
     }
+}
 
-    /// Read a file from the zip archive.
-    ///
-    /// # Arguments
-    ///
-    /// * `relative_path` - The relative path to the file.
-    ///
-    /// # Returns
-    ///
-    /// The file content as string.
-    pub fn read(&self, relative_path: &str) -> Result<Bytes, ReductError> {
-        if self.path.is_none() {
-            // TODO: When C++ is gone, use trait and emtpy implementation
-            return Err(ReductError::not_found("No static files supported"));
-        }
-
+impl ManageStaticAsset for ZipAssetManager {
+    fn read(&self, relative_path: &str) -> Result<Bytes, ReductError> {
         // check if file exists
-        let path = self.path.as_ref().unwrap().path().join(relative_path);
+        let path = self.path.path().join(relative_path);
 
         trace!("Reading file {:?}", path);
         if !path.exists() {
@@ -94,6 +97,23 @@ impl ZipAssetManager {
     }
 }
 
+/// Empty asset manager that does not support any files
+struct NoAssetManager;
+
+impl ManageStaticAsset for NoAssetManager {
+    fn read(&self, _relative_path: &str) -> Result<Bytes, ReductError> {
+        Err(ReductError::not_found("No static files supported"))
+    }
+}
+
+pub fn create_asset_manager(zipped_content: &[u8]) -> Box<dyn ManageStaticAsset + Send + Sync> {
+    if zipped_content.len() == 0 {
+        Box::new(NoAssetManager)
+    } else {
+        Box::new(ZipAssetManager::new(zipped_content))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_empty_asset_manager() {
-        let asset_manager = ZipAssetManager::new(&[]);
+        let asset_manager = create_asset_manager(&[]);
         assert!(
             asset_manager.read("test") == Err(ReductError::not_found("No static files supported"))
         );

@@ -18,7 +18,7 @@ use crate::api::middleware::{default_headers, print_statuses};
 use crate::api::server::create_server_api_routes;
 use crate::api::token::create_token_api_routes;
 use crate::api::ui::{redirect_to_index, show_ui};
-use crate::asset::asset_manager::ZipAssetManager;
+use crate::asset::asset_manager::{create_asset_manager, ManageStaticAsset};
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::storage::storage::Storage;
@@ -38,7 +38,7 @@ pub struct Components {
     pub storage: RwLock<Storage>,
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
-    pub console: ZipAssetManager,
+    pub console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub base_path: String,
 }
 
@@ -183,7 +183,7 @@ mod tests {
             storage: RwLock::new(storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
-            console: ZipAssetManager::new(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
         };
 

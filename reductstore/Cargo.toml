@@ -16,6 +16,10 @@ keywords = ["database", "time-series", "blob", "storage", "reductstore"]
 categories = ["database-implementations", "command-line-utilities", "database"]
 include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LICENSE"]
 
+[features]
+default = ["web-console"]
+web-console = []
+
 [lib]
 crate-type = ["lib"]
 
