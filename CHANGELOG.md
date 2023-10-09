@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- reductstore: Cargo feature `web-console` to build without Web Console, [PR-365](https://github.com/reductstore/reductstore/pull/365)
+
 ## [1.7.0] - 2023-10-06
 
 ### Added
@@ -20,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - reductstore: Update dependencies, min. rust v1.67.0, [PR-341](https://github.com/reductstore/reductstore/pull/341)
-- reductstore: use Web Console v1.3.0, [PR-345](https://github.com/reductstore/reductstore/pull/342)
+- reductstore: Use Web Console v1.3.0, [PR-345](https://github.com/reductstore/reductstore/pull/342)
 - reductstore: Move some Python API tests in Rust part, [PR-351](https://github.com/reductstore/reductstore/pull/351)
 - reduct-base: Rename `HttpError` -> `ReductError`, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 - docs: update Getting Started, [PR-358](https://github.com/reductstore/reductstore/pull/358)
