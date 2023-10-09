@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reductstore: Cargo feature `web-console` to build without Web Console, [PR-365](https://github.com/reductstore/reductstore/pull/365)
 
+### Fixed
+
+- reductstore: Stop downloading Web Console at docs.rs build, [PR-366](https://github.com/reductstore/reductstore/pull/366)
+
 ## [1.7.0] - 2023-10-06
 
 ### Added
