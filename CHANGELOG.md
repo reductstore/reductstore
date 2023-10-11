@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - reductstore: Cargo feature `web-console` to build without Web Console, [PR-365](https://github.com/reductstore/reductstore/pull/365)
+- reductstore: Web Console v1.4.0
 
 ### Fixed
 
