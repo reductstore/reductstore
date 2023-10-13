@@ -24,14 +24,9 @@ pub(crate) fn alias_handler(
     matches: Option<(&str, &clap::ArgMatches)>,
 ) -> anyhow::Result<()> {
     match matches {
-        Some(("add", args)) => add::add_alias(
-            ctx,
-            args.get_one::<String>("NAME").unwrap(),
-            args.get_one::<String>("URL").unwrap(),
-            args.get_one::<String>("TOKEN").unwrap_or(&String::new()),
-        )?,
+        Some(("add", args)) => add::add_alias(ctx, args)?,
         Some(("ls", _)) => ls::list_aliases(ctx)?,
-        Some(("rm", args)) => rm::remove_alias(ctx, args.get_one::<String>("NAME").unwrap())?,
+        Some(("rm", args)) => rm::remove_alias(ctx, args)?,
         _ => (),
     }
 

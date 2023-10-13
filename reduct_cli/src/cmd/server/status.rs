@@ -5,7 +5,7 @@
 
 use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::reduct::build_client;
-use clap::{arg, Arg, Command};
+use clap::{arg, Arg, ArgMatches, Command};
 use time_humanize::{Accuracy, HumanTime, Tense};
 
 pub(super) fn server_status_cmd() -> Command {
@@ -20,8 +20,10 @@ pub(super) fn server_status_cmd() -> Command {
 
 pub(super) async fn get_server_status(
     ctx: &crate::context::CliContext,
-    alias: &str,
+    args: &ArgMatches,
 ) -> anyhow::Result<()> {
+    let alias = args.get_one::<String>("ALIAS_OR_URL").unwrap();
+
     let client = build_client(ctx, alias)?;
     let info = client.server_info().await?;
 
@@ -43,7 +45,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_get_server_status(context: crate::context::CliContext) {
-        get_server_status(&context, "local").await.unwrap();
+        let args = server_status_cmd().get_matches_from(vec!["local"]);
+        get_server_status(&context, &args).await.unwrap();
         assert_eq!(context.output().history().len(), 3);
         assert_eq!(context.output().history()[0], "Status: \tOk");
         assert_eq!(

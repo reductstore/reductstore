@@ -7,7 +7,7 @@ use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::context::CliContext;
 use crate::reduct::build_client;
 
-use clap::{arg, Arg, Command};
+use clap::{arg, Arg, ArgMatches, Command};
 
 pub(super) fn check_server_cmd() -> Command {
     Command::new("alive")
@@ -19,7 +19,8 @@ pub(super) fn check_server_cmd() -> Command {
         )
 }
 
-pub(super) async fn check_server(ctx: &CliContext, alias_or_url: &str) -> anyhow::Result<()> {
+pub(super) async fn check_server(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
+    let alias_or_url = args.get_one::<String>("ALIAS_OR_URL").unwrap();
     let client = build_client(ctx, alias_or_url)?;
     client.alive().await?;
     Ok(())
@@ -34,6 +35,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_check_server(context: CliContext) {
-        check_server(&context, "local").await.unwrap();
+        let args = check_server_cmd().get_matches_from(vec!["local"]);
+        check_server(&context, &args).await.unwrap();
     }
 }
