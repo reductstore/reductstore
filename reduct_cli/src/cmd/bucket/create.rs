@@ -5,7 +5,7 @@
 
 use crate::cmd::BUCKET_PATH_HELP;
 use crate::context::CliContext;
-use clap::{arg, Arg, ArgMatches, Command};
+use clap::{Arg, ArgMatches, Command};
 
 pub(super) fn create_bucket_cmd() -> Command {
     Command::new("create")
@@ -46,6 +46,6 @@ pub(super) fn create_bucket_cmd() -> Command {
         )
 }
 
-pub(super) fn crate_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
+pub(super) fn crate_bucket(_ctx: &CliContext, _args: &ArgMatches) -> anyhow::Result<()> {
     Ok(())
 }

@@ -13,7 +13,7 @@ use log::{error, info, warn};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
-use serde::de::Unexpected::Bytes;
+
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;

@@ -7,7 +7,7 @@ use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::context::CliContext;
 use crate::reduct::build_client;
 
-use clap::{arg, Arg, ArgMatches, Command};
+use clap::{Arg, ArgMatches, Command};
 
 pub(super) fn check_server_cmd() -> Command {
     Command::new("alive")

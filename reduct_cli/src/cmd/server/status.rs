@@ -5,7 +5,7 @@
 
 use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::reduct::build_client;
-use clap::{arg, Arg, ArgMatches, Command};
+use clap::{Arg, ArgMatches, Command};
 use time_humanize::{Accuracy, HumanTime, Tense};
 
 pub(super) fn server_status_cmd() -> Command {
