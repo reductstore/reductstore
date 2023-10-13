@@ -3,14 +3,19 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::reduct::build_client;
-use clap::{arg, Command};
+use clap::{arg, Arg, Command};
 use time_humanize::{Accuracy, HumanTime, Tense};
 
 pub(super) fn server_status_cmd() -> Command {
     Command::new("status")
         .about("Get the status of a ReductStore instance")
-        .arg(arg!(<ALIAS_OR_URL> "Alias or URL of the ReductStore instance").required(true))
+        .arg(
+            Arg::new("ALIAS_OR_URL")
+                .help(ALIAS_OR_URL_HELP)
+                .required(true),
+        )
 }
 
 pub(super) async fn get_server_status(

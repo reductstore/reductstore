@@ -11,6 +11,7 @@ mod reduct;
 use crate::cmd::alias::{alias_cmd, alias_handler};
 use crate::context::ContextBuilder;
 
+use crate::cmd::bucket::{bucket_cmd, bucket_handler};
 use crate::cmd::server::{server_cmd, server_handler};
 use clap::{crate_description, crate_name, crate_version, Command};
 
@@ -21,6 +22,7 @@ fn cli() -> Command {
         .about(crate_description!())
         .subcommand(alias_cmd())
         .subcommand(server_cmd())
+        .subcommand(bucket_cmd())
 }
 
 #[tokio::main]
@@ -30,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
     match matches.subcommand() {
         Some(("alias", args)) => alias_handler(&ctx, args.subcommand()),
         Some(("server", args)) => server_handler(&ctx, args.subcommand()).await,
+        Some(("bucket", args)) => bucket_handler(&ctx, args.subcommand()).await,
         _ => Ok(()),
     }?;
 
