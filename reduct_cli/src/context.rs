@@ -83,8 +83,10 @@ impl ContextBuilder {
 pub(crate) mod tests {
     use super::*;
     use crate::config::{Alias, ConfigFile};
+    use crate::reduct::build_client;
     use rstest::fixture;
     use std::cell::RefCell;
+    use std::task::Context;
     use tempfile::tempdir;
 
     pub struct MockOutput {
@@ -146,5 +148,16 @@ pub(crate) mod tests {
         );
         config_file.save().unwrap();
         ctx
+    }
+
+    #[fixture]
+    pub(crate) async fn bucket(context: CliContext) -> String {
+        let client = build_client(&context, "local").unwrap();
+        // remove the bucket if it already exists
+        if let Ok(bucket) = client.get_bucket("test_bucket").await {
+            bucket.remove().await.unwrap_or_default();
+        }
+
+        "test_bucket".to_string()
     }
 }

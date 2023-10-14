@@ -82,23 +82,23 @@ pub(super) async fn create_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::tests::context;
-    use rstest::rstest;
+    use crate::context::tests::{bucket, context};
+    use rstest::*;
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket(context: CliContext) {
+    async fn test_create_bucket(context: CliContext, #[future] bucket: String) {
         let args = create_bucket_cmd().get_matches_from(vec![
             "create",
-            "local/test",
+            format!("local/{}", bucket.await).as_str(),
             "--quota-type",
             "FIFO",
             "--quota-size",
             "1GB",
             "--block-size",
-            "64MB",
+            "32MB",
             "--block-records",
-            "1024",
+            "100",
         ]);
 
         assert_eq!(
@@ -106,13 +106,95 @@ mod tests {
             (),
             "Create bucket succeeded"
         );
+
+        let client = build_client(&context, "local").unwrap();
+        let bucket = client.get_bucket("test_bucket").await.unwrap();
+        let settings = bucket.settings().await.unwrap();
+        assert_eq!(settings.quota_type, Some(QuotaType::FIFO));
+        assert_eq!(settings.quota_size, Some(1_000_000_000));
+        assert_eq!(settings.max_block_size, Some(32_000_000));
+        assert_eq!(settings.max_block_records, Some(100));
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_create_bucket_invalid_path(context: CliContext) {
         let args = create_bucket_cmd().get_matches_from(vec!["create", "local"]);
+        assert_eq!(
+            create_bucket(&context, &args)
+                .await
+                .err()
+                .unwrap()
+                .to_string(),
+            "Invalid bucket path",
+            "Failed because of invalid path"
+        );
+    }
 
-        assert!(create_bucket(&context, &args).await.is_err());
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_invalid_quota_type(context: CliContext, #[future] bucket: String) {
+        let args = create_bucket_cmd().try_get_matches_from(vec![
+            "create",
+            format!("local/{}", bucket.await).as_str(),
+            "--quota-type",
+            "INVALID",
+        ]);
+        assert_eq!(
+            args.err().unwrap().to_string(),
+            "error: invalid value 'INVALID' for '--quota-type <TEXT>'\n\nFor more information, try '--help'.\n",
+            "Failed because of invalid quota type"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_invalid_quota_size(context: CliContext, #[future] bucket: String) {
+        let args = create_bucket_cmd().try_get_matches_from(vec![
+            "create",
+            format!("local/{}", bucket.await).as_str(),
+            "--quota-size",
+            "INVALID",
+        ]);
+        assert_eq!(
+            args.err().unwrap().to_string(),
+            "error: invalid value 'INVALID' for '--quota-size <SIZE>'\n\nFor more information, try '--help'.\n",
+            "Failed because of invalid quota size"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_invalid_block_size(context: CliContext, #[future] bucket: String) {
+        let args = create_bucket_cmd().try_get_matches_from(vec![
+            "create",
+            format!("local/{}", bucket.await).as_str(),
+            "--block-size",
+            "INVALID",
+        ]);
+        assert_eq!(
+            args.err().unwrap().to_string(),
+            "error: invalid value 'INVALID' for '--block-size <SIZE>'\n\nFor more information, try '--help'.\n",
+            "Failed because of invalid block size"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_invalid_block_records(
+        context: CliContext,
+        #[future] bucket: String,
+    ) {
+        let args = create_bucket_cmd().try_get_matches_from(vec![
+            "create",
+            format!("local/{}", bucket.await).as_str(),
+            "--block-records",
+            "INVALID",
+        ]);
+        assert_eq!(
+            args.err().unwrap().to_string(),
+            "error: invalid value 'INVALID' for '--block-records <NUMBER>': invalid digit found in string\n\nFor more information, try '--help'.\n",
+            "Failed because of invalid block records"
+        );
     }
 }
