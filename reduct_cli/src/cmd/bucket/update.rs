@@ -3,14 +3,12 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::cmd::bucket::{create_update_bucket_args, parset_bucket_settings};
-use crate::cmd::parsers::{ByteSizeParser, QuotaTypeParser};
-use crate::cmd::BUCKET_PATH_HELP;
+
 use crate::context::CliContext;
 use crate::reduct::build_client;
-use bytesize::ByteSize;
-use clap::builder::RangedU64ValueParser;
-use clap::{Arg, ArgMatches, Command};
-use reduct_rs::{BucketSettings, ReductClient};
+
+use clap::{ArgMatches, Command};
+use reduct_rs::ReductClient;
 
 pub(super) fn update_bucket_cmd() -> Command {
     let cmd = Command::new("update").about("update a bucket");

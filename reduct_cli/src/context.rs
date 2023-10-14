@@ -86,7 +86,7 @@ pub(crate) mod tests {
     use crate::reduct::build_client;
     use rstest::fixture;
     use std::cell::RefCell;
-    use std::task::Context;
+
     use tempfile::tempdir;
 
     pub struct MockOutput {

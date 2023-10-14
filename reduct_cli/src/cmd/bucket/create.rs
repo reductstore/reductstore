@@ -4,14 +4,12 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::cmd::bucket::{create_update_bucket_args, parset_bucket_settings};
-use crate::cmd::parsers::{ByteSizeParser, QuotaTypeParser};
-use crate::cmd::BUCKET_PATH_HELP;
+
 use crate::context::CliContext;
 use crate::reduct::build_client;
-use bytesize::ByteSize;
-use clap::builder::RangedU64ValueParser;
-use clap::{Arg, ArgMatches, Command};
-use reduct_rs::{BucketSettings, QuotaType, ReductClient};
+
+use clap::{ArgMatches, Command};
+use reduct_rs::ReductClient;
 
 pub(super) fn create_bucket_cmd() -> Command {
     let cmd = Command::new("create").about("create a bucket");
@@ -90,7 +88,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_quota_type(context: CliContext, #[future] bucket: String) {
+    async fn test_create_bucket_invalid_quota_type(_context: CliContext, #[future] bucket: String) {
         let args = create_bucket_cmd().try_get_matches_from(vec![
             "create",
             format!("local/{}", bucket.await).as_str(),
@@ -106,7 +104,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_quota_size(context: CliContext, #[future] bucket: String) {
+    async fn test_create_bucket_invalid_quota_size(_context: CliContext, #[future] bucket: String) {
         let args = create_bucket_cmd().try_get_matches_from(vec![
             "create",
             format!("local/{}", bucket.await).as_str(),
@@ -122,7 +120,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_block_size(context: CliContext, #[future] bucket: String) {
+    async fn test_create_bucket_invalid_block_size(_context: CliContext, #[future] bucket: String) {
         let args = create_bucket_cmd().try_get_matches_from(vec![
             "create",
             format!("local/{}", bucket.await).as_str(),
@@ -139,7 +137,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_bucket_invalid_block_records(
-        context: CliContext,
+        _context: CliContext,
         #[future] bucket: String,
     ) {
         let args = create_bucket_cmd().try_get_matches_from(vec![
