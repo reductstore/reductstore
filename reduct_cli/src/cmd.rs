@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 pub(crate) mod alias;
 pub(crate) mod bucket;
+mod parsers;
 pub(crate) mod server;
 
 const ALIAS_OR_URL_HELP: &str =

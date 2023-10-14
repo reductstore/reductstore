@@ -19,7 +19,7 @@ pub(crate) async fn bucket_handler(
     matches: Option<(&str, &clap::ArgMatches)>,
 ) -> anyhow::Result<()> {
     match matches {
-        Some(("create", args)) => create::crate_bucket(ctx, args)?,
+        Some(("create", args)) => create::create_bucket(ctx, args).await?,
         _ => (),
     }
 

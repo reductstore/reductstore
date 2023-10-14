@@ -13,5 +13,10 @@ pub use client::ReductClient;
 pub use record::read_record::ReadRecordBuilder;
 pub use record::write_batched_records::WriteBatchBuilder;
 pub use record::write_record::WriteRecordBuilder;
-pub use record::{Labels, Record, RecordStream};
+pub use record::{Labels, Record, RecordBuilder, RecordStream};
+
+// Re-export
 pub use reduct_base::error::{ErrorCode, ReductError};
+pub use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, QuotaType};
+pub use reduct_base::msg::entry_api::EntryInfo;
+pub use reduct_base::msg::token_api::{Permissions, Token};
