@@ -8,10 +8,9 @@ use crate::cmd::BUCKET_PATH_HELP;
 use crate::context::CliContext;
 use crate::reduct::build_client;
 use bytesize::ByteSize;
-use clap::builder::{RangedU64ValueParser, Str, TypedValueParser};
+use clap::builder::RangedU64ValueParser;
 use clap::{Arg, ArgMatches, Command};
 use reduct_rs::{BucketSettings, QuotaType, ReductClient};
-use std::str::FromStr;
 
 pub(super) fn create_bucket_cmd() -> Command {
     Command::new("create")
@@ -61,8 +60,8 @@ pub(super) async fn create_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow
     if let Some((alias_or_url, bucket_name)) = path.rsplit_once('/') {
         let bucket_settings = BucketSettings {
             quota_type: args.get_one::<QuotaType>("quota-type").map(|v| v.clone()),
-            quota_size: args.get_one::<u64>("quota-size").map(|v| v.clone()),
-            max_block_size: args.get_one::<u64>("block-size").map(|v| v.clone()),
+            quota_size: args.get_one::<ByteSize>("quota-size").map(|v| v.as_u64()),
+            max_block_size: args.get_one::<ByteSize>("block-size").map(|v| v.as_u64()),
             max_block_records: args.get_one::<u64>("block-records").map(|v| v.clone()),
         };
 
@@ -77,5 +76,43 @@ pub(super) async fn create_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow
         Ok(())
     } else {
         Err(anyhow::anyhow!("Invalid bucket path"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::tests::context;
+    use rstest::rstest;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket(context: CliContext) {
+        let args = create_bucket_cmd().get_matches_from(vec![
+            "create",
+            "local/test",
+            "--quota-type",
+            "FIFO",
+            "--quota-size",
+            "1GB",
+            "--block-size",
+            "64MB",
+            "--block-records",
+            "1024",
+        ]);
+
+        assert_eq!(
+            create_bucket(&context, &args).await.unwrap(),
+            (),
+            "Create bucket succeeded"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_invalid_path(context: CliContext) {
+        let args = create_bucket_cmd().get_matches_from(vec!["create", "local"]);
+
+        assert!(create_bucket(&context, &args).await.is_err());
     }
 }
