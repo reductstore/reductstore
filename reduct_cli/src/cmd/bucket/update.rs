@@ -2,7 +2,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
 use crate::cmd::bucket::{create_update_bucket_args, parset_bucket_settings};
 use crate::cmd::parsers::{ByteSizeParser, QuotaTypeParser};
 use crate::cmd::BUCKET_PATH_HELP;
@@ -11,25 +10,26 @@ use crate::reduct::build_client;
 use bytesize::ByteSize;
 use clap::builder::RangedU64ValueParser;
 use clap::{Arg, ArgMatches, Command};
-use reduct_rs::{BucketSettings, QuotaType, ReductClient};
+use reduct_rs::{BucketSettings, ReductClient};
 
-pub(super) fn create_bucket_cmd() -> Command {
-    let cmd = Command::new("create").about("create a bucket");
+pub(super) fn update_bucket_cmd() -> Command {
+    let cmd = Command::new("update").about("update a bucket");
     create_update_bucket_args(cmd)
 }
 
-pub(super) async fn create_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
+pub(super) async fn update_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
     let path = args.get_one::<String>("BUCKET_PATH").unwrap();
     if let Some((alias_or_url, bucket_name)) = path.rsplit_once('/') {
         let bucket_settings = parset_bucket_settings(args);
+
         let client: ReductClient = build_client(ctx, alias_or_url)?;
         client
-            .create_bucket(bucket_name)
-            .settings(bucket_settings)
-            .send()
+            .get_bucket(bucket_name)
+            .await?
+            .set_settings(bucket_settings)
             .await?;
 
-        println!("Bucket '{}' created", bucket_name);
+        println!("Bucket '{}' updated", bucket_name);
         Ok(())
     } else {
         Err(anyhow::anyhow!("Invalid bucket path"))
@@ -40,14 +40,19 @@ pub(super) async fn create_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow
 mod tests {
     use super::*;
     use crate::context::tests::{bucket, context};
+    use reduct_rs::QuotaType;
     use rstest::*;
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket(context: CliContext, #[future] bucket: String) {
-        let args = create_bucket_cmd().get_matches_from(vec![
-            "create",
-            format!("local/{}", bucket.await).as_str(),
+    async fn test_update_bucket(context: CliContext, #[future] bucket: String) {
+        let bucket_name = bucket.await;
+        let client = build_client(&context, "local").unwrap();
+        client.create_bucket(&bucket_name).send().await.unwrap();
+
+        let args = update_bucket_cmd().get_matches_from(vec![
+            "update",
+            format!("local/{}", bucket_name).as_str(),
             "--quota-type",
             "FIFO",
             "--quota-size",
@@ -59,12 +64,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            create_bucket(&context, &args).await.unwrap(),
+            update_bucket(&context, &args).await.unwrap(),
             (),
             "Create bucket succeeded"
         );
 
-        let client = build_client(&context, "local").unwrap();
         let bucket = client.get_bucket("test_bucket").await.unwrap();
         let settings = bucket.settings().await.unwrap();
         assert_eq!(settings.quota_type, Some(QuotaType::FIFO));
@@ -75,10 +79,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_path(context: CliContext) {
-        let args = create_bucket_cmd().get_matches_from(vec!["create", "local"]);
+    async fn test_update_bucket_invalid_path(context: CliContext) {
+        let args = update_bucket_cmd().get_matches_from(vec!["update", "local"]);
         assert_eq!(
-            create_bucket(&context, &args)
+            update_bucket(&context, &args)
                 .await
                 .err()
                 .unwrap()
@@ -90,9 +94,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_quota_type(context: CliContext, #[future] bucket: String) {
-        let args = create_bucket_cmd().try_get_matches_from(vec![
-            "create",
+    async fn test_update_bucket_invalid_quota_type(#[future] bucket: String) {
+        let args = update_bucket_cmd().try_get_matches_from(vec![
+            "update",
             format!("local/{}", bucket.await).as_str(),
             "--quota-type",
             "INVALID",
@@ -106,9 +110,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_quota_size(context: CliContext, #[future] bucket: String) {
-        let args = create_bucket_cmd().try_get_matches_from(vec![
-            "create",
+    async fn test_update_bucket_invalid_quota_size(#[future] bucket: String) {
+        let args = update_bucket_cmd().try_get_matches_from(vec![
+            "update",
             format!("local/{}", bucket.await).as_str(),
             "--quota-size",
             "INVALID",
@@ -122,9 +126,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_block_size(context: CliContext, #[future] bucket: String) {
-        let args = create_bucket_cmd().try_get_matches_from(vec![
-            "create",
+    async fn test_update_bucket_invalid_block_size(#[future] bucket: String) {
+        let args = update_bucket_cmd().try_get_matches_from(vec![
+            "update",
             format!("local/{}", bucket.await).as_str(),
             "--block-size",
             "INVALID",
@@ -138,12 +142,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_block_records(
-        context: CliContext,
-        #[future] bucket: String,
-    ) {
-        let args = create_bucket_cmd().try_get_matches_from(vec![
-            "create",
+    async fn test_update_bucket_invalid_block_records(#[future] bucket: String) {
+        let args = update_bucket_cmd().try_get_matches_from(vec![
+            "update",
             format!("local/{}", bucket.await).as_str(),
             "--block-records",
             "INVALID",
