@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::cmd::bucket::{create_update_bucket_args, parset_bucket_settings};
+use crate::cmd::bucket::{create_update_bucket_args, parse_bucket_settings};
 
 use crate::context::CliContext;
 use crate::reduct::build_client;
@@ -17,27 +17,25 @@ pub(super) fn create_bucket_cmd() -> Command {
 }
 
 pub(super) async fn create_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
-    let path = args.get_one::<String>("BUCKET_PATH").unwrap();
-    if let Some((alias_or_url, bucket_name)) = path.rsplit_once('/') {
-        let bucket_settings = parset_bucket_settings(args);
-        let client: ReductClient = build_client(ctx, alias_or_url)?;
-        client
-            .create_bucket(bucket_name)
-            .settings(bucket_settings)
-            .send()
-            .await?;
+    let (alias_or_url, bucket_name) = args.get_one::<(String, String)>("BUCKET_PATH").unwrap();
+    let bucket_settings = parse_bucket_settings(args);
 
-        println!("Bucket '{}' created", bucket_name);
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("Invalid bucket path"))
-    }
+    let client: ReductClient = build_client(ctx, alias_or_url)?;
+    client
+        .create_bucket(bucket_name)
+        .settings(bucket_settings)
+        .send()
+        .await?;
+
+    println!("Bucket '{}' created", bucket_name);
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::context::tests::{bucket, context};
+    use reduct_rs::QuotaType;
     use rstest::*;
 
     #[rstest]
@@ -74,15 +72,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_bucket_invalid_path(context: CliContext) {
-        let args = create_bucket_cmd().get_matches_from(vec!["create", "local"]);
+        let args = create_bucket_cmd().try_get_matches_from(vec!["create", "local"]);
         assert_eq!(
-            create_bucket(&context, &args)
-                .await
-                .err()
-                .unwrap()
-                .to_string(),
-            "Invalid bucket path",
-            "Failed because of invalid path"
+            args.err().unwrap().to_string(),
+            "error: invalid value 'local' for '<BUCKET_PATH>'\n\nFor more information, try '--help'.\n"
         );
     }
 

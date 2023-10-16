@@ -3,9 +3,10 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 mod create;
+mod rm;
 mod update;
 
-use crate::cmd::parsers::{ByteSizeParser, QuotaTypeParser};
+use crate::cmd::parsers::{BucketPathParser, ByteSizeParser, QuotaTypeParser};
 use crate::cmd::BUCKET_PATH_HELP;
 use crate::context::CliContext;
 use bytesize::ByteSize;
@@ -19,6 +20,7 @@ pub(crate) fn bucket_cmd() -> Command {
         .arg_required_else_help(true)
         .subcommand(create::create_bucket_cmd())
         .subcommand(update::update_bucket_cmd())
+        .subcommand(rm::rm_bucket_cmd())
 }
 
 pub(crate) async fn bucket_handler(
@@ -28,6 +30,7 @@ pub(crate) async fn bucket_handler(
     match matches {
         Some(("create", args)) => create::create_bucket(ctx, args).await?,
         Some(("update", args)) => update::update_bucket(ctx, args).await?,
+        Some(("rm", args)) => rm::rm_bucket(ctx, args).await?,
         _ => (),
     }
 
@@ -39,6 +42,7 @@ fn create_update_bucket_args(cmd: Command) -> Command {
     cmd.arg(
         Arg::new("BUCKET_PATH")
             .help(BUCKET_PATH_HELP)
+            .value_parser(BucketPathParser::new())
             .required(true),
     )
     .arg(
@@ -76,7 +80,7 @@ fn create_update_bucket_args(cmd: Command) -> Command {
     )
 }
 
-fn parset_bucket_settings(args: &ArgMatches) -> BucketSettings {
+fn parse_bucket_settings(args: &ArgMatches) -> BucketSettings {
     let bucket_settings = BucketSettings {
         quota_type: args.get_one::<QuotaType>("quota-type").map(|v| v.clone()),
         quota_size: args.get_one::<ByteSize>("quota-size").map(|v| v.as_u64()),
