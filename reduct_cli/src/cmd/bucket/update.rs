@@ -5,8 +5,9 @@
 use crate::cmd::bucket::{create_update_bucket_args, parse_bucket_settings};
 
 use crate::context::CliContext;
-use crate::reduct::build_client;
 
+use crate::io::reduct::build_client;
+use crate::io::std::output;
 use clap::{ArgMatches, Command};
 use reduct_rs::ReductClient;
 
@@ -26,7 +27,7 @@ pub(super) async fn update_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow
         .set_settings(bucket_settings)
         .await?;
 
-    println!("Bucket '{}' updated", bucket_name);
+    output!(ctx, "Bucket '{}' updated", bucket_name);
     Ok(())
 }
 
@@ -69,11 +70,16 @@ mod tests {
         assert_eq!(settings.quota_size, Some(1_000_000_000));
         assert_eq!(settings.max_block_size, Some(32_000_000));
         assert_eq!(settings.max_block_records, Some(100));
+
+        assert_eq!(
+            context.stdout().history(),
+            vec!["Bucket 'test_bucket' updated"]
+        )
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket_invalid_path(context: CliContext) {
+    async fn test_update_bucket_invalid_path() {
         let args = update_bucket_cmd().try_get_matches_from(vec!["update", "local"]);
         assert_eq!(
             args.err().unwrap().to_string(),

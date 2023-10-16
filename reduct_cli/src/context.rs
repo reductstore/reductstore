@@ -3,38 +3,26 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::io::std::{Input, Output, StdInput, StdOutput};
 use dirs::home_dir;
 use std::env::current_dir;
-
-pub(crate) trait Output {
-    fn print(&self, message: &str);
-
-    fn history(&self) -> Vec<String>;
-}
-
-struct StdoutOutput;
-
-impl Output for StdoutOutput {
-    fn print(&self, message: &str) {
-        println!("{}", message);
-    }
-
-    fn history(&self) -> Vec<String> {
-        Vec::new()
-    }
-}
 
 pub(crate) struct CliContext {
     config_path: String,
     output: Box<dyn Output>,
+    input: Box<dyn Input>,
 }
 
 impl CliContext {
     pub(crate) fn config_path(&self) -> &str {
         &self.config_path
     }
-    pub(crate) fn output(&self) -> &dyn Output {
+    pub(crate) fn stdout(&self) -> &dyn Output {
         &*self.output
+    }
+
+    pub(crate) fn stdin(&self) -> &dyn Input {
+        &*self.input
     }
 }
 
@@ -46,7 +34,8 @@ impl ContextBuilder {
     pub(crate) fn new() -> Self {
         let mut config = CliContext {
             config_path: String::new(),
-            output: Box::new(StdoutOutput {}),
+            output: Box::new(StdOutput::new()),
+            input: Box::new(StdInput::new()),
         };
         config.config_path = match home_dir() {
             Some(path) => path
@@ -74,6 +63,11 @@ impl ContextBuilder {
         self
     }
 
+    pub(crate) fn input(mut self, input: Box<dyn Input>) -> Self {
+        self.config.input = input;
+        self
+    }
+
     pub(crate) fn build(self) -> CliContext {
         self.config
     }
@@ -83,10 +77,10 @@ impl ContextBuilder {
 pub(crate) mod tests {
     use super::*;
     use crate::config::{Alias, ConfigFile};
-    use crate::reduct::build_client;
+    use crate::io::reduct::build_client;
+    use crate::io::std::Output;
     use rstest::fixture;
     use std::cell::RefCell;
-
     use tempfile::tempdir;
 
     pub struct MockOutput {
@@ -111,9 +105,37 @@ pub(crate) mod tests {
         }
     }
 
+    pub struct MockInput {
+        input: RefCell<Vec<String>>,
+    }
+
+    impl Input for MockInput {
+        fn read(&self) -> Result<String, anyhow::Error> {
+            Ok(self.input.borrow_mut().pop().unwrap())
+        }
+
+        fn emulate(&self, input: Vec<&'static str>) {
+            self.input
+                .replace(input.iter().map(|s| s.to_string()).collect());
+        }
+    }
+
+    impl MockInput {
+        pub fn new() -> Self {
+            MockInput {
+                input: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
     #[fixture]
     pub(crate) fn output() -> Box<MockOutput> {
         Box::new(MockOutput::new())
+    }
+
+    #[fixture]
+    pub(crate) fn input() -> Box<MockInput> {
+        Box::new(MockInput::new())
     }
 
     #[fixture]
@@ -122,11 +144,16 @@ pub(crate) mod tests {
     }
 
     #[fixture]
-    pub(crate) fn context(output: Box<dyn Output>, current_token: String) -> CliContext {
+    pub(crate) fn context(
+        output: Box<dyn Output>,
+        input: Box<dyn Input>,
+        current_token: String,
+    ) -> CliContext {
         let tmp_dir = tempdir().unwrap();
         let ctx = ContextBuilder::new()
             .config_path(tmp_dir.into_path().join("config.toml").to_str().unwrap())
             .output(output)
+            .input(input)
             .build();
 
         // add a default alias

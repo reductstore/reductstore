@@ -1619,6 +1619,7 @@ dependencies = [
  "rstest",
  "serde",
  "tempfile",
+ "thread-id",
  "time-humanize",
  "tokio",
  "toml",

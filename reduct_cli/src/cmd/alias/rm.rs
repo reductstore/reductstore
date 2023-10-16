@@ -36,7 +36,7 @@ mod tests {
 
     #[rstest]
     fn test_remove_alias(context: CliContext) {
-        let args = rm_alias_cmd().get_matches_from(vec!["default"]);
+        let args = rm_alias_cmd().get_matches_from(vec!["rm", "default"]);
         remove_alias(&context, &args).unwrap();
 
         let config_file = ConfigFile::load(context.config_path()).unwrap();
@@ -46,7 +46,7 @@ mod tests {
 
     #[rstest]
     fn test_remove_alias_not_found(context: CliContext) {
-        let args = rm_alias_cmd().get_matches_from(vec!["test"]);
+        let args = rm_alias_cmd().get_matches_from(vec!["rm", "test"]);
         let result = remove_alias(&context, &args);
         assert!(result.is_err());
         assert_eq!(

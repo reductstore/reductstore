@@ -5,8 +5,8 @@
 
 use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::context::CliContext;
-use crate::reduct::build_client;
 
+use crate::io::reduct::build_client;
 use clap::{Arg, ArgMatches, Command};
 
 pub(super) fn check_server_cmd() -> Command {
@@ -35,7 +35,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_check_server(context: CliContext) {
-        let args = check_server_cmd().get_matches_from(vec!["local"]);
+        let args = check_server_cmd().get_matches_from(vec!["alive", "local"]);
         check_server(&context, &args).await.unwrap();
     }
 }

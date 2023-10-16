@@ -2,14 +2,12 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
-use crate::cmd::bucket::{create_update_bucket_args, parse_bucket_settings};
-
 use crate::context::CliContext;
-use crate::reduct::build_client;
 
 use crate::cmd::parsers::BucketPathParser;
 use crate::cmd::BUCKET_PATH_HELP;
+use crate::io::reduct::build_client;
+use crate::io::std::{input, output};
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
 use reduct_rs::ReductClient;
@@ -37,14 +35,14 @@ pub(super) async fn rm_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Re
     let (alias_or_url, bucket_name) = args.get_one::<(String, String)>("BUCKET_PATH").unwrap();
 
     if !args.get_flag("yes") {
-        println!(
+        output!(
+            ctx,
             "Are you sure you want to remove bucket '{}'? [N/y]",
             bucket_name
         );
-        let mut confirmation = String::new();
-        std::io::stdin().read_line(&mut confirmation)?;
-        if confirmation.trim().to_lowercase() != "y" {
-            println!("Aborting");
+        let confirmation = input!(ctx)?;
+        if confirmation.to_lowercase() != "y" {
+            output!(ctx, "Aborting");
             return Ok(());
         }
     }
@@ -52,7 +50,7 @@ pub(super) async fn rm_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Re
     let client: ReductClient = build_client(ctx, alias_or_url)?;
     client.get_bucket(bucket_name).await?.remove().await?;
 
-    println!("Bucket '{}' removed", bucket_name);
+    output!(ctx, "Bucket '{}' removed", bucket_name);
     Ok(())
 }
 
@@ -60,6 +58,7 @@ pub(super) async fn rm_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Re
 mod tests {
     use super::*;
     use crate::context::tests::{bucket, context};
+    use reduct_rs::ErrorCode;
     use rstest::*;
 
     #[rstest]
@@ -76,11 +75,46 @@ mod tests {
         ]);
 
         assert_eq!(rm_bucket(&context, &args).await.unwrap(), ());
+        assert_eq!(
+            client
+                .get_bucket(&bucket_name)
+                .await
+                .err()
+                .unwrap()
+                .status(),
+            ErrorCode::NotFound
+        );
+        assert_eq!(
+            context.stdout().history(),
+            vec!["Bucket 'test_bucket' removed"]
+        );
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_rm_bucket_invalid_path(context: CliContext) {
+    async fn test_rm_bucket_confirmed(context: CliContext, #[future] bucket: String) {
+        let bucket_name = bucket.await;
+        let client = build_client(&context, "local").unwrap();
+        client.create_bucket(&bucket_name).send().await.unwrap();
+
+        context.stdin().emulate(vec!["y"]);
+
+        let args =
+            rm_bucket_cmd().get_matches_from(vec!["rm", format!("local/{}", bucket_name).as_str()]);
+
+        assert_eq!(rm_bucket(&context, &args).await.unwrap(), ());
+        assert_eq!(
+            context.stdout().history(),
+            vec![
+                "Are you sure you want to remove bucket 'test_bucket'? [N/y]",
+                "Bucket 'test_bucket' removed"
+            ]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_rm_bucket_invalid_path() {
         let args = rm_bucket_cmd().try_get_matches_from(vec!["rm", "local"]);
 
         assert_eq!(

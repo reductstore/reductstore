@@ -6,8 +6,9 @@
 use crate::cmd::bucket::{create_update_bucket_args, parse_bucket_settings};
 
 use crate::context::CliContext;
-use crate::reduct::build_client;
+use crate::io::reduct::build_client;
 
+use crate::io::std::output;
 use clap::{ArgMatches, Command};
 use reduct_rs::ReductClient;
 
@@ -27,7 +28,7 @@ pub(super) async fn create_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow
         .send()
         .await?;
 
-    println!("Bucket '{}' created", bucket_name);
+    output!(ctx, "Bucket '{}' created", bucket_name);
     Ok(())
 }
 
@@ -67,11 +68,16 @@ mod tests {
         assert_eq!(settings.quota_size, Some(1_000_000_000));
         assert_eq!(settings.max_block_size, Some(32_000_000));
         assert_eq!(settings.max_block_records, Some(100));
+
+        assert_eq!(
+            context.stdout().history(),
+            vec!["Bucket 'test_bucket' created"]
+        )
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_path(context: CliContext) {
+    async fn test_create_bucket_invalid_path() {
         let args = create_bucket_cmd().try_get_matches_from(vec!["create", "local"]);
         assert_eq!(
             args.err().unwrap().to_string(),
@@ -81,7 +87,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_invalid_quota_type(_context: CliContext, #[future] bucket: String) {
+    async fn test_create_bucket_invalid_quota_type(#[future] bucket: String) {
         let args = create_bucket_cmd().try_get_matches_from(vec![
             "create",
             format!("local/{}", bucket.await).as_str(),
