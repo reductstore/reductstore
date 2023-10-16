@@ -59,7 +59,7 @@ impl Input for StdInput {
     }
 
     #[cfg(test)]
-    fn emulate(&self, input: Vec<&'static str>) {}
+    fn emulate(&self, _input: Vec<&'static str>) {}
 }
 
 macro_rules! input {
