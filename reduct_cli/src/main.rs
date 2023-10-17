@@ -6,7 +6,9 @@
 mod cmd;
 mod config;
 mod context;
+mod helpers;
 mod io;
+mod parsers;
 
 use crate::cmd::alias::{alias_cmd, alias_handler};
 use crate::context::ContextBuilder;

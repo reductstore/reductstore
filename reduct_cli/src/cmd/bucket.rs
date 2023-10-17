@@ -3,12 +3,13 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 mod create;
+mod ls;
 mod rm;
 mod update;
 
-use crate::cmd::parsers::{BucketPathParser, ByteSizeParser, QuotaTypeParser};
 use crate::cmd::BUCKET_PATH_HELP;
 use crate::context::CliContext;
+use crate::parsers::{BucketPathParser, ByteSizeParser, QuotaTypeParser};
 use bytesize::ByteSize;
 use clap::builder::RangedU64ValueParser;
 use clap::{Arg, ArgMatches, Command};
@@ -21,6 +22,7 @@ pub(crate) fn bucket_cmd() -> Command {
         .subcommand(create::create_bucket_cmd())
         .subcommand(update::update_bucket_cmd())
         .subcommand(rm::rm_bucket_cmd())
+        .subcommand(ls::ls_bucket_cmd())
 }
 
 pub(crate) async fn bucket_handler(
@@ -31,6 +33,7 @@ pub(crate) async fn bucket_handler(
         Some(("create", args)) => create::create_bucket(ctx, args).await?,
         Some(("update", args)) => update::update_bucket(ctx, args).await?,
         Some(("rm", args)) => rm::rm_bucket(ctx, args).await?,
+        Some(("ls", args)) => ls::ls_bucket(ctx, args).await?,
         _ => (),
     }
 
