@@ -8,13 +8,12 @@ use crate::context::CliContext;
 use crate::helpers::timestamp_to_iso;
 use crate::io::reduct::build_client;
 use crate::io::std::output;
-use crate::parsers::BucketPathParser;
+
 use bytesize::ByteSize;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
 use colored::Colorize;
-use reduct_rs::{BucketInfo, BucketInfoList};
-use std::time::Duration;
+use reduct_rs::BucketInfoList;
 
 pub(super) fn ls_bucket_cmd() -> Command {
     Command::new("ls")
@@ -90,7 +89,6 @@ mod tests {
     use super::*;
     use crate::context::tests::{bucket, context};
     use rstest::rstest;
-    use serde::de::Unexpected::Bytes;
 
     #[rstest]
     #[tokio::test]
