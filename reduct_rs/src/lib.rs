@@ -17,7 +17,7 @@ pub use record::{Labels, Record, RecordBuilder, RecordStream};
 
 // Re-export
 pub use reduct_base::error::{ErrorCode, ReductError};
-pub use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, QuotaType};
+pub use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 pub use reduct_base::msg::entry_api::EntryInfo;
 pub use reduct_base::msg::server_api::{BucketInfoList, Defaults, ServerInfo};
 pub use reduct_base::msg::token_api::{Permissions, Token};

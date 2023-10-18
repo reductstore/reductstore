@@ -5,6 +5,7 @@
 mod create;
 mod ls;
 mod rm;
+mod show;
 mod update;
 
 use crate::cmd::BUCKET_PATH_HELP;
@@ -23,6 +24,7 @@ pub(crate) fn bucket_cmd() -> Command {
         .subcommand(update::update_bucket_cmd())
         .subcommand(rm::rm_bucket_cmd())
         .subcommand(ls::ls_bucket_cmd())
+        .subcommand(show::show_bucket_cmd())
 }
 
 pub(crate) async fn bucket_handler(
@@ -34,6 +36,7 @@ pub(crate) async fn bucket_handler(
         Some(("update", args)) => update::update_bucket(ctx, args).await?,
         Some(("rm", args)) => rm::rm_bucket(ctx, args).await?,
         Some(("ls", args)) => ls::ls_bucket(ctx, args).await?,
+        Some(("show", args)) => show::show_bucket(ctx, args).await?,
         _ => (),
     }
 
