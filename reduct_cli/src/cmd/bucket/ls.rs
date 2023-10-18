@@ -134,13 +134,13 @@ mod tests {
             .unwrap();
 
         ls_bucket(&context, &args).await.unwrap();
-        let has_bucket = context.stdout().history().iter().any(|s| {
-            s.contains("test_bucket")
-                && s.contains("1")
-                && s.contains("8 B")
-                && s.contains("1970-01-01T00:00:00.000Z")
-                && s.contains("1970-01-01T00:00:00.001Z")
-        });
-        assert!(has_bucket);
+
+        assert_eq!(context
+                       .stdout()
+                       .history(),
+                   vec!["Name                          | Entries   | Size       | Oldest record (UTC)            | Latest record (UTC)           |",
+                        "----------------------------- | ----------| ---------- | ------------------------------ | ------------------------------|",
+                        "test_bucket                   |          1| 8 B        | 1970-01-01T00:00:00.000Z       | 1970-01-01T00:00:00.001Z      |"]
+        );
     }
 }
