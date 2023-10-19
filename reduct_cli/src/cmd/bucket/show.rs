@@ -147,7 +147,6 @@ mod tests {
     use super::*;
     use crate::context::tests::{bucket, context};
     use rstest::rstest;
-    use std::io::Bytes;
 
     #[rstest]
     #[tokio::test]
