@@ -133,6 +133,7 @@ mod tests {
     use axum::body::Empty;
     use std::collections::HashMap;
 
+    use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
     use crate::storage::writer::{Chunk, WriteChunk};
     use axum::extract::{BodyStream, FromRequest, Path};
