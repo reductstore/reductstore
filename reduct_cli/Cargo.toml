@@ -11,12 +11,16 @@ description = "A CLI client for ReductStore written in Rust"
 reduct-rs = { path = "../reduct_rs", version = "1.8.0-dev" }
 clap = { version = "4.3.23", features = ["cargo"] }
 dirs = "5.0.1"
-toml = "0.7.6"
+toml = "0.8.0"
 serde = { version = "1.0.183", features = ["derive"] }
 anyhow = "1.0.75"
 url = { version = "2.4.0", features = ["serde"] }
 tokio = {version = "1.32.0", features = ["rt-multi-thread"] }
 time-humanize = "0.1.3"
+bytesize = "1.3.0"
+thread-id = "4.2.0"
+colored = "2.0.4"
+chrono = "0.4.31"
 
 [dev-dependencies]
 rstest = "0.18.2"

@@ -18,7 +18,7 @@ use crate::api::middleware::{default_headers, print_statuses};
 use crate::api::server::create_server_api_routes;
 use crate::api::token::create_token_api_routes;
 use crate::api::ui::{redirect_to_index, show_ui};
-use crate::asset::asset_manager::{create_asset_manager, ManageStaticAsset};
+use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::storage::storage::Storage;
@@ -133,6 +133,7 @@ mod tests {
     use axum::body::Empty;
     use std::collections::HashMap;
 
+    use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
     use crate::storage::writer::{Chunk, WriteChunk};
     use axum::extract::{BodyStream, FromRequest, Path};

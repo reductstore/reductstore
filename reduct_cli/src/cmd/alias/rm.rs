@@ -6,9 +6,11 @@
 use crate::config::ConfigFile;
 use crate::context::CliContext;
 use anyhow::Error;
-use clap::{arg, Command};
+use clap::{arg, ArgMatches, Command};
 
-pub(super) fn remove_alias(ctx: &CliContext, name: &str) -> anyhow::Result<()> {
+pub(super) fn remove_alias(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
+    let name = args.get_one::<String>("NAME").unwrap();
+
     let mut config_file = ConfigFile::load(ctx.config_path())?;
     let config = config_file.mut_config();
     if !config.aliases.contains_key(name) {
@@ -34,7 +36,8 @@ mod tests {
 
     #[rstest]
     fn test_remove_alias(context: CliContext) {
-        remove_alias(&context, "default").unwrap();
+        let args = rm_alias_cmd().get_matches_from(vec!["rm", "default"]);
+        remove_alias(&context, &args).unwrap();
 
         let config_file = ConfigFile::load(context.config_path()).unwrap();
         let config = config_file.config();
@@ -43,7 +46,8 @@ mod tests {
 
     #[rstest]
     fn test_remove_alias_not_found(context: CliContext) {
-        let result = remove_alias(&context, "test");
+        let args = rm_alias_cmd().get_matches_from(vec!["rm", "test"]);
+        let result = remove_alias(&context, &args);
         assert!(result.is_err());
         assert_eq!(
             result.err().unwrap().to_string(),

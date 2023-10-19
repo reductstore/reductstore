@@ -111,7 +111,7 @@ impl Record {
 }
 
 impl RecordBuilder {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             record: Record {
                 timestamp: from_system_time(SystemTime::now()),

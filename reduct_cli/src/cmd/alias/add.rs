@@ -6,15 +6,14 @@
 use crate::config::{Alias, ConfigFile};
 use crate::context::CliContext;
 use anyhow::Error;
-use clap::{arg, Arg, Command};
+use clap::{arg, Arg, ArgMatches, Command};
 use url::Url;
 
-pub(super) fn add_alias(
-    ctx: &CliContext,
-    name: &str,
-    url: &str,
-    token: &str,
-) -> anyhow::Result<()> {
+pub(super) fn add_alias(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
+    let name = args.get_one::<String>("NAME").unwrap();
+    let url = args.get_one::<String>("URL").unwrap();
+    let token = args.get_one("TOKEN");
+
     let mut config_file = ConfigFile::load(ctx.config_path())?;
     let config = config_file.mut_config();
     if config.aliases.contains_key(name) {
@@ -25,7 +24,7 @@ pub(super) fn add_alias(
         name.to_string(),
         Alias {
             url: Url::parse(url)?,
-            token: token.to_string(),
+            token: token.map(|t: &String| t.to_string()).unwrap_or_default(),
         },
     );
     config_file.save()?;
@@ -60,7 +59,15 @@ mod tests {
 
     #[rstest]
     fn test_add_alias(context: CliContext) {
-        add_alias(&context, "test", "https://test.reduct.store", "test_token").unwrap();
+        let args = add_alias_cmd().get_matches_from(vec![
+            "add",
+            "test",
+            "-L",
+            "https://test.reduct.store",
+            "-t",
+            "test_token",
+        ]);
+        add_alias(&context, &args).unwrap();
 
         let config_file = ConfigFile::load(context.config_path()).unwrap();
         let config = config_file.config();
@@ -76,7 +83,15 @@ mod tests {
 
     #[rstest]
     fn test_add_bad_url(context: CliContext) {
-        let result = add_alias(&context, "test", "bad_url", "test_token");
+        let args = add_alias_cmd().get_matches_from(vec![
+            "add",
+            "test",
+            "-L",
+            "bad_url",
+            "-t",
+            "test_token",
+        ]);
+        let result = add_alias(&context, &args);
         assert_eq!(
             result.err().unwrap().to_string(),
             "relative URL without a base"
@@ -85,9 +100,25 @@ mod tests {
 
     #[rstest]
     fn test_add_existing_alias(context: CliContext) {
-        add_alias(&context, "test", "https://test.reduct.store", "test_token").unwrap();
+        let args = add_alias_cmd().get_matches_from(vec![
+            "add",
+            "test",
+            "-L",
+            "https://test.reduct.store",
+            "-t",
+            "test_token",
+        ]);
+        add_alias(&context, &args).unwrap();
 
-        let result = add_alias(&context, "test", "https://test.reduct.store", "test_token");
+        let args = add_alias_cmd().get_matches_from(vec![
+            "add",
+            "test",
+            "-L",
+            "https://test.reduct.store",
+            "-t",
+            "test_token",
+        ]);
+        let result = add_alias(&context, &args);
         assert_eq!(
             result.err().unwrap().to_string(),
             "Alias 'test' already exists"

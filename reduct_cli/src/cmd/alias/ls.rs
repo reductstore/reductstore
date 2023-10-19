@@ -5,13 +5,14 @@
 
 use crate::config::ConfigFile;
 use crate::context::CliContext;
+use crate::io::std::output;
 use clap::Command;
 
 pub(super) fn list_aliases(ctx: &CliContext) -> anyhow::Result<()> {
     let config_file = ConfigFile::load(ctx.config_path())?;
     let config = config_file.config();
     for (name, alias) in config.aliases.iter() {
-        ctx.output().print(&format!("{}: {}", name, alias.url));
+        output!(ctx, "{}: {}", name, alias.url);
     }
     Ok(())
 }
@@ -32,7 +33,7 @@ mod tests {
     fn test_list_aliases(context: CliContext) {
         list_aliases(&context).unwrap();
         assert_eq!(
-            context.output().history(),
+            context.stdout().history(),
             vec![
                 "default: https://default.store/",
                 "local: http://localhost:8383/"

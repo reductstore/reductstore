@@ -22,12 +22,8 @@ pub(crate) async fn server_handler(
     matches: Option<(&str, &clap::ArgMatches)>,
 ) -> anyhow::Result<()> {
     match matches {
-        Some(("alive", args)) => {
-            alive::check_server(ctx, args.get_one::<String>("ALIAS_OR_URL").unwrap()).await?
-        }
-        Some(("status", args)) => {
-            status::get_server_status(ctx, args.get_one::<String>("ALIAS_OR_URL").unwrap()).await?
-        }
+        Some(("alive", args)) => alive::check_server(ctx, args).await?,
+        Some(("status", args)) => status::get_server_status(ctx, args).await?,
         _ => (),
     }
     Ok(())
