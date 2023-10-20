@@ -11,13 +11,13 @@ use axum::http::HeaderName;
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
-use hermit_abi::send;
+
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
 // POST /:bucket/:entry/batch

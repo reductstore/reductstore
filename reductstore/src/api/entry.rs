@@ -11,6 +11,7 @@ mod write_single;
 use crate::api::entry::read_batched::read_batched_records;
 use crate::api::entry::read_single::read_single_record;
 use crate::api::entry::remove::remove_entry;
+
 use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;
 use crate::api::Components;
@@ -105,10 +106,10 @@ pub struct QueryInfoAxum(QueryInfo);
 pub fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
-        // .route(
-        //     "/:bucket_name/:entry_name/batch",
-        //     post(write_batched_records),
-        // )
+        .route(
+            "/:bucket_name/:entry_name/batch",
+            post(write_batched_records),
+        )
         .route("/:bucket_name/:entry_name", get(read_single_record))
         .route("/:bucket_name/:entry_name", head(read_single_record))
         .route("/:bucket_name/:entry_name/batch", get(read_batched_records))

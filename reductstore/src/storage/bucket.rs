@@ -10,15 +10,13 @@ use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
 
-use futures_util::Stream;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot::Receiver;
 
 use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::{Chunk, RecordWriter};
+
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reduct_base::msg::entry_api::EntryInfo;

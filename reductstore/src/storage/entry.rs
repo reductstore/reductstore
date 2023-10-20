@@ -8,8 +8,7 @@ use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::{Chunk, RecordWriter};
-use futures_util::Stream;
+
 use futures_util::StreamExt;
 use log::{debug, error, warn};
 use prost::bytes::Bytes;
@@ -274,7 +273,7 @@ impl Entry {
         mut written_bytes: usize,
         chunk: Result<Bytes, ReductError>,
     ) -> Result<usize, ReductError> {
-        let mut chunk = chunk?;
+        let chunk = chunk?;
         written_bytes += chunk.len();
         if written_bytes > *content_size {
             return Err(ReductError::bad_request(

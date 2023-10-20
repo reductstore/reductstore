@@ -5,11 +5,10 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::storage::entry::Labels;
-use crate::storage::writer::{Chunk, WriteChunk};
+use crate::storage::writer::WriteChunk;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
-use axum_macros::debug_handler;
-use bytes::Bytes;
+
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -17,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // POST /:bucket/:entry?ts=<number>
-#[debug_handler]
 pub async fn write_record(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
