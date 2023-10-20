@@ -10,12 +10,15 @@ use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
 
+use futures_util::Stream;
 use std::sync::{Arc, RwLock};
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot::Receiver;
 
 use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::RecordWriter;
+use crate::storage::writer::{Chunk, RecordWriter};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reduct_base::msg::entry_api::EntryInfo;
@@ -211,13 +214,13 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub fn info(&self) -> Result<FullBucketInfo, ReductError> {
+    pub async fn info(&self) -> Result<FullBucketInfo, ReductError> {
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
         let mut entries: Vec<EntryInfo> = vec![];
         for entry in self.entries.values() {
-            let info = entry.info()?;
+            let info = entry.info().await?;
             entries.push(info.clone());
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
@@ -251,17 +254,19 @@ impl Bucket {
     ///
     /// * `RecordWriter` - The record writer to write the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_write(
+    pub async fn write(
         &mut self,
         name: &str,
         time: u64,
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
-        self.keep_quota_for(content_size)?;
+    ) -> Result<Sender<Result<Bytes, ReductError>>, ReductError> {
+        self.keep_quota_for(content_size).await?;
         let entry = self.get_or_create_entry(name)?;
-        entry.begin_write(time, content_size, content_type, labels)
+        entry
+            .write_record(time, content_size, content_type, labels)
+            .await
     }
 
     /// Starts a new record read with
@@ -275,13 +280,13 @@ impl Bucket {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_read(
+    pub async fn begin_read(
         &self,
         name: &str,
         time: u64,
     ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
         let entry = self.get_entry(name)?;
-        entry.begin_read(time)
+        entry.begin_read(time).await
     }
 
     /// Get the next record from the entry
@@ -296,13 +301,13 @@ impl Bucket {
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `bool` - True if the record is the last one.
     /// * `HTTPError` - The error if any.
-    pub fn next(
+    pub async fn next(
         &mut self,
         name: &str,
         time: u64,
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
         let entry = self.get_mut_entry(name)?;
-        entry.next(time)
+        entry.next(time).await
     }
 
     /// Remove entry from the bucket
@@ -323,30 +328,27 @@ impl Bucket {
         Ok(())
     }
 
-    fn keep_quota_for(&mut self, content_size: usize) -> Result<(), ReductError> {
+    async fn keep_quota_for(&mut self, content_size: usize) -> Result<(), ReductError> {
         match self.settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
             QuotaType::FIFO => {
-                let mut size = self.info()?.info.size + content_size as u64;
+                let mut size = self.info().await?.info.size + content_size as u64;
                 while size > self.settings.quota_size.unwrap_or(0) {
                     debug!(
                         "Need more space. Remove an oldest block from bucket '{}'",
                         self.name()
                     );
 
-                    let mut candidates: Vec<&Entry> = self
-                        .entries
-                        .iter()
-                        .map(|entry| entry.1)
-                        .collect::<Vec<&Entry>>();
-                    candidates.sort_by_key(|entry| match entry.info() {
-                        Ok(info) => info.oldest_record,
-                        Err(_) => u64::MAX, //todo: handle error
-                    });
+                    let mut candidates: Vec<(u64, &Entry)> = vec![];
+                    for (_, entry) in self.entries.iter() {
+                        let info = entry.info().await?;
+                        candidates.push((info.oldest_record, entry));
+                    }
+                    candidates.sort_by_key(|entry| entry.0);
 
                     let candidates = candidates
                         .iter()
-                        .map(|entry| entry.name().to_string())
+                        .map(|(_, entry)| entry.name().to_string())
                         .collect::<Vec<String>>();
 
                     let mut success = false;
@@ -357,6 +359,7 @@ impl Bucket {
                             .get_mut(&name)
                             .unwrap()
                             .try_remove_oldest_block()
+                            .await
                         {
                             Ok(_) => {
                                 success = true;
@@ -377,19 +380,20 @@ impl Bucket {
                         ));
                     }
 
-                    size = self.info()?.info.size + content_size as u64;
+                    size = self.info().await?.info.size + content_size as u64;
                 }
 
                 // Remove empty entries
-                for name in self
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.1.info().unwrap().size == 0)
-                    .map(|entry| entry.0.clone())
-                    .collect::<Vec<String>>()
-                {
-                    debug!("Remove empty entry '{}'", name);
-                    self.remove_entry(&name)?;
+                let mut names_to_remove = vec![];
+                for (name, entry) in &self.entries {
+                    if entry.info().await?.size == 0 {
+                        continue;
+                    }
+                    names_to_remove.push(name.clone());
+                }
+
+                for name in names_to_remove {
+                    self.entries.remove(&name);
                 }
                 Ok(())
             }

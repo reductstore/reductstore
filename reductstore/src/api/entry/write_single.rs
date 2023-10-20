@@ -8,13 +8,16 @@ use crate::storage::entry::Labels;
 use crate::storage::writer::{Chunk, WriteChunk};
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
+use axum_macros::debug_handler;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
+use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 // POST /:bucket/:entry?ts=<number>
+#[debug_handler]
 pub async fn write_record(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
@@ -32,7 +35,7 @@ pub async fn write_record(
     )
     .await?;
 
-    let check_request_and_get_writer = async {
+    let check_request_and_get_sender = async {
         if !params.contains_key("ts") {
             return Err(HttpError::new(
                 ErrorCode::UnprocessableEntity,
@@ -87,36 +90,41 @@ pub async fn write_record(
             }
         }
 
-        let writer = {
+        let sender = {
             let mut storage = components.storage.write().await;
             let bucket = storage.get_mut_bucket(bucket)?;
-            bucket.begin_write(
-                path.get("entry_name").unwrap(),
-                ts,
-                content_size,
-                content_type,
-                labels,
-            )?
+            bucket
+                .write(
+                    path.get("entry_name").unwrap(),
+                    ts,
+                    content_size,
+                    content_type,
+                    labels,
+                )
+                .await?
         };
-        Ok(writer)
+        Ok(sender)
     };
 
-    match check_request_and_get_writer.await {
-        Ok(writer) => {
+    match check_request_and_get_sender.await {
+        Ok(sender) => {
             while let Some(chunk) = stream.next().await {
-                let mut writer = writer.write().unwrap();
                 let chunk = match chunk {
-                    Ok(chunk) => chunk,
+                    Ok(chunk) => Ok(chunk),
                     Err(e) => {
-                        writer.write(Chunk::Error)?;
                         error!("Error while receiving data: {}", e);
-                        return Err(HttpError::from(e));
+                        Err(HttpError::from(e).0)
                     }
                 };
-                writer.write(Chunk::Data(chunk))?;
+                sender.send(chunk).await.map(|_| ()).map_err(|e| {
+                    error!("Error while writing data: {}", e);
+                    HttpError::from(ReductError::bad_request(&format!(
+                        "Error while writing data: {}",
+                        e
+                    )))
+                })?;
             }
 
-            writer.write().unwrap().write(Chunk::Last(Bytes::new()))?;
             Ok(())
         }
         Err(e) => {

@@ -22,7 +22,8 @@ pub async fn get_bucket(
         .read()
         .await
         .get_bucket(&bucket_name)?
-        .info()?;
+        .info()
+        .await?;
     Ok(FullBucketInfoAxum::from(bucket_info))
 }
 

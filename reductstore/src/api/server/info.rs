@@ -16,8 +16,9 @@ pub async fn info(
     headers: HeaderMap,
 ) -> Result<ServerInfoAxum, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+
     Ok(ServerInfoAxum::from(
-        components.storage.read().await.info()?,
+        components.storage.read().await.info().await?,
     ))
 }
 

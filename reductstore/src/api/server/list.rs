@@ -16,7 +16,7 @@ pub async fn list(
 ) -> Result<BucketInfoListAxum, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
 
-    let list = components.storage.read().await.get_bucket_list()?;
+    let list = components.storage.read().await.get_bucket_list().await?;
     Ok(BucketInfoListAxum::from(list))
 }
 

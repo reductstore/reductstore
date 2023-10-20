@@ -7,9 +7,11 @@ use prost_wkt_types::Timestamp;
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
-use std::io::Write;
+use std::io::{SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
+use tokio::fs::File;
+use tokio::io::AsyncSeekExt;
 
 use crate::storage::proto::*;
 use crate::storage::reader::RecordReader;
@@ -28,6 +30,9 @@ pub struct BlockManager {
     path: PathBuf,
     readers: HashMap<u64, Vec<Weak<RwLock<RecordReader>>>>,
     writers: HashMap<u64, Vec<Weak<RwLock<RecordWriter>>>>,
+    reader_count: HashMap<u64, usize>,
+    writer_count: HashMap<u64, usize>,
+
     last_block: Option<Block>,
 }
 
@@ -64,6 +69,8 @@ impl BlockManager {
             path,
             readers: HashMap::new(),
             writers: HashMap::new(),
+            reader_count: HashMap::new(),
+            writer_count: HashMap::new(),
             last_block: None,
         }
     }
@@ -111,6 +118,49 @@ impl BlockManager {
             bm.clean_readers_or_writers(block_id);
         }
         Ok(writer)
+    }
+
+    pub async fn begin_write_new(
+        &mut self,
+        block: &Block,
+        record_index: usize,
+    ) -> Result<File, ReductError> {
+        let ts = block.begin_time.clone().unwrap();
+        let path = self.path_to_data(&ts);
+
+        let block_id = ts_to_us(&ts);
+        match self.writer_count.entry(block_id) {
+            Entry::Occupied(mut e) => {
+                *e.get_mut() += 1;
+            }
+            Entry::Vacant(e) => {
+                e.insert(0);
+            }
+        }
+
+        self.clean_readers_or_writers(block_id);
+
+        let mut file = File::options().write(true).create(true).open(path).await?;
+        let offset = block.records[record_index].begin;
+        file.seek(SeekFrom::Start(offset)).await?;
+
+        Ok(file)
+    }
+
+    pub fn finish_write_record(
+        &mut self,
+        block: &Block,
+        state: record::State,
+        record_index: usize,
+    ) -> Result<(), ReductError> {
+        let block_id = ts_to_us(&block.begin_time.clone().unwrap());
+        let mut block = self.load(block_id)?;
+        block.records[record_index].state = i32::from(state);
+        block.invalid = state == record::State::Invalid;
+
+        *self.writer_count.get_mut(&block_id).unwrap() -= 1;
+
+        self.save(block)
     }
 
     pub fn begin_read(

@@ -8,19 +8,23 @@ use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::RecordWriter;
+use crate::storage::writer::{Chunk, RecordWriter};
+use futures_util::Stream;
+use futures_util::StreamExt;
 use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
-use reduct_base::error::ReductError;
-
+use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::msg::entry_api::EntryInfo;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
-
-use reduct_base::msg::entry_api::EntryInfo;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock as TokioRwLock;
 
 pub type Labels = HashMap<String, String>;
 
@@ -29,7 +33,7 @@ pub struct Entry {
     name: String,
     settings: EntrySettings,
     block_index: BTreeSet<u64>,
-    block_manager: Arc<RwLock<BlockManager>>,
+    block_manager: Arc<TokioRwLock<BlockManager>>,
     record_count: u64,
     size: u64,
     queries: HashMap<u64, Box<dyn Query + Send + Sync>>,
@@ -49,7 +53,7 @@ impl Entry {
             name: name.to_string(),
             settings,
             block_index: BTreeSet::new(),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path.join(name)))),
+            block_manager: Arc::new(TokioRwLock::new(BlockManager::new(path.join(name)))),
             record_count: 0,
             size: 0,
             queries: HashMap::new(),
@@ -103,7 +107,7 @@ impl Entry {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
             settings: options,
             block_index,
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
+            block_manager: Arc::new(TokioRwLock::new(BlockManager::new(path))),
             record_count,
             size,
             queries: HashMap::new(),
@@ -123,13 +127,13 @@ impl Entry {
     ///
     /// * `RecordWriter` - The record writer to write the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_write(
+    pub(crate) async fn write_record(
         &mut self,
         time: u64,
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
+    ) -> Result<Sender<Result<Bytes, ReductError>>, ReductError> {
         #[derive(PartialEq)]
         enum RecordType {
             Latest,
@@ -140,9 +144,9 @@ impl Entry {
         // When we write, the likely case is that we are writing the latest record
         // in the entry. In this case, we can just append to the latest block.
         let block = if self.block_index.is_empty() {
-            self.start_new_block(time)?
+            self.start_new_block(time).await?
         } else {
-            let bm = self.block_manager.read().unwrap();
+            let bm = self.block_manager.read().await;
             bm.load(*self.block_index.last().unwrap())?
         };
 
@@ -155,10 +159,10 @@ impl Entry {
             if *self.block_index.first().unwrap() > time {
                 // The timestamp is the earliest. We need to create a new block.
                 debug!("Timestamp {} is the earliest. Creating a new block", time);
-                (self.start_new_block(time)?, RecordType::BelatedFirst)
+                (self.start_new_block(time).await?, RecordType::BelatedFirst)
             } else {
                 let block_id = find_first_block(&self.block_index, &time);
-                let bm = self.block_manager.read().unwrap();
+                let bm = self.block_manager.read().await;
                 let block = bm.load(block_id)?;
                 // check if the record already exists
                 let proto_time = Some(us_to_ts(&time));
@@ -179,8 +183,8 @@ impl Entry {
             (block, RecordType::Latest)
         };
 
-        let content_size = content_size as u64;
-        let has_no_space = block.size + content_size > self.settings.max_block_size;
+        let content_size = content_size;
+        let has_no_space = block.size + content_size as u64 > self.settings.max_block_size;
         let has_too_many_records =
             block.records.len() + 1 >= self.settings.max_block_records as usize;
 
@@ -189,8 +193,8 @@ impl Entry {
         {
             // We need to create a new block.
             debug!("Creating a new block");
-            self.block_manager.write().unwrap().finish(&block)?;
-            self.start_new_block(time)?
+            self.block_manager.write().await.finish(&block)?;
+            self.start_new_block(time).await?
         } else {
             // We can just append to the latest block.
             block
@@ -199,7 +203,7 @@ impl Entry {
         let record = Record {
             timestamp: Some(us_to_ts(&time)),
             begin: block.size,
-            end: block.size + content_size,
+            end: block.size + content_size as u64,
             content_type,
             state: record::State::Started as i32,
             labels: labels
@@ -217,12 +221,68 @@ impl Entry {
             block.latest_record_time = Some(us_to_ts(&time));
         }
 
-        self.block_manager.write().unwrap().save(block.clone())?;
-        BlockManager::begin_write(
-            Arc::clone(&self.block_manager),
-            &block,
-            block.records.len() - 1,
-        )
+        let record_index = block.records.len() - 1;
+        let mut file = {
+            let mut bm = self.block_manager.write().await;
+            bm.save(block.clone())?;
+            bm.begin_write_new(&block, record_index).await?
+        };
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let bm = Arc::clone(&self.block_manager);
+        tokio::spawn(async move {
+            let res = {
+                let mut written_bytes: usize = 0;
+                while let Some(chunk) = rx.recv().await {
+                    written_bytes =
+                        Self::write_transaction(&content_size, &mut file, written_bytes, chunk)
+                            .await?;
+                }
+
+                if written_bytes < content_size {
+                    Err(ReductError::bad_request(
+                        "Content is smaller than in content-length",
+                    ))
+                } else {
+                    file.flush().await?;
+                    Ok(())
+                }
+            };
+
+            let state = match res {
+                Ok(_) => record::State::Finished,
+                Err(err) => {
+                    if err.status == ErrorCode::InternalServerError {
+                        record::State::Invalid
+                    } else {
+                        record::State::Errored
+                    }
+                }
+            };
+
+            bm.write()
+                .await
+                .finish_write_record(&block, state, record_index)
+        });
+
+        Ok(tx)
+    }
+
+    async fn write_transaction(
+        content_size: &usize,
+        file: &mut File,
+        mut written_bytes: usize,
+        chunk: Result<Bytes, ReductError>,
+    ) -> Result<usize, ReductError> {
+        let mut chunk = chunk?;
+        written_bytes += chunk.len();
+        if written_bytes > *content_size {
+            return Err(ReductError::bad_request(
+                "Content is bigger than in content-length",
+            ));
+        }
+        file.write_all(chunk.as_ref()).await?;
+        Ok(written_bytes)
     }
 
     /// Starts a new record read.
@@ -235,7 +295,10 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) fn begin_read(&self, time: u64) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
+    pub(crate) async fn begin_read(
+        &self,
+        time: u64,
+    ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
         debug!("Reading record for ts={}", time);
         let not_found_err = Err(ReductError::not_found(&format!(
             "No record with timestamp {}",
@@ -254,7 +317,7 @@ impl Entry {
         let block_id = find_first_block(&self.block_index, &time);
 
         let block = {
-            let bm = self.block_manager.read().unwrap();
+            let bm = self.block_manager.read().await;
             bm.load(block_id)?
         };
 
@@ -284,7 +347,7 @@ impl Entry {
 
         self.block_manager
             .write()
-            .unwrap()
+            .await
             .begin_read(&block, record_index.unwrap())
     }
 
@@ -325,7 +388,7 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub fn next(
+    pub async fn next(
         &mut self,
         query_id: u64,
     ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
@@ -334,18 +397,19 @@ impl Entry {
             .queries
             .get_mut(&query_id)
             .ok_or_else(|| ReductError::not_found(&format!("Query {} not found", query_id)))?;
-        query.next(&self.block_index, &mut self.block_manager.write().unwrap())
+        let mut bm = self.block_manager.write().await;
+        query.next(&self.block_index, &mut bm)
     }
 
     /// Returns stats about the entry.
-    pub fn info(&self) -> Result<EntryInfo, ReductError> {
+    pub async fn info(&self) -> Result<EntryInfo, ReductError> {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
             (0, 0)
         } else {
             let latest_block = self
                 .block_manager
                 .read()
-                .unwrap()
+                .await
                 .load(*self.block_index.last().unwrap())?;
             let latest_record = if latest_block.records.is_empty() {
                 0
@@ -379,21 +443,18 @@ impl Entry {
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub fn try_remove_oldest_block(&mut self) -> Result<(), ReductError> {
+    pub async fn try_remove_oldest_block(&mut self) -> Result<(), ReductError> {
         if self.block_index.is_empty() {
             return Err(ReductError::internal_server_error("No block to remove"));
         }
 
         let oldest_block_id = *self.block_index.first().unwrap();
 
-        let block = self.block_manager.read().unwrap().load(oldest_block_id)?;
+        let block = self.block_manager.read().await.load(oldest_block_id)?;
         self.size -= block.size;
         self.record_count -= block.records.len() as u64;
 
-        self.block_manager
-            .write()
-            .unwrap()
-            .remove(oldest_block_id)?;
+        self.block_manager.write().await.remove(oldest_block_id)?;
         self.block_index.remove(&oldest_block_id);
 
         Ok(())
@@ -411,11 +472,11 @@ impl Entry {
         self.settings = settings;
     }
 
-    fn start_new_block(&mut self, time: u64) -> Result<Block, ReductError> {
+    async fn start_new_block(&mut self, time: u64) -> Result<Block, ReductError> {
         let block = self
             .block_manager
             .write()
-            .unwrap()
+            .await
             .start(time, self.settings.max_block_size)?;
         self.block_index
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));

@@ -61,7 +61,7 @@ where
     }
 }
 
-fn check_and_extract_ts_or_query_id(
+async fn check_and_extract_ts_or_query_id(
     storage: &Storage,
     params: HashMap<String, String>,
     bucket_name: &String,
@@ -89,7 +89,8 @@ fn check_and_extract_ts_or_query_id(
             storage
                 .get_bucket(bucket_name)?
                 .get_entry(entry_name)?
-                .info()?
+                .info()
+                .await?
                 .latest_record,
         )
     } else {
@@ -104,10 +105,10 @@ pub struct QueryInfoAxum(QueryInfo);
 pub fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
-        .route(
-            "/:bucket_name/:entry_name/batch",
-            post(write_batched_records),
-        )
+        // .route(
+        //     "/:bucket_name/:entry_name/batch",
+        //     post(write_batched_records),
+        // )
         .route("/:bucket_name/:entry_name", get(read_single_record))
         .route("/:bucket_name/:entry_name", head(read_single_record))
         .route("/:bucket_name/:entry_name/batch", get(read_batched_records))

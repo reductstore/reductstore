@@ -54,13 +54,13 @@ impl Storage {
     /// # Returns
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
-    pub fn info(&self) -> Result<ServerInfo, ReductError> {
+    pub async fn info(&self) -> Result<ServerInfo, ReductError> {
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
         for bucket in self.buckets.values() {
-            let bucket = bucket.info()?.info;
+            let bucket = bucket.info().await?.info;
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
             latest_record = latest_record.max(bucket.latest_record);
@@ -172,10 +172,10 @@ impl Storage {
         }
     }
 
-    pub fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
+    pub async fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
         let mut buckets = Vec::new();
         for bucket in self.buckets.values() {
-            buckets.push(bucket.info()?.info);
+            buckets.push(bucket.info().await?.info);
         }
 
         Ok(BucketInfoList { buckets })

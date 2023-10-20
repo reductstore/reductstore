@@ -11,13 +11,14 @@ use axum::http::HeaderName;
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
+use hermit_abi::send;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashMap};
-
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
+use tokio::sync::mpsc::Sender;
 
 // POST /:bucket/:entry/batch
 pub async fn write_batched_records(
@@ -62,14 +63,14 @@ pub async fn write_batched_records(
 
         check_content_length(&headers, &timed_headers)?;
 
-        let mut writers: Vec<Arc<RwLock<dyn WriteChunk + Sync + Send>>> = Vec::new();
-        for (time, header) in timed_headers {
-            writers.push(
-                get_writer(
+        let mut senders = Vec::new();
+        for (time, header) in &timed_headers {
+            senders.push(
+                start_writting(
                     &components,
                     bucket_name,
                     entry_name,
-                    time,
+                    *time,
                     header,
                     &mut error_map,
                 )
@@ -78,30 +79,26 @@ pub async fn write_batched_records(
         }
 
         let mut index = 0;
+        let mut written = 0;
         while let Some(chunk) = stream.next().await {
             let mut chunk = chunk?;
 
-            let write_chunk = |index: usize, chunk: Bytes| -> Result<Option<Bytes>, ReductError> {
-                let mut writer = writers[index].write().unwrap();
-                let to_write = writer.content_length() - writer.written();
-                if chunk.len() < to_write {
-                    writer.write(Chunk::Data(chunk))?;
-                    Ok(None)
-                } else {
-                    let chuck_to_write = chunk.slice(0..to_write);
-                    writer.write(Chunk::Last(chuck_to_write))?;
-                    Ok(Some(chunk.slice(to_write..)))
-                }
-            };
-
             while !chunk.is_empty() {
-                match write_chunk(index, chunk) {
+                match write_chunk(
+                    &mut senders[index],
+                    chunk,
+                    &mut written,
+                    timed_headers[index].1.content_length.clone(),
+                )
+                .await
+                {
                     Ok(None) => {
                         chunk = Bytes::new();
                     }
                     Ok(Some(new_chunk)) => {
                         chunk = new_chunk;
                         index += 1;
+                        written = 0;
                     }
                     Err(err) => {
                         return Err::<(), HttpError>(err.into());
@@ -110,7 +107,7 @@ pub async fn write_batched_records(
             }
         }
 
-        if writers.len() < index {
+        if senders.len() < index {
             return Err(ReductError::bad_request("Content is shorter than expected").into());
         }
 
@@ -137,6 +134,24 @@ pub async fn write_batched_records(
     });
 
     Ok(headers.into())
+}
+
+async fn write_chunk(
+    sender: &mut Sender<Result<Bytes, ReductError>>,
+    chunk: Bytes,
+    written: &mut usize,
+    content_size: usize,
+) -> Result<Option<Bytes>, ReductError> {
+    let to_write = content_size - *written;
+    *written += chunk.len();
+    if chunk.len() < to_write {
+        sender.send(Ok(chunk)).await;
+        Ok(None)
+    } else {
+        let chuck_to_write = chunk.slice(0..to_write);
+        sender.send(Ok(chuck_to_write)).await;
+        Ok(Some(chunk.slice(to_write..)))
+    }
 }
 
 fn check_content_length(
@@ -168,32 +183,37 @@ fn check_content_length(
     Ok(())
 }
 
-async fn get_writer(
+async fn start_writting(
     components: &Arc<Components>,
     bucket_name: &str,
     entry_name: &str,
     time: u64,
-    record_header: RecordHeader,
+    record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
-) -> Arc<RwLock<dyn WriteChunk + Send + Sync>> {
-    let get_writer = async move {
+) -> Sender<Result<Bytes, ReductError>> {
+    let get_tx = async move {
         let mut storage = components.storage.write().await;
         let bucket = storage.get_mut_bucket(bucket_name)?;
 
-        bucket.begin_write(
-            entry_name,
-            time,
-            record_header.content_length,
-            record_header.content_type,
-            record_header.labels,
-        )
+        bucket
+            .write(
+                entry_name,
+                time,
+                record_header.content_length.clone(),
+                record_header.content_type.clone(),
+                record_header.labels.clone(),
+            )
+            .await
     };
 
-    match get_writer.await {
-        Ok(writer) => writer,
+    match get_tx.await {
+        Ok(tx) => tx,
         Err(err) => {
             error_map.insert(time, err);
-            Arc::new(RwLock::new(ChunkDrainer::new(record_header.content_length)))
+            // drain the stream
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            tokio::spawn(async move { while let Some(_) = rx.recv().await {} });
+            tx
         }
     }
 }

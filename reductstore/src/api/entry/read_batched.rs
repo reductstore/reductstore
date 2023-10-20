@@ -64,9 +64,10 @@ pub async fn read_batched_records(
         query_id,
         method.name == "HEAD",
     )
+    .await
 }
 
-fn fetch_and_response_batched_records(
+async fn fetch_and_response_batched_records(
     bucket: &mut Bucket,
     entry_name: &str,
     query_id: u64,
@@ -109,7 +110,7 @@ fn fetch_and_response_batched_records(
     let mut readers = Vec::new();
     let mut last = false;
     loop {
-        let _reader = match bucket.next(entry_name, query_id) {
+        let _reader = match bucket.next(entry_name, query_id).await {
             Ok((reader, _)) => {
                 {
                     let reader_lock = reader.read().unwrap();
