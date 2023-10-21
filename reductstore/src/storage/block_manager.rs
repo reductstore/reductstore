@@ -15,7 +15,6 @@ use tokio::io::AsyncSeekExt;
 
 use crate::storage::proto::*;
 use crate::storage::reader::RecordReader;
-use crate::storage::writer::{RecordWriter, WriteChunk};
 use reduct_base::error::ReductError;
 
 pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
@@ -29,7 +28,6 @@ pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
 pub struct BlockManager {
     path: PathBuf,
     readers: HashMap<u64, Vec<Weak<RwLock<RecordReader>>>>,
-    writers: HashMap<u64, Vec<Weak<RwLock<RecordWriter>>>>,
     reader_count: HashMap<u64, usize>,
     writer_count: HashMap<u64, usize>,
 
@@ -68,56 +66,10 @@ impl BlockManager {
         Self {
             path,
             readers: HashMap::new(),
-            writers: HashMap::new(),
             reader_count: HashMap::new(),
             writer_count: HashMap::new(),
             last_block: None,
         }
-    }
-
-    /// Begin write a record
-    ///
-    /// # Arguments
-    ///
-    /// * `block_manager` - Block manager to update state of record
-    /// * `block` - Block to write to.
-    /// * `record` - Record to write.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(RecordWriter)` - weak reference to the record writer.
-    pub fn begin_write(
-        block_manager: Arc<RwLock<BlockManager>>,
-        block: &Block,
-        record_index: usize,
-    ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
-        let ts = block.begin_time.clone().unwrap();
-        let path = block_manager.read().unwrap().path_to_data(&ts);
-
-        let content_length = block.records[record_index].end - block.records[record_index].begin;
-        let writer = Arc::new(RwLock::new(RecordWriter::new(
-            path,
-            block,
-            record_index,
-            content_length as usize,
-            Arc::clone(&block_manager),
-        )?));
-
-        {
-            let mut bm = block_manager.write().unwrap();
-            let block_id = ts_to_us(&ts);
-            match bm.writers.entry(block_id) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().push(Arc::downgrade(&writer));
-                }
-                Entry::Vacant(e) => {
-                    e.insert(vec![Arc::downgrade(&writer)]);
-                }
-            }
-
-            bm.clean_readers_or_writers(block_id);
-        }
-        Ok(writer)
     }
 
     pub async fn begin_write_new(
@@ -134,7 +86,7 @@ impl BlockManager {
                 *e.get_mut() += 1;
             }
             Entry::Vacant(e) => {
-                e.insert(0);
+                e.insert(1);
             }
         }
 
@@ -223,13 +175,14 @@ impl BlockManager {
             None => true,
         };
 
-        let writers_empty = match self.writers.get_mut(&block_id) {
-            Some(writers) => {
-                writers.retain(|w| {
-                    let writer = w.upgrade();
-                    writer.is_some() && !writer.unwrap().try_read().map_or(false, |w| w.is_done())
-                });
-                writers.is_empty()
+        let writers_empty = match self.writer_count.get_mut(&block_id) {
+            Some(count) => {
+                if *count == 0 {
+                    self.writer_count.remove(&block_id);
+                    true
+                } else {
+                    false
+                }
             }
             None => true,
         };

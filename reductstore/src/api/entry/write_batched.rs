@@ -4,7 +4,6 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::storage::writer::{Chunk, WriteChunk};
 use axum::extract::{BodyStream, Path, State};
 use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
 use axum::http::HeaderName;
@@ -145,11 +144,11 @@ async fn write_chunk(
     let to_write = content_size - *written;
     *written += chunk.len();
     if chunk.len() < to_write {
-        sender.send(Ok(chunk)).await;
+        sender.send(Ok(chunk)).await.unwrap();
         Ok(None)
     } else {
         let chuck_to_write = chunk.slice(0..to_write);
-        sender.send(Ok(chuck_to_write)).await;
+        sender.send(Ok(chuck_to_write)).await.unwrap();
         Ok(Some(chunk.slice(to_write..)))
     }
 }
@@ -229,43 +228,6 @@ impl ChunkDrainer {
             written: 0,
             content_length,
         }
-    }
-}
-
-impl WriteChunk for ChunkDrainer {
-    fn write(&mut self, chunk: Chunk) -> Result<(), ReductError> {
-        match chunk {
-            Chunk::Data(chunk) => {
-                self.written += chunk.len();
-                if self.written > self.content_length {
-                    return Err(ReductError::bad_request(
-                        "Content is bigger than in content-length",
-                    ));
-                }
-            }
-            Chunk::Last(chunk) => {
-                self.written += chunk.len();
-                if self.written > self.content_length {
-                    return Err(ReductError::bad_request(
-                        "Content is bigger than in content-length",
-                    ));
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn content_length(&self) -> usize {
-        self.content_length
-    }
-
-    fn written(&self) -> usize {
-        self.written
-    }
-
-    fn is_done(&self) -> bool {
-        self.written == self.content_length
     }
 }
 
