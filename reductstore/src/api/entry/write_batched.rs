@@ -201,7 +201,7 @@ async fn start_writting(
         let bucket = storage.get_mut_bucket(bucket_name)?;
 
         bucket
-            .write(
+            .write_record(
                 entry_name,
                 time,
                 record_header.content_length.clone(),
@@ -369,7 +369,7 @@ mod tests {
             storage
                 .get_mut_bucket("bucket-1")
                 .unwrap()
-                .write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
+                .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await
                 .unwrap();
         }

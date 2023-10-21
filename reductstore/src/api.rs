@@ -166,7 +166,7 @@ mod tests {
         let sender = storage
             .get_mut_bucket("bucket-1")
             .unwrap()
-            .write("entry-1", 0, 6, "text/plain".to_string(), labels)
+            .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)
             .await
             .unwrap();
         sender.send(Ok(Bytes::from("Hey!!!"))).await.unwrap();

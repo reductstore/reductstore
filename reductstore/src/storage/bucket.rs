@@ -250,9 +250,9 @@ impl Bucket {
     ///
     /// # Returns
     ///
-    /// * `RecordWriter` - The record writer to write the record content in chunks.
+    /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub async fn write(
+    pub async fn write_record(
         &mut self,
         name: &str,
         time: u64,
@@ -640,7 +640,7 @@ mod tests {
         content: &'static [u8],
     ) -> Result<(), ReductError> {
         let sender = bucket
-            .write(
+            .write_record(
                 entry_name,
                 time,
                 content.len(),

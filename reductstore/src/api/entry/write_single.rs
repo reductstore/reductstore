@@ -91,7 +91,7 @@ pub async fn write_record(
             let mut storage = components.storage.write().await;
             let bucket = storage.get_mut_bucket(bucket)?;
             bucket
-                .write(
+                .write_record(
                     path.get("entry_name").unwrap(),
                     ts,
                     content_size,

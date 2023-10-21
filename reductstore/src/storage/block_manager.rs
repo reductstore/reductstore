@@ -5,6 +5,7 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use prost_wkt_types::Timestamp;
 
+use axum::async_trait;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{SeekFrom, Write};
@@ -72,6 +73,16 @@ impl BlockManager {
         }
     }
 
+    /// Begin writing a record to a block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - Block to write to.
+    /// * `record_index` - Index of the record to write.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(file)` - File to write to.
     pub async fn begin_write(
         &mut self,
         block: &Block,
@@ -322,14 +333,13 @@ impl ManageBlock for BlockManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
 
-    #[test]
-    fn test_starting_block() {
-        let mut bm = setup();
-        let block = bm.start(1_000_005, 1024).unwrap();
+    #[rstest]
+    fn test_starting_block(mut block_manager: BlockManager) {
+        let block = block_manager.start(1_000_005, 1024).unwrap();
 
         let ts = block.begin_time.clone().unwrap();
         assert_eq!(
@@ -341,66 +351,67 @@ mod tests {
         );
 
         // Create an empty block
-        let file = std::fs::File::open(bm.path.join(format!("{}{}", ts_to_us(&ts), DATA_FILE_EXT)))
-            .unwrap();
+        let file = std::fs::File::open(block_manager.path.join(format!(
+            "{}{}",
+            ts_to_us(&ts),
+            DATA_FILE_EXT
+        )))
+        .unwrap();
         assert_eq!(file.metadata().unwrap().len(), 1024);
 
         // Create a block descriptor
-        let buf = std::fs::read(
-            bm.path
-                .join(format!("{}{}", ts_to_us(&ts), DESCRIPTOR_FILE_EXT)),
-        )
+        let buf = std::fs::read(block_manager.path.join(format!(
+            "{}{}",
+            ts_to_us(&ts),
+            DESCRIPTOR_FILE_EXT
+        )))
         .unwrap();
         let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
         assert_eq!(block_from_file, block);
     }
 
-    #[test]
-    fn test_loading_block() {
-        let mut bm = setup();
-
-        bm.start(1, 1024).unwrap();
-        let block = bm.start(20000005, 1024).unwrap();
+    #[rstest]
+    fn test_loading_block(mut block_manager: BlockManager) {
+        block_manager.start(1, 1024).unwrap();
+        let block = block_manager.start(20000005, 1024).unwrap();
 
         let ts = block.begin_time.clone().unwrap();
-        let loaded_block = bm.load(ts_to_us(&ts)).unwrap();
+        let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
         assert_eq!(loaded_block, block);
     }
 
-    #[test]
-    fn test_start_reading() {
-        let mut bm = setup();
-
-        let block = bm.start(1, 1024).unwrap();
+    #[rstest]
+    fn test_start_reading(mut block_manager: BlockManager) {
+        let block = block_manager.start(1, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
-        let loaded_block = bm.load(ts_to_us(&ts)).unwrap();
+        let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
         assert_eq!(loaded_block, block);
     }
 
-    #[test]
-    fn test_finish_block() {
-        let mut bm = setup();
-
-        let block = bm.start(1, 1024).unwrap();
+    #[rstest]
+    fn test_finish_block(mut block_manager: BlockManager) {
+        let block = block_manager.start(1, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
-        let loaded_block = bm.load(ts_to_us(&ts)).unwrap();
+        let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
         assert_eq!(loaded_block, block);
 
-        bm.finish(&loaded_block).unwrap();
+        block_manager.finish(&loaded_block).unwrap();
 
-        let file = std::fs::File::open(bm.path.join(format!("{}{}", ts_to_us(&ts), DATA_FILE_EXT)))
-            .unwrap();
+        let file = std::fs::File::open(block_manager.path.join(format!(
+            "{}{}",
+            ts_to_us(&ts),
+            DATA_FILE_EXT
+        )))
+        .unwrap();
         assert_eq!(file.metadata().unwrap().len(), 0);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_start_writing() {
-        let mut bm = setup();
-
+    async fn test_start_writing(mut block_manager: BlockManager) {
         let block_id = 1;
-        let mut block = bm.start(block_id, 1024).unwrap().clone();
+        let mut block = block_manager.start(block_id, 1024).unwrap().clone();
         block.records.push(Record {
             timestamp: Some(Timestamp {
                 seconds: 1,
@@ -413,22 +424,21 @@ mod tests {
             content_type: "".to_string(),
         });
 
-        bm.save(block.clone()).unwrap();
+        block_manager.save(block.clone()).unwrap();
 
-        let mut file = bm.begin_write(&block, 0).await.unwrap();
+        let mut file = block_manager.begin_write(&block, 0).await.unwrap();
         file.write(b"hallo").await.unwrap();
 
-        bm.finish(&block).unwrap();
+        block_manager.finish(&block).unwrap();
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_with_writers() {
-        let mut bm = setup();
+    async fn test_remove_with_writers(mut block_manager: BlockManager) {
         let block_id = 1;
 
         {
-            let mut block = bm.start(block_id, 1024).unwrap().clone();
+            let mut block = block_manager.start(block_id, 1024).unwrap().clone();
             block.records.push(Record {
                 timestamp: Some(Timestamp {
                     seconds: 1,
@@ -441,10 +451,10 @@ mod tests {
                 content_type: "".to_string(),
             });
 
-            let file = bm.begin_write(&block, 0).await.unwrap();
+            let _ = block_manager.begin_write(&block, 0).await.unwrap();
 
             assert_eq!(
-                bm.remove(block_id).err(),
+                block_manager.remove(block_id).err(),
                 Some(ReductError::internal_server_error(&format!(
                     "Cannot remove block {} because it is still in use",
                     block_id
@@ -453,13 +463,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_remove_block_with_readers() {
-        let mut bm = setup();
+    #[rstest]
+    fn test_remove_block_with_readers(mut block_manager: BlockManager) {
         let block_id = 1;
 
         {
-            let mut block = bm.start(block_id, 1024).unwrap().clone();
+            let mut block = block_manager.start(block_id, 1024).unwrap().clone();
             block.records.push(Record {
                 timestamp: Some(Timestamp {
                     seconds: 1,
@@ -471,11 +480,11 @@ mod tests {
                 labels: vec![],
                 content_type: "".to_string(),
             });
-            let reader = bm.begin_read(&block, 0).unwrap();
+            let reader = block_manager.begin_read(&block, 0).unwrap();
             assert!(!reader.read().unwrap().is_done());
 
             assert_eq!(
-                bm.remove(block_id).err(),
+                block_manager.remove(block_id).err(),
                 Some(ReductError::internal_server_error(&format!(
                     "Cannot remove block {} because it is still in use",
                     block_id
@@ -484,7 +493,8 @@ mod tests {
         }
     }
 
-    fn setup() -> BlockManager {
+    #[fixture]
+    fn block_manager() -> BlockManager {
         let path = tempdir();
         let bm = BlockManager::new(path.unwrap().into_path());
         bm

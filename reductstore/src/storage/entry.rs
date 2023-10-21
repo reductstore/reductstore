@@ -123,7 +123,7 @@ impl Entry {
     ///
     /// # Returns
     ///
-    /// * `RecordWriter` - The record writer to write the record content in chunks.
+    /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
     pub(crate) async fn write_record(
         &mut self,
