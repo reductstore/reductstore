@@ -142,7 +142,6 @@ mod tests {
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
-    use tokio::time::sleep;
 
     #[fixture]
     pub(crate) async fn components() -> Arc<Components> {

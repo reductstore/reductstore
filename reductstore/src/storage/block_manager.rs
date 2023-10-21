@@ -5,7 +5,6 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use prost_wkt_types::Timestamp;
 
-use axum::async_trait;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{SeekFrom, Write};
