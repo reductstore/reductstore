@@ -34,8 +34,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_me(components: Arc<Components>, headers: HeaderMap) {
-        let token = me(State(components), headers).await.unwrap().0;
+    async fn test_me(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let token = me(State(components.await), headers).await.unwrap().0;
         assert_eq!(token.name, "init-token");
     }
 }

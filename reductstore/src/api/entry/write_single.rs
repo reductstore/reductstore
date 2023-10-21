@@ -145,17 +145,19 @@ mod tests {
 
     use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
+    use tokio::time::sleep;
 
     use crate::api::tests::{components, empty_body, path_to_entry_1};
 
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
     ) {
+        let components = components.await;
         write_record(
             State(Arc::clone(&components)),
             headers,
@@ -169,6 +171,8 @@ mod tests {
         .await
         .unwrap();
 
+        sleep(std::time::Duration::from_millis(1)).await;
+
         let record = components
             .storage
             .read()
@@ -176,6 +180,7 @@ mod tests {
             .get_bucket("bucket-1")
             .unwrap()
             .begin_read("entry-1", 1)
+            .await
             .unwrap();
 
         assert_eq!(
@@ -187,10 +192,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bucket_not_found(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         headers: HeaderMap,
         #[future] empty_body: BodyStream,
     ) {
+        let components = components.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
@@ -218,11 +224,12 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bad_ts(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
     ) {
+        let components = components.await;
         let err = write_record(
             State(Arc::clone(&components)),
             headers,

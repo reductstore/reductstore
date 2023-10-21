@@ -178,11 +178,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_1_rec(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_ok_1_rec(#[future] block_manager_and_index: (BlockManager, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
+        let (mut block_manager, index) = block_manager_and_index.await;
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -200,21 +200,20 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_2_recs(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_ok_2_recs(
+        #[future] block_manager_and_index: (BlockManager, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (mut block_manager, index) = block_manager_and_index.await;
         {
-            {
-                let (reader, _) = query.next(&index, &mut block_manager).unwrap();
-                assert_eq!(
-                    reader.write().unwrap().read().unwrap(),
-                    Some(Bytes::from("0123456789"))
-                );
-                assert!(reader.write().unwrap().read().unwrap().is_none())
-            }
+            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            assert_eq!(
+                reader.write().unwrap().read().unwrap(),
+                Some(Bytes::from("0123456789"))
+            );
+            assert!(reader.write().unwrap().read().unwrap().is_none())
         }
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
@@ -236,12 +235,13 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_3_recs(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_ok_3_recs(
+        #[future] block_manager_and_index: (BlockManager, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (mut block_manager, index) = block_manager_and_index.await;
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
 
@@ -278,7 +278,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_include(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_include(#[future] block_manager_and_index: (BlockManager, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -290,9 +291,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (mut block_manager, index) = block_manager_and_index.await;
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -315,7 +314,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_exclude(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_exclude(#[future] block_manager_and_index: (BlockManager, BTreeSet<u64>)) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -328,9 +328,7 @@ mod tests {
             },
         );
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (mut block_manager, index) = block_manager_and_index.await;
         {
             let (reader, _) = query.next(&index, &mut block_manager).unwrap();
             assert_eq!(
@@ -363,13 +361,13 @@ mod tests {
     }
 
     #[rstest]
-    fn test_ignoring_errored_records(
-        block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    #[tokio::test]
+    async fn test_ignoring_errored_records(
+        #[future] block_manager_and_index: (BlockManager, BTreeSet<u64>),
     ) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
+        let (mut block_manager, index) = block_manager_and_index.await;
 
         let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
         block.records[0].state = record::State::Errored as i32;

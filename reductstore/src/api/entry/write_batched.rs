@@ -143,14 +143,20 @@ async fn write_chunk(
 ) -> Result<Option<Bytes>, ReductError> {
     let to_write = content_size - *written;
     *written += chunk.len();
-    if chunk.len() < to_write {
-        sender.send(Ok(chunk)).await.unwrap();
-        Ok(None)
+    let (chunk, rest) = if chunk.len() < to_write {
+        (chunk, None)
     } else {
         let chuck_to_write = chunk.slice(0..to_write);
-        sender.send(Ok(chuck_to_write)).await.unwrap();
-        Ok(Some(chunk.slice(to_write..)))
-    }
+        (chuck_to_write, Some(chunk.slice(to_write..)))
+    };
+
+    sender.send(Ok(chunk)).await.map_err(|_| {
+        ReductError::new(
+            ErrorCode::InternalServerError,
+            "Internal reductstore error: failed to write to the storage",
+        )
+    })?;
+    Ok(rest)
 }
 
 fn check_content_length(
@@ -217,20 +223,6 @@ async fn start_writting(
     }
 }
 
-struct ChunkDrainer {
-    written: usize,
-    content_length: usize,
-}
-
-impl ChunkDrainer {
-    fn new(content_length: usize) -> Self {
-        Self {
-            written: 0,
-            content_length,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,11 +232,12 @@ mod tests {
     use axum::extract::FromRequest;
     use axum::http::Request;
     use rstest::{fixture, rstest};
+    use tokio::time::sleep;
 
     #[rstest]
     #[tokio::test]
     async fn test_write_record_bad_timestamp(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: BodyStream,
@@ -253,7 +246,7 @@ mod tests {
         headers.insert("x-reduct-time-xxx", "10".parse().unwrap());
 
         let err = write_batched_records(
-            State(components),
+            State(components.await),
             headers,
             path_to_entry_1,
             body_stream.await,
@@ -274,7 +267,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_invalid_header(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: BodyStream,
@@ -283,7 +276,7 @@ mod tests {
         headers.insert("x-reduct-time-1", "".parse().unwrap());
 
         let err = write_batched_records(
-            State(components),
+            State(components.await),
             headers,
             path_to_entry_1,
             body_stream.await,
@@ -301,11 +294,12 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_records(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: BodyStream,
     ) {
+        let components = components.await;
         headers.insert("content-length", "48".parse().unwrap());
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
         headers.insert(
@@ -325,10 +319,12 @@ mod tests {
         .await
         .unwrap();
 
+        sleep(std::time::Duration::from_millis(1)).await;
+
         let storage = components.storage.read().await;
         let bucket = storage.get_bucket("bucket-1").unwrap();
         {
-            let reader = bucket.begin_read("entry-1", 1).unwrap();
+            let reader = bucket.begin_read("entry-1", 1).await.unwrap();
             let mut reader = reader.write().unwrap();
             assert_eq!(reader.labels().get("a"), Some(&"b".to_string()));
             assert_eq!(reader.content_type(), "text/plain");
@@ -336,7 +332,7 @@ mod tests {
             assert_eq!(reader.read().unwrap(), Some(Bytes::from("1234567890")));
         }
         {
-            let reader = bucket.begin_read("entry-1", 2).unwrap();
+            let reader = bucket.begin_read("entry-1", 2).await.unwrap();
             let mut reader = reader.write().unwrap();
             assert_eq!(reader.labels().get("c"), Some(&"d,f".to_string()));
             assert_eq!(reader.content_type(), "text/plain");
@@ -347,7 +343,7 @@ mod tests {
             );
         }
         {
-            let reader = bucket.begin_read("entry-1", 3).unwrap();
+            let reader = bucket.begin_read("entry-1", 3).await.unwrap();
             let mut reader = reader.write().unwrap();
             assert!(reader.labels().is_empty());
             assert_eq!(reader.content_type(), "text/plain");
@@ -362,17 +358,19 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_records_error(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: BodyStream,
     ) {
+        let components = components.await;
         {
             let mut storage = components.storage.write().await;
             storage
                 .get_mut_bucket("bucket-1")
                 .unwrap()
-                .begin_write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
+                .write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
+                .await
                 .unwrap();
         }
 
@@ -393,6 +391,8 @@ mod tests {
         .unwrap()
         .into_response();
 
+        sleep(std::time::Duration::from_millis(1)).await;
+
         let headers = resp.headers();
         assert_eq!(headers.len(), 1);
         assert_eq!(
@@ -403,13 +403,13 @@ mod tests {
         let storage = components.storage.read().await;
         let bucket = storage.get_bucket("bucket-1").unwrap();
         {
-            let reader = bucket.begin_read("entry-1", 1).unwrap();
+            let reader = bucket.begin_read("entry-1", 1).await.unwrap();
             let mut reader = reader.write().unwrap();
             assert_eq!(reader.content_length(), 10);
             assert_eq!(reader.read().unwrap(), Some(Bytes::from("1234567890")));
         }
         {
-            let reader = bucket.begin_read("entry-1", 3).unwrap();
+            let reader = bucket.begin_read("entry-1", 3).await.unwrap();
             let mut reader = reader.write().unwrap();
             assert_eq!(reader.content_length(), 18);
             assert_eq!(

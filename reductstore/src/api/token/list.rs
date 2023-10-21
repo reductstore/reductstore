@@ -36,8 +36,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_token_list(components: Arc<Components>, headers: HeaderMap) {
-        let list = list_tokens(State(components), headers).await.unwrap().0;
+    async fn test_token_list(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let list = list_tokens(State(components.await), headers)
+            .await
+            .unwrap()
+            .0;
         assert_eq!(list.tokens.len(), 2);
         assert_eq!(list.tokens[0].name, "init-token");
         assert!(list.tokens[0].value.is_empty(), "Token value MUST be empty");

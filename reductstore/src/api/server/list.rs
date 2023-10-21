@@ -28,8 +28,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_list(components: Arc<Components>, headers: HeaderMap) {
-        let list = list(State(components), headers).await.unwrap();
+    async fn test_list(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let list = list(State(components.await), headers).await.unwrap();
         assert_eq!(list.0.buckets.len(), 2);
     }
 }

@@ -40,9 +40,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_create_token(#[future] components: Arc<Components>, headers: HeaderMap) {
         let token = create_token(
-            State(components),
+            State(components.await),
             Path("new-token".to_string()),
             headers,
             PermissionsAxum(Permissions::default()),
@@ -55,9 +55,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token_already_exists(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_create_token_already_exists(
+        #[future] components: Arc<Components>,
+        headers: HeaderMap,
+    ) {
         let err = create_token(
-            State(components),
+            State(components.await),
             Path("test".to_string()),
             headers,
             PermissionsAxum(Permissions::default()),

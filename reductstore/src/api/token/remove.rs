@@ -33,18 +33,25 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_token(components: Arc<Components>, headers: HeaderMap) {
-        let token = remove_token(State(components), Path("test".to_string()), headers).await;
+    async fn test_remove_token(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let token = remove_token(State(components.await), Path("test".to_string()), headers).await;
         assert!(token.is_ok());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_token_not_found(components: Arc<Components>, headers: HeaderMap) {
-        let err = remove_token(State(components), Path("not-found".to_string()), headers)
-            .await
-            .err()
-            .unwrap();
+    async fn test_remove_token_not_found(
+        #[future] components: Arc<Components>,
+        headers: HeaderMap,
+    ) {
+        let err = remove_token(
+            State(components.await),
+            Path("not-found".to_string()),
+            headers,
+        )
+        .await
+        .err()
+        .unwrap();
         assert_eq!(
             err,
             HttpError::new(ErrorCode::NotFound, "Token 'not-found' doesn't exist")

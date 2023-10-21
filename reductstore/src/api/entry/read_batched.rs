@@ -208,12 +208,13 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_batched_read(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
+        let components = components.await;
         let query_id = {
             components
                 .storage

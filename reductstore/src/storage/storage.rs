@@ -186,7 +186,6 @@ impl Storage {
 mod tests {
     use super::*;
     use crate::storage::entry::Labels;
-    use crate::storage::writer::{Chunk, WriteChunk};
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use rstest::{fixture, rstest};
@@ -195,10 +194,11 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_info(storage: Storage) {
+    #[tokio::test]
+    async fn test_info(storage: Storage) {
         sleep(Duration::from_secs(1)); // uptime is 1 second
 
-        let info = storage.info().unwrap();
+        let info = storage.info().await.unwrap();
         assert_eq!(
             info,
             ServerInfo {
@@ -216,7 +216,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_recover_from_fs(mut storage: Storage) {
+    #[tokio::test]
+    async fn test_recover_from_fs(mut storage: Storage) {
         let bucket_settings = BucketSettings {
             quota_size: Some(100),
             quota_type: Some(QuotaType::FIFO),
@@ -229,41 +230,32 @@ mod tests {
 
         {
             let entry = bucket.get_or_create_entry("entry-1").unwrap();
-            let writer = entry
-                .begin_write(1000, 10, "text/plain".to_string(), Labels::new())
+            let sender = entry
+                .write_record(1000, 10, "text/plain".to_string(), Labels::new())
+                .await
                 .unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
+            sender.send(Ok(Bytes::from("0123456789"))).await.unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let writer = entry
-                .begin_write(2000, 10, "text/plain".to_string(), Labels::new())
+            let sender = entry
+                .write_record(2000, 10, "text/plain".to_string(), Labels::new())
+                .await
                 .unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
+            sender.send(Ok(Bytes::from("0123456789"))).await.unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let writer = entry
-                .begin_write(5000, 10, "text/plain".to_string(), Labels::new())
+            let sender = entry
+                .write_record(5000, 10, "text/plain".to_string(), Labels::new())
+                .await
                 .unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
+            sender.send(Ok(Bytes::from("0123456789"))).await.unwrap();
         }
 
         let storage = Storage::new(storage.data_path);
         assert_eq!(
-            storage.info().unwrap(),
+            storage.info().await.unwrap(),
             ServerInfo {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 bucket_count: 1,
@@ -380,11 +372,12 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket_list(mut storage: Storage) {
+    #[tokio::test]
+    async fn test_get_bucket_list(mut storage: Storage) {
         storage.create_bucket("test1", Bucket::defaults()).unwrap();
         storage.create_bucket("test2", Bucket::defaults()).unwrap();
 
-        let bucket_list = storage.get_bucket_list().unwrap();
+        let bucket_list = storage.get_bucket_list().await.unwrap();
         assert_eq!(bucket_list.buckets.len(), 2);
         assert_eq!(bucket_list.buckets[0].name, "test1");
         assert_eq!(bucket_list.buckets[1].name, "test2");

@@ -66,10 +66,9 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_limit(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
-        let (block_manager, block_indexes) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+    #[tokio::test]
+    async fn test_limit(#[future] block_manager_and_index: (BlockManager, BTreeSet<u64>)) {
+        let (mut block_manager, block_indexes) = block_manager_and_index.await;
         let mut query = LimitedQuery::new(
             0,
             u64::MAX,

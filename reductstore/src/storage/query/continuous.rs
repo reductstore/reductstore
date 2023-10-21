@@ -77,9 +77,9 @@ mod tests {
     use crate::storage::query::base::tests::block_manager_and_index;
 
     #[rstest]
-    fn test_query(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
-        let (block_manager, block_indexes) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
+    #[tokio::test]
+    async fn test_query(#[future] block_manager_and_index: (BlockManager, BTreeSet<u64>)) {
+        let (mut block_manager, block_indexes) = block_manager_and_index.await;
 
         let mut query = ContinuousQuery::new(
             900,

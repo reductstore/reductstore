@@ -131,10 +131,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let mut params = HashMap::new();
         params.insert("limit".to_string(), "1".to_string());
 
@@ -155,11 +156,11 @@ mod tests {
             .get_mut_entry("entry-1")
             .unwrap();
 
-        let (_, last) = entry.next(query.id).unwrap();
+        let (_, last) = entry.next(query.id).await.unwrap();
         assert!(last);
 
         assert_eq!(
-            entry.next(query.id).err().unwrap().status,
+            entry.next(query.id).await.err().unwrap().status,
             ErrorCode::NoContent
         );
     }
@@ -167,10 +168,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_bad_limit(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let mut params = HashMap::new();
         params.insert("limit".to_string(), "a".to_string());
 

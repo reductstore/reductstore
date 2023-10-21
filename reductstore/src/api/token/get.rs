@@ -38,8 +38,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token(components: Arc<Components>, headers: HeaderMap) {
-        let token = get_token(State(components), Path("test".to_string()), headers)
+    async fn test_get_token(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let token = get_token(State(components.await), Path("test".to_string()), headers)
             .await
             .unwrap()
             .0;
@@ -49,11 +49,15 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token_not_found(components: Arc<Components>, headers: HeaderMap) {
-        let err = get_token(State(components), Path("not-found".to_string()), headers)
-            .await
-            .err()
-            .unwrap();
+    async fn test_get_token_not_found(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let err = get_token(
+            State(components.await),
+            Path("not-found".to_string()),
+            headers,
+        )
+        .await
+        .err()
+        .unwrap();
         assert_eq!(
             err,
             HttpError::new(ErrorCode::NotFound, "Token 'not-found' doesn't exist")

@@ -149,12 +149,13 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_ts(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
+        let components = components.await;
         let mut response = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
@@ -185,12 +186,13 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_query(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
+        let components = components.await;
         let query_id = {
             components
                 .storage
@@ -231,11 +233,16 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_single_read_bucket_not_found(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_single_read_bucket_not_found(
+        #[future] components: Arc<Components>,
+        headers: HeaderMap,
+    ) {
+        let components = components.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entru-1".to_string()),
         ]));
+
         let err = read_single_record(
             State(Arc::clone(&components)),
             path,
@@ -256,10 +263,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_ts_not_found(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let err = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
@@ -280,10 +288,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_bad_ts(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let err = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
@@ -310,10 +319,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_query_not_found(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let err = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,

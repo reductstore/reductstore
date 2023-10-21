@@ -72,7 +72,7 @@ impl BlockManager {
         }
     }
 
-    pub async fn begin_write_new(
+    pub async fn begin_write(
         &mut self,
         block: &Block,
         record_index: usize,
@@ -322,8 +322,9 @@ impl ManageBlock for BlockManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::writer::Chunk;
+    use rstest::rstest;
     use tempfile::tempdir;
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn test_starting_block() {
@@ -393,8 +394,9 @@ mod tests {
         assert_eq!(file.metadata().unwrap().len(), 0);
     }
 
-    #[test]
-    fn test_start_writing() {
+    #[rstest]
+    #[tokio::test]
+    async fn test_start_writing() {
         let mut bm = setup();
 
         let block_id = 1;
@@ -413,21 +415,15 @@ mod tests {
 
         bm.save(block.clone()).unwrap();
 
-        let bm_ref = Arc::new(RwLock::new(bm));
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&bm_ref), &block, 0).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("hello")))
-                .unwrap();
-        }
+        let mut file = bm.begin_write(&block, 0).await.unwrap();
+        file.write(b"hallo").await.unwrap();
 
-        bm_ref.write().unwrap().finish(&block).unwrap();
+        bm.finish(&block).unwrap();
     }
 
-    #[test]
-    fn test_remove_with_writers() {
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_with_writers() {
         let mut bm = setup();
         let block_id = 1;
 
@@ -445,12 +441,10 @@ mod tests {
                 content_type: "".to_string(),
             });
 
-            let bm_ref = Arc::new(RwLock::new(bm));
-            let writer = BlockManager::begin_write(Arc::clone(&bm_ref), &block, 0).unwrap();
-            assert!(!writer.read().unwrap().is_done());
+            let file = bm.begin_write(&block, 0).await.unwrap();
 
             assert_eq!(
-                bm_ref.write().unwrap().remove(block_id).err(),
+                bm.remove(block_id).err(),
                 Some(ReductError::internal_server_error(&format!(
                     "Cannot remove block {} because it is still in use",
                     block_id
