@@ -148,6 +148,7 @@ mod tests {
     use tokio::time::sleep;
 
     use crate::api::tests::{components, empty_body, path_to_entry_1};
+    use crate::storage::proto::record::Label;
 
     #[rstest]
     #[tokio::test]
@@ -184,8 +185,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            record.read().unwrap().labels().get("x"),
-            Some(&"y".to_string())
+            record.labels()[0],
+            Label {
+                name: "x".to_string(),
+                value: "y".to_string(),
+            }
         );
     }
 

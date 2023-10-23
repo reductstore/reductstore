@@ -774,9 +774,11 @@ mod tests {
     #[tokio::test]
     async fn test_begin_read_ok1(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000).await.unwrap();
-        let reader = entry.begin_read(1000000).await.unwrap();
-        let chunk = reader.write().unwrap().read().unwrap();
-        assert_eq!(chunk.unwrap(), "0123456789".as_bytes());
+        let mut reader = entry.begin_read(1000000).await.unwrap();
+        assert_eq!(
+            reader.rx().recv().await.unwrap(),
+            Ok(Bytes::from("0123456789"))
+        );
     }
 
     #[rstest]
@@ -785,9 +787,11 @@ mod tests {
         write_stub_record(&mut entry, 1000000).await.unwrap();
         write_stub_record(&mut entry, 1010000).await.unwrap();
 
-        let reader = entry.begin_read(1010000).await.unwrap();
-        let chunk = reader.write().unwrap().read().unwrap();
-        assert_eq!(chunk.unwrap(), "0123456789".as_bytes());
+        let mut reader = entry.begin_read(1010000).await.unwrap();
+        assert_eq!(
+            reader.rx().recv().await.unwrap(),
+            Ok(Bytes::from("0123456789"))
+        );
     }
 
     #[rstest]
@@ -801,20 +805,16 @@ mod tests {
             .await
             .unwrap();
 
-        let reader = entry.begin_read(1000000).await.unwrap();
-        let mut wr = reader.write().unwrap();
-        let chunk = wr.read().unwrap();
+        let mut reader = entry.begin_read(1000000).await.unwrap();
         assert_eq!(
-            chunk.unwrap().to_vec(),
+            reader.rx().recv().await.unwrap().unwrap().to_vec(),
             data[0..DEFAULT_MAX_READ_CHUNK as usize]
         );
-        let chunk = wr.read().unwrap();
         assert_eq!(
-            chunk.unwrap().to_vec(),
+            reader.rx().recv().await.unwrap().unwrap().to_vec(),
             data[DEFAULT_MAX_READ_CHUNK as usize..]
         );
-        let chunk = wr.read().unwrap();
-        assert_eq!(chunk, None);
+        assert_eq!(reader.rx().recv().await, None);
     }
 
     #[rstest]
@@ -828,16 +828,16 @@ mod tests {
         assert!(id >= 1);
 
         {
-            let (reader, _) = entry.next(id).await.unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 1000000);
+            let reader = entry.next(id).await.unwrap();
+            assert_eq!(reader.timestamp(), 1000000);
         }
         {
-            let (reader, _) = entry.next(id).await.unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 2000000);
+            let reader = entry.next(id).await.unwrap();
+            assert_eq!(reader.timestamp(), 2000000);
         }
         {
-            let (reader, _) = entry.next(id).await.unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 3000000);
+            let reader = entry.next(id).await.unwrap();
+            assert_eq!(reader.timestamp(), 3000000);
         }
 
         assert_eq!(
@@ -868,8 +868,8 @@ mod tests {
             .unwrap();
 
         {
-            let (reader, _) = entry.next(id).await.unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 1000000);
+            let reader = entry.next(id).await.unwrap();
+            assert_eq!(reader.timestamp(), 1000000);
         }
 
         assert_eq!(
@@ -879,8 +879,8 @@ mod tests {
 
         write_stub_record(&mut entry, 2000000).await.unwrap();
         {
-            let (reader, _) = entry.next(id).await.unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 2000000);
+            let reader = entry.next(id).await.unwrap();
+            assert_eq!(reader.timestamp(), 2000000);
         }
 
         sleep(Duration::from_millis(600));
@@ -931,9 +931,7 @@ mod tests {
         }
 
         let reader = entry.begin_read(30 * step).await.unwrap();
-        let wr = reader.write().unwrap();
-
-        assert_eq!(wr.timestamp(), 3000000);
+        assert_eq!(reader.timestamp(), 3000000);
     }
 
     #[rstest]

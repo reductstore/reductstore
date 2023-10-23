@@ -684,8 +684,8 @@ mod tests {
         entry_name: &str,
         time: u64,
     ) -> Result<Vec<u8>, ReductError> {
-        let reader = bucket.begin_read(entry_name, time).await?;
-        let data = reader.write().unwrap().read()?.unwrap();
+        let mut reader = bucket.begin_read(entry_name, time).await?;
+        let data = reader.rx().recv().await.unwrap().unwrap();
         Ok(data.to_vec())
     }
 

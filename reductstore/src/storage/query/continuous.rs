@@ -36,6 +36,7 @@ impl ContinuousQuery {
         }
     }
 }
+
 #[async_trait]
 impl Query for ContinuousQuery {
     async fn next(
@@ -94,18 +95,21 @@ mod tests {
             },
         );
         {
-            let (reader, _) = query.next(&block_indexes, &mut block_manager).unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 1000);
+            let reader = query
+                .next(&block_indexes, &mut block_manager)
+                .await
+                .unwrap();
+            assert_eq!(reader.timestamp(), 1000);
         }
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).err(),
+            query.next(&block_indexes, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).err(),
+            query.next(&block_indexes, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

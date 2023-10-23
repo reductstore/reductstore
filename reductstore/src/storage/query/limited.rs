@@ -81,12 +81,15 @@ mod tests {
             },
         );
 
-        let (reader, last) = query.next(&block_indexes, &mut block_manager).unwrap();
-        assert_eq!(reader.read().unwrap().timestamp(), 0);
-        assert!(last);
+        let reader = query
+            .next(&block_indexes, &mut block_manager)
+            .await
+            .unwrap();
+        assert_eq!(reader.timestamp(), 0);
+        assert!(reader.last());
 
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).err(),
+            query.next(&block_indexes, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

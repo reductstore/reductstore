@@ -228,6 +228,7 @@ mod tests {
     use super::*;
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::storage::proto::record::Label;
     use axum::body::Full;
     use axum::extract::FromRequest;
     use axum::http::Request;
@@ -324,32 +325,45 @@ mod tests {
         let storage = components.storage.read().await;
         let bucket = storage.get_bucket("bucket-1").unwrap();
         {
-            let reader = bucket.begin_read("entry-1", 1).await.unwrap();
-            assert_eq!(reader.labels().get("a"), Some(&"b".to_string()));
+            let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
+            assert_eq!(
+                reader.labels()[0],
+                Label {
+                    name: "a".to_string(),
+                    value: "b".to_string()
+                }
+            );
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 10);
-            assert_eq!(reader.read().unwrap(), Some(Bytes::from("1234567890")));
-        }
-        {
-            let reader = bucket.begin_read("entry-1", 2).await.unwrap();
-            let mut reader = reader.write().unwrap();
-            assert_eq!(reader.labels().get("c"), Some(&"d,f".to_string()));
-            assert_eq!(reader.content_type(), "text/plain");
-            assert_eq!(reader.content_length(), 20);
             assert_eq!(
-                reader.read().unwrap(),
-                Some(Bytes::from("abcdef1234567890abcd"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("1234567890"))
             );
         }
         {
-            let reader = bucket.begin_read("entry-1", 3).await.unwrap();
-            let mut reader = reader.write().unwrap();
+            let mut reader = bucket.begin_read("entry-1", 2).await.unwrap();
+            assert_eq!(
+                reader.labels()[0],
+                Label {
+                    name: "c".to_string(),
+                    value: "d,f".to_string()
+                }
+            );
+            assert_eq!(reader.content_type(), "text/plain");
+            assert_eq!(reader.content_length(), 20);
+            assert_eq!(
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("abcdef1234567890abcd"))
+            );
+        }
+        {
+            let mut reader = bucket.begin_read("entry-1", 3).await.unwrap();
             assert!(reader.labels().is_empty());
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 18);
             assert_eq!(
-                reader.read().unwrap(),
-                Some(Bytes::from("ef1234567890abcdef"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("ef1234567890abcdef"))
             );
         }
     }
@@ -402,18 +416,19 @@ mod tests {
         let storage = components.storage.read().await;
         let bucket = storage.get_bucket("bucket-1").unwrap();
         {
-            let reader = bucket.begin_read("entry-1", 1).await.unwrap();
-            let mut reader = reader.write().unwrap();
+            let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
             assert_eq!(reader.content_length(), 10);
-            assert_eq!(reader.read().unwrap(), Some(Bytes::from("1234567890")));
+            assert_eq!(
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("1234567890"))
+            );
         }
         {
-            let reader = bucket.begin_read("entry-1", 3).await.unwrap();
-            let mut reader = reader.write().unwrap();
+            let mut reader = bucket.begin_read("entry-1", 3).await.unwrap();
             assert_eq!(reader.content_length(), 18);
             assert_eq!(
-                reader.read().unwrap(),
-                Some(Bytes::from("ef1234567890abcdef"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("ef1234567890abcdef"))
             );
         }
     }

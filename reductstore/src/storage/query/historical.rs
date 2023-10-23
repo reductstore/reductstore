@@ -188,6 +188,7 @@ mod tests {
 
     use bytes::Bytes;
 
+    use crate::storage::proto::record::Label;
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
     use std::collections::HashMap;
@@ -210,15 +211,15 @@ mod tests {
 
         let (mut block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let res = query.next(&index, &mut block_manager);
+            let res = query.next(&index, &mut block_manager).await;
             assert!(res.is_err());
             assert_eq!(res.err().unwrap().status, ErrorCode::NoContent);
             assert_eq!(query.state(), &QueryState::Done);
@@ -234,24 +235,24 @@ mod tests {
 
         let (mut block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -269,32 +270,32 @@ mod tests {
 
         let (mut block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, &mut block_manager).await.unwrap();
 
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -319,18 +320,24 @@ mod tests {
         );
         let (mut block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.read().unwrap().labels(),
-                &HashMap::from([
-                    ("block".to_string(), "2".to_string()),
-                    ("record".to_string(), "1".to_string()),
-                ])
+                reader.labels(),
+                &vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "2".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "1".to_string(),
+                    },
+                ]
             );
         }
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -356,28 +363,40 @@ mod tests {
 
         let (mut block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.read().unwrap().labels(),
-                &HashMap::from([
-                    ("block".to_string(), "1".to_string()),
-                    ("record".to_string(), "2".to_string()),
-                ])
+                reader.labels(),
+                &vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "1".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "2".to_string(),
+                    },
+                ]
             );
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let reader = query.next(&index, &mut block_manager).await.unwrap();
             assert_eq!(
-                reader.read().unwrap().labels(),
-                &HashMap::from([
-                    ("block".to_string(), "2".to_string()),
-                    ("record".to_string(), "1".to_string()),
-                ])
+                reader.labels(),
+                &vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "2".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "1".to_string(),
+                    },
+                ]
             );
         }
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -400,7 +419,7 @@ mod tests {
         block_manager.save(block).unwrap();
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, &mut block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

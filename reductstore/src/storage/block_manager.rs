@@ -459,7 +459,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_remove_block_with_readers(mut block_manager: BlockManager) {
+    #[tokio::test]
+    async fn test_remove_block_with_readers(mut block_manager: BlockManager) {
         let block_id = 1;
 
         {
@@ -475,16 +476,17 @@ mod tests {
                 labels: vec![],
                 content_type: "".to_string(),
             });
-            let reader = block_manager.begin_read(&block, 0).unwrap();
-            assert!(!reader.read().unwrap().is_done());
+            {
+                let _ = block_manager.begin_read(&block, 0).await.unwrap();
 
-            assert_eq!(
-                block_manager.remove(block_id).err(),
-                Some(ReductError::internal_server_error(&format!(
-                    "Cannot remove block {} because it is still in use",
-                    block_id
-                )))
-            );
+                assert_eq!(
+                    block_manager.remove(block_id).err(),
+                    Some(ReductError::internal_server_error(&format!(
+                        "Cannot remove block {} because it is still in use",
+                        block_id
+                    )))
+                );
+            }
         }
     }
 
