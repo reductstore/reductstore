@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reductstore: Stop downloading Web Console at docs.rs build, [PR-366](https://github.com/reductstore/reductstore/pull/366)
 
+### Changed
+
+- reductstore: Refactor read and write operation with tokio channels, [PR-370](https://github.com/reductstore/reductstore/pull/370)
+
 ## [1.7.0] - 2023-10-06
 
 ### Added
