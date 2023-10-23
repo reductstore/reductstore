@@ -2,13 +2,13 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::{
-    find_first_block, BlockManager, ManageBlock, DESCRIPTOR_FILE_EXT,
+    find_first_block, BlockManager, ManageBlock, DEFAULT_MAX_READ_CHUNK, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
-use crate::storage::reader::RecordReader;
 
+use crate::storage::bucket::RecordReader;
 use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
@@ -20,8 +20,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc::Sender;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::RwLock as TokioRwLock;
 
 pub type Labels = HashMap<String, String>;
@@ -226,7 +226,7 @@ impl Entry {
             bm.begin_write(&block, record_index).await?
         };
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let (tx, mut rx) = channel(1);
         let bm = Arc::clone(&self.block_manager);
         tokio::spawn(async move {
             let recv = async move {
@@ -274,23 +274,6 @@ impl Entry {
         Ok(tx)
     }
 
-    async fn write_transaction(
-        content_size: &usize,
-        file: &mut File,
-        mut written_bytes: usize,
-        chunk: Result<Bytes, ReductError>,
-    ) -> Result<usize, ReductError> {
-        let chunk = chunk?;
-        written_bytes += chunk.len();
-        if written_bytes > *content_size {
-            return Err(ReductError::bad_request(
-                "Content is bigger than in content-length",
-            ));
-        }
-        file.write_all(chunk.as_ref()).await?;
-        Ok(written_bytes)
-    }
-
     /// Starts a new record read.
     ///
     /// # Arguments
@@ -301,10 +284,7 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) async fn begin_read(
-        &self,
-        time: u64,
-    ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
+    pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
         debug!("Reading record for ts={}", time);
         let not_found_err = Err(ReductError::not_found(&format!(
             "No record with timestamp {}",
@@ -351,10 +331,32 @@ impl Entry {
             )));
         }
 
-        self.block_manager
+        let file = self
+            .block_manager
             .write()
             .await
             .begin_read(&block, record_index.unwrap())
+            .await?;
+
+        let (tx, rx) = channel(1);
+        tokio::spawn(async move {
+            let mut file = file;
+            let mut offset = 0;
+            let mut buf = vec![0; DEFAULT_MAX_READ_CHUNK as usize];
+            loop {
+                let read = file.read(&mut buf).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                offset += read;
+                if let Err(e) = tx.send(Ok(Bytes::from(buf[..read].to_vec()))).await {
+                    error!("Failed to send record chunk: {}", e);
+                    break;
+                }
+            }
+        });
+
+        Ok(RecordReader::new(rx, record.clone(), true))
     }
 
     /// Query records for a time range.
@@ -394,17 +396,14 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub async fn next(
-        &mut self,
-        query_id: u64,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
+    pub async fn next(&mut self, query_id: u64) -> Result<RecordReader, ReductError> {
         self.remove_expired_query();
         let query = self
             .queries
             .get_mut(&query_id)
             .ok_or_else(|| ReductError::not_found(&format!("Query {} not found", query_id)))?;
         let mut bm = self.block_manager.write().await;
-        query.next(&self.block_index, &mut bm)
+        query.next(&self.block_index, &mut bm).await
     }
 
     /// Returns stats about the entry.
@@ -492,6 +491,23 @@ impl Entry {
     fn remove_expired_query(&mut self) {
         self.queries
             .retain(|_, query| matches!(query.state(), QueryState::Running(_)));
+    }
+
+    async fn write_transaction(
+        content_size: &usize,
+        file: &mut File,
+        mut written_bytes: usize,
+        chunk: Result<Bytes, ReductError>,
+    ) -> Result<usize, ReductError> {
+        let chunk = chunk?;
+        written_bytes += chunk.len();
+        if written_bytes > *content_size {
+            return Err(ReductError::bad_request(
+                "Content is bigger than in content-length",
+            ));
+        }
+        file.write_all(chunk.as_ref()).await?;
+        Ok(written_bytes)
     }
 }
 

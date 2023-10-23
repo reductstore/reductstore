@@ -2,11 +2,15 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
-use crate::storage::reader::RecordReader;
 use reduct_base::error::ReductError;
 
 use std::collections::{BTreeSet, HashMap};
 
+use crate::storage::bucket::RecordReader;
+use crate::storage::proto::Record;
+use axum::async_trait;
+use bytes::Bytes;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -21,6 +25,8 @@ pub enum QueryState {
 }
 
 /// Query is used to iterate over the records among multiple blocks.
+
+#[async_trait]
 pub trait Query {
     ///  Get next record
     ///
@@ -38,11 +44,11 @@ pub trait Query {
     ///
     /// * `HTTPError` - If the record cannot be read.
     /// * `HTTPError(NoContent)` - If all records have been read.
-    fn next(
+    async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError>;
+    ) -> Result<RecordReader, ReductError>;
 
     /// Get the state of the query.
     fn state(&self) -> &QueryState;

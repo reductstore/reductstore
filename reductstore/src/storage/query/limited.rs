@@ -2,10 +2,12 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
+use crate::storage::bucket::RecordReader;
 use crate::storage::query::base::QueryState::Running;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
-use crate::storage::reader::RecordReader;
+use async_trait::async_trait;
+use hermit_abi::read;
 use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
@@ -25,12 +27,13 @@ impl LimitedQuery {
     }
 }
 
+#[async_trait]
 impl Query for LimitedQuery {
-    fn next(
+    async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
+    ) -> Result<RecordReader, ReductError> {
         // TODO: It could be done better, maybe it make sense to move the limit into HistoricalQuery instead of manipulating the state here.
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
@@ -42,15 +45,15 @@ impl Query for LimitedQuery {
             }
         }
 
-        let (reader, last) = self.query.next(block_indexes, block_manager)?;
+        let reader = self.query.next(block_indexes, block_manager).await?;
 
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
-                return Ok((reader, true));
+                return Ok(reader);
             }
         }
 
-        Ok((reader, last))
+        Ok(reader)
     }
 
     fn state(&self) -> &QueryState {

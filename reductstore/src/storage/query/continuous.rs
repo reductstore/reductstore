@@ -4,12 +4,16 @@
 use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
-use crate::storage::reader::RecordReader;
 use reduct_base::error::{ErrorCode, ReductError};
 
 use std::collections::BTreeSet;
 
+use crate::storage::bucket::RecordReader;
+use crate::storage::proto::Record;
+use async_trait::async_trait;
+use bytes::Bytes;
 use std::sync::{Arc, RwLock};
+use tokio::sync::mpsc::Sender;
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
@@ -32,18 +36,18 @@ impl ContinuousQuery {
         }
     }
 }
-
+#[async_trait]
 impl Query for ContinuousQuery {
-    fn next(
+    async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
-        match self.query.next(block_indexes, block_manager) {
-            Ok((record, last)) => {
-                self.next_start = record.read().unwrap().timestamp() + 1;
+    ) -> Result<RecordReader, ReductError> {
+        match self.query.next(block_indexes, block_manager).await {
+            Ok(reader) => {
+                self.next_start = reader.timestamp() + 1;
                 self.count += 1;
-                Ok((record, last))
+                Ok(reader)
             }
             Err(ReductError {
                 status: ErrorCode::NoContent,

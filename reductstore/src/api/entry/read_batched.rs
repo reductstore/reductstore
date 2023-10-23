@@ -5,9 +5,7 @@ use crate::api::entry::MethodExtractor;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
-use crate::storage::bucket::Bucket;
-
-use crate::storage::reader::RecordReader;
+use crate::storage::bucket::{Bucket, RecordReader};
 
 use axum::body::StreamBody;
 use axum::extract::{Path, Query, State};
@@ -16,6 +14,9 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::storage::proto::{ts_to_us, Record};
+use hermit_abi::read;
+use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -79,16 +80,16 @@ async fn fetch_and_response_batched_records(
 
     let make_header = |reader: &RecordReader| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
-
         let mut meta_data = vec![
             reader.content_length().to_string(),
-            reader.content_type().clone(),
+            reader.content_type().to_string(),
         ];
 
         let mut labels: Vec<String> = reader
             .labels()
             .iter()
-            .map(|(k, v)| {
+            .map(|label| {
+                let (k, v) = (&label.name, &label.value);
                 if v.contains(",") {
                     format!("{}=\"{}\"", k, v)
                 } else {
@@ -111,13 +112,11 @@ async fn fetch_and_response_batched_records(
     let mut last = false;
     loop {
         let _reader = match bucket.next(entry_name, query_id).await {
-            Ok((reader, _)) => {
+            Ok(reader) => {
                 {
-                    let reader_lock = reader.read().unwrap();
-
-                    let (name, value) = make_header(&reader_lock);
+                    let (name, value) = make_header(&reader);
                     header_size += (name.as_str().len() + value.to_str().unwrap().len() + 2) as u64;
-                    body_size += reader_lock.content_length();
+                    body_size += reader.content_length();
                     headers.insert(name, value);
                 }
                 readers.push(reader);
@@ -151,7 +150,7 @@ async fn fetch_and_response_batched_records(
     headers.insert("x-reduct-last", last.to_string().parse().unwrap());
 
     struct ReadersWrapper {
-        readers: Vec<Arc<RwLock<RecordReader>>>,
+        readers: Vec<RecordReader>,
         empty_body: bool,
     }
 
@@ -170,13 +169,20 @@ async fn fetch_and_response_batched_records(
                 return Poll::Ready(None);
             }
 
-            if self.readers[0].read().unwrap().is_done() {
-                self.readers.remove(0);
-            }
-
-            match self.readers[0].write().unwrap().read() {
-                Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                Err(err) => Poll::Ready(Some(Err(HttpError::from(err)))),
+            loop {
+                if let Poll::Ready(data) = self.readers[0].rx().poll_recv(_cx) {
+                    match data {
+                        Some(Ok(chunk)) => {
+                            return Poll::Ready(Some(Ok(chunk)));
+                        }
+                        Some(Err(err)) => {
+                            return Poll::Ready(Some(Err(HttpError::from(err))));
+                        }
+                        None => self.readers.remove(0),
+                    };
+                } else {
+                    return Poll::Pending;
+                }
             }
         }
         fn size_hint(&self) -> (usize, Option<usize>) {

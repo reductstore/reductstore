@@ -325,7 +325,6 @@ mod tests {
         let bucket = storage.get_bucket("bucket-1").unwrap();
         {
             let reader = bucket.begin_read("entry-1", 1).await.unwrap();
-            let mut reader = reader.write().unwrap();
             assert_eq!(reader.labels().get("a"), Some(&"b".to_string()));
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 10);

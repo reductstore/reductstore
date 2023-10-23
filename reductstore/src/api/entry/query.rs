@@ -1,21 +1,18 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::entry::QueryInfoAxum;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::query::base::QueryOptions;
-
+use async_trait::async_trait;
 use axum::extract::{Path, Query, State};
 use axum::headers::HeaderMap;
-
-use std::collections::HashMap;
-
-use std::sync::Arc;
-
-use crate::api::entry::QueryInfoAxum;
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
@@ -156,8 +153,8 @@ mod tests {
             .get_mut_entry("entry-1")
             .unwrap();
 
-        let (_, last) = entry.next(query.id).await.unwrap();
-        assert!(last);
+        let reader = entry.next(query.id).await.unwrap();
+        assert!(reader.last());
 
         assert_eq!(
             entry.next(query.id).await.err().unwrap().status,

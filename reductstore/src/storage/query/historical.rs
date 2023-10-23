@@ -3,13 +3,20 @@
 
 use std::collections::BTreeSet;
 
+use async_trait::async_trait;
+use bytes::Bytes;
+use log::error;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
+use tokio::io::AsyncReadExt;
+use tokio::sync::mpsc::Sender;
 
-use crate::storage::block_manager::{find_first_block, BlockManager, ManageBlock};
+use crate::storage::block_manager::{
+    find_first_block, BlockManager, ManageBlock, DEFAULT_MAX_READ_CHUNK,
+};
+use crate::storage::bucket::RecordReader;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
-use crate::storage::reader::RecordReader;
 use reduct_base::error::ReductError;
 
 pub struct HistoricalQuery {
@@ -34,12 +41,13 @@ impl HistoricalQuery {
     }
 }
 
+#[async_trait]
 impl Query for HistoricalQuery {
-    fn next<'a>(
+    async fn next(
         &mut self,
         block_index: &BTreeSet<u64>,
         block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
+    ) -> Result<RecordReader, ReductError> {
         self.last_update = Instant::now();
 
         let check_next_block = |start, stop| -> bool {
@@ -143,7 +151,25 @@ impl Query for HistoricalQuery {
             *idx += 1;
         }
 
-        Ok((block_manager.begin_read(&block, record_idx)?, last))
+        let file = block_manager.begin_read(&block, record_idx).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            let mut file = file;
+            let mut offset = 0;
+            let mut buf = vec![0; DEFAULT_MAX_READ_CHUNK as usize];
+            loop {
+                let read = file.read(&mut buf).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                offset += read;
+                if let Err(e) = tx.send(Ok(Bytes::from(buf[..read].to_vec()))).await {
+                    error!("Failed to send record chunk: {}", e);
+                    break;
+                }
+            }
+        });
+        Ok(RecordReader::new(rx, record.clone(), last))
     }
 
     fn state(&self) -> &QueryState {

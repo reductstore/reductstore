@@ -7,4 +7,3 @@ pub mod storage;
 
 mod block_manager;
 pub mod query;
-pub mod reader;

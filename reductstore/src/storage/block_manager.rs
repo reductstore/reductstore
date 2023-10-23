@@ -14,7 +14,6 @@ use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 
 use crate::storage::proto::*;
-use crate::storage::reader::RecordReader;
 use reduct_base::error::ReductError;
 
 pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
@@ -27,7 +26,6 @@ pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
 /// because it does not lock the block descriptor file. Use it with RwLock<BlockManager>
 pub struct BlockManager {
     path: PathBuf,
-    readers: HashMap<u64, Vec<Weak<RwLock<RecordReader>>>>,
     reader_count: HashMap<u64, usize>,
     writer_count: HashMap<u64, usize>,
 
@@ -65,7 +63,6 @@ impl BlockManager {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            readers: HashMap::new(),
             reader_count: HashMap::new(),
             writer_count: HashMap::new(),
             last_block: None,
@@ -125,32 +122,30 @@ impl BlockManager {
         self.save(block)
     }
 
-    pub fn begin_read(
+    pub async fn begin_read(
         &mut self,
         block: &Block,
         record_index: usize,
-    ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
+    ) -> Result<File, ReductError> {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
-        let reader = Arc::new(RwLock::new(RecordReader::new(
-            path,
-            block,
-            record_index,
-            DEFAULT_MAX_READ_CHUNK,
-        )?));
 
         let block_id = ts_to_us(&ts);
-        match self.readers.entry(block_id) {
+        match self.reader_count.entry(block_id) {
             Entry::Occupied(mut e) => {
-                e.get_mut().push(Arc::downgrade(&reader));
+                *e.get_mut() += 1;
             }
             Entry::Vacant(e) => {
-                e.insert(vec![Arc::downgrade(&reader)]);
+                e.insert(1);
             }
         }
 
         self.clean_readers_or_writers(block_id);
-        Ok(reader)
+
+        let mut file = File::options().read(true).open(path).await?;
+        let offset = block.records[record_index].begin;
+        file.seek(SeekFrom::Start(offset)).await?;
+        Ok(file)
     }
 
     fn path_to_desc(&self, begin_time: &Timestamp) -> PathBuf {
@@ -174,13 +169,14 @@ impl BlockManager {
     ///
     /// * `true` - If there are no more readers or writers.
     fn clean_readers_or_writers(&mut self, block_id: u64) -> bool {
-        let readers_empty = match self.readers.get_mut(&block_id) {
-            Some(readers) => {
-                readers.retain(|r| {
-                    let reader = r.upgrade();
-                    reader.is_some() && !reader.unwrap().try_read().map_or(false, |r| r.is_done())
-                });
-                readers.is_empty()
+        let readers_empty = match self.reader_count.get_mut(&block_id) {
+            Some(count) => {
+                if *count == 0 {
+                    self.reader_count.remove(&block_id);
+                    true
+                } else {
+                    false
+                }
             }
             None => true,
         };

@@ -1,25 +1,21 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::storage::entry::{Entry, EntrySettings, Labels};
+use crate::storage::proto::record::Label;
+use crate::storage::proto::{ts_to_us, us_to_ts, BucketSettings as ProtoBucketSettings, Record};
+use futures_util::TryFutureExt;
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
-
+use reduct_base::error::ReductError;
+use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
+use reduct_base::msg::entry_api::EntryInfo;
 use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
-
-use std::sync::{Arc, RwLock};
-use tokio::sync::mpsc::Sender;
-
-use crate::storage::entry::{Entry, EntrySettings, Labels};
-use crate::storage::proto::BucketSettings as ProtoBucketSettings;
-use crate::storage::reader::RecordReader;
-
-use reduct_base::error::ReductError;
-use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
-use reduct_base::msg::entry_api::EntryInfo;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 const DEFAULT_MAX_RECORDS: u64 = 256;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -52,6 +48,42 @@ impl Into<BucketSettings> for ProtoBucketSettings {
             max_block_records: self.max_block_records,
             max_block_size: self.max_block_size,
         }
+    }
+}
+
+pub struct RecordReader {
+    rx: Receiver<Result<Bytes, ReductError>>,
+    record: Record,
+    last: bool,
+}
+
+impl RecordReader {
+    pub fn new(rx: Receiver<Result<Bytes, ReductError>>, record: Record, last: bool) -> Self {
+        RecordReader { rx, record, last }
+    }
+
+    pub fn timestamp(&self) -> u64 {
+        ts_to_us(self.record.timestamp.as_ref().unwrap())
+    }
+
+    pub fn content_type(&self) -> &str {
+        self.record.content_type.as_str()
+    }
+
+    pub fn labels(&self) -> &Vec<Label> {
+        &self.record.labels
+    }
+
+    pub fn content_length(&self) -> u64 {
+        self.record.end - self.record.begin
+    }
+
+    pub fn rx(&mut self) -> &mut Receiver<Result<Bytes, ReductError>> {
+        &mut self.rx
+    }
+
+    pub fn last(&self) -> bool {
+        self.last
     }
 }
 
@@ -278,11 +310,7 @@ impl Bucket {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub async fn begin_read(
-        &self,
-        name: &str,
-        time: u64,
-    ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
+    pub async fn begin_read(&self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
         let entry = self.get_entry(name)?;
         entry.begin_read(time).await
     }
@@ -299,11 +327,7 @@ impl Bucket {
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `bool` - True if the record is the last one.
     /// * `HTTPError` - The error if any.
-    pub async fn next(
-        &mut self,
-        name: &str,
-        time: u64,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
+    pub async fn next(&mut self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
         let entry = self.get_mut_entry(name)?;
         entry.next(time).await
     }
