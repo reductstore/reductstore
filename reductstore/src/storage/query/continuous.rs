@@ -12,8 +12,9 @@ use crate::storage::bucket::RecordReader;
 use crate::storage::proto::Record;
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
@@ -42,7 +43,7 @@ impl Query for ContinuousQuery {
     async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &mut BlockManager,
+        block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         match self.query.next(block_indexes, block_manager).await {
             Ok(reader) => {
@@ -83,7 +84,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_query(#[future] block_manager_and_index: (BlockManager, BTreeSet<u64>)) {
+    async fn test_query(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let (mut block_manager, block_indexes) = block_manager_and_index.await;
 
         let mut query = ContinuousQuery::new(
@@ -96,20 +99,23 @@ mod tests {
         );
         {
             let reader = query
-                .next(&block_indexes, &mut block_manager)
+                .next(&block_indexes, block_manager.clone())
                 .await
                 .unwrap();
             assert_eq!(reader.timestamp(), 1000);
         }
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).await.err(),
+            query
+                .next(&block_indexes, block_manager.clone())
+                .await
+                .err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).await.err(),
+            query.next(&block_indexes, block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

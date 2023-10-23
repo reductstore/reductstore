@@ -4,19 +4,23 @@
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use prost_wkt_types::Timestamp;
+use std::cmp::min;
 
+use log::error;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, Weak};
 use tokio::fs::File;
-use tokio::io::AsyncSeekExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::RwLock;
 
 use crate::storage::proto::*;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 
-pub const DEFAULT_MAX_READ_CHUNK: u64 = 1024 * 1024 * 512;
+pub const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 64;
 
 /// Helper class for basic operations on blocks.
 ///
@@ -97,8 +101,6 @@ impl BlockManager {
             }
         }
 
-        self.clean_readers_or_writers(block_id);
-
         let mut file = File::options().write(true).create(true).open(path).await?;
         let offset = block.records[record_index].begin;
         file.seek(SeekFrom::Start(offset)).await?;
@@ -108,16 +110,17 @@ impl BlockManager {
 
     pub fn finish_write_record(
         &mut self,
-        block: &Block,
+        block_id: u64,
         state: record::State,
         record_index: usize,
     ) -> Result<(), ReductError> {
-        let block_id = ts_to_us(&block.begin_time.clone().unwrap());
         let mut block = self.load(block_id)?;
         block.records[record_index].state = i32::from(state);
         block.invalid = state == record::State::Invalid;
 
         *self.writer_count.get_mut(&block_id).unwrap() -= 1;
+
+        self.clean_readers_or_writers(block_id);
 
         self.save(block)
     }
@@ -140,12 +143,15 @@ impl BlockManager {
             }
         }
 
-        self.clean_readers_or_writers(block_id);
-
         let mut file = File::options().read(true).open(path).await?;
         let offset = block.records[record_index].begin;
         file.seek(SeekFrom::Start(offset)).await?;
         Ok(file)
+    }
+
+    fn finish_read_record(&mut self, block_id: u64) {
+        *self.reader_count.get_mut(&block_id).unwrap() -= 1;
+        self.clean_readers_or_writers(block_id);
     }
 
     fn path_to_desc(&self, begin_time: &Timestamp) -> PathBuf {
@@ -325,6 +331,142 @@ impl ManageBlock for BlockManager {
     }
 }
 
+pub async fn spawn_read_task(
+    block_manager: Arc<RwLock<BlockManager>>,
+    block: &Block,
+    record_index: usize,
+) -> Result<Receiver<Result<Bytes, ReductError>>, ReductError> {
+    let file = block_manager
+        .write()
+        .await
+        .begin_read(&block, record_index)
+        .await?;
+
+    let (tx, rx) = channel(1);
+    let content_size =
+        (block.records[record_index].end - block.records[record_index].begin) as usize;
+    let block_id = ts_to_us(&block.begin_time.clone().unwrap());
+    tokio::spawn(async move {
+        let mut file = file;
+        let mut offset = 0;
+        loop {
+            let chunk_size = min(content_size - offset, DEFAULT_MAX_READ_CHUNK) as usize;
+            let mut buf = vec![0; chunk_size];
+
+            let read = match file.read(&mut buf).await {
+                Ok(read) => read,
+                Err(e) => {
+                    let _ = tx
+                        .send(Err(ReductError::internal_server_error(&format!(
+                            "Failed to read record chunk: {}",
+                            e
+                        ))))
+                        .await;
+                    break;
+                }
+            };
+
+            if read == 0 {
+                let _ = tx
+                    .send(Err(ReductError::internal_server_error(
+                        "Failed to read record chunk: EOF",
+                    )))
+                    .await;
+                break;
+            }
+            if let Err(e) = tx.send(Ok(Bytes::from(buf))).await {
+                error!("Failed to send record chunk: {}", e);
+                break;
+            }
+
+            offset += read;
+            if offset == content_size {
+                break;
+            }
+        }
+
+        block_manager.write().await.finish_read_record(block_id);
+    });
+    Ok(rx)
+}
+
+pub async fn spawn_write_task(
+    block_manager: Arc<RwLock<BlockManager>>,
+    block: Block,
+    record_index: usize,
+) -> Result<Sender<Result<Bytes, ReductError>>, ReductError> {
+    let mut file = {
+        let mut bm = block_manager.write().await;
+        bm.save(block.clone())?;
+        bm.begin_write(&block, record_index).await?
+    };
+
+    let (tx, mut rx) = channel(1);
+    let bm = Arc::clone(&block_manager);
+    let block_id = ts_to_us(block.begin_time.as_ref().unwrap());
+    let content_size =
+        (block.records[record_index].end - block.records[record_index].begin) as usize;
+    tokio::spawn(async move {
+        let recv = async move {
+            let mut written_bytes: usize = 0;
+            while let Some(chunk) = rx.recv().await {
+                written_bytes =
+                    write_transaction(&content_size, &mut file, written_bytes, chunk).await?;
+                if written_bytes >= content_size {
+                    break;
+                }
+            }
+
+            if written_bytes < content_size {
+                Err(ReductError::bad_request(
+                    "Content is smaller than in content-length",
+                ))
+            } else {
+                file.flush().await?;
+                Ok(())
+            }
+        };
+
+        let state = match recv.await {
+            Ok(_) => record::State::Finished,
+            Err(err) => {
+                error!("Failed to write record: {}", err);
+                if err.status == ErrorCode::InternalServerError {
+                    record::State::Invalid
+                } else {
+                    record::State::Errored
+                }
+            }
+        };
+
+        if let Err(err) = bm
+            .write()
+            .await
+            .finish_write_record(block_id, state, record_index)
+        {
+            error!("Failed to finish writing record: {}", err);
+        }
+    });
+    Ok(tx)
+}
+
+async fn write_transaction(
+    content_size: &usize,
+    file: &mut File,
+    mut written_bytes: usize,
+    chunk: Result<Bytes, ReductError>,
+) -> Result<usize, ReductError> {
+    let chunk = chunk?;
+    written_bytes += chunk.len();
+    if written_bytes > *content_size {
+        return Err(ReductError::bad_request(
+            "Content is bigger than in content-length",
+        ));
+    }
+    file.write_all(chunk.as_ref()).await?;
+    Ok(written_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,6 +587,7 @@ mod tests {
                 labels: vec![],
                 content_type: "".to_string(),
             });
+            block_manager.save(block.clone()).unwrap();
 
             let _ = block_manager.begin_write(&block, 0).await.unwrap();
 
@@ -455,6 +598,11 @@ mod tests {
                     block_id
                 )))
             );
+
+            block_manager
+                .finish_write_record(block_id, record::State::Finished, 0)
+                .unwrap();
+            assert_eq!(block_manager.remove(block_id).err(), None);
         }
     }
 
@@ -476,17 +624,19 @@ mod tests {
                 labels: vec![],
                 content_type: "".to_string(),
             });
-            {
-                let _ = block_manager.begin_read(&block, 0).await.unwrap();
 
-                assert_eq!(
-                    block_manager.remove(block_id).err(),
-                    Some(ReductError::internal_server_error(&format!(
-                        "Cannot remove block {} because it is still in use",
-                        block_id
-                    )))
-                );
-            }
+            let _ = block_manager.begin_read(&block, 0).await.unwrap();
+
+            assert_eq!(
+                block_manager.remove(block_id).err(),
+                Some(ReductError::internal_server_error(&format!(
+                    "Cannot remove block {} because it is still in use",
+                    block_id
+                )))
+            );
+
+            block_manager.finish_read_record(block_id);
+            assert_eq!(block_manager.remove(block_id).err(), None);
         }
     }
 

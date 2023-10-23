@@ -82,8 +82,16 @@ impl RecordReader {
         &mut self.rx
     }
 
+    pub fn into_rx(self) -> Receiver<Result<Bytes, ReductError>> {
+        self.rx
+    }
+
     pub fn last(&self) -> bool {
         self.last
+    }
+
+    pub fn record(&self) -> &Record {
+        &self.record
     }
 }
 

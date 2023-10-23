@@ -2,11 +2,13 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::{
-    find_first_block, BlockManager, ManageBlock, DEFAULT_MAX_READ_CHUNK, DESCRIPTOR_FILE_EXT,
+    find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock,
+    DEFAULT_MAX_READ_CHUNK, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
+use std::cmp::min;
 
 use crate::storage::bucket::RecordReader;
 use log::{debug, error, warn};
@@ -14,15 +16,16 @@ use prost::bytes::Bytes;
 use prost::Message;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::entry_api::EntryInfo;
+use rustls::internal::msgs::handshake::Random;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Sender};
-use tokio::sync::RwLock as TokioRwLock;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::RwLock;
 
 pub type Labels = HashMap<String, String>;
 
@@ -31,7 +34,7 @@ pub struct Entry {
     name: String,
     settings: EntrySettings,
     block_index: BTreeSet<u64>,
-    block_manager: Arc<TokioRwLock<BlockManager>>,
+    block_manager: Arc<RwLock<BlockManager>>,
     record_count: u64,
     size: u64,
     queries: HashMap<u64, Box<dyn Query + Send + Sync>>,
@@ -51,7 +54,7 @@ impl Entry {
             name: name.to_string(),
             settings,
             block_index: BTreeSet::new(),
-            block_manager: Arc::new(TokioRwLock::new(BlockManager::new(path.join(name)))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path.join(name)))),
             record_count: 0,
             size: 0,
             queries: HashMap::new(),
@@ -105,7 +108,7 @@ impl Entry {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
             settings: options,
             block_index,
-            block_manager: Arc::new(TokioRwLock::new(BlockManager::new(path))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
             record_count,
             size,
             queries: HashMap::new(),
@@ -220,57 +223,7 @@ impl Entry {
         }
 
         let record_index = block.records.len() - 1;
-        let mut file = {
-            let mut bm = self.block_manager.write().await;
-            bm.save(block.clone())?;
-            bm.begin_write(&block, record_index).await?
-        };
-
-        let (tx, mut rx) = channel(1);
-        let bm = Arc::clone(&self.block_manager);
-        tokio::spawn(async move {
-            let recv = async move {
-                let mut written_bytes: usize = 0;
-                while let Some(chunk) = rx.recv().await {
-                    written_bytes =
-                        Self::write_transaction(&content_size, &mut file, written_bytes, chunk)
-                            .await?;
-                    if written_bytes >= content_size {
-                        break;
-                    }
-                }
-
-                if written_bytes < content_size {
-                    Err(ReductError::bad_request(
-                        "Content is smaller than in content-length",
-                    ))
-                } else {
-                    file.flush().await?;
-                    Ok(())
-                }
-            };
-
-            let state = match recv.await {
-                Ok(_) => record::State::Finished,
-                Err(err) => {
-                    error!("Failed to write record: {}", err);
-                    if err.status == ErrorCode::InternalServerError {
-                        record::State::Invalid
-                    } else {
-                        record::State::Errored
-                    }
-                }
-            };
-
-            if let Err(err) = bm
-                .write()
-                .await
-                .finish_write_record(&block, state, record_index)
-            {
-                error!("Failed to finish writing record: {}", err);
-            }
-        });
-
+        let tx = spawn_write_task(Arc::clone(&self.block_manager), block, record_index).await?;
         Ok(tx)
     }
 
@@ -316,7 +269,8 @@ impl Entry {
             return not_found_err;
         }
 
-        let record = &block.records[record_index.unwrap()];
+        let record_index = record_index.unwrap();
+        let record = &block.records[record_index];
         if record.state == record::State::Started as i32 {
             return Err(ReductError::too_early(&format!(
                 "Record with timestamp {} is still being written",
@@ -331,30 +285,7 @@ impl Entry {
             )));
         }
 
-        let file = self
-            .block_manager
-            .write()
-            .await
-            .begin_read(&block, record_index.unwrap())
-            .await?;
-
-        let (tx, rx) = channel(1);
-        tokio::spawn(async move {
-            let mut file = file;
-            let mut offset = 0;
-            let mut buf = vec![0; DEFAULT_MAX_READ_CHUNK as usize];
-            loop {
-                let read = file.read(&mut buf).await.unwrap();
-                if read == 0 {
-                    break;
-                }
-                offset += read;
-                if let Err(e) = tx.send(Ok(Bytes::from(buf[..read].to_vec()))).await {
-                    error!("Failed to send record chunk: {}", e);
-                    break;
-                }
-            }
-        });
+        let rx = spawn_read_task(Arc::clone(&self.block_manager), &block, record_index).await?;
 
         Ok(RecordReader::new(rx, record.clone(), true))
     }
@@ -402,8 +333,9 @@ impl Entry {
             .queries
             .get_mut(&query_id)
             .ok_or_else(|| ReductError::not_found(&format!("Query {} not found", query_id)))?;
-        let mut bm = self.block_manager.write().await;
-        query.next(&self.block_index, &mut bm).await
+        query
+            .next(&self.block_index, Arc::clone(&self.block_manager))
+            .await
     }
 
     /// Returns stats about the entry.
@@ -491,23 +423,6 @@ impl Entry {
     fn remove_expired_query(&mut self) {
         self.queries
             .retain(|_, query| matches!(query.state(), QueryState::Running(_)));
-    }
-
-    async fn write_transaction(
-        content_size: &usize,
-        file: &mut File,
-        mut written_bytes: usize,
-        chunk: Result<Bytes, ReductError>,
-    ) -> Result<usize, ReductError> {
-        let chunk = chunk?;
-        written_bytes += chunk.len();
-        if written_bytes > *content_size {
-            return Err(ReductError::bad_request(
-                "Content is bigger than in content-length",
-            ));
-        }
-        file.write_all(chunk.as_ref()).await?;
-        Ok(written_bytes)
     }
 }
 

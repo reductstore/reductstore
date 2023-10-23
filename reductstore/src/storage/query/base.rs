@@ -11,8 +11,9 @@ use crate::storage::proto::Record;
 use axum::async_trait;
 use bytes::Bytes;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 #[derive(PartialEq, Debug)]
 pub enum QueryState {
@@ -47,7 +48,7 @@ pub trait Query {
     async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &mut BlockManager,
+        block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError>;
 
     /// Get the state of the query.
@@ -94,7 +95,7 @@ pub(crate) mod tests {
     use tokio::io::AsyncWriteExt;
 
     #[fixture]
-    pub(crate) async fn block_manager_and_index() -> (BlockManager, BTreeSet<u64>) {
+    pub(crate) async fn block_manager_and_index() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
@@ -196,6 +197,7 @@ pub(crate) mod tests {
         write_record!(block, 0, b"0123456789");
 
         block_manager.finish(&block).unwrap();
+        let block_manager = Arc::new(RwLock::new(block_manager));
         (block_manager, BTreeSet::from([0, 1000]))
     }
 }

@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use hermit_abi::read;
 use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::BTreeSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// A query that is limited to a certain number of records.
 pub(crate) struct LimitedQuery {
@@ -32,7 +33,7 @@ impl Query for LimitedQuery {
     async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &mut BlockManager,
+        block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         // TODO: It could be done better, maybe it make sense to move the limit into HistoricalQuery instead of manipulating the state here.
         if let Running(count) = self.state() {
@@ -49,7 +50,8 @@ impl Query for LimitedQuery {
 
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
-                return Ok(reader);
+                let record = reader.record().clone();
+                return Ok(RecordReader::new(reader.into_rx(), record, true));
             }
         }
 
@@ -70,7 +72,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_limit(#[future] block_manager_and_index: (BlockManager, BTreeSet<u64>)) {
+    async fn test_limit(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let (mut block_manager, block_indexes) = block_manager_and_index.await;
         let mut query = LimitedQuery::new(
             0,
@@ -82,14 +86,14 @@ mod tests {
         );
 
         let reader = query
-            .next(&block_indexes, &mut block_manager)
+            .next(&block_indexes, block_manager.clone())
             .await
             .unwrap();
         assert_eq!(reader.timestamp(), 0);
         assert!(reader.last());
 
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).await.err(),
+            query.next(&block_indexes, block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
