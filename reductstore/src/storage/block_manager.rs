@@ -20,7 +20,7 @@ use tokio::sync::RwLock;
 use crate::storage::proto::*;
 use reduct_base::error::{ErrorCode, ReductError};
 
-pub const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 64;
+pub const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 
 /// Helper class for basic operations on blocks.
 ///
