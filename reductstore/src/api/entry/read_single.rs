@@ -15,12 +15,10 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::Stream;
 
-use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::sync::mpsc::Receiver;
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub async fn read_single_record(

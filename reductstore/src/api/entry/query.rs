@@ -6,7 +6,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::query::base::QueryOptions;
-use async_trait::async_trait;
+
 use axum::extract::{Path, Query, State};
 use axum::headers::HeaderMap;
 use reduct_base::error::ErrorCode;

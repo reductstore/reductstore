@@ -3,28 +3,27 @@
 
 use crate::storage::block_manager::{
     find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock,
-    DEFAULT_MAX_READ_CHUNK, DESCRIPTOR_FILE_EXT,
+    DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
-use std::cmp::min;
 
 use crate::storage::bucket::RecordReader;
 use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
-use rustls::internal::msgs::handshake::Random;
+
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::fs::File;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 
 pub type Labels = HashMap<String, String>;

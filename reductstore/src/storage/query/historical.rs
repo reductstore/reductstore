@@ -4,17 +4,14 @@
 use std::collections::BTreeSet;
 
 use async_trait::async_trait;
-use bytes::Bytes;
-use log::error;
+
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc::Sender;
+
 use tokio::sync::RwLock;
 
-use crate::storage::block_manager::{
-    find_first_block, spawn_read_task, BlockManager, ManageBlock, DEFAULT_MAX_READ_CHUNK,
-};
+use crate::storage::block_manager::{find_first_block, spawn_read_task, BlockManager, ManageBlock};
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
@@ -195,7 +192,7 @@ mod tests {
     ) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (mut block_manager, index) = block_manager_and_index.await;
+        let (block_manager, index) = block_manager_and_index.await;
         {
             let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
@@ -219,7 +216,7 @@ mod tests {
     ) {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
 
-        let (mut block_manager, index) = block_manager_and_index.await;
+        let (block_manager, index) = block_manager_and_index.await;
         {
             let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
@@ -254,7 +251,7 @@ mod tests {
     ) {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
 
-        let (mut block_manager, index) = block_manager_and_index.await;
+        let (block_manager, index) = block_manager_and_index.await;
         {
             let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
 
@@ -306,9 +303,9 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (mut block_manager, index) = block_manager_and_index.await;
+        let (block_manager, index) = block_manager_and_index.await;
         {
-            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
+            let reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
                 reader.labels(),
                 &vec![
@@ -351,7 +348,7 @@ mod tests {
             },
         );
 
-        let (mut block_manager, index) = block_manager_and_index.await;
+        let (block_manager, index) = block_manager_and_index.await;
         {
             let reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(

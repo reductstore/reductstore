@@ -14,13 +14,10 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::Stream;
 
-use crate::storage::proto::{ts_to_us, Record};
-use hermit_abi::read;
-use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 // GET /:bucket/:entry/batch?q=<number>

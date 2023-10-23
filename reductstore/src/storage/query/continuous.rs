@@ -9,11 +9,11 @@ use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::BTreeSet;
 
 use crate::storage::bucket::RecordReader;
-use crate::storage::proto::Record;
+
 use async_trait::async_trait;
-use bytes::Bytes;
+
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
+
 use tokio::sync::RwLock;
 
 pub struct ContinuousQuery {
@@ -87,7 +87,7 @@ mod tests {
     async fn test_query(
         #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
     ) {
-        let (mut block_manager, block_indexes) = block_manager_and_index.await;
+        let (block_manager, block_indexes) = block_manager_and_index.await;
 
         let mut query = ContinuousQuery::new(
             900,

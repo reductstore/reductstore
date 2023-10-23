@@ -7,7 +7,7 @@ use crate::storage::query::base::QueryState::Running;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
-use hermit_abi::read;
+
 use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -75,7 +75,7 @@ mod tests {
     async fn test_limit(
         #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
     ) {
-        let (mut block_manager, block_indexes) = block_manager_and_index.await;
+        let (block_manager, block_indexes) = block_manager_and_index.await;
         let mut query = LimitedQuery::new(
             0,
             u64::MAX,

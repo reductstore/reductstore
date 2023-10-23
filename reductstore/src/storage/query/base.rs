@@ -7,10 +7,9 @@ use reduct_base::error::ReductError;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::storage::bucket::RecordReader;
-use crate::storage::proto::Record;
+
 use axum::async_trait;
-use bytes::Bytes;
-use std::sync::mpsc::Sender;
+
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
