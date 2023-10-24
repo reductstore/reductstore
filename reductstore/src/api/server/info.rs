@@ -16,8 +16,9 @@ pub async fn info(
     headers: HeaderMap,
 ) -> Result<ServerInfoAxum, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+
     Ok(ServerInfoAxum::from(
-        components.storage.read().await.info()?,
+        components.storage.read().await.info().await?,
     ))
 }
 
@@ -29,8 +30,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_info(components: Arc<Components>, headers: HeaderMap) {
-        let info = info(State(components), headers).await.unwrap();
+    async fn test_info(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let info = info(State(components.await), headers).await.unwrap();
         assert_eq!(info.0.bucket_count, 2);
     }
 }

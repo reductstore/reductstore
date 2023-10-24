@@ -135,7 +135,6 @@ mod tests {
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
-    use crate::storage::writer::{Chunk, WriteChunk};
     use axum::extract::{BodyStream, FromRequest, Path};
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
     use axum::http::Request;
@@ -145,7 +144,7 @@ mod tests {
     use rstest::fixture;
 
     #[fixture]
-    pub(crate) fn components() -> Arc<Components> {
+    pub(crate) async fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
         let mut storage = Storage::new(data_path.clone());
@@ -163,15 +162,14 @@ mod tests {
             ("b".to_string(), "[a,b]".to_string()),
         ]);
 
-        storage
+        let sender = storage
             .get_mut_bucket("bucket-1")
             .unwrap()
-            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
-            .unwrap()
-            .write()
-            .unwrap()
-            .write(Chunk::Last(Bytes::from("Hey!!!")))
+            .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)
+            .await
             .unwrap();
+        sender.send(Ok(Bytes::from("Hey!!!"))).await.unwrap();
+        sender.closed().await;
 
         let permissions = Permissions {
             read: vec!["bucket-1".to_string(), "bucket-2".to_string()],

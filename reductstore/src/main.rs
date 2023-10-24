@@ -67,6 +67,13 @@ async fn main() {
     tokio::spawn(shutdown_ctrl_c(handle.clone()));
     tokio::spawn(shutdown_signal(handle.clone()));
 
+    // Ensure that the process exits with a non-zero exit code on panic.
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_panic(info);
+        std::process::exit(1);
+    }));
+
     if cfg.cert_path.is_empty() {
         axum_server::bind(addr)
             .handle(handle)

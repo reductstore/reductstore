@@ -11,6 +11,7 @@ mod write_single;
 use crate::api::entry::read_batched::read_batched_records;
 use crate::api::entry::read_single::read_single_record;
 use crate::api::entry::remove::remove_entry;
+
 use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;
 use crate::api::Components;
@@ -61,7 +62,7 @@ where
     }
 }
 
-fn check_and_extract_ts_or_query_id(
+async fn check_and_extract_ts_or_query_id(
     storage: &Storage,
     params: HashMap<String, String>,
     bucket_name: &String,
@@ -89,7 +90,8 @@ fn check_and_extract_ts_or_query_id(
             storage
                 .get_bucket(bucket_name)?
                 .get_entry(entry_name)?
-                .info()?
+                .info()
+                .await?
                 .latest_record,
         )
     } else {

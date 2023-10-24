@@ -2,13 +2,16 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
+use crate::storage::bucket::RecordReader;
 use crate::storage::query::base::QueryState::Running;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
-use crate::storage::reader::RecordReader;
+use async_trait::async_trait;
+
 use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::BTreeSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// A query that is limited to a certain number of records.
 pub(crate) struct LimitedQuery {
@@ -25,12 +28,13 @@ impl LimitedQuery {
     }
 }
 
+#[async_trait]
 impl Query for LimitedQuery {
-    fn next(
+    async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
+        block_manager: Arc<RwLock<BlockManager>>,
+    ) -> Result<RecordReader, ReductError> {
         // TODO: It could be done better, maybe it make sense to move the limit into HistoricalQuery instead of manipulating the state here.
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
@@ -42,15 +46,16 @@ impl Query for LimitedQuery {
             }
         }
 
-        let (reader, last) = self.query.next(block_indexes, block_manager)?;
+        let reader = self.query.next(block_indexes, block_manager).await?;
 
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
-                return Ok((reader, true));
+                let record = reader.record().clone();
+                return Ok(RecordReader::new(reader.into_rx(), record, true));
             }
         }
 
-        Ok((reader, last))
+        Ok(reader)
     }
 
     fn state(&self) -> &QueryState {
@@ -66,10 +71,11 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_limit(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
-        let (block_manager, block_indexes) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+    #[tokio::test]
+    async fn test_limit(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
+        let (block_manager, block_indexes) = block_manager_and_index.await;
         let mut query = LimitedQuery::new(
             0,
             u64::MAX,
@@ -79,12 +85,15 @@ mod tests {
             },
         );
 
-        let (reader, last) = query.next(&block_indexes, &mut block_manager).unwrap();
-        assert_eq!(reader.read().unwrap().timestamp(), 0);
-        assert!(last);
+        let reader = query
+            .next(&block_indexes, block_manager.clone())
+            .await
+            .unwrap();
+        assert_eq!(reader.timestamp(), 0);
+        assert!(reader.last());
 
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).err(),
+            query.next(&block_indexes, block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

@@ -5,12 +5,12 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::storage::entry::Labels;
-use crate::storage::writer::{Chunk, WriteChunk};
 use axum::extract::{BodyStream, Path, Query, State};
-use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
-use bytes::Bytes;
+use axum::headers::{Expect, Header, HeaderMap};
+
 use futures_util::StreamExt;
 use log::{debug, error};
+use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ pub async fn write_record(
     )
     .await?;
 
-    let check_request_and_get_writer = async {
+    let check_request_and_get_sender = async {
         if !params.contains_key("ts") {
             return Err(HttpError::new(
                 ErrorCode::UnprocessableEntity,
@@ -87,44 +87,46 @@ pub async fn write_record(
             }
         }
 
-        let writer = {
+        let sender = {
             let mut storage = components.storage.write().await;
             let bucket = storage.get_mut_bucket(bucket)?;
-            bucket.begin_write(
-                path.get("entry_name").unwrap(),
-                ts,
-                content_size,
-                content_type,
-                labels,
-            )?
+            bucket
+                .write_record(
+                    path.get("entry_name").unwrap(),
+                    ts,
+                    content_size,
+                    content_type,
+                    labels,
+                )
+                .await?
         };
-        Ok(writer)
+        Ok(sender)
     };
 
-    match check_request_and_get_writer.await {
-        Ok(writer) => {
+    match check_request_and_get_sender.await {
+        Ok(sender) => {
             while let Some(chunk) = stream.next().await {
-                let mut writer = writer.write().unwrap();
                 let chunk = match chunk {
-                    Ok(chunk) => chunk,
+                    Ok(chunk) => Ok(chunk),
                     Err(e) => {
-                        writer.write(Chunk::Error)?;
                         error!("Error while receiving data: {}", e);
-                        return Err(HttpError::from(e));
+                        Err(HttpError::from(e).0)
                     }
                 };
-                writer.write(Chunk::Data(chunk))?;
+                sender.send(chunk).await.map(|_| ()).map_err(|e| {
+                    error!("Error while writing data: {}", e);
+                    HttpError::from(ReductError::bad_request(&format!(
+                        "Error while writing data: {}",
+                        e
+                    )))
+                })?;
             }
 
-            writer.write().unwrap().write(Chunk::Last(Bytes::new()))?;
             Ok(())
         }
         Err(e) => {
             // drain the stream in the case if a client doesn't support Expect: 100-continue
-            if !headers
-                .get(Expect::name())
-                .eq(&Some(&HeaderValue::from_static("100-continue")))
-            {
+            if !!headers.contains_key(Expect::name()) {
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}
             }
@@ -140,17 +142,20 @@ mod tests {
 
     use axum::headers::{Authorization, HeaderMapExt};
     use rstest::*;
+    use tokio::time::sleep;
 
     use crate::api::tests::{components, empty_body, path_to_entry_1};
+    use crate::storage::proto::record::Label;
 
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
     ) {
+        let components = components.await;
         write_record(
             State(Arc::clone(&components)),
             headers,
@@ -164,6 +169,8 @@ mod tests {
         .await
         .unwrap();
 
+        sleep(std::time::Duration::from_millis(10)).await; // wait for the record to be written
+
         let record = components
             .storage
             .read()
@@ -171,21 +178,26 @@ mod tests {
             .get_bucket("bucket-1")
             .unwrap()
             .begin_read("entry-1", 1)
+            .await
             .unwrap();
 
         assert_eq!(
-            record.read().unwrap().labels().get("x"),
-            Some(&"y".to_string())
+            record.labels()[0],
+            Label {
+                name: "x".to_string(),
+                value: "y".to_string(),
+            }
         );
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_write_bucket_not_found(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         headers: HeaderMap,
         #[future] empty_body: BodyStream,
     ) {
+        let components = components.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
@@ -213,11 +225,12 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bad_ts(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: BodyStream,
     ) {
+        let components = components.await;
         let err = write_record(
             State(Arc::clone(&components)),
             headers,

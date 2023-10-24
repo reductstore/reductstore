@@ -4,12 +4,17 @@
 use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::historical::HistoricalQuery;
-use crate::storage::reader::RecordReader;
 use reduct_base::error::{ErrorCode, ReductError};
 
 use std::collections::BTreeSet;
 
-use std::sync::{Arc, RwLock};
+use crate::storage::bucket::RecordReader;
+
+use async_trait::async_trait;
+
+use std::sync::Arc;
+
+use tokio::sync::RwLock;
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
@@ -33,17 +38,18 @@ impl ContinuousQuery {
     }
 }
 
+#[async_trait]
 impl Query for ContinuousQuery {
-    fn next(
+    async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
-        match self.query.next(block_indexes, block_manager) {
-            Ok((record, last)) => {
-                self.next_start = record.read().unwrap().timestamp() + 1;
+        block_manager: Arc<RwLock<BlockManager>>,
+    ) -> Result<RecordReader, ReductError> {
+        match self.query.next(block_indexes, block_manager).await {
+            Ok(reader) => {
+                self.next_start = reader.timestamp() + 1;
                 self.count += 1;
-                Ok((record, last))
+                Ok(reader)
             }
             Err(ReductError {
                 status: ErrorCode::NoContent,
@@ -77,9 +83,11 @@ mod tests {
     use crate::storage::query::base::tests::block_manager_and_index;
 
     #[rstest]
-    fn test_query(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
-        let (block_manager, block_indexes) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
+    #[tokio::test]
+    async fn test_query(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
+        let (block_manager, block_indexes) = block_manager_and_index.await;
 
         let mut query = ContinuousQuery::new(
             900,
@@ -90,18 +98,24 @@ mod tests {
             },
         );
         {
-            let (reader, _) = query.next(&block_indexes, &mut block_manager).unwrap();
-            assert_eq!(reader.read().unwrap().timestamp(), 1000);
+            let reader = query
+                .next(&block_indexes, block_manager.clone())
+                .await
+                .unwrap();
+            assert_eq!(reader.timestamp(), 1000);
         }
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).err(),
+            query
+                .next(&block_indexes, block_manager.clone())
+                .await
+                .err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
         assert_eq!(
-            query.next(&block_indexes, &mut block_manager).err(),
+            query.next(&block_indexes, block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

@@ -33,9 +33,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_update_bucket(#[future] components: Arc<Components>, headers: HeaderMap) {
         update_bucket(
-            State(components),
+            State(components.await),
             Path("bucket-1".to_string()),
             headers,
             BucketSettingsAxum::default(),
@@ -46,9 +46,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket_not_found(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_update_bucket_not_found(
+        #[future] components: Arc<Components>,
+        headers: HeaderMap,
+    ) {
         let err = update_bucket(
-            State(components),
+            State(components.await),
             Path("not-found".to_string()),
             headers,
             BucketSettingsAxum::default(),

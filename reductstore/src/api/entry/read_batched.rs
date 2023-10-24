@@ -5,9 +5,7 @@ use crate::api::entry::MethodExtractor;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
-use crate::storage::bucket::Bucket;
-
-use crate::storage::reader::RecordReader;
+use crate::storage::bucket::{Bucket, RecordReader};
 
 use axum::body::StreamBody;
 use axum::extract::{Path, Query, State};
@@ -19,7 +17,7 @@ use futures_util::Stream;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 // GET /:bucket/:entry/batch?q=<number>
@@ -64,9 +62,10 @@ pub async fn read_batched_records(
         query_id,
         method.name == "HEAD",
     )
+    .await
 }
 
-fn fetch_and_response_batched_records(
+async fn fetch_and_response_batched_records(
     bucket: &mut Bucket,
     entry_name: &str,
     query_id: u64,
@@ -78,16 +77,16 @@ fn fetch_and_response_batched_records(
 
     let make_header = |reader: &RecordReader| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
-
         let mut meta_data = vec![
             reader.content_length().to_string(),
-            reader.content_type().clone(),
+            reader.content_type().to_string(),
         ];
 
         let mut labels: Vec<String> = reader
             .labels()
             .iter()
-            .map(|(k, v)| {
+            .map(|label| {
+                let (k, v) = (&label.name, &label.value);
                 if v.contains(",") {
                     format!("{}=\"{}\"", k, v)
                 } else {
@@ -109,14 +108,12 @@ fn fetch_and_response_batched_records(
     let mut readers = Vec::new();
     let mut last = false;
     loop {
-        let _reader = match bucket.next(entry_name, query_id) {
-            Ok((reader, _)) => {
+        let _reader = match bucket.next(entry_name, query_id).await {
+            Ok(reader) => {
                 {
-                    let reader_lock = reader.read().unwrap();
-
-                    let (name, value) = make_header(&reader_lock);
+                    let (name, value) = make_header(&reader);
                     header_size += (name.as_str().len() + value.to_str().unwrap().len() + 2) as u64;
-                    body_size += reader_lock.content_length();
+                    body_size += reader.content_length();
                     headers.insert(name, value);
                 }
                 readers.push(reader);
@@ -150,7 +147,7 @@ fn fetch_and_response_batched_records(
     headers.insert("x-reduct-last", last.to_string().parse().unwrap());
 
     struct ReadersWrapper {
-        readers: Vec<Arc<RwLock<RecordReader>>>,
+        readers: Vec<RecordReader>,
         empty_body: bool,
     }
 
@@ -169,13 +166,20 @@ fn fetch_and_response_batched_records(
                 return Poll::Ready(None);
             }
 
-            if self.readers[0].read().unwrap().is_done() {
-                self.readers.remove(0);
-            }
-
-            match self.readers[0].write().unwrap().read() {
-                Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                Err(err) => Poll::Ready(Some(Err(HttpError::from(err)))),
+            loop {
+                if let Poll::Ready(data) = self.readers[0].rx().poll_recv(_cx) {
+                    match data {
+                        Some(Ok(chunk)) => {
+                            return Poll::Ready(Some(Ok(chunk)));
+                        }
+                        Some(Err(err)) => {
+                            return Poll::Ready(Some(Err(HttpError::from(err))));
+                        }
+                        None => self.readers.remove(0),
+                    };
+                } else {
+                    return Poll::Pending;
+                }
             }
         }
         fn size_hint(&self) -> (usize, Option<usize>) {
@@ -207,12 +211,13 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_batched_read(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
+        let components = components.await;
         let query_id = {
             components
                 .storage

@@ -1681,6 +1681,7 @@ dependencies = [
 name = "reductstore"
 version = "1.8.0-dev"
 dependencies = [
+ "async-trait",
  "axum",
  "axum-server",
  "bytes",

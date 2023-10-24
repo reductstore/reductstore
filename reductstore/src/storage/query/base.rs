@@ -2,13 +2,17 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
-use crate::storage::reader::RecordReader;
 use reduct_base::error::ReductError;
 
 use std::collections::{BTreeSet, HashMap};
 
-use std::sync::{Arc, RwLock};
+use crate::storage::bucket::RecordReader;
+
+use axum::async_trait;
+
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 #[derive(PartialEq, Debug)]
 pub enum QueryState {
@@ -21,6 +25,8 @@ pub enum QueryState {
 }
 
 /// Query is used to iterate over the records among multiple blocks.
+
+#[async_trait]
 pub trait Query {
     ///  Get next record
     ///
@@ -38,11 +44,11 @@ pub trait Query {
     ///
     /// * `HTTPError` - If the record cannot be read.
     /// * `HTTPError(NoContent)` - If all records have been read.
-    fn next(
+    async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError>;
+        block_manager: Arc<RwLock<BlockManager>>,
+    ) -> Result<RecordReader, ReductError>;
 
     /// Get the state of the query.
     fn state(&self) -> &QueryState;
@@ -81,14 +87,14 @@ pub(crate) mod tests {
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::proto::record::{Label, State as RecordState};
     use crate::storage::proto::Record;
-    use crate::storage::writer::{Chunk, WriteChunk};
-    use bytes::Bytes;
+
     use prost_wkt_types::Timestamp;
     use rstest::fixture;
     use tempfile::tempdir;
+    use tokio::io::AsyncWriteExt;
 
     #[fixture]
-    pub(crate) fn block_manager_and_index() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
+    pub(crate) async fn block_manager_and_index() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
@@ -145,28 +151,19 @@ pub(crate) mod tests {
         block.size = 20;
         block_manager.save(block.clone()).unwrap();
 
-        let block_manager = Arc::new(RwLock::new(block_manager));
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
+        macro_rules! write_record {
+            ($block:expr, $index:expr, $content:expr) => {{
+                let mut file = block_manager.begin_write(&$block, $index).await.unwrap();
+                file.write($content).await.unwrap();
+                file.flush().await.unwrap();
+            }};
         }
 
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 1).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
-        }
+        write_record!(block, 0, b"0123456789");
+        write_record!(block, 1, b"0123456789");
 
-        block_manager.write().unwrap().finish(&block).unwrap();
-
-        let mut block = block_manager.write().unwrap().start(1000, 10).unwrap();
+        block_manager.finish(&block).unwrap();
+        let mut block = block_manager.start(1000, 10).unwrap();
 
         block.records.push(Record {
             timestamp: Some(Timestamp {
@@ -194,18 +191,12 @@ pub(crate) mod tests {
             nanos: 1000_000,
         });
         block.size = 10;
-        block_manager.write().unwrap().save(block.clone()).unwrap();
+        block_manager.save(block.clone()).unwrap();
 
-        {
-            let writer = BlockManager::begin_write(Arc::clone(&block_manager), &block, 0).unwrap();
-            writer
-                .write()
-                .unwrap()
-                .write(Chunk::Last(Bytes::from("0123456789")))
-                .unwrap();
-        }
+        write_record!(block, 0, b"0123456789");
 
-        block_manager.write().unwrap().finish(&block).unwrap();
+        block_manager.finish(&block).unwrap();
+        let block_manager = Arc::new(RwLock::new(block_manager));
         (block_manager, BTreeSet::from([0, 1000]))
     }
 }

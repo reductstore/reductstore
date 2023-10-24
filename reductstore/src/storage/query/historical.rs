@@ -3,13 +3,17 @@
 
 use std::collections::BTreeSet;
 
-use std::sync::{Arc, RwLock};
+use async_trait::async_trait;
+
+use std::sync::Arc;
 use std::time::Instant;
 
-use crate::storage::block_manager::{find_first_block, BlockManager, ManageBlock};
+use tokio::sync::RwLock;
+
+use crate::storage::block_manager::{find_first_block, spawn_read_task, BlockManager, ManageBlock};
+use crate::storage::bucket::RecordReader;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
-use crate::storage::reader::RecordReader;
 use reduct_base::error::ReductError;
 
 pub struct HistoricalQuery {
@@ -34,17 +38,18 @@ impl HistoricalQuery {
     }
 }
 
+#[async_trait]
 impl Query for HistoricalQuery {
-    fn next<'a>(
+    async fn next(
         &mut self,
-        block_index: &BTreeSet<u64>,
-        block_manager: &mut BlockManager,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
+        block_indexes: &BTreeSet<u64>,
+        block_manager: Arc<RwLock<BlockManager>>,
+    ) -> Result<RecordReader, ReductError> {
         self.last_update = Instant::now();
 
         let check_next_block = |start, stop| -> bool {
-            let start = find_first_block(block_index, start);
-            let next_block_id = block_index.range(start..stop).next();
+            let start = find_first_block(block_indexes, start);
+            let next_block_id = block_indexes.range(start..stop).next();
             if let Some(next_block_id) = next_block_id {
                 next_block_id >= &stop
             } else {
@@ -92,16 +97,16 @@ impl Query for HistoricalQuery {
 
         let mut records: Vec<Record> = Vec::new();
         let mut block = Block::default();
-        let start = find_first_block(block_index, &self.start_time);
-        for block_id in block_index.range(start..self.stop_time) {
+        let start = find_first_block(block_indexes, &self.start_time);
+        for block_id in block_indexes.range(start..self.stop_time) {
             block = if let Some(block) = &self.block {
                 if block.begin_time == Some(us_to_ts(block_id)) {
                     block.clone()
                 } else {
-                    block_manager.load(*block_id)?
+                    block_manager.read().await.load(*block_id)?
                 }
             } else {
-                block_manager.load(*block_id)?
+                block_manager.read().await.load(*block_id)?
             };
 
             if block.invalid {
@@ -143,7 +148,8 @@ impl Query for HistoricalQuery {
             *idx += 1;
         }
 
-        Ok((block_manager.begin_read(&block, record_idx)?, last))
+        let rx = spawn_read_task(Arc::clone(&block_manager), &block, record_idx).await?;
+        Ok(RecordReader::new(rx, record.clone(), last))
     }
 
     fn state(&self) -> &QueryState {
@@ -162,6 +168,7 @@ mod tests {
 
     use bytes::Bytes;
 
+    use crate::storage::proto::record::Label;
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
     use std::collections::HashMap;
@@ -178,21 +185,23 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_1_rec(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_ok_1_rec(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
+        let (block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let res = query.next(&index, &mut block_manager);
+            let res = query.next(&index, block_manager.clone()).await;
             assert!(res.is_err());
             assert_eq!(res.err().unwrap().status, ErrorCode::NoContent);
             assert_eq!(query.state(), &QueryState::Done);
@@ -200,33 +209,32 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_2_recs(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_ok_2_recs(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (block_manager, index) = block_manager_and_index.await;
         {
-            {
-                let (reader, _) = query.next(&index, &mut block_manager).unwrap();
-                assert_eq!(
-                    reader.write().unwrap().read().unwrap(),
-                    Some(Bytes::from("0123456789"))
-                );
-                assert!(reader.write().unwrap().read().unwrap().is_none())
-            }
+            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
+            assert_eq!(
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
+            );
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -236,39 +244,40 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_3_recs(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_ok_3_recs(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
 
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
-                reader.write().unwrap().read().unwrap(),
-                Some(Bytes::from("0123456789"))
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
             );
-            assert!(reader.write().unwrap().read().unwrap().is_none())
+            assert!(reader.rx().recv().await.is_none())
         }
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -278,7 +287,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_include(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_include(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -290,22 +302,26 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
-                reader.read().unwrap().labels(),
-                &HashMap::from([
-                    ("block".to_string(), "2".to_string()),
-                    ("record".to_string(), "1".to_string()),
-                ])
+                reader.labels(),
+                &vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "2".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "1".to_string(),
+                    },
+                ]
             );
         }
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -315,7 +331,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_exclude(block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>)) {
+    #[tokio::test]
+    async fn test_query_exclude(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -328,32 +347,42 @@ mod tests {
             },
         );
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
-
+        let (block_manager, index) = block_manager_and_index.await;
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
-                reader.read().unwrap().labels(),
-                &HashMap::from([
-                    ("block".to_string(), "1".to_string()),
-                    ("record".to_string(), "2".to_string()),
-                ])
+                reader.labels(),
+                &vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "1".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "2".to_string(),
+                    },
+                ]
             );
         }
         {
-            let (reader, _) = query.next(&index, &mut block_manager).unwrap();
+            let reader = query.next(&index, block_manager.clone()).await.unwrap();
             assert_eq!(
-                reader.read().unwrap().labels(),
-                &HashMap::from([
-                    ("block".to_string(), "2".to_string()),
-                    ("record".to_string(), "1".to_string()),
-                ])
+                reader.labels(),
+                &vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "2".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "1".to_string(),
+                    },
+                ]
             );
         }
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -363,20 +392,24 @@ mod tests {
     }
 
     #[rstest]
-    fn test_ignoring_errored_records(
-        block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    #[tokio::test]
+    async fn test_ignoring_errored_records(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
     ) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
 
-        let (block_manager, index) = block_manager_and_index;
-        let mut block_manager = block_manager.write().unwrap();
+        let (block_manager, index) = block_manager_and_index.await;
 
-        let mut block = block_manager.load(*index.get(&0u64).unwrap()).unwrap();
+        let mut block = block_manager
+            .read()
+            .await
+            .load(*index.get(&0u64).unwrap())
+            .unwrap();
         block.records[0].state = record::State::Errored as i32;
-        block_manager.save(block).unwrap();
+        block_manager.write().await.save(block).unwrap();
 
         assert_eq!(
-            query.next(&index, &mut block_manager).err(),
+            query.next(&index, block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

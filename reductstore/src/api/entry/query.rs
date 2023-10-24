@@ -1,6 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::api::entry::QueryInfoAxum;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
@@ -8,14 +9,10 @@ use crate::storage::query::base::QueryOptions;
 
 use axum::extract::{Path, Query, State};
 use axum::headers::HeaderMap;
-
-use std::collections::HashMap;
-
-use std::sync::Arc;
-
-use crate::api::entry::QueryInfoAxum;
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
@@ -40,7 +37,7 @@ pub async fn query(
     let entry_info = {
         let mut storage = components.storage.write().await;
         let bucket = storage.get_mut_bucket(bucket_name)?;
-        bucket.get_entry(entry_name)?.info()?
+        bucket.get_entry(entry_name)?.info().await?
     };
 
     let start = match params.get("start") {
@@ -131,10 +128,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let mut params = HashMap::new();
         params.insert("limit".to_string(), "1".to_string());
 
@@ -155,11 +153,11 @@ mod tests {
             .get_mut_entry("entry-1")
             .unwrap();
 
-        let (_, last) = entry.next(query.id).unwrap();
-        assert!(last);
+        let reader = entry.next(query.id).await.unwrap();
+        assert!(reader.last());
 
         assert_eq!(
-            entry.next(query.id).err().unwrap().status,
+            entry.next(query.id).await.err().unwrap().status,
             ErrorCode::NoContent
         );
     }
@@ -167,10 +165,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_bad_limit(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let mut params = HashMap::new();
         params.insert("limit".to_string(), "a".to_string());
 

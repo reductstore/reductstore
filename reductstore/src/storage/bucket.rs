@@ -1,24 +1,20 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::storage::entry::{Entry, EntrySettings, Labels};
+use crate::storage::proto::record::Label;
+use crate::storage::proto::{ts_to_us, BucketSettings as ProtoBucketSettings, Record};
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
-
+use reduct_base::error::ReductError;
+use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
+use reduct_base::msg::entry_api::EntryInfo;
 use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
-
-use std::sync::{Arc, RwLock};
-
-use crate::storage::entry::{Entry, EntrySettings, Labels};
-use crate::storage::proto::BucketSettings as ProtoBucketSettings;
-use crate::storage::reader::RecordReader;
-use crate::storage::writer::RecordWriter;
-use reduct_base::error::ReductError;
-use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
-use reduct_base::msg::entry_api::EntryInfo;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 const DEFAULT_MAX_RECORDS: u64 = 256;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -51,6 +47,50 @@ impl Into<BucketSettings> for ProtoBucketSettings {
             max_block_records: self.max_block_records,
             max_block_size: self.max_block_size,
         }
+    }
+}
+
+pub struct RecordReader {
+    rx: Receiver<Result<Bytes, ReductError>>,
+    record: Record,
+    last: bool,
+}
+
+impl RecordReader {
+    pub fn new(rx: Receiver<Result<Bytes, ReductError>>, record: Record, last: bool) -> Self {
+        RecordReader { rx, record, last }
+    }
+
+    pub fn timestamp(&self) -> u64 {
+        ts_to_us(self.record.timestamp.as_ref().unwrap())
+    }
+
+    pub fn content_type(&self) -> &str {
+        self.record.content_type.as_str()
+    }
+
+    pub fn labels(&self) -> &Vec<Label> {
+        &self.record.labels
+    }
+
+    pub fn content_length(&self) -> u64 {
+        self.record.end - self.record.begin
+    }
+
+    pub fn rx(&mut self) -> &mut Receiver<Result<Bytes, ReductError>> {
+        &mut self.rx
+    }
+
+    pub fn into_rx(self) -> Receiver<Result<Bytes, ReductError>> {
+        self.rx
+    }
+
+    pub fn last(&self) -> bool {
+        self.last
+    }
+
+    pub fn record(&self) -> &Record {
+        &self.record
     }
 }
 
@@ -211,13 +251,13 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub fn info(&self) -> Result<FullBucketInfo, ReductError> {
+    pub async fn info(&self) -> Result<FullBucketInfo, ReductError> {
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
         let mut entries: Vec<EntryInfo> = vec![];
         for entry in self.entries.values() {
-            let info = entry.info()?;
+            let info = entry.info().await?;
             entries.push(info.clone());
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
@@ -249,19 +289,21 @@ impl Bucket {
     ///
     /// # Returns
     ///
-    /// * `RecordWriter` - The record writer to write the record content in chunks.
+    /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_write(
+    pub async fn write_record(
         &mut self,
         name: &str,
         time: u64,
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<Arc<RwLock<RecordWriter>>, ReductError> {
-        self.keep_quota_for(content_size)?;
+    ) -> Result<Sender<Result<Bytes, ReductError>>, ReductError> {
+        self.keep_quota_for(content_size).await?;
         let entry = self.get_or_create_entry(name)?;
-        entry.begin_write(time, content_size, content_type, labels)
+        entry
+            .begin_write(time, content_size, content_type, labels)
+            .await
     }
 
     /// Starts a new record read with
@@ -275,13 +317,9 @@ impl Bucket {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_read(
-        &self,
-        name: &str,
-        time: u64,
-    ) -> Result<Arc<RwLock<RecordReader>>, ReductError> {
+    pub async fn begin_read(&self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
         let entry = self.get_entry(name)?;
-        entry.begin_read(time)
+        entry.begin_read(time).await
     }
 
     /// Get the next record from the entry
@@ -296,13 +334,9 @@ impl Bucket {
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `bool` - True if the record is the last one.
     /// * `HTTPError` - The error if any.
-    pub fn next(
-        &mut self,
-        name: &str,
-        time: u64,
-    ) -> Result<(Arc<RwLock<RecordReader>>, bool), ReductError> {
+    pub async fn next(&mut self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
         let entry = self.get_mut_entry(name)?;
-        entry.next(time)
+        entry.next(time).await
     }
 
     /// Remove entry from the bucket
@@ -323,30 +357,27 @@ impl Bucket {
         Ok(())
     }
 
-    fn keep_quota_for(&mut self, content_size: usize) -> Result<(), ReductError> {
+    async fn keep_quota_for(&mut self, content_size: usize) -> Result<(), ReductError> {
         match self.settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
             QuotaType::FIFO => {
-                let mut size = self.info()?.info.size + content_size as u64;
+                let mut size = self.info().await?.info.size + content_size as u64;
                 while size > self.settings.quota_size.unwrap_or(0) {
                     debug!(
                         "Need more space. Remove an oldest block from bucket '{}'",
                         self.name()
                     );
 
-                    let mut candidates: Vec<&Entry> = self
-                        .entries
-                        .iter()
-                        .map(|entry| entry.1)
-                        .collect::<Vec<&Entry>>();
-                    candidates.sort_by_key(|entry| match entry.info() {
-                        Ok(info) => info.oldest_record,
-                        Err(_) => u64::MAX, //todo: handle error
-                    });
+                    let mut candidates: Vec<(u64, &Entry)> = vec![];
+                    for (_, entry) in self.entries.iter() {
+                        let info = entry.info().await?;
+                        candidates.push((info.oldest_record, entry));
+                    }
+                    candidates.sort_by_key(|entry| entry.0);
 
                     let candidates = candidates
                         .iter()
-                        .map(|entry| entry.name().to_string())
+                        .map(|(_, entry)| entry.name().to_string())
                         .collect::<Vec<String>>();
 
                     let mut success = false;
@@ -357,6 +388,7 @@ impl Bucket {
                             .get_mut(&name)
                             .unwrap()
                             .try_remove_oldest_block()
+                            .await
                         {
                             Ok(_) => {
                                 success = true;
@@ -377,19 +409,20 @@ impl Bucket {
                         ));
                     }
 
-                    size = self.info()?.info.size + content_size as u64;
+                    size = self.info().await?.info.size + content_size as u64;
                 }
 
                 // Remove empty entries
-                for name in self
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.1.info().unwrap().size == 0)
-                    .map(|entry| entry.0.clone())
-                    .collect::<Vec<String>>()
-                {
-                    debug!("Remove empty entry '{}'", name);
-                    self.remove_entry(&name)?;
+                let mut names_to_remove = vec![];
+                for (name, entry) in &self.entries {
+                    if entry.info().await?.size != 0 {
+                        continue;
+                    }
+                    names_to_remove.push(name.clone());
+                }
+
+                for name in names_to_remove {
+                    self.entries.remove(&name);
                 }
                 Ok(())
             }
@@ -472,7 +505,6 @@ impl Bucket {
 mod tests {
     use super::*;
     use crate::storage::entry::Labels;
-    use crate::storage::writer::{Chunk, WriteChunk};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
@@ -535,7 +567,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_quota_keeping(path: PathBuf) {
+    #[tokio::test]
+    async fn test_quota_keeping(path: PathBuf) {
         let mut bucket = bucket(
             BucketSettings {
                 max_block_size: Some(5),
@@ -546,17 +579,17 @@ mod tests {
             path,
         );
 
-        write(&mut bucket, "test-1", 0, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.size, 4);
+        write(&mut bucket, "test-1", 0, b"test").await.unwrap();
+        assert_eq!(bucket.info().await.unwrap().info.size, 4);
 
-        write(&mut bucket, "test-2", 1, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.size, 8);
+        write(&mut bucket, "test-2", 1, b"test").await.unwrap();
+        assert_eq!(bucket.info().await.unwrap().info.size, 8);
 
-        write(&mut bucket, "test-3", 2, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.size, 8);
+        write(&mut bucket, "test-3", 2, b"test").await.unwrap();
+        assert_eq!(bucket.info().await.unwrap().info.size, 8);
 
         assert_eq!(
-            read(&mut bucket, "test-1", 0).err(),
+            read(&mut bucket, "test-1", 0).await.err(),
             Some(ReductError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
             ))
@@ -564,7 +597,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_blob_bigger_than_quota(path: PathBuf) {
+    #[tokio::test]
+    async fn test_blob_bigger_than_quota(path: PathBuf) {
         let mut bucket = bucket(
             BucketSettings {
                 max_block_size: Some(5),
@@ -575,10 +609,10 @@ mod tests {
             path,
         );
 
-        write(&mut bucket, "test-1", 0, b"test").unwrap();
-        assert_eq!(bucket.info().unwrap().info.size, 4);
+        write(&mut bucket, "test-1", 0, b"test").await.unwrap();
+        assert_eq!(bucket.info().await.unwrap().info.size, 4);
 
-        let result = write(&mut bucket, "test-2", 1, b"0123456789___");
+        let result = write(&mut bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(
             result.err(),
             Some(ReductError::internal_server_error(
@@ -588,8 +622,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_remove_entry(mut bucket: Bucket) {
-        write(&mut bucket, "test-1", 1, b"test").unwrap();
+    #[tokio::test]
+    async fn test_remove_entry(mut bucket: Bucket) {
+        write(&mut bucket, "test-1", 1, b"test").await.unwrap();
 
         bucket.remove_entry("test-1").unwrap();
         assert_eq!(
@@ -611,8 +646,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_info(provisioned_bucket: Bucket) {
-        let info = provisioned_bucket.info().unwrap().info;
+    #[tokio::test]
+    async fn test_provisioned_info(provisioned_bucket: Bucket) {
+        let info = provisioned_bucket.info().await.unwrap().info;
         assert_eq!(info.is_provisioned, true);
     }
 
@@ -628,29 +664,35 @@ mod tests {
         );
     }
 
-    fn write(
+    async fn write(
         bucket: &mut Bucket,
         entry_name: &str,
         time: u64,
         content: &'static [u8],
     ) -> Result<(), ReductError> {
-        let writer = bucket.begin_write(
-            entry_name,
-            time,
-            content.len(),
-            "".to_string(),
-            Labels::new(),
-        )?;
-        writer
-            .write()
-            .unwrap()
-            .write(Chunk::Last(Bytes::from(content)))?;
+        let sender = bucket
+            .write_record(
+                entry_name,
+                time,
+                content.len(),
+                "".to_string(),
+                Labels::new(),
+            )
+            .await?;
+        sender.send(Ok(Bytes::from(content))).await.map_err(|e| {
+            ReductError::internal_server_error(format!("Failed to send data: {}", e).as_str())
+        })?;
+        sender.closed().await;
         Ok(())
     }
 
-    fn read(bucket: &mut Bucket, entry_name: &str, time: u64) -> Result<Vec<u8>, ReductError> {
-        let reader = bucket.begin_read(entry_name, time)?;
-        let data = reader.write().unwrap().read()?.unwrap();
+    async fn read(
+        bucket: &mut Bucket,
+        entry_name: &str,
+        time: u64,
+    ) -> Result<Vec<u8>, ReductError> {
+        let mut reader = bucket.begin_read(entry_name, time).await?;
+        let data = reader.rx().recv().await.unwrap().unwrap();
         Ok(data.to_vec())
     }
 

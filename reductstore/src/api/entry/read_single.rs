@@ -6,9 +6,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::Components;
 use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
-use crate::storage::bucket::Bucket;
-
-use crate::storage::reader::RecordReader;
+use crate::storage::bucket::{Bucket, RecordReader};
 
 use axum::body::StreamBody;
 use axum::extract::{Path, Query, State};
@@ -19,7 +17,7 @@ use futures_util::Stream;
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
@@ -44,24 +42,25 @@ pub async fn read_single_record(
     let mut storage = components.storage.write().await;
 
     let (query_id, ts) =
-        check_and_extract_ts_or_query_id(&storage, params, bucket_name, entry_name)?;
+        check_and_extract_ts_or_query_id(&storage, params, bucket_name, entry_name).await?;
 
     let bucket = storage.get_mut_bucket(bucket_name)?;
     fetch_and_response_single_record(bucket, entry_name, ts, query_id, method.name() == "HEAD")
+        .await
 }
 
-fn fetch_and_response_single_record(
+async fn fetch_and_response_single_record(
     bucket: &mut Bucket,
     entry_name: &str,
     ts: Option<u64>,
     query_id: Option<u64>,
     empty_body: bool,
 ) -> Result<impl IntoResponse, HttpError> {
-    let make_headers = |reader: &Arc<RwLock<RecordReader>>, last| {
+    let make_headers = |record_reader: &RecordReader| {
         let mut headers = HeaderMap::new();
 
-        let reader = reader.read().unwrap();
-        for (k, v) in reader.labels() {
+        for label in record_reader.labels() {
+            let (k, v) = (&label.name, &label.value);
             headers.insert(
                 format!("x-reduct-label-{}", k)
                     .parse::<HeaderName>()
@@ -72,31 +71,33 @@ fn fetch_and_response_single_record(
 
         headers.insert(
             "content-type",
-            reader.content_type().to_string().parse().unwrap(),
+            record_reader.content_type().to_string().parse().unwrap(),
         );
         headers.insert(
             "content-length",
-            reader.content_length().to_string().parse().unwrap(),
+            record_reader.content_length().to_string().parse().unwrap(),
         );
         headers.insert(
             "x-reduct-time",
-            reader.timestamp().to_string().parse().unwrap(),
+            record_reader.timestamp().to_string().parse().unwrap(),
         );
-        headers.insert("x-reduct-last", u8::from(last).to_string().parse().unwrap());
+        headers.insert(
+            "x-reduct-last",
+            u8::from(record_reader.last()).to_string().parse().unwrap(),
+        );
         headers
     };
 
-    let (reader, last) = if let Some(ts) = ts {
-        let reader = bucket.begin_read(entry_name, ts)?;
-        (reader, true)
+    let reader = if let Some(ts) = ts {
+        bucket.begin_read(entry_name, ts).await?
     } else {
-        bucket.next(entry_name, query_id.unwrap())?
+        bucket.next(entry_name, query_id.unwrap()).await?
     };
 
-    let headers = make_headers(&reader, last);
+    let headers = make_headers(&reader);
 
     struct ReaderWrapper {
-        reader: Arc<RwLock<RecordReader>>,
+        reader: RecordReader,
         empty_body: bool,
     }
 
@@ -105,19 +106,21 @@ fn fetch_and_response_single_record(
         type Item = Result<Bytes, HttpError>;
 
         fn poll_next(
-            self: Pin<&mut ReaderWrapper>,
-            _cx: &mut Context<'_>,
+            mut self: Pin<&mut ReaderWrapper>,
+            cx: &mut Context<'_>,
         ) -> Poll<Option<Self::Item>> {
             if self.empty_body {
                 return Poll::Ready(None);
             }
 
-            if self.reader.read().unwrap().is_done() {
-                return Poll::Ready(None);
-            }
-            match self.reader.write().unwrap().read() {
-                Ok(chunk) => Poll::Ready(Some(Ok(chunk.unwrap()))),
-                Err(e) => Poll::Ready(Some(Err(HttpError::from(e)))),
+            if let Poll::Ready(data) = self.reader.rx().poll_recv(cx) {
+                match data {
+                    Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
+                    Some(Err(e)) => Poll::Ready(Some(Err(HttpError::from(e)))),
+                    None => Poll::Ready(None),
+                }
+            } else {
+                Poll::Pending
             }
         }
         fn size_hint(&self) -> (usize, Option<usize>) {
@@ -148,12 +151,13 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_ts(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
+        let components = components.await;
         let mut response = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
@@ -184,12 +188,13 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_query(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
+        let components = components.await;
         let query_id = {
             components
                 .storage
@@ -230,11 +235,16 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_single_read_bucket_not_found(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_single_read_bucket_not_found(
+        #[future] components: Arc<Components>,
+        headers: HeaderMap,
+    ) {
+        let components = components.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entru-1".to_string()),
         ]));
+
         let err = read_single_record(
             State(Arc::clone(&components)),
             path,
@@ -255,10 +265,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_ts_not_found(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let err = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
@@ -279,10 +290,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_bad_ts(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let err = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
@@ -301,7 +313,7 @@ mod tests {
             err,
             HttpError::new(
                 ErrorCode::UnprocessableEntity,
-                "'ts' must be an unix timestamp in microseconds"
+                "'ts' must be an unix timestamp in microseconds",
             )
         );
     }
@@ -309,10 +321,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_query_not_found(
-        components: Arc<Components>,
+        #[future] components: Arc<Components>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let components = components.await;
         let err = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,

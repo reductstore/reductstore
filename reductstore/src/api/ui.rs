@@ -77,9 +77,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_img_decoding(components: Arc<Components>) {
+    async fn test_img_decoding(#[future] components: Arc<Components>) {
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
-        let response = show_ui(State(components), request)
+        let response = show_ui(State(components.await), request)
             .await
             .unwrap()
             .into_response();

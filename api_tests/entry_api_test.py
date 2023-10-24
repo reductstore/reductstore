@@ -35,7 +35,6 @@ def test_read_write_entries_ok_with_labels(base_url, session, bucket):
         headers={"x-reduct-label-x": "0", "x-reduct-label-y": "1"},
     )
     assert resp.status_code == 200
-
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts=1000")
     assert resp.status_code == 200
     assert resp.headers["x-reduct-label-x"] == "0"
@@ -63,12 +62,12 @@ def test_read_write_entries_big_blob_ok(base_url, session, bucket):
 
 @requires_env("API_TOKEN")
 def test__read_with_read_token(
-    base_url,
-    session,
-    bucket,
-    token_without_permissions,
-    token_read_bucket,
-    token_write_bucket,
+        base_url,
+        session,
+        bucket,
+        token_without_permissions,
+        token_read_bucket,
+        token_write_bucket,
 ):
     """Needs read permissions to read"""
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts=1000", headers=auth_headers(""))
@@ -124,7 +123,7 @@ def test_latest_record(base_url, session, bucket):
 
 def test_read_write_big_blob(base_url, session, bucket):
     """Should read and write a big blob"""
-    blob = np.random.bytes(2**20).hex()
+    blob = np.random.bytes(2 ** 20).hex()
     ts = 1000
 
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data=blob)
@@ -138,7 +137,7 @@ def test_read_write_big_blob(base_url, session, bucket):
 
 def test_write_big_blob_with_error(base_url, session, bucket):
     """Should write a big blob with error and don't crush"""
-    blob = np.random.bytes(2**20).hex()
+    blob = np.random.bytes(2 ** 20).hex()
     ts = 1000
 
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data=blob)
@@ -153,12 +152,12 @@ def test_write_big_blob_with_error(base_url, session, bucket):
 
 @requires_env("API_TOKEN")
 def test__write_with_write_token(
-    base_url,
-    session,
-    bucket,
-    token_without_permissions,
-    token_read_bucket,
-    token_write_bucket,
+        base_url,
+        session,
+        bucket,
+        token_without_permissions,
+        token_read_bucket,
+        token_write_bucket,
 ):
     """Needs write permissions to write"""
     resp = session.post(
@@ -355,12 +354,12 @@ def test_query_continuous(base_url, session, bucket):
 
 @requires_env("API_TOKEN")
 def test__query_with_read_token(
-    base_url,
-    session,
-    bucket,
-    token_without_permissions,
-    token_read_bucket,
-    token_write_bucket,
+        base_url,
+        session,
+        bucket,
+        token_without_permissions,
+        token_read_bucket,
+        token_write_bucket,
 ):
     """Needs read permissions to query"""
     resp = session.get(f"{base_url}/b/{bucket}/entry/q", headers=auth_headers(""))
@@ -384,7 +383,7 @@ def test__query_with_read_token(
 
 
 def test__head_entry_ok(base_url, session, bucket):
-    """Should return only headers and no body because request is of type HEAD."""
+    """Should return only headers and nobody because request is of type HEAD."""
     ts = 1000
     entry_name = "testentry"
     dummy_data = "dummy data"
@@ -399,12 +398,12 @@ def test__head_entry_ok(base_url, session, bucket):
 
 @requires_env("API_TOKEN")
 def test__head_entry_with_full_access_token(
-    base_url,
-    session,
-    bucket,
-    token_without_permissions,
-    token_write_bucket,
-    token_read_bucket,
+        base_url,
+        session,
+        bucket,
+        token_without_permissions,
+        token_write_bucket,
+        token_read_bucket,
 ):
     """Needs authenticated token. Should not return the body, only headers."""
     ts = 1000
@@ -508,7 +507,7 @@ def test_read_batched_query_required(base_url, session, bucket):
     resp = session.get(f"{base_url}/b/{bucket}/entry/batch")
     assert resp.status_code == 422
     assert (
-        resp.headers["x-reduct-error"] == "'q' parameter is required for batched reads"
+            resp.headers["x-reduct-error"] == "'q' parameter is required for batched reads"
     )
 
 
@@ -550,12 +549,12 @@ def test_remove_entry(base_url, session, bucket):
 
 @requires_env("API_TOKEN")
 def test_remove_with_bucket_write_permissions(
-    base_url,
-    session,
-    bucket,
-    token_without_permissions,
-    token_read_bucket,
-    token_write_bucket,
+        base_url,
+        session,
+        bucket,
+        token_without_permissions,
+        token_read_bucket,
+        token_write_bucket,
 ):
     """Needs write permissions to remove entry"""
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts=1000", data="some_data1")
@@ -579,12 +578,13 @@ def test_remove_with_bucket_write_permissions(
     )
     assert resp.status_code == 200
 
+
 def test_write_batched_records(base_url, session, bucket):
     """Should write batched records"""
     ts = 1000
     resp = session.post(
         f"{base_url}/b/{bucket}/entry/batch",
-        data=b"x"*1000_000 + b"y"*1000_000 + b"z"*1000_000,
+        data=b"x" * 1000_000 + b"y" * 1000_000 + b"z" * 1000_000,
         headers={
             "x-reduct-time-1000": "1000000,",
             "x-reduct-time-1100": "1000000,",
@@ -599,18 +599,18 @@ def test_write_batched_records(base_url, session, bucket):
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
     assert resp.status_code == 200
-    assert resp.content == b"x"*1000_000
+    assert resp.content == b"x" * 1000_000
     assert resp.headers["content-type"] == "application/octet-stream"
     assert resp.headers["x-reduct-time"] == "1000"
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
     assert resp.status_code == 200
-    assert resp.content == b"y"*1000_000
+    assert resp.content == b"y" * 1000_000
     assert resp.headers["content-type"] == "application/octet-stream"
     assert resp.headers["x-reduct-time"] == "1100"
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
     assert resp.status_code == 200
-    assert resp.content == b"z"*1000_000
+    assert resp.content == b"z" * 1000_000
     assert resp.headers["content-type"] == "application/octet-stream"
     assert resp.headers["x-reduct-time"] == "1200"

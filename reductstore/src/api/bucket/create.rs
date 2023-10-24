@@ -40,9 +40,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_create_bucket(#[future] components: Arc<Components>, headers: HeaderMap) {
         create_bucket(
-            State(components),
+            State(components.await),
             Path("bucket-3".to_string()),
             headers,
             BucketSettingsAxum::default(),
@@ -53,9 +53,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_already_exists(components: Arc<Components>, headers: HeaderMap) {
+    async fn test_create_bucket_already_exists(
+        #[future] components: Arc<Components>,
+        headers: HeaderMap,
+    ) {
         let err = create_bucket(
-            State(components),
+            State(components.await),
             Path("bucket-1".to_string()),
             headers,
             BucketSettingsAxum::default(),
