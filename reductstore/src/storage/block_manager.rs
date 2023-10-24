@@ -307,6 +307,7 @@ impl ManageBlock for BlockManager {
 
         let descr_block = std::fs::OpenOptions::new()
             .read(true)
+            .write(true)
             .open(self.path_to_desc(block.begin_time.as_ref().unwrap()))?;
         descr_block.sync_all()?;
 
