@@ -125,7 +125,7 @@ impl Entry {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) async fn write_record(
+    pub(crate) async fn begin_write(
         &mut self,
         time: u64,
         content_size: usize,
@@ -663,13 +663,12 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_begin_read_still_written(mut entry: Entry) {
-        {
-            let sender = entry
-                .write_record(1000000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender.send(Ok(Bytes::from(vec![0; 5]))).await.unwrap();
-        }
+        let sender = entry
+            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        sender.send(Ok(Bytes::from(vec![0; 5]))).await.unwrap();
+
         let reader = entry.begin_read(1000000).await;
         assert_eq!(
             reader.err(),
@@ -885,7 +884,7 @@ mod tests {
 
     async fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), ReductError> {
         let sender = entry
-            .write_record(time, data.len(), "text/plain".to_string(), Labels::new())
+            .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
             .await?;
         let x = sender.send(Ok(Bytes::from(data))).await;
         sender.closed().await;

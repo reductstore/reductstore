@@ -302,7 +302,7 @@ impl Bucket {
         self.keep_quota_for(content_size).await?;
         let entry = self.get_or_create_entry(name)?;
         entry
-            .write_record(time, content_size, content_type, labels)
+            .begin_write(time, content_size, content_type, labels)
             .await
     }
 

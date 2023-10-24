@@ -296,13 +296,19 @@ impl ManageBlock for BlockManager {
     }
 
     fn finish(&mut self, block: &Block) -> Result<(), ReductError> {
+        /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
-        let file = std::fs::OpenOptions::new()
+        let data_block = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)?;
-        file.set_len(block.size as u64)?;
-        file.sync_all()?;
+        data_block.set_len(block.size)?;
+        data_block.sync_all()?;
+
+        let descr_block = std::fs::OpenOptions::new()
+            .read(true)
+            .open(self.path_to_desc(block.begin_time.as_ref().unwrap()))?;
+        descr_block.sync_all()?;
 
         self.last_block = None;
         Ok(())
@@ -583,7 +589,7 @@ mod tests {
             DATA_FILE_EXT
         )))
         .unwrap();
-        assert_eq!(file.metadata().unwrap().len(), 0);
+        assert_eq!(file.metadata().unwrap().len(), 5);
     }
 
     #[rstest]
