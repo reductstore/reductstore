@@ -302,6 +302,7 @@ impl ManageBlock for BlockManager {
             .write(true)
             .open(path)?;
         file.set_len(block.size as u64)?;
+        file.sync_all()?;
 
         self.last_block = None;
         Ok(())
