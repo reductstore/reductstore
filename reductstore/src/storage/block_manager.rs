@@ -149,7 +149,7 @@ impl BlockManager {
         Ok(file)
     }
 
-    fn finish_read_record(&mut self, block_id: u64) {
+    pub fn finish_read_record(&mut self, block_id: u64) {
         *self.reader_count.get_mut(&block_id).unwrap() -= 1;
         self.clean_readers_or_writers(block_id);
     }
@@ -331,6 +331,22 @@ impl ManageBlock for BlockManager {
     }
 }
 
+/// Spawn a task that reads a record from a block.
+/// The task will send chunks of the record to the receiver or an error if file reading failed
+///
+/// # Arguments
+///
+/// * `block_manager` - Block manager to use.
+/// * `block` - Block to read from.
+/// * `record_index` - Index of the record to read.
+///
+/// # Returns
+///
+/// * `Ok(rx)` - Receiver to receive chunks from.
+///
+/// # Errors
+///
+/// * `ReductError` - If could not open the block
 pub async fn spawn_read_task(
     block_manager: Arc<RwLock<BlockManager>>,
     block: &Block,
@@ -390,6 +406,21 @@ pub async fn spawn_read_task(
     Ok(rx)
 }
 
+/// Spawn a task that writes a record to a block.
+///
+/// # Arguments
+///
+/// * `block_manager` - Block manager to use.
+/// * `block` - Block to write to.
+/// * `record_index` - Index of the record to write.
+///
+/// # Returns
+///
+/// * `Ok(tx)` - Sender to send chunks to.
+///
+/// # Errors
+///
+/// * `ReductError` - If the block is invalid or the record is already finished.
 pub async fn spawn_write_task(
     block_manager: Arc<RwLock<BlockManager>>,
     block: Block,
@@ -470,14 +501,19 @@ async fn write_transaction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Buf;
     use rstest::{fixture, rstest};
+    use std::hash::Hasher;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
+    use tokio::time::sleep;
 
     #[rstest]
-    fn test_starting_block(mut block_manager: BlockManager) {
-        let block = block_manager.start(1_000_005, 1024).unwrap();
+    #[tokio::test]
+    async fn test_starting_block(#[future] block_manager: BlockManager) {
+        let mut block_manager = block_manager.await;
 
+        let block = block_manager.start(1_000_005, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
         assert_eq!(
             ts,
@@ -509,8 +545,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_loading_block(mut block_manager: BlockManager) {
-        block_manager.start(1, 1024).unwrap();
+    #[tokio::test]
+    async fn test_loading_block(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+
+        block_manager.start(block_id, 1024).unwrap();
         let block = block_manager.start(20000005, 1024).unwrap();
 
         let ts = block.begin_time.clone().unwrap();
@@ -519,16 +558,20 @@ mod tests {
     }
 
     #[rstest]
-    fn test_start_reading(mut block_manager: BlockManager) {
-        let block = block_manager.start(1, 1024).unwrap();
+    #[tokio::test]
+    async fn test_start_reading(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+        let block = block_manager.start(block_id, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
         let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
         assert_eq!(loaded_block, block);
     }
 
     #[rstest]
-    fn test_finish_block(mut block_manager: BlockManager) {
-        let block = block_manager.start(1, 1024).unwrap();
+    #[tokio::test]
+    async fn test_finish_block(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+        let block = block_manager.start(block_id, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
         let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
         assert_eq!(loaded_block, block);
@@ -546,9 +589,73 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_start_writing(mut block_manager: BlockManager) {
-        let block_id = 1;
-        let mut block = block_manager.start(block_id, 1024).unwrap().clone();
+    async fn test_remove_with_writers(
+        #[future] block_manager: BlockManager,
+        #[future] block: Block,
+        block_id: u64,
+    ) {
+        let mut block_manager = Arc::new(RwLock::new(block_manager.await));
+        let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            block_manager.write().await.remove(block_id).err(),
+            Some(ReductError::internal_server_error(&format!(
+                "Cannot remove block {} because it is still in use",
+                block_id
+            )))
+        );
+
+        tx.send(Ok(Bytes::from("hallo"))).await.unwrap();
+        drop(tx);
+        sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
+        assert_eq!(block_manager.write().await.remove(block_id).err(), None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_block_with_readers(
+        #[future] mut block_manager: BlockManager,
+        #[future] block: Block,
+        block_id: u64,
+    ) {
+        let block_manager = Arc::new(RwLock::new(block_manager.await));
+
+        let mut rx = spawn_read_task(Arc::clone(&block_manager), &block.await, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            block_manager.write().await.remove(block_id).err(),
+            Some(ReductError::internal_server_error(&format!(
+                "Cannot remove block {} because it is still in use",
+                block_id
+            )))
+        );
+
+        assert_eq!(rx.recv().await.unwrap().unwrap().as_ref(), b"hallo");
+        drop(rx);
+        sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
+
+        assert_eq!(block_manager.write().await.remove(block_id).err(), None);
+    }
+
+    #[fixture]
+    fn block_id() -> u64 {
+        1
+    }
+
+    #[fixture]
+    async fn block(#[future] block_manager: BlockManager, block_id: u64) -> Block {
+        block_manager.await.load(block_id).unwrap()
+    }
+
+    #[fixture]
+    async fn block_manager(block_id: u64) -> BlockManager {
+        let path = tempdir();
+        let mut bm = BlockManager::new(path.unwrap().into_path());
+        let mut block = bm.start(block_id, 1024).unwrap().clone();
         block.records.push(Record {
             timestamp: Some(Timestamp {
                 seconds: 1,
@@ -560,90 +667,13 @@ mod tests {
             labels: vec![],
             content_type: "".to_string(),
         });
+        bm.save(block.clone()).unwrap();
 
-        block_manager.save(block.clone()).unwrap();
-
-        let mut file = block_manager.begin_write(&block, 0).await.unwrap();
+        let mut file = bm.begin_write(&block, 0).await.unwrap();
         file.write(b"hallo").await.unwrap();
+        bm.finish_write_record(block_id, record::State::Finished, 0)
+            .unwrap();
 
-        block_manager.finish(&block).unwrap();
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_remove_with_writers(mut block_manager: BlockManager) {
-        let block_id = 1;
-
-        {
-            let mut block = block_manager.start(block_id, 1024).unwrap().clone();
-            block.records.push(Record {
-                timestamp: Some(Timestamp {
-                    seconds: 1,
-                    nanos: 5000,
-                }),
-                begin: 0,
-                end: 5,
-                state: 0,
-                labels: vec![],
-                content_type: "".to_string(),
-            });
-            block_manager.save(block.clone()).unwrap();
-
-            let _ = block_manager.begin_write(&block, 0).await.unwrap();
-
-            assert_eq!(
-                block_manager.remove(block_id).err(),
-                Some(ReductError::internal_server_error(&format!(
-                    "Cannot remove block {} because it is still in use",
-                    block_id
-                )))
-            );
-
-            block_manager
-                .finish_write_record(block_id, record::State::Finished, 0)
-                .unwrap();
-            assert_eq!(block_manager.remove(block_id).err(), None);
-        }
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_remove_block_with_readers(mut block_manager: BlockManager) {
-        let block_id = 1;
-
-        {
-            let mut block = block_manager.start(block_id, 1024).unwrap().clone();
-            block.records.push(Record {
-                timestamp: Some(Timestamp {
-                    seconds: 1,
-                    nanos: 5000,
-                }),
-                begin: 0,
-                end: 5,
-                state: 0,
-                labels: vec![],
-                content_type: "".to_string(),
-            });
-
-            let _ = block_manager.begin_read(&block, 0).await.unwrap();
-
-            assert_eq!(
-                block_manager.remove(block_id).err(),
-                Some(ReductError::internal_server_error(&format!(
-                    "Cannot remove block {} because it is still in use",
-                    block_id
-                )))
-            );
-
-            block_manager.finish_read_record(block_id);
-            assert_eq!(block_manager.remove(block_id).err(), None);
-        }
-    }
-
-    #[fixture]
-    fn block_manager() -> BlockManager {
-        let path = tempdir();
-        let bm = BlockManager::new(path.unwrap().into_path());
         bm
     }
 }

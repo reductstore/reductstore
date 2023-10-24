@@ -169,7 +169,7 @@ mod tests {
         .await
         .unwrap();
 
-        sleep(std::time::Duration::from_millis(1)).await;
+        sleep(std::time::Duration::from_millis(10)).await; // wait for the record to be written
 
         let record = components
             .storage

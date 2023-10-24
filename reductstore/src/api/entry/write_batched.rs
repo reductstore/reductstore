@@ -317,7 +317,7 @@ mod tests {
         .await
         .unwrap();
 
-        sleep(std::time::Duration::from_millis(1)).await;
+        sleep(std::time::Duration::from_millis(10)).await; // wait for the write to be done
 
         let storage = components.storage.read().await;
         let bucket = storage.get_bucket("bucket-1").unwrap();
@@ -401,7 +401,7 @@ mod tests {
         .unwrap()
         .into_response();
 
-        sleep(std::time::Duration::from_millis(1)).await;
+        sleep(std::time::Duration::from_millis(10)).await; // wait for the write to be done
 
         let headers = resp.headers();
         assert_eq!(headers.len(), 1);
