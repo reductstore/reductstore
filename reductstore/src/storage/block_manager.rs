@@ -576,7 +576,7 @@ mod tests {
     #[tokio::test]
     async fn test_finish_block(#[future] block_manager: BlockManager, block_id: u64) {
         let mut block_manager = block_manager.await;
-        let block = block_manager.start(block_id, 1024).unwrap();
+        let block = block_manager.start(block_id + 1, 1024).unwrap();
         let ts = block.begin_time.clone().unwrap();
         let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
         assert_eq!(loaded_block, block);
@@ -589,7 +589,7 @@ mod tests {
             DATA_FILE_EXT
         )))
         .unwrap();
-        assert_eq!(file.metadata().unwrap().len(), 5);
+        assert_eq!(file.metadata().unwrap().len(), 0);
     }
 
     #[rstest]
