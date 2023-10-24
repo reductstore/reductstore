@@ -393,6 +393,7 @@ def test__head_entry_ok(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/{entry_name}?ts={ts}", data=dummy_data)
     assert resp.status_code == 200
 
+    sleep(0.01)  # let the last record to be written
     resp = session.head(f"{base_url}/b/{bucket}/{entry_name}")
     assert resp.status_code == 200
     assert len(resp.content) == 0
