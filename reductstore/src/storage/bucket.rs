@@ -4,7 +4,6 @@
 use crate::storage::entry::{Entry, EntrySettings, Labels};
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, BucketSettings as ProtoBucketSettings, Record};
-use futures_util::TryFutureExt;
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;

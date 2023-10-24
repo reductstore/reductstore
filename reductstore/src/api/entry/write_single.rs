@@ -6,7 +6,7 @@ use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::storage::entry::Labels;
 use axum::extract::{BodyStream, Path, Query, State};
-use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
+use axum::headers::{Expect, Header, HeaderMap};
 
 use futures_util::StreamExt;
 use log::{debug, error};

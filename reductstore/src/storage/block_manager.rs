@@ -501,9 +501,7 @@ async fn write_transaction(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Buf;
     use rstest::{fixture, rstest};
-    use std::hash::Hasher;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
     use tokio::time::sleep;
@@ -594,7 +592,7 @@ mod tests {
         #[future] block: Block,
         block_id: u64,
     ) {
-        let mut block_manager = Arc::new(RwLock::new(block_manager.await));
+        let block_manager = Arc::new(RwLock::new(block_manager.await));
         let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
             .await
             .unwrap();
@@ -616,7 +614,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_block_with_readers(
-        #[future] mut block_manager: BlockManager,
+        #[future] block_manager: BlockManager,
         #[future] block: Block,
         block_id: u64,
     ) {
