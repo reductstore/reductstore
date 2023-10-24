@@ -19,8 +19,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
+use tokio::time::sleep;
 
 pub type Labels = HashMap<String, String>;
 
@@ -265,12 +267,23 @@ impl Entry {
         }
 
         let record_index = record_index.unwrap();
-        let record = &block.records[record_index];
+        let mut record = block.records[record_index].clone();
+
         if record.state == record::State::Started as i32 {
-            return Err(ReductError::too_early(&format!(
-                "Record with timestamp {} is still being written",
-                time
-            )));
+            // try to wait for the record to be finished
+            sleep(Duration::from_millis(10)).await;
+            let block = {
+                let bm = self.block_manager.read().await;
+                bm.load(block_id)?
+            };
+
+            record = block.records[record_index].clone();
+            if record.state == record::State::Started as i32 {
+                return Err(ReductError::too_early(&format!(
+                    "Record with timestamp {} is still being written",
+                    time
+                )));
+            }
         }
 
         if record.state == record::State::Errored as i32 {
@@ -281,8 +294,7 @@ impl Entry {
         }
 
         let rx = spawn_read_task(Arc::clone(&self.block_manager), &block, record_index).await?;
-
-        Ok(RecordReader::new(rx, record.clone(), true))
+        Ok(RecordReader::new(rx, record, true))
     }
 
     /// Query records for a time range.

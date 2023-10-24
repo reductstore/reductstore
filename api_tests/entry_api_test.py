@@ -21,7 +21,6 @@ def test_read_write_entries_ok(base_url, session, bucket, data, ts):
     """Should write few entries and read them back"""
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data=data)
     assert resp.status_code == 200
-    sleep(0.01)  # let the last record to be written
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts}")
     assert resp.status_code == 200
@@ -36,8 +35,6 @@ def test_read_write_entries_ok_with_labels(base_url, session, bucket):
         headers={"x-reduct-label-x": "0", "x-reduct-label-y": "1"},
     )
     assert resp.status_code == 200
-    sleep(0.01)  # let the last record to be written
-
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts=1000")
     assert resp.status_code == 200
     assert resp.headers["x-reduct-label-x"] == "0"
@@ -53,7 +50,6 @@ def test_read_write_entries_big_blob_ok(base_url, session, bucket):
 
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts + 100}", data=huge_data)
     assert resp.status_code == 200
-    sleep(0.01)  # let the last record to be written
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts}")
     assert resp.status_code == 200
@@ -118,7 +114,6 @@ def test_latest_record(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts + 10}", data="some_data2")
     assert resp.status_code == 200
 
-    sleep(0.01)  # let the last record to be written
     resp = session.get(f"{base_url}/b/{bucket}/entry")
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
@@ -134,7 +129,6 @@ def test_read_write_big_blob(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data=blob)
     assert resp.status_code == 200
 
-    sleep(0.01)  # let the last record to be written
     resp = session.get(f"{base_url}/b/{bucket}/entry")
     assert resp.status_code == 200
     assert len(resp.text) == len(blob)
@@ -396,7 +390,6 @@ def test__head_entry_ok(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/{entry_name}?ts={ts}", data=dummy_data)
     assert resp.status_code == 200
 
-    sleep(0.01)  # let the last record to be written
     resp = session.head(f"{base_url}/b/{bucket}/{entry_name}")
     assert resp.status_code == 200
     assert len(resp.content) == 0
