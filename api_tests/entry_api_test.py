@@ -21,6 +21,7 @@ def test_read_write_entries_ok(base_url, session, bucket, data, ts):
     """Should write few entries and read them back"""
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data=data)
     assert resp.status_code == 200
+    sleep(0.01)  # let the last record to be written
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts}")
     assert resp.status_code == 200
@@ -35,6 +36,7 @@ def test_read_write_entries_ok_with_labels(base_url, session, bucket):
         headers={"x-reduct-label-x": "0", "x-reduct-label-y": "1"},
     )
     assert resp.status_code == 200
+    sleep(0.01)  # let the last record to be written
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts=1000")
     assert resp.status_code == 200
@@ -51,6 +53,7 @@ def test_read_write_entries_big_blob_ok(base_url, session, bucket):
 
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts + 100}", data=huge_data)
     assert resp.status_code == 200
+    sleep(0.01)  # let the last record to be written
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts}")
     assert resp.status_code == 200
@@ -386,7 +389,7 @@ def test__query_with_read_token(
 
 
 def test__head_entry_ok(base_url, session, bucket):
-    """Should return only headers and no body because request is of type HEAD."""
+    """Should return only headers and nobody because request is of type HEAD."""
     ts = 1000
     entry_name = "testentry"
     dummy_data = "dummy data"
