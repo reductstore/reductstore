@@ -131,6 +131,7 @@ def test_read_write_big_blob(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data=blob)
     assert resp.status_code == 200
 
+    sleep(0.01)  # let the last record to be written
     resp = session.get(f"{base_url}/b/{bucket}/entry")
     assert resp.status_code == 200
     assert len(resp.text) == len(blob)
