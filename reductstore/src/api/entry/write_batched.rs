@@ -114,10 +114,7 @@ pub async fn write_batched_records(
     };
 
     if let Err(err) = process_stream.await {
-        if !headers
-            .get(Expect::name())
-            .eq(&Some(&HeaderValue::from_static("100-continue")))
-        {
+        if !!headers.contains_key(Expect::name()) {
             debug!("draining the stream");
             while let Some(_) = stream.next().await {}
         }
@@ -330,7 +327,7 @@ mod tests {
                 reader.labels()[0],
                 Label {
                     name: "a".to_string(),
-                    value: "b".to_string()
+                    value: "b".to_string(),
                 }
             );
             assert_eq!(reader.content_type(), "text/plain");
@@ -346,7 +343,7 @@ mod tests {
                 reader.labels()[0],
                 Label {
                     name: "c".to_string(),
-                    value: "d,f".to_string()
+                    value: "d,f".to_string(),
                 }
             );
             assert_eq!(reader.content_type(), "text/plain");
