@@ -189,7 +189,6 @@ mod tests {
     #[rstest]
     fn masked_values(mut env: Env) {
         std::env::set_var("TEST", "123");
-        sleep(std::time::Duration::from_millis(100));
 
         let value = env.get_masked("TEST", String::from("default"));
         assert_eq!(value, "123");
@@ -210,6 +209,7 @@ mod tests {
     #[fixture]
     fn env() -> Env {
         std::env::remove_var("TEST");
+        sleep(std::time::Duration::from_millis(100));
         Env::default()
     }
 }
