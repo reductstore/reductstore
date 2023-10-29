@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2023-10-29
+
 ### Fixed
 
 - reductstore: Wrong size calculation if a block could not be removed, [PR-371](https://github.com/reductstore/reductstore/pull/371)
@@ -546,7 +548,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.7.1...HEAD
+
+[1.7.1]: https://github.com/reductstore/reductstore/compare/v1.7.0...v1.7.1
 
 [1.7.0]: https://github.com/reductstore/reductstore/compare/v1.6.2...v1.7.0
 
