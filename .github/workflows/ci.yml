@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Download artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: image
           path: /tmp/
@@ -115,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Download artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: image
           path: /tmp/
@@ -136,7 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Download artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: image
           path: /tmp/
@@ -167,7 +167,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Download artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: image
           path: /tmp/
@@ -436,7 +436,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Download Linux artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: reductstore-ubuntu-latest
           path: /tmp/
@@ -454,7 +454,7 @@ jobs:
           asset_name: reductstore.linux-amd64.tar.gz
           asset_content_type: application/gzip
       - name: Download Macos artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: reductstore-macos-latest
           path: /tmp/
@@ -473,7 +473,7 @@ jobs:
           asset_content_type: application/gzip
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: reductstore-windows-latest
           path: /tmp/
