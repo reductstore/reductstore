@@ -171,6 +171,7 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
 mod tests {
     use crate::core::env::Env;
     use rstest::{fixture, rstest};
+    use std::thread::sleep;
 
     #[rstest]
     fn make_env(_env: Env) {
@@ -188,6 +189,7 @@ mod tests {
     #[rstest]
     fn masked_values(mut env: Env) {
         std::env::set_var("TEST", "123");
+        sleep(std::time::Duration::from_millis(100));
 
         let value = env.get_masked("TEST", String::from("default"));
         assert_eq!(value, "123");
