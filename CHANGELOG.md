@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- reductstore: Wrong size calculation if a block could not be removed, [PR-371](https://github.com/reductstore/reductstore/pull/371)
+
 ## [1.7.0] - 2023-10-06
 
 ### Added
