@@ -393,13 +393,13 @@ impl Entry {
         }
 
         let oldest_block_id = *self.block_index.first().unwrap();
-
         let block = self.block_manager.read().await.load(oldest_block_id)?;
-        self.size -= block.size;
-        self.record_count -= block.records.len() as u64;
 
         self.block_manager.write().await.remove(oldest_block_id)?;
         self.block_index.remove(&oldest_block_id);
+
+        self.size -= block.size;
+        self.record_count -= block.records.len() as u64;
 
         Ok(())
     }
@@ -862,6 +862,46 @@ mod tests {
             entry.try_remove_oldest_block().await,
             Err(ReductError::internal_server_error("No block to remove"))
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_try_remove_block_from_entry_which_has_reader(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await.unwrap();
+        let _rx = entry.begin_read(1000000).await.unwrap();
+
+        assert_eq!(
+            entry.try_remove_oldest_block().await,
+            Err(ReductError::internal_server_error(
+                "Cannot remove block 1000000 because it is still in use"
+            ))
+        );
+        let info = entry.info().await.unwrap();
+        assert_eq!(info.block_count, 1);
+        assert_eq!(info.size, 10);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_try_remove_from_entry_which_has_writer(mut entry: Entry) {
+        let sender = entry
+            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Bytes::from_static(b"456789")))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            entry.try_remove_oldest_block().await,
+            Err(ReductError::internal_server_error(
+                "Cannot remove block 1000000 because it is still in use"
+            ))
+        );
+        let info = entry.info().await.unwrap();
+        assert_eq!(info.block_count, 1);
+        assert_eq!(info.size, 10);
     }
 
     #[fixture]
