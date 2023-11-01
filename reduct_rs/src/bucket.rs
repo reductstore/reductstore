@@ -244,7 +244,6 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use chrono::Duration;
     use futures_util::{pin_mut, StreamExt};
     use rstest::{fixture, rstest};
 
@@ -411,6 +410,8 @@ mod tests {
 
     mod query {
         use super::*;
+        use chrono::Duration;
+        use std::time::SystemTime;
 
         #[rstest]
         #[case(true, 10)]
@@ -444,7 +445,7 @@ mod tests {
 
             let query = bucket
                 .query("entry-3")
-                .ttl(Duration::minutes(1))
+                .ttl(Duration::minutes(1).to_std().unwrap())
                 .head_only(head_only)
                 .send()
                 .await
@@ -498,6 +499,22 @@ mod tests {
             pin_mut!(query);
             let _ = query.next().await.unwrap().unwrap();
             assert!(query.next().await.is_none());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_query_with_few_options(#[future] bucket: Bucket) {
+            let bucket: Bucket = bucket.await;
+            let query = bucket
+                .query("entry-1")
+                .start(SystemTime::now() - Duration::minutes(1).to_std().unwrap())
+                .stop(SystemTime::now() + Duration::minutes(1).to_std().unwrap())
+                .limit(1)
+                .add_include("bucket", "1")
+                .add_exclude("entry", "1")
+                .send()
+                .await;
+            assert!(query.is_ok());
         }
     }
 

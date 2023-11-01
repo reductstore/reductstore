@@ -10,7 +10,6 @@ use async_channel::{unbounded, Receiver};
 use async_stream::stream;
 use bytes::Bytes;
 use bytes::BytesMut;
-use chrono::Duration;
 use futures::Stream;
 use futures_util::{pin_mut, StreamExt};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
@@ -19,7 +18,7 @@ use reduct_base::msg::entry_api::QueryInfo;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Method;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 /// Builder for a query request.
 pub struct QueryBuilder {
@@ -147,31 +146,31 @@ impl QueryBuilder {
     pub async fn send(
         self,
     ) -> Result<impl Stream<Item = Result<Record, ReductError>>, ReductError> {
-        let mut url = format!("/b/{}/{}/q", self.bucket, self.entry);
+        let mut url = format!("/b/{}/{}/q?", self.bucket, self.entry);
         if let Some(start) = self.start {
-            url.push_str(&format!("?start={}", start));
+            url.push_str(&format!("start={}", start));
         }
         if let Some(stop) = self.stop {
-            url.push_str(&format!("?stop={}", stop));
+            url.push_str(&format!("&stop={}", stop));
         }
         if let Some(ttl) = self.ttl {
-            url.push_str(&format!("?ttl={}", ttl.num_seconds()));
+            url.push_str(&format!("&ttl={}", ttl.as_secs()));
         }
         if let Some(include) = self.include {
             for (key, value) in include {
-                url.push_str(&format!("?include-{}={}", key, value));
+                url.push_str(&format!("&include-{}={}", key, value));
             }
         }
         if let Some(exclude) = self.exclude {
             for (key, value) in exclude {
-                url.push_str(&format!("?exclude-{}={}", key, value));
+                url.push_str(&format!("&exclude-{}={}", key, value));
             }
         }
         if self.continuous {
-            url.push_str("?continuous=true");
+            url.push_str("&continuous=true");
         }
         if let Some(limit) = self.limit {
-            url.push_str(&format!("?limit={}", limit));
+            url.push_str(&format!("&limit={}", limit));
         }
 
         let response = self
