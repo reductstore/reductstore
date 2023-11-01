@@ -215,6 +215,36 @@ impl Bucket {
     }
 
     /// Create a record to write to the bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The entry to write to.
+    ///
+    /// # Returns
+    ///
+    /// Returns a record builder.
+    ///
+    /// ```no_run
+    /// use reduct_rs::{ReductClient, ReductError};
+    /// use std::time::SystemTime;
+    /// use futures_util::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), ReductError> {
+    ///    let client = ReductClient::builder()
+    ///         .url("https://play.reduct.store")
+    ///         .api_token("reductstore")
+    ///         .build();
+    ///     let bucket = client.get_bucket("datasets").await?;
+    ///     let query = bucket.query("cats").limit(10).send().await?;
+    ///     tokio::pin!(query);
+    ///     while let Some(record) = query.next().await {
+    ///         let record = record?;
+    ///         let content_ = record.bytes().await?;
+    ///     }
+    ///     Ok(())
+    /// }
+    ///  ```
     pub fn query(&self, entry: &str) -> QueryBuilder {
         QueryBuilder::new(
             self.name.clone(),

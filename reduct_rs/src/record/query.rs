@@ -142,7 +142,7 @@ impl QueryBuilder {
         self
     }
 
-    /// Set the query to be continuous.
+    /// Send the query request.
     pub async fn send(
         self,
     ) -> Result<impl Stream<Item = Result<Record, ReductError>>, ReductError> {
