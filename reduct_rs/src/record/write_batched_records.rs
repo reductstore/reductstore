@@ -8,7 +8,7 @@ use crate::Record;
 use async_stream::stream;
 use futures_util::StreamExt;
 use reqwest::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Method, StatusCode};
+use reqwest::{Body, Method};
 use std::collections::{BTreeMap, VecDeque};
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
