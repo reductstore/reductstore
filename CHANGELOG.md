@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reductstore: Refactor read and write operation with tokio channels, [PR-370](https://github.com/reductstore/reductstore/pull/370)
 
+## [1.7.2] - 2023-11-01
+
+## Fixed
+
+- reduct-rs: Fix query URL in ReductClient, [PR-372](https://github.com/reductstore/reductstore/pull/372)
+
 ## [1.7.1] - 2023-10-29
 
 ### Fixed
