@@ -64,7 +64,7 @@ pub enum ErrorCode {
 }
 
 /// An HTTP error, we use it for error handling.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct ReductError {
     /// The HTTP status code.
     pub status: ErrorCode,

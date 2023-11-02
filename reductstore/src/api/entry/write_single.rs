@@ -13,6 +13,7 @@ use log::{debug, error};
 use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 // POST /:bucket/:entry?ts=<number>
 pub async fn write_record(
@@ -104,23 +105,37 @@ pub async fn write_record(
     };
 
     match check_request_and_get_sender.await {
-        Ok(sender) => {
+        Ok(tx) => {
+            macro_rules! send_chunk {
+                ($chunk:expr) => {
+                    tx.send($chunk).await.map(|_| ()).map_err(|e| {
+                        error!("Error while writing data: {}", e);
+                        HttpError::from(ReductError::bad_request(&format!(
+                            "Error while writing data: {}",
+                            e
+                        )))
+                    })?;
+                };
+            }
+
             while let Some(chunk) = stream.next().await {
                 let chunk = match chunk {
-                    Ok(chunk) => Ok(chunk),
+                    Ok(chunk) => Ok(Some(chunk)),
                     Err(e) => {
                         error!("Error while receiving data: {}", e);
-                        Err(HttpError::from(e).0)
+                        let err = HttpError::from(e).0;
+                        send_chunk!(Err(err.clone()));
+                        return Err(err.into());
                     }
                 };
-                sender.send(chunk).await.map(|_| ()).map_err(|e| {
-                    error!("Error while writing data: {}", e);
-                    HttpError::from(ReductError::bad_request(&format!(
-                        "Error while writing data: {}",
-                        e
-                    )))
-                })?;
+
+                send_chunk!(chunk);
             }
+
+            if let Err(_) = tx.send_timeout(Ok(None), Duration::from_millis(1)).await {
+                debug!("Failed to sync the channel - it may be already closed");
+            }
+            tx.closed().await; //sync with the storage
 
             Ok(())
         }

@@ -234,7 +234,10 @@ mod tests {
                 .begin_write(1000, 10, "text/plain".to_string(), Labels::new())
                 .await
                 .unwrap();
-            sender.send(Ok(Bytes::from("0123456789"))).await.unwrap();
+            sender
+                .send(Ok(Some(Bytes::from("0123456789"))))
+                .await
+                .unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
@@ -242,7 +245,10 @@ mod tests {
                 .begin_write(2000, 10, "text/plain".to_string(), Labels::new())
                 .await
                 .unwrap();
-            sender.send(Ok(Bytes::from("0123456789"))).await.unwrap();
+            sender
+                .send(Ok(Some(Bytes::from("0123456789"))))
+                .await
+                .unwrap();
         }
         {
             let entry = bucket.get_or_create_entry("entry-2").unwrap();
@@ -250,7 +256,10 @@ mod tests {
                 .begin_write(5000, 10, "text/plain".to_string(), Labels::new())
                 .await
                 .unwrap();
-            sender.send(Ok(Bytes::from("0123456789"))).await.unwrap();
+            sender
+                .send(Ok(Some(Bytes::from("0123456789"))))
+                .await
+                .unwrap();
         }
 
         let storage = Storage::new(storage.data_path);

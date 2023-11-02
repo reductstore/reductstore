@@ -339,6 +339,9 @@ impl ManageBlock for BlockManager {
     }
 }
 
+pub type RecordRx = Receiver<Result<Bytes, ReductError>>;
+pub type RecordTx = Sender<Result<Option<Bytes>, ReductError>>;
+
 /// Spawn a task that reads a record from a block.
 /// The task will send chunks of the record to the receiver or an error if file reading failed
 ///
@@ -359,7 +362,7 @@ pub async fn spawn_read_task(
     block_manager: Arc<RwLock<BlockManager>>,
     block: &Block,
     record_index: usize,
-) -> Result<Receiver<Result<Bytes, ReductError>>, ReductError> {
+) -> Result<RecordRx, ReductError> {
     let file = block_manager
         .write()
         .await
@@ -433,7 +436,7 @@ pub async fn spawn_write_task(
     block_manager: Arc<RwLock<BlockManager>>,
     block: Block,
     record_index: usize,
-) -> Result<Sender<Result<Bytes, ReductError>>, ReductError> {
+) -> Result<RecordTx, ReductError> {
     let mut file = {
         let mut bm = block_manager.write().await;
         bm.save(block.clone())?;
@@ -447,16 +450,17 @@ pub async fn spawn_write_task(
         (block.records[record_index].end - block.records[record_index].begin) as usize;
     tokio::spawn(async move {
         let recv = async move {
-            let mut written_bytes: usize = 0;
+            let mut written_bytes = None;
             while let Some(chunk) = rx.recv().await {
-                written_bytes =
+                let written_bytes =
                     write_transaction(&content_size, &mut file, written_bytes, chunk).await?;
-                if written_bytes >= content_size {
+
+                if written_bytes.is_none() || written_bytes >= Some(content_size) {
                     break;
                 }
             }
 
-            if written_bytes < content_size {
+            if written_bytes.is_some_and(|x| x < content_size) {
                 Err(ReductError::bad_request(
                     "Content is smaller than in content-length",
                 ))
@@ -489,13 +493,33 @@ pub async fn spawn_write_task(
     Ok(tx)
 }
 
+/// Write a transaction to a file.
+///
+/// # Arguments
+///
+/// * `content_size` - Size of the content to write.
+/// * `file` - File to write to.
+/// * `written_bytes` - Number of bytes already written.
+/// * `chunk` - Chunk to write.
+///
+/// # Returns
+///
+/// * `Ok(written_bytes)` - Number of bytes written.
+/// * `Ok(None)` - If the chunk is None. This means that the transaction is finished.
 async fn write_transaction(
     content_size: &usize,
     file: &mut File,
-    mut written_bytes: usize,
-    chunk: Result<Bytes, ReductError>,
-) -> Result<usize, ReductError> {
+    mut written_bytes: Option<usize>,
+    chunk: Result<Option<Bytes>, ReductError>,
+) -> Result<Option<usize>, ReductError> {
     let chunk = chunk?;
+    if chunk.is_none() {
+        return Ok(None);
+    }
+
+    let mut written_bytes = written_bytes.unwrap_or(0);
+
+    let chunk = chunk.unwrap();
     written_bytes += chunk.len();
     if written_bytes > *content_size {
         return Err(ReductError::bad_request(
@@ -503,7 +527,7 @@ async fn write_transaction(
         ));
     }
     file.write_all(chunk.as_ref()).await?;
-    Ok(written_bytes)
+    Ok(Some(written_bytes))
 }
 
 #[cfg(test)]
@@ -613,7 +637,7 @@ mod tests {
             )))
         );
 
-        tx.send(Ok(Bytes::from("hallo"))).await.unwrap();
+        tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
         drop(tx);
         sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
         assert_eq!(block_manager.write().await.remove(block_id).err(), None);

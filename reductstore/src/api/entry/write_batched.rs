@@ -11,12 +11,14 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
 
+use crate::storage::bucket::RecordTx;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 
 // POST /:bucket/:entry/batch
@@ -65,7 +67,7 @@ pub async fn write_batched_records(
         let mut senders = Vec::new();
         for (time, header) in &timed_headers {
             senders.push(
-                start_writting(
+                start_writing(
                     &components,
                     bucket_name,
                     entry_name,
@@ -92,10 +94,20 @@ pub async fn write_batched_records(
                 .await
                 {
                     Ok(None) => {
+                        // the chunk is fully written next one
                         chunk = Bytes::new();
                     }
-                    Ok(Some(new_chunk)) => {
-                        chunk = new_chunk;
+                    Ok(Some(rest)) => {
+                        // finish writing the current record and start a new one
+                        if let Err(_) = senders[index]
+                            .send_timeout(Ok(None), Duration::from_millis(1))
+                            .await
+                        {
+                            debug!("Failed to sync the channel - it may be already closed");
+                        }
+                        senders[index].closed().await;
+
+                        chunk = rest;
                         index += 1;
                         written = 0;
                     }
@@ -133,7 +145,7 @@ pub async fn write_batched_records(
 }
 
 async fn write_chunk(
-    sender: &mut Sender<Result<Bytes, ReductError>>,
+    sender: &mut Sender<Result<Option<Bytes>, ReductError>>,
     chunk: Bytes,
     written: &mut usize,
     content_size: usize,
@@ -147,10 +159,10 @@ async fn write_chunk(
         (chuck_to_write, Some(chunk.slice(to_write..)))
     };
 
-    sender.send(Ok(chunk)).await.map_err(|_| {
+    sender.send(Ok(Some(chunk))).await.map_err(|_| {
         ReductError::new(
             ErrorCode::InternalServerError,
-            "Internal reductstore error: failed to write to the storage",
+            "Failed to write to the storage",
         )
     })?;
     Ok(rest)
@@ -185,14 +197,14 @@ fn check_content_length(
     Ok(())
 }
 
-async fn start_writting(
+async fn start_writing(
     components: &Arc<Components>,
     bucket_name: &str,
     entry_name: &str,
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
-) -> Sender<Result<Bytes, ReductError>> {
+) -> RecordTx {
     let get_tx = async move {
         let mut storage = components.storage.write().await;
         let bucket = storage.get_mut_bucket(bucket_name)?;
@@ -317,10 +329,9 @@ mod tests {
         .await
         .unwrap();
 
-        sleep(std::time::Duration::from_millis(10)).await; // wait for the write to be done
-
         let storage = components.storage.read().await;
         let bucket = storage.get_bucket("bucket-1").unwrap();
+
         {
             let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
             assert_eq!(
