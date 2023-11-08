@@ -267,7 +267,7 @@ mod tests {
             ServerInfo {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 bucket_count: 1,
-                usage: 30,
+                usage: 134,
                 uptime: 0,
                 oldest_record: 1000,
                 latest_record: 5000,
