@@ -80,7 +80,7 @@ impl Entry {
                 }};
             }
 
-            let buf = std::fs::read(path.clone())?;
+            let buf = fs::read(path.clone())?;
             let block = match Block::decode(Bytes::from(buf)) {
                 Ok(block) => block,
                 Err(err) => {
@@ -88,6 +88,7 @@ impl Entry {
                 }
             };
 
+            let metadata_size = block.encoded_len() as u64;
             let id = if let Some(begin_time) = block.begin_time {
                 ts_to_us(&begin_time)
             } else {
@@ -95,7 +96,7 @@ impl Entry {
             };
 
             record_count += block.records.len() as u64;
-            size += block.size;
+            size += block.size + metadata_size;
             block_index.insert(id);
         }
 
@@ -208,11 +209,13 @@ impl Entry {
                 .collect(),
         };
 
+        // count the record and usage size with protobuf overhead
+        self.record_count += 1;
+        self.size += content_size + record.encoded_len() as u64;
+
         block.size += content_size as u64;
         block.records.push(record);
 
-        self.record_count += 1;
-        self.size += content_size as u64;
         if record_type != RecordType::Belated {
             block.latest_record_time = Some(us_to_ts(&time));
         }
@@ -478,7 +481,7 @@ mod tests {
 
         assert_eq!(entry.name(), "entry");
         assert_eq!(entry.record_count, 2);
-        assert_eq!(entry.size, 20);
+        assert_eq!(entry.size, 84);
     }
 
     #[rstest]
@@ -826,7 +829,7 @@ mod tests {
 
         let info = entry.info().unwrap();
         assert_eq!(info.name, "entry");
-        assert_eq!(info.size, 30);
+        assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 3);
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1000000);
@@ -877,7 +880,7 @@ mod tests {
         );
         let info = entry.info().unwrap();
         assert_eq!(info.block_count, 1);
-        assert_eq!(info.size, 10);
+        assert_eq!(info.size, 28);
     }
 
     #[rstest]
@@ -899,7 +902,7 @@ mod tests {
         );
         let info = entry.info().unwrap();
         assert_eq!(info.block_count, 1);
-        assert_eq!(info.size, 10);
+        assert_eq!(info.size, 28);
     }
 
     #[fixture]
