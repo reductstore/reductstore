@@ -418,7 +418,7 @@ impl Bucket {
                 // Remove empty entries
                 let mut names_to_remove = vec![];
                 for (name, entry) in &self.entries {
-                    if entry.info().await?.size != 0 {
+                    if entry.info().await?.record_count != 0 {
                         continue;
                     }
                     names_to_remove.push(name.clone());
@@ -574,22 +574,24 @@ mod tests {
     async fn test_quota_keeping(path: PathBuf) {
         let mut bucket = bucket(
             BucketSettings {
-                max_block_size: Some(5),
+                max_block_size: Some(20),
                 quota_type: Some(QuotaType::FIFO),
-                quota_size: Some(10),
+                quota_size: Some(100),
                 max_block_records: Some(100),
             },
             path,
         );
 
-        write(&mut bucket, "test-1", 0, b"test").await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 4);
+        let blob: &[u8] = &[0u8; 40];
 
-        write(&mut bucket, "test-2", 1, b"test").await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 8);
+        write(&mut bucket, "test-1", 0, blob).await.unwrap();
+        assert_eq!(bucket.info().await.unwrap().info.size, 44);
 
-        write(&mut bucket, "test-3", 2, b"test").await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 8);
+        write(&mut bucket, "test-2", 1, blob).await.unwrap();
+        assert_eq!(bucket.info().await.unwrap().info.size, 91);
+
+        write(&mut bucket, "test-3", 2, blob).await.unwrap();
+        assert_eq!(bucket.info().await.unwrap().info.size, 94);
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).await.err(),
@@ -613,7 +615,7 @@ mod tests {
         );
 
         write(&mut bucket, "test-1", 0, b"test").await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 4);
+        assert_eq!(bucket.info().await.unwrap().info.size, 8);
 
         let result = write(&mut bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(
