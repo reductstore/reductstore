@@ -14,7 +14,10 @@ use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
+
+pub use crate::storage::block_manager::RecordRx;
+pub use crate::storage::block_manager::RecordTx;
 
 const DEFAULT_MAX_RECORDS: u64 = 256;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -51,7 +54,7 @@ impl Into<BucketSettings> for ProtoBucketSettings {
 }
 
 pub struct RecordReader {
-    rx: Receiver<Result<Bytes, ReductError>>,
+    rx: RecordRx,
     record: Record,
     last: bool,
 }
@@ -298,7 +301,7 @@ impl Bucket {
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<Sender<Result<Bytes, ReductError>>, ReductError> {
+    ) -> Result<RecordTx, ReductError> {
         self.keep_quota_for(content_size).await?;
         let entry = self.get_or_create_entry(name)?;
         entry
@@ -681,9 +684,12 @@ mod tests {
                 Labels::new(),
             )
             .await?;
-        sender.send(Ok(Bytes::from(content))).await.map_err(|e| {
-            ReductError::internal_server_error(format!("Failed to send data: {}", e).as_str())
-        })?;
+        sender
+            .send(Ok(Some(Bytes::from(content))))
+            .await
+            .map_err(|e| {
+                ReductError::internal_server_error(format!("Failed to send data: {}", e).as_str())
+            })?;
         sender.closed().await;
         Ok(())
     }

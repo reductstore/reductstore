@@ -168,7 +168,7 @@ mod tests {
             .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)
             .await
             .unwrap();
-        sender.send(Ok(Bytes::from("Hey!!!"))).await.unwrap();
+        sender.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
         sender.closed().await;
 
         let permissions = Permissions {

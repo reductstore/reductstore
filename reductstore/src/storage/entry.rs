@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::{
-    find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock,
+    find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock, RecordTx,
     DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::bucket::RecordReader;
@@ -19,10 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
-use tokio::time::sleep;
 
 pub type Labels = HashMap<String, String>;
 
@@ -132,7 +129,7 @@ impl Entry {
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<Sender<Result<Bytes, ReductError>>, ReductError> {
+    ) -> Result<RecordTx, ReductError> {
         #[derive(PartialEq)]
         enum RecordType {
             Latest,
@@ -273,8 +270,6 @@ impl Entry {
         let mut record = block.records[record_index].clone();
 
         if record.state == record::State::Started as i32 {
-            // try to wait for the record to be finished
-            sleep(Duration::from_millis(10)).await;
             let block = {
                 let bm = self.block_manager.read().await;
                 bm.load(block_id)?
@@ -670,7 +665,10 @@ mod tests {
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
             .unwrap();
-        sender.send(Ok(Bytes::from(vec![0; 5]))).await.unwrap();
+        sender
+            .send(Ok(Some(Bytes::from(vec![0; 5]))))
+            .await
+            .unwrap();
 
         let reader = entry.begin_read(1000000).await;
         assert_eq!(
@@ -892,7 +890,7 @@ mod tests {
             .await
             .unwrap();
         sender
-            .send(Ok(Bytes::from_static(b"456789")))
+            .send(Ok(Some(Bytes::from_static(b"456789"))))
             .await
             .unwrap();
 
@@ -929,7 +927,7 @@ mod tests {
         let sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
             .await?;
-        let x = sender.send(Ok(Bytes::from(data))).await;
+        let x = sender.send(Ok(Some(Bytes::from(data)))).await;
         sender.closed().await;
         match x {
             Ok(_) => Ok(()),
