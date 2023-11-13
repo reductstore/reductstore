@@ -226,7 +226,14 @@ async fn start_writing(
             error_map.insert(time, err);
             // drain the stream
             let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-            tokio::spawn(async move { while let Some(_) = rx.recv().await {} });
+            tokio::spawn(async move {
+                while let Some(chunk) = rx.recv().await {
+                    if let Ok(None) = chunk {
+                        // sync the channel
+                        break;
+                    }
+                }
+            });
             tx
         }
     }

@@ -77,6 +77,7 @@ mod tests {
 
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
+    use tokio::time::sleep;
 
     use crate::storage::query::base::tests::block_manager_and_index;
 
@@ -120,6 +121,8 @@ mod tests {
             })
         );
         assert_eq!(query.state(), &QueryState::Running(1));
+
+        sleep(std::time::Duration::from_millis(100)).await;
         assert_eq!(query.state(), &QueryState::Expired);
     }
 }

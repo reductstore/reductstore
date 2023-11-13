@@ -119,9 +119,7 @@ impl BlockManager {
         block.invalid = state == record::State::Invalid;
 
         *self.writer_count.get_mut(&block_id).unwrap() -= 1;
-
         self.clean_readers_or_writers(block_id);
-
         self.save(block)
     }
 
@@ -450,7 +448,7 @@ pub async fn spawn_write_task(
         (block.records[record_index].end - block.records[record_index].begin) as usize;
     tokio::spawn(async move {
         let recv = async move {
-            let mut written_bytes = None;
+            let written_bytes = None;
             while let Some(chunk) = rx.recv().await {
                 let written_bytes =
                     write_transaction(&content_size, &mut file, written_bytes, chunk).await?;
@@ -509,7 +507,7 @@ pub async fn spawn_write_task(
 async fn write_transaction(
     content_size: &usize,
     file: &mut File,
-    mut written_bytes: Option<usize>,
+    written_bytes: Option<usize>,
     chunk: Result<Option<Bytes>, ReductError>,
 ) -> Result<Option<usize>, ReductError> {
     let chunk = chunk?;
