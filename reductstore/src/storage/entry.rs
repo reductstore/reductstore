@@ -19,9 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::sleep;
 
 pub type Labels = HashMap<String, String>;
 
@@ -272,8 +270,6 @@ impl Entry {
         let mut record = block.records[record_index].clone();
 
         if record.state == record::State::Started as i32 {
-            // try to wait for the record to be finished
-            sleep(Duration::from_millis(10)).await;
             let block = {
                 let bm = self.block_manager.read().await;
                 bm.load(block_id)?

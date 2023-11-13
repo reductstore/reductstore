@@ -155,12 +155,10 @@ pub async fn write_record(
 mod tests {
     use super::*;
 
-    use axum::headers::{Authorization, HeaderMapExt};
-    use rstest::*;
-    use tokio::time::sleep;
-
     use crate::api::tests::{components, empty_body, path_to_entry_1};
     use crate::storage::proto::record::Label;
+    use axum::headers::{Authorization, HeaderMapExt};
+    use rstest::*;
 
     #[rstest]
     #[tokio::test]
@@ -183,8 +181,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        sleep(std::time::Duration::from_millis(10)).await; // wait for the record to be written
 
         let record = components
             .storage

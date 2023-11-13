@@ -419,8 +419,6 @@ mod tests {
         .unwrap()
         .into_response();
 
-        sleep(std::time::Duration::from_millis(10)).await; // wait for the write to be done
-
         let headers = resp.headers();
         assert_eq!(headers.len(), 1);
         assert_eq!(
