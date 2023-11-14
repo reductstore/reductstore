@@ -5,4 +5,5 @@ pub mod asset;
 pub mod auth;
 pub mod cfg;
 pub mod core;
+pub mod replication;
 pub mod storage;

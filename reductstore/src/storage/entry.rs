@@ -14,14 +14,13 @@ use prost::bytes::Bytes;
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
+use reduct_base::Labels;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-pub type Labels = HashMap<String, String>;
 
 /// Entry is a time series in a bucket.
 pub struct Entry {

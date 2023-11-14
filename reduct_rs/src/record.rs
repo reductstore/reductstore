@@ -22,7 +22,7 @@ use async_stream::stream;
 
 use std::time::SystemTime;
 
-pub use reduct_base::batch::Labels;
+pub use reduct_base::Labels;
 
 pub type RecordStream = Pin<Box<dyn Stream<Item = Result<Bytes, ReductError>> + Send + Sync>>;
 

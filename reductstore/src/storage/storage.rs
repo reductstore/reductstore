@@ -185,9 +185,9 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::entry::Labels;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
+    use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::thread::sleep;
     use std::time::Duration;

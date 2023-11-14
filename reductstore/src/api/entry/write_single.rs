@@ -4,13 +4,13 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::storage::entry::Labels;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap};
 
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
+use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

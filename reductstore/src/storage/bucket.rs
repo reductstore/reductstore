@@ -1,7 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::storage::entry::{Entry, EntrySettings, Labels};
+use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, BucketSettings as ProtoBucketSettings, Record};
 use log::debug;
@@ -10,6 +10,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reduct_base::msg::entry_api::EntryInfo;
+use reduct_base::Labels;
 use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
@@ -507,7 +508,6 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::entry::Labels;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 

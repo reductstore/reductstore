@@ -5,7 +5,7 @@
 
 use crate::http_client::HttpClient;
 use crate::record::{from_system_time, Record};
-use crate::{Labels, RecordStream};
+use crate::RecordStream;
 use async_channel::{unbounded, Receiver};
 use async_stream::stream;
 use bytes::Bytes;
@@ -15,6 +15,7 @@ use futures_util::{pin_mut, StreamExt};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryInfo;
+use reduct_base::Labels;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Method;
 use std::sync::Arc;
