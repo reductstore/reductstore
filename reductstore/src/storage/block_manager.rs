@@ -17,6 +17,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 
+use crate::replication::{NotifyReplicationEvent, ReplicationAgent, ReplicationEvent};
 use crate::storage::proto::*;
 use reduct_base::error::{ErrorCode, ReductError};
 
@@ -32,8 +33,8 @@ pub struct BlockManager {
     path: PathBuf,
     reader_count: HashMap<u64, usize>,
     writer_count: HashMap<u64, usize>,
-
     last_block: Option<Block>,
+    repl_agent: ReplicationAgent,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -64,12 +65,13 @@ pub fn find_first_block(block_index: &BTreeSet<u64>, start: &u64) -> u64 {
 }
 
 impl BlockManager {
-    pub fn new(path: PathBuf) -> Self {
+    pub(crate) fn new(path: PathBuf, repl_agent: ReplicationAgent) -> Self {
         Self {
             path,
             reader_count: HashMap::new(),
             writer_count: HashMap::new(),
             last_block: None,
+            repl_agent,
         }
     }
 
@@ -108,19 +110,29 @@ impl BlockManager {
         Ok(file)
     }
 
-    pub fn finish_write_record(
+    async fn finish_write_record(
         &mut self,
         block_id: u64,
         state: record::State,
         record_index: usize,
     ) -> Result<(), ReductError> {
         let mut block = self.load(block_id)?;
-        block.records[record_index].state = i32::from(state);
+        let record = &mut block.records[record_index];
+        let timestamp = ts_to_us(&record.timestamp.as_ref().unwrap());
+        record.state = i32::from(state);
         block.invalid = state == record::State::Invalid;
 
         *self.writer_count.get_mut(&block_id).unwrap() -= 1;
         self.clean_readers_or_writers(block_id);
-        self.save(block)
+        self.save(block)?;
+
+        if state == record::State::Finished {
+            self.repl_agent
+                .filter_and_notify(ReplicationEvent::WriteRecord(timestamp))
+                .await?;
+        }
+
+        Ok(())
     }
 
     pub async fn begin_read(
@@ -484,6 +496,7 @@ pub async fn spawn_write_task(
             .write()
             .await
             .finish_write_record(block_id, state, record_index)
+            .await
         {
             error!("Failed to finish writing record: {}", err);
         }

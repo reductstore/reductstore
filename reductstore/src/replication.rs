@@ -3,14 +3,21 @@
 
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 mod agent;
+mod cfg;
 mod engine;
 
 /// Replication event to be synchronized.
+#[derive(Debug)]
 pub(crate) enum ReplicationEvent {
+    /// Write a record to a bucket (timestamp)
     WriteRecord(u64),
 }
+
+pub(crate) type ReplicationAgent = Box<dyn NotifyReplicationEvent + Send + Sync>;
 
 #[async_trait]
 pub(crate) trait NotifyReplicationEvent {
@@ -22,7 +29,7 @@ pub(crate) trait NotifyReplicationEvent {
     async fn filter_and_notify(&self, event: ReplicationEvent) -> Result<(), ReductError>;
 }
 
-pub(crate) trait MakeReplicationAgent {
+pub(crate) trait BuildReplicationAgent {
     /// Make a replication agent for a given bucket and entry name of event source.
     ///
     /// # Arguments
@@ -33,9 +40,14 @@ pub(crate) trait MakeReplicationAgent {
     /// # Returns
     ///
     /// A replication agent for event notification.
-    fn make_replication_agent_for(
-        &self,
-        bucket: &str,
-        entry: &str,
-    ) -> Box<dyn NotifyReplicationEvent>;
+    fn build_agent_for(&mut self, bucket: &str, entry: &str) -> ReplicationAgent;
+}
+
+#[async_trait]
+pub(crate) trait ReplicationEngine: BuildReplicationAgent {
+    fn add_replication(&mut self, cfg: cfg::ReplicationCfg) -> Result<(), ReductError>;
+}
+
+pub(crate) fn create_replication_engine() -> impl ReplicationEngine {
+    engine::ReplicationEngineImpl::new()
 }

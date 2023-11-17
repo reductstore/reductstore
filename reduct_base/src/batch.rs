@@ -6,7 +6,6 @@
 use crate::error::ReductError;
 use crate::Labels;
 use http::{HeaderMap, HeaderValue};
-use std::collections::HashMap;
 
 pub struct RecordHeader {
     pub content_length: usize,

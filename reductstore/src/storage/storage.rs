@@ -6,27 +6,33 @@ use std::collections::BTreeMap;
 
 use std::fs::remove_dir_all;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use std::time::Instant;
+use tokio::sync::RwLock;
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
+use crate::replication::BuildReplicationAgent;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, ServerInfo};
+
+pub(crate) type BuildReplAgentRef = Arc<RwLock<dyn BuildReplicationAgent + Send + Sync>>;
 
 /// Storage is the main entry point for the storage service.
 pub struct Storage {
     data_path: PathBuf,
     start_time: Instant,
     buckets: BTreeMap<String, Bucket>,
+    repl_agent_builder: BuildReplAgentRef,
 }
 
 impl Storage {
     /// Create a new Storage
-    pub fn new(data_path: PathBuf) -> Storage {
+    pub(crate) async fn new(data_path: PathBuf, repl_agent_builder: BuildReplAgentRef) -> Storage {
         if !data_path.exists() {
-            info!("Folder '{}' doesn't exist. Create it.", data_path.display());
+            info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
         }
 
@@ -35,7 +41,9 @@ impl Storage {
         for entry in std::fs::read_dir(&data_path).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                let bucket = Bucket::restore(path).unwrap();
+                let bucket = Bucket::restore(path, Arc::clone(&repl_agent_builder))
+                    .await
+                    .unwrap();
                 buckets.insert(bucket.name().to_string(), bucket);
             }
         }
@@ -46,6 +54,7 @@ impl Storage {
             data_path,
             start_time: Instant::now(),
             buckets,
+            repl_agent_builder,
         }
     }
 
@@ -82,7 +91,7 @@ impl Storage {
     }
 
     /// Creat a new bucket.
-    pub(crate) fn create_bucket(
+    pub(crate) async fn create_bucket(
         &mut self,
         name: &str,
         settings: BucketSettings,
@@ -100,7 +109,12 @@ impl Storage {
             ));
         }
 
-        let bucket = Bucket::new(name, &self.data_path, settings)?;
+        let bucket = Bucket::new(
+            name,
+            &self.data_path,
+            settings,
+            Arc::clone(&self.repl_agent_builder),
+        )?;
         self.buckets.insert(name.to_string(), bucket);
 
         Ok(self.buckets.get_mut(name).unwrap())

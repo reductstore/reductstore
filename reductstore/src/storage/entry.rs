@@ -1,6 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::replication::{NotifyReplicationEvent, ReplicationAgent};
 use crate::storage::block_manager::{
     find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock, RecordTx,
     DESCRIPTOR_FILE_EXT,
@@ -41,20 +42,29 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, ReductError> {
+    pub(crate) fn new(
+        name: &str,
+        path: PathBuf,
+        settings: EntrySettings,
+        repl_agent: ReplicationAgent,
+    ) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
         Ok(Self {
             name: name.to_string(),
             settings,
             block_index: BTreeSet::new(),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path.join(name)))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path.join(name), repl_agent))),
             record_count: 0,
             size: 0,
             queries: HashMap::new(),
         })
     }
 
-    pub fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, ReductError> {
+    pub(crate) fn restore(
+        path: PathBuf,
+        options: EntrySettings,
+        repl_agent: ReplicationAgent,
+    ) -> Result<Self, ReductError> {
         let mut record_count = 0;
         let mut size = 0;
         let mut block_index = BTreeSet::new();
@@ -102,7 +112,7 @@ impl Entry {
             name: path.file_name().unwrap().to_str().unwrap().to_string(),
             settings: options,
             block_index,
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path, repl_agent))),
             record_count,
             size,
             queries: HashMap::new(),

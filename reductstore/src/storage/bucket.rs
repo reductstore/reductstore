@@ -19,6 +19,7 @@ use tokio::sync::mpsc::Receiver;
 
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
+use crate::storage::storage::BuildReplAgentRef;
 
 const DEFAULT_MAX_RECORDS: u64 = 256;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -105,6 +106,7 @@ pub struct Bucket {
     entries: BTreeMap<String, Entry>,
     settings: BucketSettings,
     is_provisioned: bool,
+    repl_agent_builder: BuildReplAgentRef,
 }
 
 impl Bucket {
@@ -115,6 +117,7 @@ impl Bucket {
     /// * `name` - The name of the bucket
     /// * `path` - The path to folder with buckets
     /// * `settings` - The settings for the bucket
+    /// * `repl_agent_builder` - The replication agent builder
     ///
     /// # Returns
     ///
@@ -123,6 +126,7 @@ impl Bucket {
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
+        repl_agent_builder: BuildReplAgentRef,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         std::fs::create_dir_all(&path)?;
@@ -134,6 +138,7 @@ impl Bucket {
             entries: BTreeMap::new(),
             settings,
             is_provisioned: false,
+            repl_agent_builder,
         };
 
         bucket.save_settings()?;
@@ -145,39 +150,50 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `path` - The path to the bucket
+    /// * `repl_agent_builder` - The replication agent builder
     ///
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
+    pub(crate) async fn restore(
+        path: PathBuf,
+        repl_agent_builder: BuildReplAgentRef,
+    ) -> Result<Bucket, ReductError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             ReductError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
         })?;
 
         let settings = Self::fill_settings(settings.into(), Self::defaults());
+        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
 
         let mut entries = BTreeMap::new();
         for entry in std::fs::read_dir(&path)? {
             let path = entry?.path();
             if path.is_dir() {
+                let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
                 let entry = Entry::restore(
                     path,
                     EntrySettings {
                         max_block_size: settings.max_block_size.unwrap(),
                         max_block_records: settings.max_block_records.unwrap(),
                     },
+                    repl_agent_builder
+                        .write()
+                        .await
+                        .build_agent_for(&bucket_name, &entry_name),
                 )?;
                 entries.insert(entry.name().to_string(), entry);
             }
         }
 
         Ok(Bucket {
-            name: path.file_name().unwrap().to_str().unwrap().to_string(),
+            name: bucket_name,
             path,
             entries,
             settings,
             is_provisioned: false,
+            repl_agent_builder,
         })
     }
 
@@ -200,7 +216,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, ReductError> {
+    pub async fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, ReductError> {
         if !self.entries.contains_key(key) {
             let entry = Entry::new(
                 &key,
@@ -209,6 +225,10 @@ impl Bucket {
                     max_block_size: self.settings.max_block_size.unwrap(),
                     max_block_records: self.settings.max_block_records.unwrap(),
                 },
+                self.repl_agent_builder
+                    .write()
+                    .await
+                    .build_agent_for(self.name.as_str(), key),
             );
             self.entries.insert(key.to_string(), entry?);
         }
@@ -304,7 +324,7 @@ impl Bucket {
         labels: Labels,
     ) -> Result<RecordTx, ReductError> {
         self.keep_quota_for(content_size).await?;
-        let entry = self.get_or_create_entry(name)?;
+        let entry = self.get_or_create_entry(name).await?;
         entry
             .begin_write(time, content_size, content_type, labels)
             .await

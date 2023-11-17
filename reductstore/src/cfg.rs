@@ -17,8 +17,10 @@ use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::asset::asset_manager::create_asset_manager;
+use crate::replication::create_replication_engine;
 use tokio::sync::RwLock;
 
 /// Database configuration
@@ -58,8 +60,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         cfg
     }
 
-    pub fn build(&self) -> Components {
-        let storage = self.provision_storage();
+    pub async fn build(&self) -> Components {
+        let storage = self.provision_storage().await;
         let token_repo = self.provision_tokens();
 
         let console = create_asset_manager(load_console());
@@ -107,10 +109,13 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         token_repo
     }
 
-    fn provision_storage(&self) -> Storage {
-        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()));
+    async fn provision_storage(&self) -> Storage {
+        let replication_engine = Arc::new(RwLock::new(create_replication_engine()));
+
+        let mut storage =
+            Storage::new(PathBuf::from(self.data_path.clone()), replication_engine).await;
         for (name, settings) in &self.buckets {
-            let settings = match storage.create_bucket(&name, settings.clone()) {
+            let settings = match storage.create_bucket(&name, settings.clone()).await {
                 Ok(bucket) => {
                     bucket.set_provisioned(true);
                     Ok(bucket.settings().clone())
