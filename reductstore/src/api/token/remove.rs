@@ -9,7 +9,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // DELETE /tokens/:name
-pub async fn remove_token(
+pub(crate) async fn remove_token(
     State(components): State<Arc<Components>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,

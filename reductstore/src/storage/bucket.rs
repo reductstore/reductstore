@@ -19,7 +19,6 @@ use tokio::sync::mpsc::Receiver;
 
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
-use crate::storage::storage::BuildReplAgentRef;
 
 const DEFAULT_MAX_RECORDS: u64 = 256;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -106,7 +105,6 @@ pub struct Bucket {
     entries: BTreeMap<String, Entry>,
     settings: BucketSettings,
     is_provisioned: bool,
-    repl_agent_builder: BuildReplAgentRef,
 }
 
 impl Bucket {
@@ -126,7 +124,6 @@ impl Bucket {
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
-        repl_agent_builder: BuildReplAgentRef,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         std::fs::create_dir_all(&path)?;
@@ -138,7 +135,6 @@ impl Bucket {
             entries: BTreeMap::new(),
             settings,
             is_provisioned: false,
-            repl_agent_builder,
         };
 
         bucket.save_settings()?;
@@ -155,10 +151,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) async fn restore(
-        path: PathBuf,
-        repl_agent_builder: BuildReplAgentRef,
-    ) -> Result<Bucket, ReductError> {
+    pub(crate) async fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             ReductError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
@@ -178,10 +171,6 @@ impl Bucket {
                         max_block_size: settings.max_block_size.unwrap(),
                         max_block_records: settings.max_block_records.unwrap(),
                     },
-                    repl_agent_builder
-                        .write()
-                        .await
-                        .build_agent_for(&bucket_name, &entry_name),
                 )?;
                 entries.insert(entry.name().to_string(), entry);
             }
@@ -193,7 +182,6 @@ impl Bucket {
             entries,
             settings,
             is_provisioned: false,
-            repl_agent_builder,
         })
     }
 
@@ -225,10 +213,6 @@ impl Bucket {
                     max_block_size: self.settings.max_block_size.unwrap(),
                     max_block_records: self.settings.max_block_records.unwrap(),
                 },
-                self.repl_agent_builder
-                    .write()
-                    .await
-                    .build_agent_for(self.name.as_str(), key),
             );
             self.entries.insert(key.to_string(), entry?);
         }

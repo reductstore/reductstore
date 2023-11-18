@@ -71,6 +71,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
             console,
+            replication_engine: create_replication_engine(),
             base_path: self.api_base_path.clone(),
         }
     }
@@ -110,10 +111,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     async fn provision_storage(&self) -> Storage {
-        let replication_engine = Arc::new(RwLock::new(create_replication_engine()));
-
-        let mut storage =
-            Storage::new(PathBuf::from(self.data_path.clone()), replication_engine).await;
+        let mut storage = Storage::new(PathBuf::from(self.data_path.clone())).await;
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()).await {
                 Ok(bucket) => {

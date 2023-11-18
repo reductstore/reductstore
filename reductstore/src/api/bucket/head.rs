@@ -10,7 +10,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // HEAD /b/:bucket_name
-pub async fn head_bucket(
+pub(crate) async fn head_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,

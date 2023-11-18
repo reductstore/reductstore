@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
-pub async fn read_single_record(
+pub(crate) async fn read_single_record(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,

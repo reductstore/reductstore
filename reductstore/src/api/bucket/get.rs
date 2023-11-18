@@ -11,7 +11,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /b/:bucket_name
-pub async fn get_bucket(
+pub(crate) async fn get_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,

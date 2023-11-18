@@ -7,6 +7,8 @@ use crate::auth::policy::WriteAccessPolicy;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap};
 
+use crate::replication::ReplicationEvent::WriteRecord;
+use crate::replication::ReplicationNotification;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -16,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // POST /:bucket/:entry?ts=<number>
-pub async fn write_record(
+pub(crate) async fn write_record(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
@@ -101,11 +103,11 @@ pub async fn write_record(
                 )
                 .await?
         };
-        Ok(sender)
+        Ok((ts, sender))
     };
 
     match check_request_and_get_sender.await {
-        Ok(tx) => {
+        Ok((ts, tx)) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
                     tx.send($chunk).await.map(|_| ()).map_err(|e| {
@@ -136,7 +138,14 @@ pub async fn write_record(
                 debug!("Failed to sync the channel - it may be already closed");
             }
             tx.closed().await; //sync with the storage
-
+            components
+                .replication_engine
+                .notify(ReplicationNotification {
+                    bucket: bucket.clone(),
+                    entry: path.get("entry_name").unwrap().to_string(),
+                    event: WriteRecord(ts),
+                })
+                .await?;
             Ok(())
         }
         Err(e) => {

@@ -103,7 +103,7 @@ async fn check_and_extract_ts_or_query_id(
 #[derive(IntoResponse, Twin)]
 pub struct QueryInfoAxum(QueryInfo);
 
-pub fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
+pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
         .route(

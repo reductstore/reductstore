@@ -17,7 +17,6 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 
-use crate::replication::{NotifyReplicationEvent, ReplicationAgent, ReplicationEvent};
 use crate::storage::proto::*;
 use reduct_base::error::{ErrorCode, ReductError};
 
@@ -34,7 +33,6 @@ pub struct BlockManager {
     reader_count: HashMap<u64, usize>,
     writer_count: HashMap<u64, usize>,
     last_block: Option<Block>,
-    repl_agent: ReplicationAgent,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -65,13 +63,12 @@ pub fn find_first_block(block_index: &BTreeSet<u64>, start: &u64) -> u64 {
 }
 
 impl BlockManager {
-    pub(crate) fn new(path: PathBuf, repl_agent: ReplicationAgent) -> Self {
+    pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
             reader_count: HashMap::new(),
             writer_count: HashMap::new(),
             last_block: None,
-            repl_agent,
         }
     }
 
@@ -125,12 +122,6 @@ impl BlockManager {
         *self.writer_count.get_mut(&block_id).unwrap() -= 1;
         self.clean_readers_or_writers(block_id);
         self.save(block)?;
-
-        if state == record::State::Finished {
-            self.repl_agent
-                .filter_and_notify(ReplicationEvent::WriteRecord(timestamp))
-                .await?;
-        }
 
         Ok(())
     }

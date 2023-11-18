@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 // GET /:bucket/:entry/batch?q=<number>
-pub async fn read_batched_records(
+pub(crate) async fn read_batched_records(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,

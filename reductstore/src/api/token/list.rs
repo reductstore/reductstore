@@ -11,7 +11,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /tokens
-pub async fn list_tokens(
+pub(crate) async fn list_tokens(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<TokenListAxum, HttpError> {

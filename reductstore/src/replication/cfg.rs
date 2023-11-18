@@ -4,7 +4,7 @@
 use reduct_base::Labels;
 use url::Url;
 
-pub(crate) struct ReplicationCfg {
+pub struct ReplicationCfg {
     pub name: String,
     pub src_bucket: String,
     pub remote_bucket: String,

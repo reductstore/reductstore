@@ -17,14 +17,16 @@ use mime_guess::mime;
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
-pub async fn redirect_to_index(State(components): State<Arc<Components>>) -> impl IntoResponse {
+pub(crate) async fn redirect_to_index(
+    State(components): State<Arc<Components>>,
+) -> impl IntoResponse {
     let base_path = components.base_path.clone();
     let mut headers = HeaderMap::new();
     headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
     (StatusCode::FOUND, headers, Bytes::new()).into_response()
 }
 
-pub async fn show_ui(
+pub(crate) async fn show_ui(
     State(components): State<Arc<Components>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {

@@ -25,6 +25,7 @@ use crate::storage::storage::Storage;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
+use crate::replication::ReplicationEngine;
 pub use reduct_base::error::ErrorCode;
 
 mod bucket;
@@ -39,6 +40,7 @@ pub struct Components {
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
+    pub replication_engine: Box<dyn ReplicationEngine + Send + Sync>,
     pub base_path: String,
 }
 

@@ -54,7 +54,7 @@ pub async fn print_statuses<B>(
     Ok(response)
 }
 
-pub async fn check_permissions<P>(
+pub(crate) async fn check_permissions<P>(
     components: &Components,
     headers: HeaderMap,
     policy: P,
