@@ -1,7 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::cfg::ReplicationCfg;
+use crate::replication::replication::Replication;
 use crate::replication::{ReplicationEngine, ReplicationNotification};
 use async_trait::async_trait;
 use log::info;
@@ -10,35 +10,28 @@ use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 
 pub(crate) struct ReplicationEngineImpl {
-    replications: HashMap<String, ReplicationCfg>,
-    tx: Sender<ReplicationNotification>,
+    replications: HashMap<String, Replication>,
 }
 
 #[async_trait]
 impl ReplicationEngine for ReplicationEngineImpl {
-    fn add_replication(&mut self, cfg: ReplicationCfg) -> Result<(), ReductError> {
-        self.replications.insert(cfg.name.clone(), cfg);
+    fn add_replication(&mut self, cfg: Replication) -> Result<(), ReductError> {
+        self.replications.insert(cfg.name().clone(), cfg);
         Ok(())
     }
 
     async fn notify(&self, notification: ReplicationNotification) -> Result<(), ReductError> {
-        self.tx.send(notification).await.map_err(|_| {
-            ReductError::internal_server_error("Failed to send replication notification")
-        })
+        for (_, replication) in self.replications.iter() {
+            let _ = replication.notify(notification.clone()).await?;
+        }
+        Ok(())
     }
 }
 
 impl ReplicationEngineImpl {
     pub(crate) fn new() -> Self {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(100);
-        tokio::spawn(async move {
-            while let Some(notification) = rx.recv().await {
-                info!("Replication notification: {:?}", notification);
-            }
-        });
         Self {
             replications: HashMap::new(),
-            tx,
         }
     }
 }

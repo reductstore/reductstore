@@ -7,8 +7,8 @@ use crate::auth::policy::WriteAccessPolicy;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap};
 
-use crate::replication::ReplicationEvent::WriteRecord;
 use crate::replication::ReplicationNotification;
+use crate::replication::Transaction::WriteRecord;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -99,15 +99,15 @@ pub(crate) async fn write_record(
                     ts,
                     content_size,
                     content_type,
-                    labels,
+                    labels.clone(),
                 )
                 .await?
         };
-        Ok((ts, sender))
+        Ok((ts, labels, sender))
     };
 
     match check_request_and_get_sender.await {
-        Ok((ts, tx)) => {
+        Ok((ts, labels, tx)) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
                     tx.send($chunk).await.map(|_| ()).map_err(|e| {
@@ -143,6 +143,7 @@ pub(crate) async fn write_record(
                 .notify(ReplicationNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),
+                    labels,
                     event: WriteRecord(ts),
                 })
                 .await?;

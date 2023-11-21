@@ -11,7 +11,7 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
 
-use crate::replication::{ReplicationEvent, ReplicationNotification};
+use crate::replication::{ReplicationNotification, Transaction};
 use crate::storage::bucket::RecordTx;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
@@ -113,7 +113,8 @@ pub(crate) async fn write_batched_records(
                             .notify(ReplicationNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),
-                                event: ReplicationEvent::WriteRecord(timed_headers[index].0),
+                                labels: timed_headers[index].1.labels.clone(),
+                                event: Transaction::WriteRecord(timed_headers[index].0),
                             })
                             .await?;
 
