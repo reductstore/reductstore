@@ -151,7 +151,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) async fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
+    pub(crate) fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             ReductError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
@@ -204,7 +204,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub async fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, ReductError> {
+    pub fn get_or_create_entry(&mut self, key: &str) -> Result<&mut Entry, ReductError> {
         if !self.entries.contains_key(key) {
             let entry = Entry::new(
                 &key,
@@ -308,7 +308,7 @@ impl Bucket {
         labels: Labels,
     ) -> Result<RecordTx, ReductError> {
         self.keep_quota_for(content_size).await?;
-        let entry = self.get_or_create_entry(name).await?;
+        let entry = self.get_or_create_entry(name)?;
         entry
             .begin_write(time, content_size, content_type, labels)
             .await

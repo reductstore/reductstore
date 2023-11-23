@@ -22,8 +22,7 @@ pub(crate) async fn create_bucket(
         .storage
         .write()
         .await
-        .create_bucket(&bucket_name, settings.into())
-        .await?;
+        .create_bucket(&bucket_name, settings.into());
     Ok(())
 }
 

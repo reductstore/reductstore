@@ -60,8 +60,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         cfg
     }
 
-    pub async fn build(&self) -> Components {
-        let storage = self.provision_storage().await;
+    pub fn build(&self) -> Components {
+        let storage = self.provision_storage();
         let token_repo = self.provision_tokens();
 
         let console = create_asset_manager(load_console());
@@ -110,10 +110,10 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         token_repo
     }
 
-    async fn provision_storage(&self) -> Storage {
-        let mut storage = Storage::new(PathBuf::from(self.data_path.clone())).await;
+    fn provision_storage(&self) -> Storage {
+        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()));
         for (name, settings) in &self.buckets {
-            let settings = match storage.create_bucket(&name, settings.clone()).await {
+            let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {
                     bucket.set_provisioned(true);
                     Ok(bucket.settings().clone())

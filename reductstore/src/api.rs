@@ -137,6 +137,7 @@ mod tests {
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
+    use crate::replication::create_replication_engine;
     use axum::extract::{BodyStream, FromRequest, Path};
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
     use axum::http::Request;
@@ -186,6 +187,7 @@ mod tests {
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
+            replication_engine: create_replication_engine(),
         };
 
         Arc::new(components)

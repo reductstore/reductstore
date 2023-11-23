@@ -704,6 +704,7 @@ mod tests {
         let mut file = bm.begin_write(&block, 0).await.unwrap();
         file.write(b"hallo").await.unwrap();
         bm.finish_write_record(block_id, record::State::Finished, 0)
+            .await
             .unwrap();
 
         bm

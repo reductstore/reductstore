@@ -43,7 +43,7 @@ async fn main() {
     Logger::init(&cfg.log_level);
     info!("Configuration: \n {}", cfg);
 
-    let components = cfg.build().await;
+    let components = cfg.build();
 
     let scheme = if cfg.cert_path.is_empty() {
         "http"

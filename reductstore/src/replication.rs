@@ -13,7 +13,7 @@ mod replication;
 mod transaction_log;
 
 /// Replication event to be synchronized.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Transaction {
     /// Write a record to a bucket (timestamp)
     WriteRecord(u64),
