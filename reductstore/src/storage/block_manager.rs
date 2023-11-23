@@ -115,7 +115,7 @@ impl BlockManager {
     ) -> Result<(), ReductError> {
         let mut block = self.load(block_id)?;
         let record = &mut block.records[record_index];
-        let timestamp = ts_to_us(&record.timestamp.as_ref().unwrap());
+        let _timestamp = ts_to_us(&record.timestamp.as_ref().unwrap());
         record.state = i32::from(state);
         block.invalid = state == record::State::Invalid;
 

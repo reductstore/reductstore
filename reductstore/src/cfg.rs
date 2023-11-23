@@ -17,7 +17,6 @@ use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::asset::asset_manager::create_asset_manager;
 use crate::replication::create_replication_engine;

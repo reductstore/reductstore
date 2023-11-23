@@ -5,8 +5,6 @@ use crate::replication::replication::Replication;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 mod engine;
 mod replication;

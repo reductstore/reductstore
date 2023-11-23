@@ -260,7 +260,6 @@ mod tests {
     use axum::extract::FromRequest;
     use axum::http::Request;
     use rstest::{fixture, rstest};
-    use tokio::time::sleep;
 
     #[rstest]
     #[tokio::test]

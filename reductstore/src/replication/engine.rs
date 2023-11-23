@@ -4,10 +4,9 @@
 use crate::replication::replication::Replication;
 use crate::replication::{ReplicationEngine, ReplicationNotification};
 use async_trait::async_trait;
-use log::info;
+
 use reduct_base::error::ReductError;
 use std::collections::HashMap;
-use tokio::sync::mpsc::Sender;
 
 pub(crate) struct ReplicationEngineImpl {
     replications: HashMap<String, Replication>,

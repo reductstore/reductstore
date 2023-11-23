@@ -164,7 +164,7 @@ impl Bucket {
         for entry in std::fs::read_dir(&path)? {
             let path = entry?.path();
             if path.is_dir() {
-                let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
+                let _entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
                 let entry = Entry::restore(
                     path,
                     EntrySettings {

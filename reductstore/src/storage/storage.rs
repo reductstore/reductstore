@@ -6,10 +6,8 @@ use std::collections::BTreeMap;
 
 use std::fs::remove_dir_all;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use std::time::Instant;
-use tokio::sync::RwLock;
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
