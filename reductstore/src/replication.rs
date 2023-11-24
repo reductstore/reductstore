@@ -8,6 +8,7 @@ use reduct_base::Labels;
 
 mod engine;
 mod replication;
+mod transaction_filter;
 mod transaction_log;
 
 /// Replication event to be synchronized.
@@ -47,7 +48,7 @@ impl TryFrom<u8> for Transaction {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReplicationNotification {
+pub struct TransactionNotification {
     pub bucket: String,
     pub entry: String,
     pub labels: Labels,
@@ -57,7 +58,7 @@ pub struct ReplicationNotification {
 #[async_trait]
 pub trait ReplicationEngine {
     fn add_replication(&mut self, replication: Replication) -> Result<(), ReductError>;
-    async fn notify(&self, notification: ReplicationNotification) -> Result<(), ReductError>;
+    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
 pub(crate) fn create_replication_engine() -> Box<dyn ReplicationEngine + Send + Sync> {

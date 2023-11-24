@@ -1,11 +1,14 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::ReplicationNotification;
+use crate::replication::transaction_log::TransactionLog;
+use crate::replication::TransactionNotification;
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 use url::Url;
 
 pub struct Replication {
@@ -17,7 +20,7 @@ pub struct Replication {
     entries: Vec<String>,
     include: Labels,
     exclude: Labels,
-    tx: Sender<ReplicationNotification>,
+    tx: Sender<TransactionNotification>,
 }
 
 impl Replication {
@@ -31,7 +34,7 @@ impl Replication {
         include: Labels,
         exclude: Labels,
     ) -> Self {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<ReplicationNotification>(100);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TransactionNotification>(100);
         tokio::spawn(async move {
             while let Some(notification) = rx.recv().await {
                 // TODO: filter by entries and labels
@@ -53,7 +56,7 @@ impl Replication {
         }
     }
 
-    pub async fn notify(&self, notification: ReplicationNotification) -> Result<(), ReductError> {
+    pub async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         if notification.bucket != self.src_bucket {
             return Ok(());
         }

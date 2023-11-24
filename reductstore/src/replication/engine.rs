@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::replication::replication::Replication;
-use crate::replication::{ReplicationEngine, ReplicationNotification};
+use crate::replication::{ReplicationEngine, TransactionNotification};
 use async_trait::async_trait;
 
 use reduct_base::error::ReductError;
@@ -19,7 +19,7 @@ impl ReplicationEngine for ReplicationEngineImpl {
         Ok(())
     }
 
-    async fn notify(&self, notification: ReplicationNotification) -> Result<(), ReductError> {
+    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         for (_, replication) in self.replications.iter() {
             let _ = replication.notify(notification.clone()).await?;
         }

@@ -17,7 +17,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 ///  .........
 /// | byte - transaction type n | 8 byte - timestamp n |
 ///
-struct TransactionLog {
+pub(super) struct TransactionLog {
     file: File,
     capacity_in_bytes: usize,
     write_pos: usize,
@@ -28,6 +28,16 @@ const HEADER_SIZE: usize = 16;
 const ENTRY_SIZE: usize = 9;
 
 impl TransactionLog {
+    /// Create a new transaction log or load an existing one.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the transaction log file.
+    /// * `capacity` - Maximum number of transactions to store. Ignored if the file already exists.
+    ///
+    /// # Returns
+    ///
+    /// A new transaction log instance or an error.
     pub async fn try_load_or_create(path: PathBuf, capacity: usize) -> Result<Self, ReductError> {
         let instance = if !path.exists() {
             let file = OpenOptions::new()
@@ -65,6 +75,15 @@ impl TransactionLog {
         Ok(instance)
     }
 
+    /// Push a new transaction to the log.
+    ///
+    /// # Arguments
+    ///
+    /// * `transaction` - Transaction to push.
+    ///
+    /// # Returns
+    ///
+    /// The oldest transaction if the log is full, otherwise `None`.
     pub async fn push(
         &mut self,
         transaction: Transaction,
@@ -164,14 +183,20 @@ mod tests {
     #[tokio::test]
     async fn test_write_read_transaction_log(path: PathBuf) {
         let mut transaction_log = TransactionLog::try_load_or_create(path, 100).await.unwrap();
-        transaction_log
-            .push(Transaction::WriteRecord(1))
-            .await
-            .unwrap();
-        transaction_log
-            .push(Transaction::WriteRecord(2))
-            .await
-            .unwrap();
+        assert_eq!(
+            transaction_log
+                .push(Transaction::WriteRecord(1))
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            transaction_log
+                .push(Transaction::WriteRecord(2))
+                .await
+                .unwrap(),
+            None
+        );
         assert_eq!(transaction_log.is_empty(), false);
         assert_eq!(
             transaction_log.head().await.unwrap(),

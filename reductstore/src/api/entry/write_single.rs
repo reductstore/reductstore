@@ -7,8 +7,8 @@ use crate::auth::policy::WriteAccessPolicy;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap};
 
-use crate::replication::ReplicationNotification;
 use crate::replication::Transaction::WriteRecord;
+use crate::replication::TransactionNotification;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -140,7 +140,7 @@ pub(crate) async fn write_record(
             tx.closed().await; //sync with the storage
             components
                 .replication_engine
-                .notify(ReplicationNotification {
+                .notify(TransactionNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),
                     labels,
