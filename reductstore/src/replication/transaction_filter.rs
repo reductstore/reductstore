@@ -44,7 +44,7 @@ impl TransactionFilter {
     /// # Returns
     ///
     /// `true` if the notification matches the filter, `false` otherwise.
-    pub(super) fn filter(&self, notification: TransactionNotification) -> bool {
+    pub(super) fn filter(&self, notification: &TransactionNotification) -> bool {
         if notification.bucket != self.bucket {
             return false;
         }
@@ -112,14 +112,14 @@ mod tests {
     fn test_transaction_filter(notification: TransactionNotification) {
         let filter =
             TransactionFilter::new("bucket".to_string(), vec![], Labels::new(), Labels::new());
-        assert!(filter.filter(notification));
+        assert!(filter.filter(&notification));
     }
 
     #[rstest]
     fn test_transaction_filter_bucket(notification: TransactionNotification) {
         let filter =
             TransactionFilter::new("other".to_string(), vec![], Labels::new(), Labels::new());
-        assert!(!filter.filter(notification));
+        assert!(!filter.filter(&notification));
     }
 
     #[rstest]
@@ -135,7 +135,7 @@ mod tests {
     ) {
         let filter =
             TransactionFilter::new("bucket".to_string(), entries, Labels::new(), Labels::new());
-        assert_eq!(filter.filter(notification), expected);
+        assert_eq!(filter.filter(&notification), expected);
     }
 
     #[rstest]
@@ -156,7 +156,7 @@ mod tests {
             Labels::from_iter(include),
             Labels::new(),
         );
-        assert_eq!(filter.filter(notification), expected);
+        assert_eq!(filter.filter(&notification), expected);
     }
 
     #[rstest]
@@ -176,7 +176,7 @@ mod tests {
             Labels::new(),
             Labels::from_iter(exclude),
         );
-        assert_eq!(filter.filter(notification), expected);
+        assert_eq!(filter.filter(&notification), expected);
     }
 
     #[fixture]

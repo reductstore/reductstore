@@ -84,7 +84,7 @@ impl TransactionLog {
     /// # Returns
     ///
     /// The oldest transaction if the log is full, otherwise `None`.
-    pub async fn push(
+    pub async fn push_back(
         &mut self,
         transaction: Transaction,
     ) -> Result<Option<Transaction>, ReductError> {
@@ -118,14 +118,14 @@ impl TransactionLog {
         self.read_pos == self.write_pos
     }
 
-    pub async fn head(&mut self) -> Result<Option<Transaction>, ReductError> {
+    pub async fn front(&mut self) -> Result<Option<Transaction>, ReductError> {
         if self.is_empty() {
             return Ok(None);
         }
         self.unsafe_head().await
     }
 
-    pub async fn pop(&mut self) -> Result<(), ReductError> {
+    pub async fn pop_front(&mut self) -> Result<(), ReductError> {
         if self.read_pos == self.write_pos {
             return Err(ReductError::internal_server_error(
                 "Transaction log is empty",
@@ -185,35 +185,35 @@ mod tests {
         let mut transaction_log = TransactionLog::try_load_or_create(path, 100).await.unwrap();
         assert_eq!(
             transaction_log
-                .push(Transaction::WriteRecord(1))
+                .push_back(Transaction::WriteRecord(1))
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             transaction_log
-                .push(Transaction::WriteRecord(2))
+                .push_back(Transaction::WriteRecord(2))
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(transaction_log.is_empty(), false);
         assert_eq!(
-            transaction_log.head().await.unwrap(),
+            transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(1))
         );
 
-        transaction_log.pop().await.unwrap();
+        transaction_log.pop_front().await.unwrap();
         assert_eq!(
-            transaction_log.head().await.unwrap(),
+            transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(2))
         );
         assert_eq!(transaction_log.is_empty(), false);
 
-        transaction_log.pop().await.unwrap();
+        transaction_log.pop_front().await.unwrap();
         assert_eq!(transaction_log.is_empty(), true);
 
-        let err = transaction_log.pop().await.err().unwrap();
+        let err = transaction_log.pop_front().await.err().unwrap();
         assert_eq!(
             err,
             ReductError::internal_server_error("Transaction log is empty")
@@ -226,22 +226,22 @@ mod tests {
         let mut transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
         for i in 1..5 {
             transaction_log
-                .push(Transaction::WriteRecord(i))
+                .push_back(Transaction::WriteRecord(i))
                 .await
                 .unwrap();
         }
 
         assert_eq!(
-            transaction_log.head().await.unwrap(),
+            transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(3))
         );
-        transaction_log.pop().await.unwrap();
+        transaction_log.pop_front().await.unwrap();
 
         assert_eq!(
-            transaction_log.head().await.unwrap(),
+            transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(4))
         );
-        transaction_log.pop().await.unwrap();
+        transaction_log.pop_front().await.unwrap();
 
         assert_eq!(transaction_log.is_empty(), true);
     }
@@ -254,23 +254,23 @@ mod tests {
             .unwrap();
         for i in 1..5 {
             transaction_log
-                .push(Transaction::WriteRecord(i))
+                .push_back(Transaction::WriteRecord(i))
                 .await
                 .unwrap();
         }
 
         let mut transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
         assert_eq!(
-            transaction_log.head().await.unwrap(),
+            transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(3))
         );
-        transaction_log.pop().await.unwrap();
+        transaction_log.pop_front().await.unwrap();
 
         assert_eq!(
-            transaction_log.head().await.unwrap(),
+            transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(4))
         );
-        transaction_log.pop().await.unwrap();
+        transaction_log.pop_front().await.unwrap();
 
         assert_eq!(transaction_log.is_empty(), true);
     }
