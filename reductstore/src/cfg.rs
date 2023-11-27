@@ -10,7 +10,7 @@ use crate::storage::storage::Storage;
 use bytesize::ByteSize;
 
 use log::{error, info, warn};
-use reduct_base::error::ErrorCode;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
 
@@ -19,7 +19,10 @@ use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
 use crate::asset::asset_manager::create_asset_manager;
-use crate::replication::create_replication_engine;
+use crate::replication::{
+    create_replication_engine, Replication, ReplicationEngine, ReplicationSettings,
+};
+use reduct_base::Labels;
 use tokio::sync::RwLock;
 
 /// Database configuration
@@ -34,6 +37,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub cert_key_path: String,
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
+    pub replications: HashMap<String, ReplicationSettings>,
 
     env: Env<EnvGetter>,
 }
@@ -52,6 +56,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
+            replications: Self::parse_replications(&mut env),
 
             env,
         };
@@ -59,20 +64,20 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         cfg
     }
 
-    pub fn build(&self) -> Components {
+    pub async fn build(&self) -> Result<Components, ReductError> {
         let storage = self.provision_storage();
         let token_repo = self.provision_tokens();
-
         let console = create_asset_manager(load_console());
+        let replication_engine = self.provision_replication_engine()?;
 
-        Components {
+        Ok(Components {
             storage: RwLock::new(storage),
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
             console,
-            replication_engine: create_replication_engine(),
+            replication_engine,
             base_path: self.api_base_path.clone(),
-        }
+        })
     }
 
     fn provision_tokens(&self) -> Box<dyn ManageTokens + Send + Sync> {
@@ -142,6 +147,25 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             }
         }
         storage
+    }
+
+    fn provision_replication_engine(
+        &self,
+    ) -> Result<Box<dyn ReplicationEngine + Send + Sync>, ReductError> {
+        let mut engine = create_replication_engine();
+        for (_, settings) in &self.replications {
+            let replication =
+                Replication::new(PathBuf::from(self.data_path.clone()), settings.clone());
+            if let Err(err) = engine.add_replication(replication) {
+                error!(
+                    "Failed to provision replication '{}': {}",
+                    settings.name, err
+                );
+            } else {
+                info!("Provisioned replication {:?}", settings);
+            }
+        }
+        Ok(engine)
     }
 
     fn parse_buckets(env: &mut Env<EnvGetter>) -> HashMap<String, BucketSettings> {
@@ -221,6 +245,100 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         tokens
             .into_iter()
             .map(|(_, token)| (token.name.clone(), token))
+            .collect()
+    }
+
+    fn parse_replications(env: &mut Env<EnvGetter>) -> HashMap<String, ReplicationSettings> {
+        let mut replications = HashMap::<String, ReplicationSettings>::new();
+        for (id, name) in env.matches("RS_REPLICATION_(.*)_NAME") {
+            let replication = ReplicationSettings {
+                name,
+                src_bucket: "".to_string(),
+                remote_bucket: "".to_string(),
+                remote_host: url::Url::parse("http://localhost").unwrap(),
+                remote_token: "".to_string(),
+                entries: vec![],
+                include: Labels::new(),
+                exclude: Labels::new(),
+            };
+            replications.insert(id, replication);
+        }
+
+        let mut unfinished_replications = vec![];
+        for (id, replication) in &mut replications {
+            if let Some(src_bucket) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_SRC_BUCKET", id))
+            {
+                replication.src_bucket = src_bucket;
+            } else {
+                error!(
+                    "Replication '{}' has no source bucket. Drop it.",
+                    replication.name
+                );
+                unfinished_replications.push(id.clone());
+                continue;
+            }
+
+            if let Some(remote_bucket) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_REMOTE_BUCKET", id))
+            {
+                replication.remote_bucket = remote_bucket;
+            } else {
+                error!(
+                    "Replication '{}' has no destination bucket. Drop it.",
+                    replication.name
+                );
+                unfinished_replications.push(id.clone());
+                continue;
+            }
+
+            if let Some(remote_host) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_REMOTE_HOST", id))
+            {
+                match url::Url::parse(&remote_host) {
+                    Ok(url) => replication.remote_host = url,
+                    Err(err) => {
+                        error!(
+                            "Replication '{}' has invalid remote host: {}. Drop it.",
+                            replication.name, err
+                        );
+                        unfinished_replications.push(id.clone());
+                        continue;
+                    }
+                }
+            } else {
+                error!(
+                    "Replication '{}' has no remote host. Drop it.",
+                    replication.name
+                );
+                unfinished_replications.push(id.clone());
+                continue;
+            }
+
+            replication.remote_token = env.get::<String>(
+                &format!("RS_REPLICATION_{}_REMOTE_TOKEN", id),
+                "".to_string(),
+            );
+
+            if let Some(entries) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
+            {
+                replication.entries = entries.split(",").map(|s| s.to_string()).collect();
+            }
+
+            for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
+                replication.include.insert(key, value);
+            }
+
+            for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
+                replication.exclude.insert(key, value);
+            }
+        }
+
+        replications
+            .into_iter()
+            .filter(|(id, _)| !unfinished_replications.contains(id))
+            .map(|(_, replication)| (replication.name.clone(), replication))
             .collect()
     }
 }

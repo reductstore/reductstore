@@ -1,7 +1,6 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::replication::Replication;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
@@ -10,6 +9,9 @@ mod engine;
 mod replication;
 mod transaction_filter;
 mod transaction_log;
+
+pub use replication::Replication;
+pub use replication::ReplicationSettings;
 
 /// Replication event to be synchronized.
 #[derive(Debug, Clone, PartialEq)]

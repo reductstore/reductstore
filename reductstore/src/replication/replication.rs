@@ -7,34 +7,34 @@ use crate::replication::TransactionNotification;
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use url::Url;
 
+#[derive(Debug, Clone)]
 pub struct ReplicationSettings {
-    name: String,
-    src_bucket: String,
-    remote_bucket: String,
-    remote_host: Url,
-    remote_token: String,
-    entries: Vec<String>,
-    include: Labels,
-    exclude: Labels,
+    pub name: String,
+    pub src_bucket: String,
+    pub remote_bucket: String,
+    pub remote_host: Url,
+    pub remote_token: String,
+    pub entries: Vec<String>,
+    pub include: Labels,
+    pub exclude: Labels,
 }
 
 pub struct Replication {
     settings: ReplicationSettings,
     filter: TransactionFilter,
-    log: Arc<RwLock<TransactionLog>>,
+    storage_path: PathBuf,
+    log_map: Arc<RwLock<HashMap<String, TransactionLog>>>,
 }
 
 impl Replication {
-    pub async fn new(
-        storage_path: PathBuf,
-        settings: ReplicationSettings,
-    ) -> Result<Self, ReductError> {
+    pub fn new(storage_path: PathBuf, settings: ReplicationSettings) -> Self {
         let filter = TransactionFilter::new(
             settings.src_bucket.clone(),
             settings.entries.clone(),
@@ -42,32 +42,29 @@ impl Replication {
             settings.exclude.clone(),
         );
 
-        let log = Arc::new(RwLock::new(
-            TransactionLog::try_load_or_create(
-                storage_path.join(format!("{}.log", settings.name)),
-                1_000_000,
-            )
-            .await?,
-        ));
+        let logs = Arc::new(RwLock::new(HashMap::<String, TransactionLog>::new()));
 
-        let log_clone = log.clone();
+        let map_log = logs.clone();
         tokio::spawn(async move {
             loop {
-                if log_clone.read().await.is_empty() {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                    continue;
-                }
+                for (entry_name, log) in map_log.write().await.iter_mut() {
+                    if log.is_empty() {
+                        continue;
+                    }
 
-                let transaction = log_clone.write().await.pop_front().await.unwrap();
-                info!("Replicating transaction: {:?}", transaction)
+                    let transaction = log.front().await.unwrap().unwrap();
+                    info!("Replicating transaction {}/{:?}", entry_name, transaction);
+                    log.pop_front().await.unwrap();
+                }
             }
         });
 
-        Ok(Self {
+        Self {
             settings,
             filter,
-            log,
-        })
+            storage_path,
+            log_map: logs,
+        }
     }
 
     pub async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
@@ -75,7 +72,23 @@ impl Replication {
             return Ok(());
         }
 
-        if let Some(_) = self.log.write().await.push_back(notification.event).await? {
+        let mut lock = self.log_map.write().await;
+        let log = match lock.entry(notification.entry.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let log = TransactionLog::try_load_or_create(
+                    self.storage_path.join(format!(
+                        "{}/{}/transactions.log",
+                        notification.bucket, notification.entry
+                    )),
+                    1000_000,
+                )
+                .await?;
+                entry.insert(log)
+            }
+        };
+
+        if let Some(_) = log.push_back(notification.event).await? {
             error!("Transaction log is full, dropping the oldest transaction without replication");
         }
 
