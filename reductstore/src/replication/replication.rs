@@ -25,7 +25,6 @@ pub struct ReplicationSettings {
     pub include: Labels,
     pub exclude: Labels,
 }
-
 pub struct Replication {
     settings: ReplicationSettings,
     filter: TransactionFilter,
@@ -72,6 +71,7 @@ impl Replication {
             return Ok(());
         }
 
+        // find or create the transaction log for the entry
         let mut lock = self.log_map.write().await;
         let log = match lock.entry(notification.entry.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -97,5 +97,9 @@ impl Replication {
 
     pub fn name(&self) -> &String {
         &self.settings.name
+    }
+
+    pub fn settings(&self) -> &ReplicationSettings {
+        &self.settings
     }
 }

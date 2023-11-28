@@ -19,6 +19,10 @@ impl ReplicationEngine for ReplicationEngineImpl {
         Ok(())
     }
 
+    fn replications(&self) -> &HashMap<String, Replication> {
+        &self.replications
+    }
+
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         for (_, replication) in self.replications.iter() {
             let _ = replication.notify(notification.clone()).await?;

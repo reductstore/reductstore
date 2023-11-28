@@ -4,6 +4,7 @@
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
+use std::collections::HashMap;
 
 mod engine;
 mod replication;
@@ -60,6 +61,9 @@ pub struct TransactionNotification {
 #[async_trait]
 pub trait ReplicationEngine {
     fn add_replication(&mut self, replication: Replication) -> Result<(), ReductError>;
+
+    fn replications(&self) -> &HashMap<String, Replication>;
+
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
