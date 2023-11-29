@@ -1721,6 +1721,7 @@ dependencies = [
  "rand",
  "reduct-base",
  "reduct-macros",
+ "reduct-rs",
  "regex",
  "reqwest",
  "rstest",

@@ -7,6 +7,7 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 
 mod engine;
+mod remote_bucket;
 mod replication;
 mod transaction_filter;
 mod transaction_log;

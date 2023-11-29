@@ -7,6 +7,7 @@ use crate::replication::TransactionNotification;
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
+use reduct_rs::ReductClient;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -44,6 +45,14 @@ impl Replication {
         let logs = Arc::new(RwLock::new(HashMap::<String, TransactionLog>::new()));
 
         let map_log = logs.clone();
+        let config = settings.clone();
+
+        let client = ReductClient::builder()
+            .url(config.remote_host.as_str())
+            .api_token(&config.remote_token)
+            .build();
+
+        let bucket = client.get_bucket(&config.remote_bucket);
         tokio::spawn(async move {
             loop {
                 for (entry_name, log) in map_log.write().await.iter_mut() {
@@ -52,6 +61,7 @@ impl Replication {
                     }
 
                     let transaction = log.front().await.unwrap().unwrap();
+
                     info!("Replicating transaction {}/{:?}", entry_name, transaction);
                     log.pop_front().await.unwrap();
                 }

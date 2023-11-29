@@ -28,6 +28,7 @@ crate-type = ["lib"]
 [dependencies]
 reduct-base =  { path = "../reduct_base", version = "1.8.0-dev" }
 reduct-macros = { path = "../reduct_macros", version = "1.8.0-dev" }
+reduct-rs = { path = "../reduct_rs", version = "1.8.0-dev" }
 
 log = "0.4.20"
 chrono = { version = "0.4.26", features = ["serde"] }
