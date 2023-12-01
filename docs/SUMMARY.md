@@ -22,4 +22,4 @@
 
 ## VERSIONS
 
-* [Latest](https://docs.reduct.store)
+* [Latest](https://reduct.store/docs)
