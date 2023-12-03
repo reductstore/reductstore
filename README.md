@@ -54,7 +54,7 @@ cargo install reductstore
 RS_DATA_PATH=./data reductstore
 ```
 
-For a more in-depth guide, visit the **[Getting Started](https://docs.reduct.store/)** and **[Download](https://www.reduct.store/download)** sections.
+For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
 
 After initializing the instance, dive in with one of our **[Client SDKs](#client-sdks)** to write or retrieve data. To illustrate, here's a Python sample:
 
@@ -127,7 +127,7 @@ A1: ReductStore is specially designed for storing and managing large amounts of 
 
 **Q2: How do I get started with ReductStore?**
 
-A2: You can easily set up ReductStore using our Docker image or by using cargo. Detailed instructions are provided in the **[Getting Started](https://docs.reduct.store/)** section.
+A2: You can easily set up ReductStore using our Docker image or by using cargo. Detailed instructions are provided in the **[Getting Started](https://reduct.store/docs/)** section.
 
 **Q3: Is there any size limitation for the blob data?**
 
@@ -139,4 +139,4 @@ A4: Absolutely! With our variety of client SDKs and its adaptable HTTP API, Redu
 
 **Q5: I'm facing issues with the installation. Where can I get help?**
 
-A5: We recommend checking out our **[documentation](https://docs.reduct.store/)**. If you still face issues, feel free to join our Discord community or raise an issue on our GitHub repository.
+A5: We recommend checking out our **[documentation](https://reduct.store/docs/)**. If you still face issues, feel free to join our Discord community or raise an issue on our GitHub repository.

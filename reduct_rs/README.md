@@ -8,7 +8,7 @@ database for unstructured data.
 
 ## Features
 
-* Supports the [ReductStore HTTP API v1.7](https://docs.reduct.store/http-api)
+* Supports the [ReductStore HTTP API v1.7](https://reduct.store/docs/http-api)
 * Built on top of [reqwest](https://github.com/seanmonstar/reqwest)
 * Asynchronous API
 
@@ -57,4 +57,4 @@ async fn main() -> Result<(), HttpError> {
 ## References
 
 * [Documentation](https://docs.rs/reduct-rs/latest/reduct_rs/)
-* [ReductStore HTTP API](https://docs.reduct.store/http-api)
+* [ReductStore HTTP API](https://reduct.store/docs/http-api)

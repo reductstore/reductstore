@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - reductstore: Refactor read and write operation with tokio channels, [PR-370](https://github.com/reductstore/reductstore/pull/370)
+- docs: update link to new website, [PR-375](https://github.com/reductstore/reductstore/pull/375)
 
 ## [1.7.3] - 2023-11-08
 
