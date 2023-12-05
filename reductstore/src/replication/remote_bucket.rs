@@ -4,17 +4,19 @@
 mod state;
 
 use crate::replication::remote_bucket::state::{InitialState, RemoteBucketState};
+use crate::storage::bucket::{RecordReader, RecordRx};
+use crate::storage::proto::ts_to_us;
 use async_trait::async_trait;
 use futures_util::TryStream;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
 use reduct_rs::ReductClient;
-use serde::de::Unexpected::Option;
 use std::rc::Rc;
 use url::Url;
 
-struct RemoteBucketImpl {
-    state: Box<dyn RemoteBucketState>,
+pub(super) struct RemoteBucketImpl {
+    state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
+    path: String,
 }
 
 #[async_trait]
@@ -36,7 +38,43 @@ pub(crate) trait RemoteBucket {
 impl RemoteBucketImpl {
     pub fn new(url: Url, bucket_name: &str, api_token: &str) -> Self {
         Self {
-            state: Box::new(InitialState::new(url, bucket_name, api_token)),
+            path: format!("{}/{}", url, bucket_name),
+            state: Some(Box::new(InitialState::new(url, bucket_name, api_token))),
+        }
+    }
+
+    pub async fn write_record(
+        &mut self,
+        entry_name: &str,
+        mut record: RecordReader,
+    ) -> Result<(), ReductError> {
+        let state = self.state.take().unwrap();
+        let labels = Labels::from_iter(
+            record
+                .labels()
+                .iter()
+                .map(|label| (label.name.clone(), label.value.clone())),
+        );
+        let mut rc = record.record().clone();
+        self.state = Some(
+            state
+                .write_record(
+                    entry_name,
+                    ts_to_us(&rc.timestamp.unwrap()),
+                    labels,
+                    rc.content_type.as_str(),
+                    rc.end - rc.begin,
+                    record.into_rx(),
+                )
+                .await,
+        );
+        if self.state.as_ref().unwrap().ok() {
+            Ok(())
+        } else {
+            Err(ReductError::internal_server_error(&format!(
+                "Remote bucket {} is not available",
+                self.path
+            )))
         }
     }
 }

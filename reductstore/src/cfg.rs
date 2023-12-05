@@ -17,6 +17,7 @@ use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::asset::asset_manager::create_asset_manager;
 use crate::replication::{
@@ -65,13 +66,13 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub async fn build(&self) -> Result<Components, ReductError> {
-        let storage = self.provision_storage();
+        let storage = Arc::new(RwLock::new(self.provision_storage()));
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
-        let replication_engine = self.provision_replication_engine()?;
+        let replication_engine = self.provision_replication_engine(Arc::clone(&storage))?;
 
         Ok(Components {
-            storage: RwLock::new(storage),
+            storage,
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
             console,
@@ -151,11 +152,15 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
     fn provision_replication_engine(
         &self,
+        storage: Arc<RwLock<Storage>>,
     ) -> Result<Box<dyn ReplicationEngine + Send + Sync>, ReductError> {
         let mut engine = create_replication_engine();
         for (_, settings) in &self.replications {
-            let replication =
-                Replication::new(PathBuf::from(self.data_path.clone()), settings.clone());
+            let replication = Replication::new(
+                PathBuf::from(self.data_path.clone()),
+                Arc::clone(&storage),
+                settings.clone(),
+            );
             if let Err(err) = engine.add_replication(replication) {
                 error!(
                     "Failed to provision replication '{}': {}",

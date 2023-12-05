@@ -36,7 +36,7 @@ mod token;
 mod ui;
 
 pub struct Components {
-    pub storage: RwLock<Storage>,
+    pub storage: Arc<RwLock<Storage>>,
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,

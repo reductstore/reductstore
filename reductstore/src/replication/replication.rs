@@ -1,9 +1,11 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::replication::remote_bucket::RemoteBucketImpl;
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
+use crate::storage::storage::Storage;
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
@@ -31,10 +33,15 @@ pub struct Replication {
     filter: TransactionFilter,
     storage_path: PathBuf,
     log_map: Arc<RwLock<HashMap<String, TransactionLog>>>,
+    storage: Arc<RwLock<Storage>>,
 }
 
 impl Replication {
-    pub fn new(storage_path: PathBuf, settings: ReplicationSettings) -> Self {
+    pub fn new(
+        storage_path: PathBuf,
+        storage: Arc<RwLock<Storage>>,
+        settings: ReplicationSettings,
+    ) -> Self {
         let filter = TransactionFilter::new(
             settings.src_bucket.clone(),
             settings.entries.clone(),
@@ -47,12 +54,13 @@ impl Replication {
         let map_log = logs.clone();
         let config = settings.clone();
 
-        let client = ReductClient::builder()
-            .url(config.remote_host.as_str())
-            .api_token(&config.remote_token)
-            .build();
+        let mut remote_bucket = RemoteBucketImpl::new(
+            config.remote_host.clone(),
+            config.remote_bucket.as_str(),
+            config.remote_token.as_str(),
+        );
 
-        let bucket = client.get_bucket(&config.remote_bucket);
+        let local_storage = Arc::clone(&storage);
         tokio::spawn(async move {
             loop {
                 for (entry_name, log) in map_log.write().await.iter_mut() {
@@ -63,6 +71,33 @@ impl Replication {
                     let transaction = log.front().await.unwrap().unwrap();
 
                     info!("Replicating transaction {}/{:?}", entry_name, transaction);
+
+                    let get_record = async {
+                        local_storage
+                            .read()
+                            .await
+                            .get_bucket(&config.src_bucket)?
+                            .begin_read(&entry_name, *transaction.timestamp())
+                            .await
+                    };
+
+                    let read_record = match get_record.await {
+                        Ok(record) => record,
+                        Err(err) => {
+                            error!("Failed to replicate transaction: {:?}", err);
+                            break;
+                        }
+                    };
+
+                    match remote_bucket.write_record(entry_name, read_record).await {
+                        Ok(_) => {
+                            log.pop_front().await.unwrap();
+                        }
+                        Err(err) => {
+                            error!("Failed to replicate transaction: {:?}", err);
+                            break;
+                        }
+                    }
                     log.pop_front().await.unwrap();
                 }
             }
@@ -70,6 +105,7 @@ impl Replication {
 
         Self {
             settings,
+            storage,
             filter,
             storage_path,
             log_map: logs,
