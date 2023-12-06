@@ -6,8 +6,9 @@ use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
-use log::{error, info};
-use reduct_base::error::ReductError;
+use hermit_abi::addrinfo;
+use log::{debug, error, info};
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::Labels;
 use reduct_rs::ReductClient;
 use std::collections::hash_map::Entry;
@@ -15,6 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::time::sleep;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -28,11 +30,12 @@ pub struct ReplicationSettings {
     pub include: Labels,
     pub exclude: Labels,
 }
+
 pub struct Replication {
     settings: ReplicationSettings,
     filter: TransactionFilter,
     storage_path: PathBuf,
-    log_map: Arc<RwLock<HashMap<String, TransactionLog>>>,
+    log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<RwLock<Storage>>,
 }
 
@@ -49,7 +52,7 @@ impl Replication {
             settings.exclude.clone(),
         );
 
-        let logs = Arc::new(RwLock::new(HashMap::<String, TransactionLog>::new()));
+        let logs = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
 
         let map_log = logs.clone();
         let config = settings.clone();
@@ -63,12 +66,13 @@ impl Replication {
         let local_storage = Arc::clone(&storage);
         tokio::spawn(async move {
             loop {
-                for (entry_name, log) in map_log.write().await.iter_mut() {
-                    if log.is_empty() {
+                for (entry_name, log) in map_log.read().await.iter() {
+                    if log.read().await.is_empty() {
+                        sleep(std::time::Duration::from_millis(100)).await;
                         continue;
                     }
 
-                    let transaction = log.front().await.unwrap().unwrap();
+                    let transaction = log.write().await.front().await.unwrap().unwrap();
 
                     info!("Replicating transaction {}/{:?}", entry_name, transaction);
 
@@ -84,21 +88,23 @@ impl Replication {
                     let read_record = match get_record.await {
                         Ok(record) => record,
                         Err(err) => {
-                            error!("Failed to replicate transaction: {:?}", err);
+                            if err.status == ErrorCode::NotFound {
+                                log.write().await.pop_front().await.unwrap();
+                            }
+                            error!("Failed to read record: {:?}", err);
                             break;
                         }
                     };
 
                     match remote_bucket.write_record(entry_name, read_record).await {
                         Ok(_) => {
-                            log.pop_front().await.unwrap();
+                            log.write().await.pop_front().await.unwrap();
                         }
                         Err(err) => {
-                            error!("Failed to replicate transaction: {:?}", err);
+                            debug!("Failed to replicate transaction: {:?}", err);
                             break;
                         }
                     }
-                    log.pop_front().await.unwrap();
                 }
             }
         });
@@ -118,26 +124,52 @@ impl Replication {
         }
 
         // find or create the transaction log for the entry
-        let mut lock = self.log_map.write().await;
-        let log = match lock.entry(notification.entry.clone()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                let log = TransactionLog::try_load_or_create(
-                    self.storage_path.join(format!(
-                        "{}/{}/transactions.log",
-                        notification.bucket, notification.entry
-                    )),
-                    1000_000,
-                )
-                .await?;
-                entry.insert(log)
-            }
+        info!(
+            "find or create transaction {}/{:?}",
+            notification.entry, notification.event
+        );
+
+        if !self.log_map.read().await.contains_key(&notification.entry) {
+            let mut map = self.log_map.write().await;
+            map.insert(
+                notification.entry.clone(),
+                RwLock::new(
+                    TransactionLog::try_load_or_create(
+                        self.storage_path.join(format!(
+                            "{}/{}/{}.log",
+                            notification.bucket, notification.entry, self.settings.name
+                        )),
+                        1000_000,
+                    )
+                    .await?,
+                ),
+            );
         };
 
-        if let Some(_) = log.push_back(notification.event).await? {
+        info!(
+            "wait transaction {}/{:?}",
+            notification.entry, notification.event
+        );
+
+        let log_map = self.log_map.read().await;
+        let log = log_map.get(&notification.entry).unwrap();
+
+        info!(
+            "push transaction {}/{:?}",
+            notification.entry, notification.event
+        );
+        if let Some(_) = log
+            .write()
+            .await
+            .push_back(notification.event.clone())
+            .await?
+        {
             error!("Transaction log is full, dropping the oldest transaction without replication");
         }
-
+        info!(
+            "finish transaction {}/{:?}",
+            notification.entry, notification.event
+        );
         Ok(())
     }
 
