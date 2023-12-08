@@ -182,7 +182,7 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let components = Components {
-            storage: RwLock::new(storage),
+            storage: Arc::new(RwLock::new(storage)),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),

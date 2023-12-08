@@ -1,17 +1,17 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+mod initial_state;
 mod state;
 
-use crate::replication::remote_bucket::state::{InitialState, RemoteBucketState};
-use crate::storage::bucket::{RecordReader, RecordRx};
+use crate::replication::remote_bucket::initial_state::InitialState;
+use crate::replication::remote_bucket::state::RemoteBucketState;
+use crate::storage::bucket::RecordReader;
 use crate::storage::proto::ts_to_us;
 use async_trait::async_trait;
 use futures_util::TryStream;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
-use reduct_rs::ReductClient;
-use std::rc::Rc;
 use url::Url;
 
 pub(super) struct RemoteBucketImpl {

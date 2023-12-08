@@ -1,19 +1,23 @@
+// Copyright 2023 ReductStore
+// Licensed under the Business Source License 1.1
+
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt, TryStream};
+use futures_util::{Stream, TryStream};
 use log::error;
 use reduct_base::error::{IntEnum, ReductError};
 use reduct_base::Labels;
 use reduct_rs::{Bucket, ReductClient};
 use std::pin::Pin;
 use std::task::Poll;
-use tokio::sync::mpsc::Receiver;
 use tokio::time::Instant;
 use url::Url;
 
+/// A state of the remote bucket.
 #[async_trait]
 pub(super) trait RemoteBucketState {
+    /// Write a record to the remote bucket.
     async fn write_record(
         self: Box<Self>,
         entry: &str,
@@ -24,65 +28,11 @@ pub(super) trait RemoteBucketState {
         rx: RecordRx,
     ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
+    /// Is the bucket available?
     fn ok(&self) -> bool;
 }
 
-pub(super) struct InitialState {
-    client: ReductClient,
-    bucket_name: String,
-}
-
-impl InitialState {
-    pub fn new(url: Url, bucket: &str, api_token: &str) -> Self {
-        let client = ReductClient::builder()
-            .url(url.as_str())
-            .api_token(api_token)
-            .build();
-
-        Self {
-            client,
-            bucket_name: bucket.to_string(),
-        }
-    }
-}
-
-#[async_trait]
-impl RemoteBucketState for InitialState {
-    async fn write_record(
-        self: Box<Self>,
-        entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
-    ) -> Box<dyn RemoteBucketState + Sync + Send> {
-        let bucket = self.client.get_bucket(&self.bucket_name).await;
-        match bucket {
-            Ok(bucket) => {
-                let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                new_state
-                    .write_record(entry, timestamp, labels, content_type, content_length, rx)
-                    .await
-            }
-            Err(err) => {
-                error!(
-                    "Failed to get remote bucket {}/{}: {}",
-                    self.client.url(),
-                    self.bucket_name,
-                    err
-                );
-                Box::new(BucketUnavailableState::new(self.client, self.bucket_name))
-            }
-        }
-    }
-
-    fn ok(&self) -> bool {
-        false
-    }
-}
-
-struct BucketAvailableState {
+pub(super) struct BucketAvailableState {
     client: ReductClient,
     bucket: Bucket,
 }
@@ -155,7 +105,7 @@ impl RemoteBucketState for BucketAvailableState {
     }
 }
 
-struct BucketUnavailableState {
+pub(super) struct BucketUnavailableState {
     client: ReductClient,
     bucket_name: String,
     init_time: Instant,
