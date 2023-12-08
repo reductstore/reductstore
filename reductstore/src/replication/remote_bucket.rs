@@ -79,3 +79,69 @@ impl RemoteBucketImpl {
         }
     }
 }
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    use crate::replication::remote_bucket::client_wrapper::{
+        BoxedBucketApi, BoxedClientApi, ReductBucketApi, ReductClientApi,
+    };
+    use crate::storage::bucket::RecordRx;
+    use async_trait::async_trait;
+    use mockall::mock;
+    use rstest::fixture;
+
+    mock! {
+        pub(super) ReductClientApi {}
+
+        #[async_trait]
+        impl ReductClientApi for ReductClientApi {
+             async fn get_bucket(
+                &self,
+                bucket_name: &str,
+            ) -> Result<BoxedBucketApi, ReductError>;
+
+            fn url(&self) -> &str;
+        }
+    }
+
+    mock! {
+        pub(super) ReductBucketApi {}
+
+        #[async_trait]
+        impl ReductBucketApi for ReductBucketApi {
+            async fn write_record(
+                &self,
+                entry: &str,
+                timestamp: u64,
+                labels: Labels,
+                content_type: &str,
+                content_length: u64,
+                rx: RecordRx,
+            ) -> Result<(), ReductError>;
+
+            fn server_url(&self) -> &str;
+
+            fn name(&self) -> &str;
+        }
+    }
+
+    #[fixture]
+    pub(super) fn bucket() -> MockReductBucketApi {
+        let mut bucket = MockReductBucketApi::new();
+        bucket
+            .expect_server_url()
+            .return_const("http://localhost:8080".to_string());
+        bucket.expect_name().return_const("test".to_string());
+        bucket
+    }
+
+    #[fixture]
+    pub(super) fn client() -> MockReductClientApi {
+        let mut client = MockReductClientApi::new();
+        client
+            .expect_url()
+            .return_const("http://localhost:8080".to_string());
+        client
+    }
+}
