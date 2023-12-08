@@ -1,6 +1,9 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::replication::remote_bucket::client_wrapper::{
+    BoxedBucketApi, BoxedClientApi, ReductBucketApi, ReductClientApi,
+};
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -33,12 +36,12 @@ pub(super) trait RemoteBucketState {
 }
 
 pub(super) struct BucketAvailableState {
-    client: ReductClient,
-    bucket: Bucket,
+    client: BoxedClientApi,
+    bucket: BoxedBucketApi,
 }
 
 impl BucketAvailableState {
-    pub fn new(client: ReductClient, bucket: Bucket) -> Self {
+    pub fn new(client: BoxedClientApi, bucket: BoxedBucketApi) -> Self {
         Self { client, bucket }
     }
 }
@@ -54,30 +57,11 @@ impl RemoteBucketState for BucketAvailableState {
         content_length: u64,
         rx: RecordRx,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
-        struct RxWrapper {
-            rx: RecordRx,
-        }
-
-        impl Stream for RxWrapper {
-            type Item = Result<Bytes, ReductError>;
-
-            fn poll_next(
-                mut self: Pin<&mut Self>,
-                cx: &mut std::task::Context<'_>,
-            ) -> Poll<Option<Self::Item>> {
-                self.rx.poll_recv(cx)
-            }
-        }
-
-        let writer = self
+        match self
             .bucket
-            .write_record(entry)
-            .timestamp_us(timestamp)
-            .labels(labels)
-            .content_type(content_type)
-            .content_length(content_length)
-            .stream(RxWrapper { rx });
-        match writer.send().await {
+            .write_record(entry, timestamp, labels, content_type, content_length, rx)
+            .await
+        {
             Ok(_) => self,
             Err(err) => {
                 error!(
@@ -106,7 +90,7 @@ impl RemoteBucketState for BucketAvailableState {
 }
 
 pub(super) struct BucketUnavailableState {
-    client: ReductClient,
+    client: BoxedClientApi,
     bucket_name: String,
     init_time: Instant,
 }
@@ -124,15 +108,15 @@ impl RemoteBucketState for BucketUnavailableState {
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed().as_secs() > 60 {
             let bucket = self.client.get_bucket(&self.bucket_name).await;
-            match bucket {
+            return match bucket {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState {
                         client: self.client,
                         bucket,
                     });
-                    return new_state
+                    new_state
                         .write_record(entry, timestamp, labels, content_type, content_length, rx)
-                        .await;
+                        .await
                 }
                 Err(_) => {
                     error!(
@@ -140,9 +124,9 @@ impl RemoteBucketState for BucketUnavailableState {
                         self.client.url(),
                         self.bucket_name
                     );
-                    return Box::new(BucketUnavailableState::new(self.client, self.bucket_name));
+                    Box::new(BucketUnavailableState::new(self.client, self.bucket_name))
                 }
-            }
+            };
         }
 
         self
@@ -154,11 +138,73 @@ impl RemoteBucketState for BucketUnavailableState {
 }
 
 impl BucketUnavailableState {
-    pub fn new(client: ReductClient, bucket_name: String) -> Self {
+    pub fn new(client: BoxedClientApi, bucket_name: String) -> Self {
         Self {
             client,
             bucket_name,
             init_time: Instant::now(),
         }
+    }
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    use crate::replication::remote_bucket::client_wrapper::BoxedBucketApi;
+    use mockall::mock;
+    use rstest::fixture;
+
+    mock! {
+        pub(super) ReductClientApi {}
+
+        #[async_trait]
+        impl ReductClientApi for ReductClientApi {
+             async fn get_bucket(
+                &self,
+                bucket_name: &str,
+            ) -> Result<BoxedBucketApi, ReductError>;
+
+            fn url(&self) -> &str;
+        }
+    }
+
+    mock! {
+        pub ReductBucketApi {}
+
+        #[async_trait]
+        impl ReductBucketApi for ReductBucketApi {
+            async fn write_record(
+                &self,
+                entry: &str,
+                timestamp: u64,
+                labels: Labels,
+                content_type: &str,
+                content_length: u64,
+                rx: RecordRx,
+            ) -> Result<(), ReductError>;
+
+            fn server_url(&self) -> &str;
+
+            fn name(&self) -> &str;
+        }
+    }
+
+    #[fixture]
+    pub(super) fn bucket() -> BoxedBucketApi {
+        let mut bucket = MockReductBucketApi::new();
+        bucket
+            .expect_server_url()
+            .return_const("http://localhost:8080".to_string());
+        bucket.expect_name().return_const("test".to_string());
+        Box::new(bucket)
+    }
+
+    #[fixture]
+    pub(super) fn client() -> BoxedClientApi {
+        let mut client = MockReductClientApi::new();
+        client
+            .expect_url()
+            .return_const("http://localhost:8080".to_string());
+        Box::new(client)
     }
 }

@@ -1,6 +1,9 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::replication::remote_bucket::client_wrapper::{
+    create_client, BoxedClientApi, ReductClientApi,
+};
 use crate::replication::remote_bucket::state::{
     BucketAvailableState, BucketUnavailableState, RemoteBucketState,
 };
@@ -13,17 +16,13 @@ use url::Url;
 
 /// Initial state of the remote bucket.
 pub(super) struct InitialState {
-    client: ReductClient,
+    client: BoxedClientApi,
     bucket_name: String,
 }
 
 impl InitialState {
     pub fn new(url: Url, bucket: &str, api_token: &str) -> Self {
-        let client = ReductClient::builder()
-            .url(url.as_str())
-            .api_token(api_token)
-            .build();
-
+        let client = create_client(url.as_str(), api_token);
         Self {
             client,
             bucket_name: bucket.to_string(),

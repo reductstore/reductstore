@@ -1,6 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+mod client_wrapper;
 mod initial_state;
 mod state;
 
