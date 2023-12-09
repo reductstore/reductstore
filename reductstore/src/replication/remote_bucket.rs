@@ -5,7 +5,7 @@ mod client_wrapper;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
-use crate::storage::bucket::{RecordReader, RecordRx};
+use crate::storage::bucket::RecordReader;
 use crate::storage::proto::ts_to_us;
 use async_trait::async_trait;
 use futures_util::TryStream;
@@ -45,7 +45,7 @@ impl RemoteBucketImpl {
     pub async fn write_record(
         &mut self,
         entry_name: &str,
-        mut record: RecordReader,
+        record: RecordReader,
     ) -> Result<(), ReductError> {
         let state = self.state.take().unwrap();
         let labels = Labels::from_iter(
@@ -54,7 +54,7 @@ impl RemoteBucketImpl {
                 .iter()
                 .map(|label| (label.name.clone(), label.value.clone())),
         );
-        let mut rc = record.record().clone();
+        let rc = record.record().clone();
         self.state = Some(
             state
                 .write_record(
@@ -82,7 +82,7 @@ impl RemoteBucketImpl {
 pub(super) mod tests {
     use super::*;
     use crate::replication::remote_bucket::client_wrapper::{
-        BoxedBucketApi, BoxedClientApi, ReductBucketApi, ReductClientApi,
+        BoxedBucketApi, ReductBucketApi, ReductClientApi,
     };
     use crate::storage::bucket::RecordRx;
     use async_trait::async_trait;

@@ -6,12 +6,11 @@ use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
-use hermit_abi::addrinfo;
+
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::Labels;
-use reduct_rs::ReductClient;
-use std::collections::hash_map::Entry;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

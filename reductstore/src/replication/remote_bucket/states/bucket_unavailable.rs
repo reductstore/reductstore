@@ -2,21 +2,17 @@
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::{
-    BoxedBucketApi, BoxedClientApi, ReductBucketApi, ReductClientApi,
+    BoxedClientApi, ReductBucketApi, ReductClientApi,
 };
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
-use bytes::Bytes;
-use futures_util::{Stream, TryStream};
+
 use log::error;
 use reduct_base::Labels;
-use reduct_rs::{Bucket, ReductClient};
-use std::pin::Pin;
-use std::task::Poll;
+
 use tokio::time::{Duration, Instant};
-use url::Url;
 
 pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     client: BoxedClientApi,
@@ -82,7 +78,7 @@ mod tests {
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
     use mockall::predicate;
-    use reduct_base::error::{ErrorCode, ReductError};
+    use reduct_base::error::ReductError;
     use rstest::rstest;
 
     #[rstest]
