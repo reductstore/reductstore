@@ -85,9 +85,11 @@ pub(super) mod tests {
         BoxedBucketApi, ReductBucketApi, ReductClientApi,
     };
     use crate::storage::bucket::RecordRx;
+    use crate::storage::proto::Record;
     use async_trait::async_trait;
-    use mockall::mock;
-    use rstest::fixture;
+    use mockall::{mock, predicate};
+    use prost_wkt_types::Timestamp;
+    use rstest::{fixture, rstest};
 
     mock! {
         pub(super) ReductClientApi {}
@@ -124,6 +126,25 @@ pub(super) mod tests {
         }
     }
 
+    mock! {
+        State{}
+
+        #[async_trait]
+        impl RemoteBucketState for State {
+            async fn write_record(
+                self: Box<Self>,
+                entry: &str,
+                timestamp: u64,
+                labels: Labels,
+                content_type: &str,
+                content_length: u64,
+                rx: RecordRx,
+            ) -> Box<dyn RemoteBucketState + Sync + Send>;
+
+            fn ok(&self) -> bool;
+        }
+    }
+
     #[fixture]
     pub(super) fn bucket() -> MockReductBucketApi {
         let mut bucket = MockReductBucketApi::new();
@@ -141,5 +162,66 @@ pub(super) mod tests {
             .expect_url()
             .return_const("http://localhost:8080".to_string());
         client
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_record_ok() {
+        let mut first_state = MockState::new();
+        let mut second_state = MockState::new();
+        second_state.expect_ok().returning(|| true);
+
+        first_state
+            .expect_write_record()
+            .with(
+                predicate::eq("test"),
+                predicate::eq(0),
+                predicate::eq(Labels::default()),
+                predicate::eq(""),
+                predicate::eq(0),
+                predicate::always(),
+            )
+            .return_once(move |_, _, _, _, _, _| Box::new(second_state));
+
+        let mut remote_bucket = RemoteBucketImpl::new(
+            Url::parse("http://localhost:8080").unwrap(),
+            "test",
+            "api_token",
+        );
+        remote_bucket.state = Some(Box::new(first_state));
+
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let mut rec = Record::default();
+        rec.timestamp = Some(Timestamp::default());
+        let record = RecordReader::new(rx, rec, false);
+        remote_bucket.write_record("test", record).await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_record_err() {
+        let mut first_state = MockState::new();
+        let mut second_state = MockState::new();
+        second_state.expect_ok().returning(|| false);
+
+        first_state
+            .expect_write_record()
+            .return_once(move |_, _, _, _, _, _| Box::new(second_state));
+
+        let mut remote_bucket = RemoteBucketImpl::new(
+            Url::parse("http://localhost:8080").unwrap(),
+            "test",
+            "api_token",
+        );
+        remote_bucket.state = Some(Box::new(first_state));
+
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let mut rec = Record::default();
+        rec.timestamp = Some(Timestamp::default());
+        let record = RecordReader::new(rx, rec, false);
+        remote_bucket
+            .write_record("test", record)
+            .await
+            .unwrap_err();
     }
 }
