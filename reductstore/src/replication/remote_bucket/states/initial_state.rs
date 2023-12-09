@@ -1,11 +1,12 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::remote_bucket::bucket_available_state::BucketAvailableState;
 use crate::replication::remote_bucket::client_wrapper::{
     create_client, BoxedClientApi, ReductClientApi,
 };
-use crate::replication::remote_bucket::state::{BucketUnavailableState, RemoteBucketState};
+use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
+use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
+use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use log::error;
@@ -13,7 +14,7 @@ use reduct_base::Labels;
 use url::Url;
 
 /// Initial state of the remote bucket.
-pub(super) struct InitialState {
+pub(in crate::replication::remote_bucket) struct InitialState {
     client: BoxedClientApi,
     bucket_name: String,
 }

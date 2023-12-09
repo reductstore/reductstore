@@ -2,7 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
-use crate::replication::remote_bucket::state::{BucketUnavailableState, RemoteBucketState};
+use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
+use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use log::error;
@@ -10,7 +11,7 @@ use reduct_base::error::IntEnum;
 use reduct_base::Labels;
 
 /// A state when the remote bucket is available.
-pub(super) struct BucketAvailableState {
+pub(in crate::replication::remote_bucket) struct BucketAvailableState {
     client: BoxedClientApi,
     bucket: BoxedBucketApi,
 }

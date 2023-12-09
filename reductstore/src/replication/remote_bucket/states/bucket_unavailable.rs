@@ -1,10 +1,11 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::remote_bucket::bucket_available_state::BucketAvailableState;
 use crate::replication::remote_bucket::client_wrapper::{
     BoxedBucketApi, BoxedClientApi, ReductBucketApi, ReductClientApi,
 };
+use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
+use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -18,25 +19,7 @@ use std::task::Poll;
 use tokio::time::Instant;
 use url::Url;
 
-/// A state of the remote bucket.
-#[async_trait]
-pub(super) trait RemoteBucketState {
-    /// Write a record to the remote bucket.
-    async fn write_record(
-        self: Box<Self>,
-        entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
-    ) -> Box<dyn RemoteBucketState + Sync + Send>;
-
-    /// Is the bucket available?
-    fn ok(&self) -> bool;
-}
-
-pub(super) struct BucketUnavailableState {
+pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     client: BoxedClientApi,
     bucket_name: String,
     init_time: Instant,

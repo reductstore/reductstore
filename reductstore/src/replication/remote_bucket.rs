@@ -1,14 +1,11 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-mod bucket_available_state;
 mod client_wrapper;
-mod initial_state;
-mod state;
+mod states;
 
-use crate::replication::remote_bucket::initial_state::InitialState;
-use crate::replication::remote_bucket::state::RemoteBucketState;
-use crate::storage::bucket::RecordReader;
+use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
+use crate::storage::bucket::{RecordReader, RecordRx};
 use crate::storage::proto::ts_to_us;
 use async_trait::async_trait;
 use futures_util::TryStream;
