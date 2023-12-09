@@ -74,6 +74,8 @@ mod tests {
     use crate::replication::remote_bucket::tests::{
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
+    use mockall::predicate;
+    use reduct_base::error::ReductError;
     use rstest::rstest;
 
     #[rstest]
@@ -93,15 +95,23 @@ mod tests {
     ) {
         bucket
             .expect_write_record()
+            .with(
+                predicate::eq("test_entry"),
+                predicate::eq(0),
+                predicate::eq(Labels::new()),
+                predicate::eq("text/plain"),
+                predicate::eq(0),
+                predicate::always(),
+            )
             .return_once(|_, _, _, _, _, _| Ok(()));
         client
             .expect_get_bucket()
             .return_once(move |_| Ok(Box::new(bucket)));
 
-        let state = InitialState {
+        let state = Box::new(InitialState {
             client: Box::new(client),
             bucket_name: "test_bucket".to_string(),
-        };
+        });
 
         let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let state = state
@@ -109,5 +119,25 @@ mod tests {
             .await;
 
         assert_eq!(state.ok(), true);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bucket_unavailable(mut client: MockReductClientApi) {
+        client
+            .expect_get_bucket()
+            .return_once(move |_| Err(ReductError::bad_request("test error")));
+
+        let state = Box::new(InitialState {
+            client: Box::new(client),
+            bucket_name: "test_bucket".to_string(),
+        });
+
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let state = state
+            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
+            .await;
+
+        assert_eq!(state.ok(), false);
     }
 }
