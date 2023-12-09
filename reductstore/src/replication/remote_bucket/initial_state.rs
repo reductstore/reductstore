@@ -1,12 +1,11 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::replication::remote_bucket::bucket_available_state::BucketAvailableState;
 use crate::replication::remote_bucket::client_wrapper::{
     create_client, BoxedClientApi, ReductClientApi,
 };
-use crate::replication::remote_bucket::state::{
-    BucketAvailableState, BucketUnavailableState, RemoteBucketState,
-};
+use crate::replication::remote_bucket::state::{BucketUnavailableState, RemoteBucketState};
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use log::error;
@@ -75,7 +74,7 @@ mod tests {
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
     use mockall::predicate;
-    use reduct_base::error::ReductError;
+    use reduct_base::error::{ErrorCode, ReductError};
     use rstest::rstest;
 
     #[rstest]

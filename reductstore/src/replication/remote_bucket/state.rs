@@ -1,6 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::replication::remote_bucket::bucket_available_state::BucketAvailableState;
 use crate::replication::remote_bucket::client_wrapper::{
     BoxedBucketApi, BoxedClientApi, ReductBucketApi, ReductClientApi,
 };
@@ -35,60 +36,6 @@ pub(super) trait RemoteBucketState {
     fn ok(&self) -> bool;
 }
 
-pub(super) struct BucketAvailableState {
-    client: BoxedClientApi,
-    bucket: BoxedBucketApi,
-}
-
-impl BucketAvailableState {
-    pub fn new(client: BoxedClientApi, bucket: BoxedBucketApi) -> Self {
-        Self { client, bucket }
-    }
-}
-
-#[async_trait]
-impl RemoteBucketState for BucketAvailableState {
-    async fn write_record(
-        self: Box<Self>,
-        entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
-    ) -> Box<dyn RemoteBucketState + Sync + Send> {
-        match self
-            .bucket
-            .write_record(entry, timestamp, labels, content_type, content_length, rx)
-            .await
-        {
-            Ok(_) => self,
-            Err(err) => {
-                error!(
-                    "Failed to write record to remote bucket {}/{}: {}",
-                    self.bucket.server_url(),
-                    self.bucket.name(),
-                    err
-                );
-
-                // if it is a network error, we can retry
-                if err.status.int_value() < 0 {
-                    Box::new(BucketUnavailableState::new(
-                        self.client,
-                        self.bucket.name().to_string(),
-                    ))
-                } else {
-                    self
-                }
-            }
-        }
-    }
-
-    fn ok(&self) -> bool {
-        true
-    }
-}
-
 pub(super) struct BucketUnavailableState {
     client: BoxedClientApi,
     bucket_name: String,
@@ -110,10 +57,7 @@ impl RemoteBucketState for BucketUnavailableState {
             let bucket = self.client.get_bucket(&self.bucket_name).await;
             return match bucket {
                 Ok(bucket) => {
-                    let new_state = Box::new(BucketAvailableState {
-                        client: self.client,
-                        bucket,
-                    });
+                    let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
                     new_state
                         .write_record(entry, timestamp, labels, content_type, content_length, rx)
                         .await
