@@ -6,7 +6,7 @@ use prost::Message;
 use prost_wkt_types::Timestamp;
 use std::cmp::min;
 
-use log::error;
+use log::{debug, error};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{SeekFrom, Write};
@@ -403,7 +403,7 @@ pub async fn spawn_read_task(
                 break;
             }
             if let Err(e) = tx.send(Ok(Bytes::from(buf))).await {
-                error!("Failed to send record chunk: {}", e);
+                debug!("Failed to send record chunk: {}", e); // for some reason the receiver is closed
                 break;
             }
 

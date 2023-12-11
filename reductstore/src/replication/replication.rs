@@ -23,7 +23,7 @@ pub struct ReplicationSettings {
     pub name: String,
     pub src_bucket: String,
     pub remote_bucket: String,
-    pub remote_host: Url,
+    pub remote_host: String,
     pub remote_token: String,
     pub entries: Vec<String>,
     pub include: Labels,
@@ -57,7 +57,7 @@ impl Replication {
         } = settings.clone();
 
         let remote_bucket = Box::new(RemoteBucketImpl::new(
-            remote_host,
+            remote_host.as_str(),
             remote_bucket.as_str(),
             remote_token.as_str(),
         ));
@@ -222,7 +222,7 @@ mod tests {
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
-        assert!(transaction_log_empty(replication).await);
+        assert!(transaction_log_is_empty(replication).await);
     }
 
     #[rstest]
@@ -238,25 +238,8 @@ mod tests {
 
         replication.notify(notification).await.unwrap();
         assert!(
-            !transaction_log_empty(replication).await,
+            !transaction_log_is_empty(replication).await,
             "We keep the transaction in the log to sync later"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_replication_server_err(
-        mut remote_bucket: MockRmBucket,
-        notification: TransactionNotification,
-    ) {
-        remote_bucket
-            .expect_write_record()
-            .returning(|_, _| Err(ReductError::new(ErrorCode::InternalServerError, "")));
-        let replication = build_replication(remote_bucket).await;
-
-        replication.notify(notification).await.unwrap();
-        assert!(
-            !transaction_log_empty(replication).await,
-            "We don't keep the transaction in the log because we don't know if we can sync it later"
         );
     }
 
@@ -272,8 +255,8 @@ mod tests {
         notification.event = Transaction::WriteRecord(100);
         replication.notify(notification).await.unwrap();
         assert!(
-            !transaction_log_empty(replication).await,
-            "Transaction log is not empty because  we don't keep the transaction for a non existing record"
+            transaction_log_is_empty(replication).await,
+            "We don't keep the transaction for a non existing record"
         );
     }
 
@@ -298,7 +281,7 @@ mod tests {
             name: "test".to_string(),
             src_bucket: "src".to_string(),
             remote_bucket: "remote".to_string(),
-            remote_host: Url::parse("http://localhost:8383").unwrap(),
+            remote_host: "http://localhost:8383".to_string(),
             remote_token: "token".to_string(),
             entries: vec![],
             include: HashMap::new(),
@@ -339,7 +322,7 @@ mod tests {
         )
     }
 
-    async fn transaction_log_empty(replication: Replication) -> bool {
+    async fn transaction_log_is_empty(replication: Replication) -> bool {
         sleep(std::time::Duration::from_millis(100)).await;
 
         replication

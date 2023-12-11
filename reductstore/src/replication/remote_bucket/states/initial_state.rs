@@ -20,8 +20,8 @@ pub(in crate::replication::remote_bucket) struct InitialState {
 }
 
 impl InitialState {
-    pub fn new(url: Url, bucket: &str, api_token: &str) -> Self {
-        let client = create_client(url.as_str(), api_token);
+    pub fn new(url: &str, bucket: &str, api_token: &str) -> Self {
+        let client = create_client(url, api_token);
         Self {
             client,
             bucket_name: bucket.to_string(),
@@ -80,7 +80,7 @@ mod tests {
 
     #[rstest]
     fn test_initial_state() {
-        let url = Url::parse("http://localhost:8080").unwrap();
+        let url = "http://localhost:8080";
         let bucket_name = "test_bucket";
         let api_token = "test_token";
         let state = InitialState::new(url, bucket_name, api_token);

@@ -47,7 +47,7 @@ impl RemoteBucketState for BucketAvailableState {
                     err
                 );
 
-                // if it is a network error, we can retry
+                // if it is a network error, we can retry got to unavailable state and wait
                 if err.status.int_value() < 0 {
                     error!(
                         "Failed to write record to remote bucket {}/{}: {}",

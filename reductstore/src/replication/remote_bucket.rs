@@ -28,7 +28,7 @@ pub(crate) trait RemoteBucket {
 }
 
 impl RemoteBucketImpl {
-    pub fn new(url: Url, bucket_name: &str, api_token: &str) -> Self {
+    pub fn new(url: &str, bucket_name: &str, api_token: &str) -> Self {
         Self {
             path: format!("{}/{}", url, bucket_name),
             state: Some(Box::new(InitialState::new(url, bucket_name, api_token))),
@@ -199,11 +199,7 @@ pub(super) mod tests {
     }
 
     fn create_remote_bucket(mut first_state: MockState) -> RemoteBucketImpl {
-        let mut remote_bucket = RemoteBucketImpl::new(
-            Url::parse("http://localhost:8080").unwrap(),
-            "test",
-            "api_token",
-        );
+        let mut remote_bucket = RemoteBucketImpl::new("http://localhost:8080", "test", "api_token");
         remote_bucket.state = Some(Box::new(first_state));
         remote_bucket
     }

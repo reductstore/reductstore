@@ -256,7 +256,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 name,
                 src_bucket: "".to_string(),
                 remote_bucket: "".to_string(),
-                remote_host: url::Url::parse("http://localhost").unwrap(),
+                remote_host: "http://localhost".to_string(),
                 remote_token: "".to_string(),
                 entries: vec![],
                 include: Labels::new(),
@@ -297,7 +297,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_REMOTE_HOST", id))
             {
                 match url::Url::parse(&remote_host) {
-                    Ok(url) => replication.remote_host = url,
+                    Ok(url) => replication.remote_host = url.to_string(),
                     Err(err) => {
                         error!(
                             "Replication '{}' has invalid remote host: {}. Drop it.",
@@ -762,10 +762,7 @@ mod tests {
             assert_eq!(replication.settings().name, "replication1");
             assert_eq!(replication.settings().src_bucket, "bucket1");
             assert_eq!(replication.settings().remote_bucket, "bucket2");
-            assert_eq!(
-                replication.settings().remote_host,
-                url::Url::parse("http://localhost").unwrap()
-            );
+            assert_eq!(replication.settings().remote_host, "http://localhost");
             assert_eq!(replication.settings().remote_token, "TOKEN");
             assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
             assert_eq!(
