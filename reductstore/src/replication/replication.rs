@@ -1,7 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::remote_bucket::RemoteBucketImpl;
+use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketImpl};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
@@ -33,41 +33,63 @@ pub struct ReplicationSettings {
 pub struct Replication {
     settings: ReplicationSettings,
     filter: TransactionFilter,
-    storage_path: PathBuf,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<RwLock<Storage>>,
 }
 
+struct ReplicationComponents {
+    remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
+    filter: TransactionFilter,
+    storage: Arc<RwLock<Storage>>,
+}
+
 impl Replication {
-    pub fn new(
-        storage_path: PathBuf,
-        storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) -> Self {
-        let filter = TransactionFilter::new(
-            settings.src_bucket.clone(),
-            settings.entries.clone(),
-            settings.include.clone(),
-            settings.exclude.clone(),
-        );
+    pub fn new(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) -> Self {
+        let ReplicationSettings {
+            name,
+            src_bucket,
+            remote_bucket,
+            remote_host,
+            remote_token,
+            entries,
+            include,
+            exclude,
+        } = settings.clone();
 
+        let remote_bucket = Box::new(RemoteBucketImpl::new(
+            remote_host,
+            remote_bucket.as_str(),
+            remote_token.as_str(),
+        ));
+
+        let filter = TransactionFilter::new(src_bucket, entries, include, exclude);
+
+        Self::build(
+            ReplicationComponents {
+                remote_bucket,
+                filter,
+                storage,
+            },
+            settings,
+        )
+    }
+
+    fn build(replication_components: ReplicationComponents, settings: ReplicationSettings) -> Self {
+        let ReplicationComponents {
+            mut remote_bucket,
+            filter,
+            storage,
+        } = replication_components;
         let logs = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
-
         let map_log = logs.clone();
         let config = settings.clone();
-
-        let mut remote_bucket = RemoteBucketImpl::new(
-            config.remote_host.clone(),
-            config.remote_bucket.as_str(),
-            config.remote_token.as_str(),
-        );
 
         let local_storage = Arc::clone(&storage);
         tokio::spawn(async move {
             loop {
                 for (entry_name, log) in map_log.read().await.iter() {
                     if log.read().await.is_empty() {
-                        sleep(std::time::Duration::from_millis(100)).await;
+                        sleep(std::time::Duration::from_micros(100)).await;
                         continue;
                     }
 
@@ -112,7 +134,6 @@ impl Replication {
             settings,
             storage,
             filter,
-            storage_path,
             log_map: logs,
         }
     }
@@ -130,7 +151,7 @@ impl Replication {
                 notification.entry.clone(),
                 RwLock::new(
                     TransactionLog::try_load_or_create(
-                        self.storage_path.join(format!(
+                        self.storage.read().await.data_path().join(format!(
                             "{}/{}/{}.log",
                             notification.bucket, notification.entry, self.settings.name
                         )),
@@ -162,5 +183,173 @@ impl Replication {
 
     pub fn settings(&self) -> &ReplicationSettings {
         &self.settings
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::replication::Transaction;
+    use crate::storage::bucket::RecordReader;
+    use crate::storage::proto::Record;
+    use async_trait::async_trait;
+    use axum::extract::connect_info::MockConnectInfo;
+    use bytes::Bytes;
+    use mockall::mock;
+    use reduct_base::msg::bucket_api::BucketSettings;
+    use rstest::*;
+
+    mock! {
+        RmBucket {}
+
+        #[async_trait]
+        impl RemoteBucket for RmBucket {
+            async fn write_record(
+                &mut self,
+                entry_name: &str,
+                record: RecordReader,
+            ) -> Result<(), ReductError>;
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_ok(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+    ) {
+        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        let replication = build_replication(remote_bucket).await;
+
+        replication.notify(notification).await.unwrap();
+        assert!(transaction_log_empty(replication).await);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_comm_err(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+    ) {
+        remote_bucket
+            .expect_write_record()
+            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+        let replication = build_replication(remote_bucket).await;
+
+        replication.notify(notification).await.unwrap();
+        assert!(
+            !transaction_log_empty(replication).await,
+            "We keep the transaction in the log to sync later"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_replication_server_err(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+    ) {
+        remote_bucket
+            .expect_write_record()
+            .returning(|_, _| Err(ReductError::new(ErrorCode::InternalServerError, "")));
+        let replication = build_replication(remote_bucket).await;
+
+        replication.notify(notification).await.unwrap();
+        assert!(
+            !transaction_log_empty(replication).await,
+            "We don't keep the transaction in the log because we don't know if we can sync it later"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_not_found(
+        mut remote_bucket: MockRmBucket,
+        mut notification: TransactionNotification,
+    ) {
+        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        let replication = build_replication(remote_bucket).await;
+
+        notification.event = Transaction::WriteRecord(100);
+        replication.notify(notification).await.unwrap();
+        assert!(
+            !transaction_log_empty(replication).await,
+            "Transaction log is not empty because  we don't keep the transaction for a non existing record"
+        );
+    }
+
+    #[fixture]
+    fn remote_bucket() -> MockRmBucket {
+        MockRmBucket::new()
+    }
+
+    #[fixture]
+    fn notification() -> TransactionNotification {
+        TransactionNotification {
+            bucket: "src".to_string(),
+            entry: "test".to_string(),
+            labels: Labels::new(),
+            event: Transaction::WriteRecord(10),
+        }
+    }
+
+    async fn build_replication(remote_bucket: MockRmBucket) -> Replication {
+        let tmp_dir = tempfile::tempdir().unwrap().into_path();
+        let settings = ReplicationSettings {
+            name: "test".to_string(),
+            src_bucket: "src".to_string(),
+            remote_bucket: "remote".to_string(),
+            remote_host: Url::parse("http://localhost:8383").unwrap(),
+            remote_token: "token".to_string(),
+            entries: vec![],
+            include: HashMap::new(),
+            exclude: HashMap::new(),
+        };
+
+        let filter = TransactionFilter::new(
+            settings.src_bucket.clone(),
+            settings.entries.clone(),
+            settings.include.clone(),
+            settings.exclude.clone(),
+        );
+
+        let storage = Arc::new(RwLock::new(Storage::new(tmp_dir)));
+
+        {
+            let mut lock = storage.write().await;
+
+            let bucket = lock
+                .create_bucket("src", BucketSettings::default())
+                .unwrap();
+
+            let tx = bucket
+                .write_record("test", 10, 4, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
+            tx.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+            tx.send(Ok(None)).await.unwrap();
+        }
+
+        Replication::build(
+            ReplicationComponents {
+                remote_bucket: Box::new(remote_bucket),
+                filter,
+                storage,
+            },
+            settings,
+        )
+    }
+
+    async fn transaction_log_empty(replication: Replication) -> bool {
+        sleep(std::time::Duration::from_millis(100)).await;
+
+        replication
+            .log_map
+            .read()
+            .await
+            .get("test")
+            .unwrap()
+            .read()
+            .await
+            .is_empty()
     }
 }

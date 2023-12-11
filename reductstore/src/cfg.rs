@@ -156,11 +156,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     ) -> Result<Box<dyn ReplicationEngine + Send + Sync>, ReductError> {
         let mut engine = create_replication_engine();
         for (_, settings) in &self.replications {
-            let replication = Replication::new(
-                PathBuf::from(self.data_path.clone()),
-                Arc::clone(&storage),
-                settings.clone(),
-            );
+            let replication = Replication::new(Arc::clone(&storage), settings.clone());
             if let Err(err) = engine.add_replication(replication) {
                 error!(
                     "Failed to provision replication '{}': {}",

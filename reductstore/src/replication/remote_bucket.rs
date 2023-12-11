@@ -20,18 +20,11 @@ pub(super) struct RemoteBucketImpl {
 
 #[async_trait]
 pub(crate) trait RemoteBucket {
-    async fn write_record<S>(
-        &self,
-        entry: String,
-        timestamp: u64,
-        labels: Labels,
-        content_type: String,
-        content_length: u64,
-        data: S,
-    ) -> Result<(), ReductError>
-    where
-        S: TryStream + Send + Sync + 'static,
-        S::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+    async fn write_record(
+        &mut self,
+        entry_name: &str,
+        record: RecordReader,
+    ) -> Result<(), ReductError>;
 }
 
 impl RemoteBucketImpl {
@@ -41,8 +34,11 @@ impl RemoteBucketImpl {
             state: Some(Box::new(InitialState::new(url, bucket_name, api_token))),
         }
     }
+}
 
-    pub async fn write_record(
+#[async_trait]
+impl RemoteBucket for RemoteBucketImpl {
+    async fn write_record(
         &mut self,
         entry_name: &str,
         record: RecordReader,

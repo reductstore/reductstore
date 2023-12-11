@@ -180,6 +180,10 @@ impl Storage {
 
         Ok(BucketInfoList { buckets })
     }
+
+    pub fn data_path(&self) -> &PathBuf {
+        &self.data_path
+    }
 }
 
 #[cfg(test)]
