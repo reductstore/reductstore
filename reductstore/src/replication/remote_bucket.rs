@@ -183,18 +183,8 @@ pub(super) mod tests {
             )
             .return_once(move |_, _, _, _, _, _| Box::new(second_state));
 
-        let mut remote_bucket = RemoteBucketImpl::new(
-            Url::parse("http://localhost:8080").unwrap(),
-            "test",
-            "api_token",
-        );
-        remote_bucket.state = Some(Box::new(first_state));
-
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let mut rec = Record::default();
-        rec.timestamp = Some(Timestamp::default());
-        let record = RecordReader::new(rx, rec, false);
-        remote_bucket.write_record("test", record).await.unwrap();
+        let remote_bucket = create_remote_bucket(first_state);
+        write_record(remote_bucket).await.unwrap();
     }
 
     #[rstest]
@@ -208,20 +198,25 @@ pub(super) mod tests {
             .expect_write_record()
             .return_once(move |_, _, _, _, _, _| Box::new(second_state));
 
+        let remote_bucket = create_remote_bucket(first_state);
+        write_record(remote_bucket).await.unwrap_err();
+    }
+
+    fn create_remote_bucket(mut first_state: MockState) -> RemoteBucketImpl {
         let mut remote_bucket = RemoteBucketImpl::new(
             Url::parse("http://localhost:8080").unwrap(),
             "test",
             "api_token",
         );
         remote_bucket.state = Some(Box::new(first_state));
+        remote_bucket
+    }
 
+    async fn write_record(mut remote_bucket: RemoteBucketImpl) -> Result<(), ReductError> {
         let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
         let record = RecordReader::new(rx, rec, false);
-        remote_bucket
-            .write_record("test", record)
-            .await
-            .unwrap_err();
+        remote_bucket.write_record("test", record).await
     }
 }
