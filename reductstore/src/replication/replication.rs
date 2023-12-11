@@ -73,7 +73,7 @@ impl Replication {
 
                     let transaction = log.write().await.front().await.unwrap().unwrap();
 
-                    info!("Replicating transaction {}/{:?}", entry_name, transaction);
+                    debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
                     let get_record = async {
                         local_storage
@@ -122,12 +122,8 @@ impl Replication {
             return Ok(());
         }
 
-        // find or create the transaction log for the entry
-        info!(
-            "find or create transaction {}/{:?}",
-            notification.entry, notification.event
-        );
-
+        // NOTE: very important not to lock the log_map for too long
+        // because it is used by the replication thread
         if !self.log_map.read().await.contains_key(&notification.entry) {
             let mut map = self.log_map.write().await;
             map.insert(
@@ -145,18 +141,9 @@ impl Replication {
             );
         };
 
-        info!(
-            "wait transaction {}/{:?}",
-            notification.entry, notification.event
-        );
-
         let log_map = self.log_map.read().await;
         let log = log_map.get(&notification.entry).unwrap();
 
-        info!(
-            "push transaction {}/{:?}",
-            notification.entry, notification.event
-        );
         if let Some(_) = log
             .write()
             .await
@@ -165,10 +152,7 @@ impl Replication {
         {
             error!("Transaction log is full, dropping the oldest transaction without replication");
         }
-        info!(
-            "finish transaction {}/{:?}",
-            notification.entry, notification.event
-        );
+
         Ok(())
     }
 

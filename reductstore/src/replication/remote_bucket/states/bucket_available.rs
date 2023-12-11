@@ -6,7 +6,7 @@ use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavail
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
-use log::error;
+use log::{debug, error};
 use reduct_base::error::IntEnum;
 use reduct_base::Labels;
 
@@ -40,7 +40,7 @@ impl RemoteBucketState for BucketAvailableState {
         {
             Ok(_) => self,
             Err(err) => {
-                error!(
+                debug!(
                     "Failed to write record to remote bucket {}/{}: {}",
                     self.bucket.server_url(),
                     self.bucket.name(),
@@ -49,6 +49,12 @@ impl RemoteBucketState for BucketAvailableState {
 
                 // if it is a network error, we can retry
                 if err.status.int_value() < 0 {
+                    error!(
+                        "Failed to write record to remote bucket {}/{}: {}",
+                        self.bucket.server_url(),
+                        self.bucket.name(),
+                        err
+                    );
                     Box::new(BucketUnavailableState::new(
                         self.client,
                         self.bucket.name().to_string(),
