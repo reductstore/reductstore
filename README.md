@@ -31,6 +31,7 @@ It guarantees that your data will not overflow your hard disk and batches record
 - No limit for maximum size of blob
 - Real-time FIFO bucket quota based on size to avoid disk space shortage
 - HTTP(S) API
+- Append-only replication
 - Optimized for small objects (less than 1 MB)
 - Labeling data for annotation and filtering
 - Iterative data querying
