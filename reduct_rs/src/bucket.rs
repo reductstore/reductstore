@@ -105,6 +105,11 @@ impl Bucket {
         &self.name
     }
 
+    /// URL of the server.
+    pub fn server_url(&self) -> &str {
+        &self.http_client.url()
+    }
+
     /// Remove the bucket.
     ///
     /// # Returns

@@ -11,7 +11,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /info
-pub async fn info(
+pub(crate) async fn info(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<ServerInfoAxum, HttpError> {

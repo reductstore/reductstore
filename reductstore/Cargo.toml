@@ -28,6 +28,7 @@ crate-type = ["lib"]
 [dependencies]
 reduct-base =  { path = "../reduct_base", version = "1.8.0-dev" }
 reduct-macros = { path = "../reduct_macros", version = "1.8.0-dev" }
+reduct-rs = { path = "../reduct_rs", version = "1.8.0-dev" }
 
 log = "0.4.20"
 chrono = { version = "0.4.26", features = ["serde"] }
@@ -55,6 +56,7 @@ rustls = "0.21.6"
 mime_guess = "2.0.4"
 bytesize = "1.3.0"
 async-trait="0.1.73"
+url = { version = "2.4.0", features = ["serde"] }
 
 [build-dependencies]
 prost-build = "0.12.1"

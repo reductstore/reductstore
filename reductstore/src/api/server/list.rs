@@ -10,7 +10,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /list
-pub async fn list(
+pub(crate) async fn list(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<BucketInfoListAxum, HttpError> {

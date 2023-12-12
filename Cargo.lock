@@ -1721,6 +1721,7 @@ dependencies = [
  "rand",
  "reduct-base",
  "reduct-macros",
+ "reduct-rs",
  "regex",
  "reqwest",
  "rstest",
@@ -1732,6 +1733,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower",
+ "url",
  "zip",
 ]
 

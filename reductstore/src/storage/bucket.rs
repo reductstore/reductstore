@@ -1,7 +1,7 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::storage::entry::{Entry, EntrySettings, Labels};
+use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, BucketSettings as ProtoBucketSettings, Record};
 use log::debug;
@@ -10,6 +10,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reduct_base::msg::entry_api::EntryInfo;
+use reduct_base::Labels;
 use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
@@ -114,6 +115,7 @@ impl Bucket {
     /// * `name` - The name of the bucket
     /// * `path` - The path to folder with buckets
     /// * `settings` - The settings for the bucket
+    /// * `repl_agent_builder` - The replication agent builder
     ///
     /// # Returns
     ///
@@ -144,22 +146,25 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `path` - The path to the bucket
+    /// * `repl_agent_builder` - The replication agent builder
     ///
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
+    pub(crate) fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             ReductError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
         })?;
 
         let settings = Self::fill_settings(settings.into(), Self::defaults());
+        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
 
         let mut entries = BTreeMap::new();
         for entry in std::fs::read_dir(&path)? {
             let path = entry?.path();
             if path.is_dir() {
+                let _entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
                 let entry = Entry::restore(
                     path,
                     EntrySettings {
@@ -172,7 +177,7 @@ impl Bucket {
         }
 
         Ok(Bucket {
-            name: path.file_name().unwrap().to_str().unwrap().to_string(),
+            name: bucket_name,
             path,
             entries,
             settings,
@@ -507,7 +512,6 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::entry::Labels;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 

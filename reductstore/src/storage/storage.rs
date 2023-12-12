@@ -24,9 +24,9 @@ pub struct Storage {
 
 impl Storage {
     /// Create a new Storage
-    pub fn new(data_path: PathBuf) -> Storage {
+    pub(crate) fn new(data_path: PathBuf) -> Storage {
         if !data_path.exists() {
-            info!("Folder '{}' doesn't exist. Create it.", data_path.display());
+            info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
         }
 
@@ -180,14 +180,18 @@ impl Storage {
 
         Ok(BucketInfoList { buckets })
     }
+
+    pub fn data_path(&self) -> &PathBuf {
+        &self.data_path
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::entry::Labels;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
+    use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::thread::sleep;
     use std::time::Duration;

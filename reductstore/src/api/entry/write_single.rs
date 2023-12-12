@@ -4,19 +4,21 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::storage::entry::Labels;
 use axum::extract::{BodyStream, Path, Query, State};
 use axum::headers::{Expect, Header, HeaderMap};
 
+use crate::replication::Transaction::WriteRecord;
+use crate::replication::TransactionNotification;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
+use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 // POST /:bucket/:entry?ts=<number>
-pub async fn write_record(
+pub(crate) async fn write_record(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
@@ -97,15 +99,15 @@ pub async fn write_record(
                     ts,
                     content_size,
                     content_type,
-                    labels,
+                    labels.clone(),
                 )
                 .await?
         };
-        Ok(sender)
+        Ok((ts, labels, sender))
     };
 
     match check_request_and_get_sender.await {
-        Ok(tx) => {
+        Ok((ts, labels, tx)) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
                     tx.send($chunk).await.map(|_| ()).map_err(|e| {
@@ -136,7 +138,15 @@ pub async fn write_record(
                 debug!("Failed to sync the channel - it may be already closed");
             }
             tx.closed().await; //sync with the storage
-
+            components
+                .replication_engine
+                .notify(TransactionNotification {
+                    bucket: bucket.clone(),
+                    entry: path.get("entry_name").unwrap().to_string(),
+                    labels,
+                    event: WriteRecord(ts),
+                })
+                .await?;
             Ok(())
         }
         Err(e) => {

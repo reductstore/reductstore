@@ -10,15 +10,20 @@ use crate::storage::storage::Storage;
 use bytesize::ByteSize;
 
 use log::{error, info, warn};
-use reduct_base::error::ErrorCode;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
 
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::asset::asset_manager::create_asset_manager;
+use crate::replication::{
+    create_replication_engine, Replication, ReplicationEngine, ReplicationSettings,
+};
+use reduct_base::Labels;
 use tokio::sync::RwLock;
 
 /// Database configuration
@@ -33,6 +38,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub cert_key_path: String,
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
+    pub replications: HashMap<String, ReplicationSettings>,
 
     env: Env<EnvGetter>,
 }
@@ -51,6 +57,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
+            replications: Self::parse_replications(&mut env),
 
             env,
         };
@@ -58,19 +65,20 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         cfg
     }
 
-    pub fn build(&self) -> Components {
-        let storage = self.provision_storage();
+    pub async fn build(&self) -> Result<Components, ReductError> {
+        let storage = Arc::new(RwLock::new(self.provision_storage()));
         let token_repo = self.provision_tokens();
-
         let console = create_asset_manager(load_console());
+        let replication_engine = self.provision_replication_engine(Arc::clone(&storage))?;
 
-        Components {
-            storage: RwLock::new(storage),
+        Ok(Components {
+            storage,
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
             console,
+            replication_engine,
             base_path: self.api_base_path.clone(),
-        }
+        })
     }
 
     fn provision_tokens(&self) -> Box<dyn ManageTokens + Send + Sync> {
@@ -140,6 +148,25 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             }
         }
         storage
+    }
+
+    fn provision_replication_engine(
+        &self,
+        storage: Arc<RwLock<Storage>>,
+    ) -> Result<Box<dyn ReplicationEngine + Send + Sync>, ReductError> {
+        let mut engine = create_replication_engine();
+        for (_, settings) in &self.replications {
+            let replication = Replication::new(Arc::clone(&storage), settings.clone());
+            if let Err(err) = engine.add_replication(replication) {
+                error!(
+                    "Failed to provision replication '{}': {}",
+                    settings.name, err
+                );
+            } else {
+                info!("Provisioned replication {:?}", settings);
+            }
+        }
+        Ok(engine)
     }
 
     fn parse_buckets(env: &mut Env<EnvGetter>) -> HashMap<String, BucketSettings> {
@@ -219,6 +246,98 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         tokens
             .into_iter()
             .map(|(_, token)| (token.name.clone(), token))
+            .collect()
+    }
+
+    fn parse_replications(env: &mut Env<EnvGetter>) -> HashMap<String, ReplicationSettings> {
+        let mut replications = HashMap::<String, ReplicationSettings>::new();
+        for (id, name) in env.matches("RS_REPLICATION_(.*)_NAME") {
+            let replication = ReplicationSettings {
+                name,
+                src_bucket: "".to_string(),
+                dst_bucket: "".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: Labels::new(),
+                exclude: Labels::new(),
+            };
+            replications.insert(id, replication);
+        }
+
+        let mut unfinished_replications = vec![];
+        for (id, replication) in &mut replications {
+            if let Some(src_bucket) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_SRC_BUCKET", id))
+            {
+                replication.src_bucket = src_bucket;
+            } else {
+                error!(
+                    "Replication '{}' has no source bucket. Drop it.",
+                    replication.name
+                );
+                unfinished_replications.push(id.clone());
+                continue;
+            }
+
+            if let Some(remote_bucket) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_BUCKET", id))
+            {
+                replication.dst_bucket = remote_bucket;
+            } else {
+                error!(
+                    "Replication '{}' has no destination bucket. Drop it.",
+                    replication.name
+                );
+                unfinished_replications.push(id.clone());
+                continue;
+            }
+
+            if let Some(remote_host) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_HOST", id))
+            {
+                match url::Url::parse(&remote_host) {
+                    Ok(url) => replication.dst_host = url.to_string(),
+                    Err(err) => {
+                        error!(
+                            "Replication '{}' has invalid remote host: {}. Drop it.",
+                            replication.name, err
+                        );
+                        unfinished_replications.push(id.clone());
+                        continue;
+                    }
+                }
+            } else {
+                error!(
+                    "Replication '{}' has no remote host. Drop it.",
+                    replication.name
+                );
+                unfinished_replications.push(id.clone());
+                continue;
+            }
+
+            replication.dst_token =
+                env.get::<String>(&format!("RS_REPLICATION_{}_DST_TOKEN", id), "".to_string());
+
+            if let Some(entries) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
+            {
+                replication.entries = entries.split(",").map(|s| s.to_string()).collect();
+            }
+
+            for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
+                replication.include.insert(key, value);
+            }
+
+            for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
+                replication.exclude.insert(key, value);
+            }
+        }
+
+        replications
+            .into_iter()
+            .filter(|(id, _)| !unfinished_replications.contains(id))
+            .map(|(_, replication)| (replication.name.clone(), replication))
             .collect()
     }
 }
@@ -442,6 +561,45 @@ mod tests {
         mock_getter
     }
 
+    #[fixture]
+    fn env_with_replications() -> MockEnvGetter {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut mock_getter = MockEnvGetter::new();
+        mock_getter
+            .expect_get()
+            .with(eq("RS_DATA_PATH"))
+            .return_const(Ok(tmp.into_path().to_str().unwrap().to_string()));
+        mock_getter.expect_all().returning(|| {
+            let mut map = BTreeMap::new();
+            map.insert(
+                "RS_REPLICATION_1_NAME".to_string(),
+                "replication1".to_string(),
+            );
+            map.insert(
+                "RS_REPLICATION_1_INCLUDE_key1".to_string(),
+                "value1".to_string(),
+            );
+            map.insert(
+                "RS_REPLICATION_1_EXCLUDE_key2".to_string(),
+                "value2".to_string(),
+            );
+            map
+        });
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_NAME"))
+            .return_const(Ok("replication1".to_string()));
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_INCLUDE_key1"))
+            .return_const(Ok("value1".to_string()));
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_EXCLUDE_key2"))
+            .return_const(Ok("value2".to_string()));
+        mock_getter
+    }
+
     mod provision {
         use super::*;
         use crate::storage::bucket::Bucket;
@@ -473,7 +631,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_buckets);
-            let components = cfg.build();
+            let components = cfg.build().await.unwrap();
 
             let storage = components.storage.read().await;
             let bucket1 = storage.get_bucket("bucket1").unwrap();
@@ -493,7 +651,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_buckets);
-            let components = cfg.build();
+            let components = cfg.build().await.unwrap();
 
             let storage = components.storage.read().await;
             let bucket1 = storage.get_bucket("bucket1").unwrap();
@@ -529,7 +687,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_tokens);
-            let components = cfg.build();
+            let components = cfg.build().await.unwrap();
 
             let repo = components.token_repo.read().await;
             let token1 = repo.get_token("token1").unwrap().clone();
@@ -554,11 +712,165 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_tokens);
-            let components = cfg.build();
+            let components = cfg.build().await.unwrap();
 
             let repo = components.token_repo.read().await;
             let err = repo.get_token("token1").err().unwrap();
             assert_eq!(err, ReductError::not_found("Token 'token1' doesn't exist"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replications(mut env_with_replications: MockEnvGetter) {
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_NAME"))
+                .return_const(Ok("replication1".to_string()));
+
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+                .return_const(Ok("bucket1".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+                .return_const(Ok("bucket2".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
+                .return_const(Ok("http://localhost".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_TOKEN"))
+                .return_const(Ok("TOKEN".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_ENTRIES"))
+                .return_const(Ok("entry1,entry2".to_string()));
+
+            env_with_replications
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_with_replications);
+            let components = cfg.build().await.unwrap();
+
+            let engine = components.replication_engine;
+            let replication = engine.replications().get("replication1").unwrap();
+            assert_eq!(replication.settings().name, "replication1");
+            assert_eq!(replication.settings().src_bucket, "bucket1");
+            assert_eq!(replication.settings().dst_bucket, "bucket2");
+            assert_eq!(replication.settings().dst_host, "http://localhost/");
+            assert_eq!(replication.settings().dst_token, "TOKEN");
+            assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
+            assert_eq!(
+                replication.settings().include,
+                vec![("key1".to_string(), "value1".to_string())]
+                    .into_iter()
+                    .collect()
+            );
+            assert_eq!(
+                replication.settings().exclude,
+                vec![("key2".to_string(), "value2".to_string())]
+                    .into_iter()
+                    .collect()
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replications_needs_src_bucket(mut env_with_replications: MockEnvGetter) {
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_NAME"))
+                .return_const(Ok("replication1".to_string()));
+
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+                .return_const(Err(VarError::NotPresent));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+                .return_const(Ok("bucket2".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
+                .return_const(Ok("http://localhost".to_string()));
+
+            env_with_replications
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_with_replications);
+            let components = cfg.build().await.unwrap();
+
+            let engine = components.replication_engine;
+            assert!(engine.replications().get("replication1").is_none());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replications_needs_DST_BUCKET(mut env_with_replications: MockEnvGetter) {
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_NAME"))
+                .return_const(Ok("replication1".to_string()));
+
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+                .return_const(Ok("bucket1".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+                .return_const(Err(VarError::NotPresent));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
+                .return_const(Ok("http://localhost".to_string()));
+
+            env_with_replications
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_with_replications);
+            let components = cfg.build().await.unwrap();
+
+            let engine = components.replication_engine;
+            assert!(engine.replications().get("replication1").is_none());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replications_needs_DST_HOST(mut env_with_replications: MockEnvGetter) {
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_NAME"))
+                .return_const(Ok("replication1".to_string()));
+
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+                .return_const(Ok("bucket1".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+                .return_const(Ok("bucket2".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
+                .return_const(Err(VarError::NotPresent));
+
+            env_with_replications
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let cfg = Cfg::from_env(env_with_replications);
+            let components = cfg.build().await.unwrap();
+
+            let engine = components.replication_engine;
+            assert!(engine.replications().get("replication1").is_none());
         }
     }
 }

@@ -4,10 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::error::ReductError;
+use crate::Labels;
 use http::{HeaderMap, HeaderValue};
-use std::collections::HashMap;
-
-pub type Labels = HashMap<String, String>;
 
 pub struct RecordHeader {
     pub content_length: usize,

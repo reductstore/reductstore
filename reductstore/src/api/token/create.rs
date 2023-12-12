@@ -11,7 +11,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // POST /tokens/:token_name
-pub async fn create_token(
+pub(crate) async fn create_token(
     State(components): State<Arc<Components>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,

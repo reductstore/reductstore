@@ -11,7 +11,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // DELETE /b/:bucket_name
-pub async fn remove_bucket(
+pub(crate) async fn remove_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,

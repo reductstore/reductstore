@@ -10,7 +10,7 @@ use axum::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /tokens/:token_name
-pub async fn get_token(
+pub(crate) async fn get_token(
     State(components): State<Arc<Components>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,

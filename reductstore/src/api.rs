@@ -25,6 +25,7 @@ use crate::storage::storage::Storage;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
+use crate::replication::ReplicationEngine;
 pub use reduct_base::error::ErrorCode;
 
 mod bucket;
@@ -35,10 +36,11 @@ mod token;
 mod ui;
 
 pub struct Components {
-    pub storage: RwLock<Storage>,
+    pub storage: Arc<RwLock<Storage>>,
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
+    pub replication_engine: Box<dyn ReplicationEngine + Send + Sync>,
     pub base_path: String,
 }
 
@@ -135,6 +137,7 @@ mod tests {
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
+    use crate::replication::create_replication_engine;
     use axum::extract::{BodyStream, FromRequest, Path};
     use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
     use axum::http::Request;
@@ -179,11 +182,12 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let components = Components {
-            storage: RwLock::new(storage),
+            storage: Arc::new(RwLock::new(storage)),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
+            replication_engine: create_replication_engine(),
         };
 
         Arc::new(components)

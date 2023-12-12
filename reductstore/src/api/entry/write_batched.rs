@@ -11,6 +11,7 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
 
+use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::RecordTx;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
@@ -22,7 +23,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 
 // POST /:bucket/:entry/batch
-pub async fn write_batched_records(
+pub(crate) async fn write_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
@@ -106,6 +107,16 @@ pub async fn write_batched_records(
                             debug!("Failed to sync the channel - it may be already closed");
                         }
                         senders[index].closed().await;
+
+                        components
+                            .replication_engine
+                            .notify(TransactionNotification {
+                                bucket: bucket_name.clone(),
+                                entry: entry_name.clone(),
+                                labels: timed_headers[index].1.labels.clone(),
+                                event: Transaction::WriteRecord(timed_headers[index].0),
+                            })
+                            .await?;
 
                         chunk = rest;
                         index += 1;
@@ -249,7 +260,6 @@ mod tests {
     use axum::extract::FromRequest;
     use axum::http::Request;
     use rstest::{fixture, rstest};
-    use tokio::time::sleep;
 
     #[rstest]
     #[tokio::test]

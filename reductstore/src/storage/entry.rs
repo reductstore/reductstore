@@ -14,14 +14,13 @@ use prost::bytes::Bytes;
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
+use reduct_base::Labels;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-pub type Labels = HashMap<String, String>;
 
 /// Entry is a time series in a bucket.
 pub struct Entry {
@@ -42,7 +41,11 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, ReductError> {
+    pub(crate) fn new(
+        name: &str,
+        path: PathBuf,
+        settings: EntrySettings,
+    ) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
         Ok(Self {
             name: name.to_string(),
@@ -55,7 +58,7 @@ impl Entry {
         })
     }
 
-    pub fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, ReductError> {
+    pub(crate) fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, ReductError> {
         let mut record_count = 0;
         let mut size = 0;
         let mut block_index = BTreeSet::new();

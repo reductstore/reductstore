@@ -66,7 +66,7 @@ where
     }
 }
 
-pub fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
+pub(crate) fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name", get(get_bucket))
         .route("/:bucket_name", head(head_bucket))

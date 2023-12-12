@@ -6,7 +6,7 @@ use prost::Message;
 use prost_wkt_types::Timestamp;
 use std::cmp::min;
 
-use log::error;
+use log::{debug, error};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{SeekFrom, Write};
@@ -32,7 +32,6 @@ pub struct BlockManager {
     path: PathBuf,
     reader_count: HashMap<u64, usize>,
     writer_count: HashMap<u64, usize>,
-
     last_block: Option<Block>,
 }
 
@@ -64,7 +63,7 @@ pub fn find_first_block(block_index: &BTreeSet<u64>, start: &u64) -> u64 {
 }
 
 impl BlockManager {
-    pub fn new(path: PathBuf) -> Self {
+    pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
             reader_count: HashMap::new(),
@@ -108,19 +107,23 @@ impl BlockManager {
         Ok(file)
     }
 
-    pub fn finish_write_record(
+    async fn finish_write_record(
         &mut self,
         block_id: u64,
         state: record::State,
         record_index: usize,
     ) -> Result<(), ReductError> {
         let mut block = self.load(block_id)?;
-        block.records[record_index].state = i32::from(state);
+        let record = &mut block.records[record_index];
+        let _timestamp = ts_to_us(&record.timestamp.as_ref().unwrap());
+        record.state = i32::from(state);
         block.invalid = state == record::State::Invalid;
 
         *self.writer_count.get_mut(&block_id).unwrap() -= 1;
         self.clean_readers_or_writers(block_id);
-        self.save(block)
+        self.save(block)?;
+
+        Ok(())
     }
 
     pub async fn begin_read(
@@ -400,7 +403,7 @@ pub async fn spawn_read_task(
                 break;
             }
             if let Err(e) = tx.send(Ok(Bytes::from(buf))).await {
-                error!("Failed to send record chunk: {}", e);
+                debug!("Failed to send record chunk: {}", e); // for some reason the receiver is closed
                 break;
             }
 
@@ -484,6 +487,7 @@ pub async fn spawn_write_task(
             .write()
             .await
             .finish_write_record(block_id, state, record_index)
+            .await
         {
             error!("Failed to finish writing record: {}", err);
         }
@@ -700,6 +704,7 @@ mod tests {
         let mut file = bm.begin_write(&block, 0).await.unwrap();
         file.write(b"hallo").await.unwrap();
         bm.finish_write_record(block_id, record::State::Finished, 0)
+            .await
             .unwrap();
 
         bm
