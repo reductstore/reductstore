@@ -255,9 +255,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             let replication = ReplicationSettings {
                 name,
                 src_bucket: "".to_string(),
-                remote_bucket: "".to_string(),
-                remote_host: "http://localhost".to_string(),
-                remote_token: "".to_string(),
+                dst_bucket: "".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
                 entries: vec![],
                 include: Labels::new(),
                 exclude: Labels::new(),
@@ -281,9 +281,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             }
 
             if let Some(remote_bucket) =
-                env.get_optional::<String>(&format!("RS_REPLICATION_{}_REMOTE_BUCKET", id))
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_BUCKET", id))
             {
-                replication.remote_bucket = remote_bucket;
+                replication.dst_bucket = remote_bucket;
             } else {
                 error!(
                     "Replication '{}' has no destination bucket. Drop it.",
@@ -294,10 +294,10 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             }
 
             if let Some(remote_host) =
-                env.get_optional::<String>(&format!("RS_REPLICATION_{}_REMOTE_HOST", id))
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_HOST", id))
             {
                 match url::Url::parse(&remote_host) {
-                    Ok(url) => replication.remote_host = url.to_string(),
+                    Ok(url) => replication.dst_host = url.to_string(),
                     Err(err) => {
                         error!(
                             "Replication '{}' has invalid remote host: {}. Drop it.",
@@ -316,10 +316,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 continue;
             }
 
-            replication.remote_token = env.get::<String>(
-                &format!("RS_REPLICATION_{}_REMOTE_TOKEN", id),
-                "".to_string(),
-            );
+            replication.dst_token =
+                env.get::<String>(&format!("RS_REPLICATION_{}_DST_TOKEN", id), "".to_string());
 
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
@@ -735,15 +733,15 @@ mod tests {
                 .return_const(Ok("bucket1".to_string()));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_BUCKET"))
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
                 .return_const(Ok("bucket2".to_string()));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_HOST"))
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
                 .return_const(Ok("http://localhost".to_string()));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_TOKEN"))
+                .with(eq("RS_REPLICATION_1_DST_TOKEN"))
                 .return_const(Ok("TOKEN".to_string()));
             env_with_replications
                 .expect_get()
@@ -761,9 +759,9 @@ mod tests {
             let replication = engine.replications().get("replication1").unwrap();
             assert_eq!(replication.settings().name, "replication1");
             assert_eq!(replication.settings().src_bucket, "bucket1");
-            assert_eq!(replication.settings().remote_bucket, "bucket2");
-            assert_eq!(replication.settings().remote_host, "http://localhost");
-            assert_eq!(replication.settings().remote_token, "TOKEN");
+            assert_eq!(replication.settings().dst_bucket, "bucket2");
+            assert_eq!(replication.settings().dst_host, "http://localhost/");
+            assert_eq!(replication.settings().dst_token, "TOKEN");
             assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
             assert_eq!(
                 replication.settings().include,
@@ -793,11 +791,11 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_BUCKET"))
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
                 .return_const(Ok("bucket2".to_string()));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_HOST"))
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
                 .return_const(Ok("http://localhost".to_string()));
 
             env_with_replications
@@ -813,7 +811,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_replications_needs_remote_bucket(mut env_with_replications: MockEnvGetter) {
+        async fn test_replications_needs_DST_BUCKET(mut env_with_replications: MockEnvGetter) {
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_NAME"))
@@ -825,11 +823,11 @@ mod tests {
                 .return_const(Ok("bucket1".to_string()));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_BUCKET"))
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
                 .return_const(Err(VarError::NotPresent));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_HOST"))
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
                 .return_const(Ok("http://localhost".to_string()));
 
             env_with_replications
@@ -845,7 +843,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_replications_needs_remote_host(mut env_with_replications: MockEnvGetter) {
+        async fn test_replications_needs_DST_HOST(mut env_with_replications: MockEnvGetter) {
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_NAME"))
@@ -857,11 +855,11 @@ mod tests {
                 .return_const(Ok("bucket1".to_string()));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_BUCKET"))
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
                 .return_const(Ok("bucket2".to_string()));
             env_with_replications
                 .expect_get()
-                .with(eq("RS_REPLICATION_1_REMOTE_HOST"))
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
                 .return_const(Err(VarError::NotPresent));
 
             env_with_replications
