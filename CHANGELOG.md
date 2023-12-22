@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reductstore: Stop downloading Web Console at docs.rs build, [PR-366](https://github.com/reductstore/reductstore/pull/366)
 - reductstore: Sync write tasks with HTTP API to avoid unfinished records, [PR-374](https://github.com/reductstore/reductstore/pull/374)
+- reductstore: Re-create a transaction log of replication if it is broken, [PR-379](https://github.com/reductstore/reductstore/pull/379)
 
 ### Changed
 

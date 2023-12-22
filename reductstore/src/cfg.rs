@@ -811,7 +811,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_replications_needs_DST_BUCKET(mut env_with_replications: MockEnvGetter) {
+        async fn test_replications_needs_dst_bucket(mut env_with_replications: MockEnvGetter) {
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_NAME"))
@@ -843,7 +843,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_replications_needs_DST_HOST(mut env_with_replications: MockEnvGetter) {
+        async fn test_replications_needs_dst_host(mut env_with_replications: MockEnvGetter) {
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_NAME"))
