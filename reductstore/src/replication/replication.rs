@@ -93,7 +93,8 @@ impl Replication {
         tokio::spawn(async move {
             loop {
                 for (entry_name, log) in map_log.read().await.iter() {
-                    match log.write().await.front().await {
+                    let tr = log.write().await.front().await;
+                    match tr {
                         Ok(None) => {
                             // empty log, nothing to do
                             sleep(std::time::Duration::from_micros(100)).await;
