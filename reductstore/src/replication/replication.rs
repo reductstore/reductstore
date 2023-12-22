@@ -11,15 +11,12 @@ use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::Labels;
 
-use crate::storage::entry::Entry;
-use bytes::Buf;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct ReplicationSettings {
@@ -51,7 +48,7 @@ const TRANSACTION_LOG_SIZE: usize = 1000_000;
 impl Replication {
     pub fn new(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) -> Self {
         let ReplicationSettings {
-            name,
+            name: _,
             src_bucket,
             dst_bucket: remote_bucket,
             dst_host: remote_host,
@@ -236,8 +233,6 @@ mod tests {
     use mockall::mock;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::*;
-    use tokio::fs::OpenOptions;
-    use tokio::io::AsyncWriteExt;
 
     mock! {
         RmBucket {}

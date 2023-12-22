@@ -8,10 +8,9 @@ use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState}
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::ts_to_us;
 use async_trait::async_trait;
-use futures_util::TryStream;
+
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
-use url::Url;
 
 pub(super) struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
@@ -179,7 +178,7 @@ pub(super) mod tests {
             )
             .return_once(move |_, _, _, _, _, _| Box::new(second_state));
 
-        let remote_bucket = create_DST_BUCKET(first_state);
+        let remote_bucket = create_dst_bucket(first_state);
         write_record(remote_bucket).await.unwrap();
     }
 
@@ -194,11 +193,11 @@ pub(super) mod tests {
             .expect_write_record()
             .return_once(move |_, _, _, _, _, _| Box::new(second_state));
 
-        let remote_bucket = create_DST_BUCKET(first_state);
+        let remote_bucket = create_dst_bucket(first_state);
         write_record(remote_bucket).await.unwrap_err();
     }
 
-    fn create_DST_BUCKET(mut first_state: MockState) -> RemoteBucketImpl {
+    fn create_dst_bucket(first_state: MockState) -> RemoteBucketImpl {
         let mut remote_bucket = RemoteBucketImpl::new("http://localhost:8080", "test", "api_token");
         remote_bucket.state = Some(Box::new(first_state));
         remote_bucket
