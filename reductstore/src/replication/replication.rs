@@ -11,9 +11,12 @@ use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::Labels;
 
+use crate::storage::entry::Entry;
+use bytes::Buf;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 use url::Url;
@@ -42,6 +45,8 @@ struct ReplicationComponents {
     filter: TransactionFilter,
     storage: Arc<RwLock<Storage>>,
 }
+
+const TRANSACTION_LOG_SIZE: usize = 1000_000;
 
 impl Replication {
     pub fn new(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) -> Self {
@@ -88,42 +93,65 @@ impl Replication {
         tokio::spawn(async move {
             loop {
                 for (entry_name, log) in map_log.read().await.iter() {
-                    if log.read().await.is_empty() {
-                        sleep(std::time::Duration::from_micros(100)).await;
-                        continue;
-                    }
+                    match log.write().await.front().await {
+                        Ok(None) => {
+                            // empty log, nothing to do
+                            sleep(std::time::Duration::from_micros(100)).await;
+                            continue;
+                        }
+                        Ok(Some(transaction)) => {
+                            debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
-                    let transaction = log.write().await.front().await.unwrap().unwrap();
+                            let get_record = async {
+                                local_storage
+                                    .read()
+                                    .await
+                                    .get_bucket(&config.src_bucket)?
+                                    .begin_read(&entry_name, *transaction.timestamp())
+                                    .await
+                            };
 
-                    debug!("Replicating transaction {}/{:?}", entry_name, transaction);
+                            let read_record = match get_record.await {
+                                Ok(record) => record,
+                                Err(err) => {
+                                    if err.status == ErrorCode::NotFound {
+                                        log.write().await.pop_front().await.unwrap();
+                                    }
+                                    error!("Failed to read record: {:?}", err);
+                                    break;
+                                }
+                            };
 
-                    let get_record = async {
-                        local_storage
-                            .read()
-                            .await
-                            .get_bucket(&config.src_bucket)?
-                            .begin_read(&entry_name, *transaction.timestamp())
-                            .await
-                    };
-
-                    let read_record = match get_record.await {
-                        Ok(record) => record,
-                        Err(err) => {
-                            if err.status == ErrorCode::NotFound {
-                                log.write().await.pop_front().await.unwrap();
+                            match remote_bucket.write_record(entry_name, read_record).await {
+                                Ok(_) => {
+                                    log.write().await.pop_front().await.unwrap();
+                                }
+                                Err(err) => {
+                                    debug!("Failed to replicate transaction: {:?}", err);
+                                    break;
+                                }
                             }
-                            error!("Failed to read record: {:?}", err);
-                            break;
                         }
-                    };
 
-                    match remote_bucket.write_record(entry_name, read_record).await {
-                        Ok(_) => {
-                            log.write().await.pop_front().await.unwrap();
-                        }
                         Err(err) => {
-                            debug!("Failed to replicate transaction: {:?}", err);
-                            break;
+                            error!("Failed to read transaction: {:?}", err);
+                            info!("Transaction log is corrupted, dropping the whole log");
+                            let mut log = log.write().await;
+
+                            let path = Self::build_path_to_transaction_log(
+                                local_storage.read().await.data_path(),
+                                &config.src_bucket,
+                                &entry_name,
+                                &config.name,
+                            );
+                            if let Err(err) = fs::remove_file(&path).await {
+                                error!("Failed to remove transaction log: {:?}", err);
+                            }
+
+                            info!("Creating a new transaction log");
+                            *log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
+                                .await
+                                .unwrap();
                         }
                     }
                 }
@@ -151,11 +179,13 @@ impl Replication {
                 notification.entry.clone(),
                 RwLock::new(
                     TransactionLog::try_load_or_create(
-                        self.storage.read().await.data_path().join(format!(
-                            "{}/{}/{}.log",
-                            notification.bucket, notification.entry, self.settings.name
-                        )),
-                        1000_000,
+                        Self::build_path_to_transaction_log(
+                            self.storage.read().await.data_path(),
+                            &self.settings.src_bucket,
+                            &notification.entry,
+                            &self.settings.name,
+                        ),
+                        TRANSACTION_LOG_SIZE,
                     )
                     .await?,
                 ),
@@ -184,6 +214,15 @@ impl Replication {
     pub fn settings(&self) -> &ReplicationSettings {
         &self.settings
     }
+
+    fn build_path_to_transaction_log(
+        storage_path: &PathBuf,
+        bucket: &str,
+        entry: &str,
+        name: &str,
+    ) -> PathBuf {
+        storage_path.join(format!("{}/{}/{}.log", bucket, entry, name))
+    }
 }
 
 #[cfg(test)]
@@ -191,13 +230,13 @@ mod tests {
     use super::*;
     use crate::replication::Transaction;
     use crate::storage::bucket::RecordReader;
-    use crate::storage::proto::Record;
     use async_trait::async_trait;
-    use axum::extract::connect_info::MockConnectInfo;
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::*;
+    use tokio::fs::OpenOptions;
+    use tokio::io::AsyncWriteExt;
 
     mock! {
         RmBucket {}
