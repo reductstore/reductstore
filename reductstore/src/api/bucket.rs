@@ -9,14 +9,13 @@ mod update;
 
 use std::sync::Arc;
 
+use axum::async_trait;
 use axum::extract::FromRequest;
 use axum::headers::HeaderMapExt;
-use axum::http::{Request, StatusCode};
+use axum::http::Request;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, head, post, put};
-use axum::{async_trait, headers};
 use bytes::Bytes;
-use hyper::HeaderMap;
 
 use crate::api::bucket::create::create_bucket;
 use crate::api::bucket::get::get_bucket;

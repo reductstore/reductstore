@@ -12,9 +12,9 @@ use std::sync::Arc;
 // POST /api/v1/replications/:replication_name
 pub(crate) async fn create_replication(
     State(components): State<Arc<Components>>,
-    Path(replication_name): Path<String>,
+    Path(_replication_name): Path<String>,
     headers: HeaderMap,
-    permissions: ReplicationSettingsAxum,
+    _permissions: ReplicationSettingsAxum,
 ) -> Result<(), HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
     Ok(())

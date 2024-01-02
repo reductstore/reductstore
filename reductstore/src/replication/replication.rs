@@ -9,7 +9,6 @@ use crate::storage::storage::Storage;
 
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::Labels;
 
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;

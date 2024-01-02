@@ -9,7 +9,7 @@ use crate::api::replication::create::create_replication;
 use async_trait::async_trait;
 use axum::extract::FromRequest;
 use axum::http::Request;
-use axum::routing::{delete, head, post, put};
+use axum::routing::post;
 use bytes::Bytes;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_macros::{IntoResponse, Twin};
