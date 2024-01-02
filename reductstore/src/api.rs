@@ -31,6 +31,7 @@ pub use reduct_base::error::ErrorCode;
 mod bucket;
 mod entry;
 mod middleware;
+mod replication;
 mod server;
 mod token;
 mod ui;

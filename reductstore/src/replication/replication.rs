@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketImpl};
@@ -11,24 +11,13 @@ use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::Labels;
 
+use crate::replication::proto::ReplicationSettings;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-
-#[derive(Debug, Clone)]
-pub struct ReplicationSettings {
-    pub name: String,
-    pub src_bucket: String,
-    pub dst_bucket: String,
-    pub dst_host: String,
-    pub dst_token: String,
-    pub entries: Vec<String>,
-    pub include: Labels,
-    pub exclude: Labels,
-}
 
 pub struct Replication {
     settings: ReplicationSettings,
@@ -64,7 +53,12 @@ impl Replication {
             remote_token.as_str(),
         ));
 
-        let filter = TransactionFilter::new(src_bucket, entries, include, exclude);
+        let filter = TransactionFilter::new(
+            src_bucket,
+            entries,
+            Labels::from_iter(include.iter().map(|e| (e.name.clone(), e.value.clone()))),
+            Labels::from_iter(exclude.iter().map(|e| (e.name.clone(), e.value.clone()))),
+        );
 
         Self::build(
             ReplicationComponents {
@@ -319,15 +313,25 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: "token".to_string(),
             entries: vec![],
-            include: HashMap::new(),
-            exclude: HashMap::new(),
+            include: vec![],
+            exclude: vec![],
         };
 
         let filter = TransactionFilter::new(
             settings.src_bucket.clone(),
             settings.entries.clone(),
-            settings.include.clone(),
-            settings.exclude.clone(),
+            Labels::from_iter(
+                settings
+                    .include
+                    .iter()
+                    .map(|e| (e.name.clone(), e.value.clone())),
+            ),
+            Labels::from_iter(
+                settings
+                    .exclude
+                    .iter()
+                    .map(|e| (e.name.clone(), e.value.clone())),
+            ),
         );
 
         let storage = Arc::new(RwLock::new(Storage::new(tmp_dir)));

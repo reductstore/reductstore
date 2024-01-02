@@ -20,9 +20,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::asset::asset_manager::create_asset_manager;
-use crate::replication::{
-    create_replication_engine, Replication, ReplicationEngine, ReplicationSettings,
-};
+use crate::replication::proto::{Label, ReplicationSettings};
+use crate::replication::{create_replication_engine, Replication, ReplicationEngine};
 use reduct_base::Labels;
 use tokio::sync::RwLock;
 
@@ -259,8 +258,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 dst_host: "http://localhost".to_string(),
                 dst_token: "".to_string(),
                 entries: vec![],
-                include: Labels::new(),
-                exclude: Labels::new(),
+                include: vec![],
+                exclude: vec![],
             };
             replications.insert(id, replication);
         }
@@ -326,11 +325,11 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
-                replication.include.insert(key, value);
+                replication.include.push(Label { name: key, value });
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
-                replication.exclude.insert(key, value);
+                replication.exclude.push(Label { name: key, value });
             }
         }
 
@@ -602,6 +601,7 @@ mod tests {
 
     mod provision {
         use super::*;
+        use crate::replication::proto::Label;
         use crate::storage::bucket::Bucket;
         use reduct_base::error::ReductError;
         use reduct_base::msg::bucket_api::QuotaType::FIFO;
@@ -765,15 +765,17 @@ mod tests {
             assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
             assert_eq!(
                 replication.settings().include,
-                vec![("key1".to_string(), "value1".to_string())]
-                    .into_iter()
-                    .collect()
+                vec![Label {
+                    name: "key1".to_string(),
+                    value: "value1".to_string()
+                }]
             );
             assert_eq!(
                 replication.settings().exclude,
-                vec![("key2".to_string(), "value2".to_string())]
-                    .into_iter()
-                    .collect()
+                vec![Label {
+                    name: "key2".to_string(),
+                    value: "value2".to_string()
+                }]
             );
         }
 

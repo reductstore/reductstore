@@ -7,13 +7,13 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 
 mod engine;
+pub mod proto;
 mod remote_bucket;
 mod replication;
 mod transaction_filter;
 mod transaction_log;
 
 pub use replication::Replication;
-pub use replication::ReplicationSettings;
 
 /// Replication event to be synchronized.
 #[derive(Debug, Clone, PartialEq)]
