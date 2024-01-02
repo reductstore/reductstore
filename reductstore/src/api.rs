@@ -25,6 +25,7 @@ use crate::storage::storage::Storage;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
+use crate::api::replication::create_replication_api_routes;
 use crate::replication::ReplicationEngine;
 pub use reduct_base::error::ErrorCode;
 
@@ -121,6 +122,11 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> R
         )
         // Bucket API + Entry API
         .nest(&format!("{}api/v1/b", api_base_path), b_route)
+        // Replication API
+        .nest(
+            &format!("{}api/v1/replications", api_base_path),
+            create_replication_api_routes(),
+        )
         // UI
         .route(&format!("{}", api_base_path), get(redirect_to_index))
         .fallback(get(show_ui))

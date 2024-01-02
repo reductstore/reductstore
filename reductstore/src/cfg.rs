@@ -2,27 +2,23 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::Components;
+use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
-
+use crate::replication::{create_replication_engine, Replication, ReplicationEngine};
 use crate::storage::storage::Storage;
 use bytesize::ByteSize;
-
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::BucketSettings;
+use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
-
+use reduct_base::Labels;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
-
-use crate::asset::asset_manager::create_asset_manager;
-use crate::replication::proto::{Label, ReplicationSettings};
-use crate::replication::{create_replication_engine, Replication, ReplicationEngine};
-use reduct_base::Labels;
 use tokio::sync::RwLock;
 
 /// Database configuration
@@ -258,8 +254,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 dst_host: "http://localhost".to_string(),
                 dst_token: "".to_string(),
                 entries: vec![],
-                include: vec![],
-                exclude: vec![],
+                include: Labels::default(),
+                exclude: Labels::default(),
             };
             replications.insert(id, replication);
         }
@@ -325,11 +321,11 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
-                replication.include.push(Label { name: key, value });
+                replication.include.insert(key, value);
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
-                replication.exclude.push(Label { name: key, value });
+                replication.exclude.insert(key, value);
             }
         }
 
@@ -765,17 +761,11 @@ mod tests {
             assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
             assert_eq!(
                 replication.settings().include,
-                vec![Label {
-                    name: "key1".to_string(),
-                    value: "value1".to_string()
-                }]
+                Labels::from_iter(vec![("key1".to_string(), "value1".to_string())])
             );
             assert_eq!(
                 replication.settings().exclude,
-                vec![Label {
-                    name: "key2".to_string(),
-                    value: "value2".to_string()
-                }]
+                Labels::from_iter(vec![("key2".to_string(), "value2".to_string())])
             );
         }
 

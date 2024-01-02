@@ -11,7 +11,7 @@ use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::Labels;
 
-use crate::replication::proto::ReplicationSettings;
+use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,12 +53,7 @@ impl Replication {
             remote_token.as_str(),
         ));
 
-        let filter = TransactionFilter::new(
-            src_bucket,
-            entries,
-            Labels::from_iter(include.iter().map(|e| (e.name.clone(), e.value.clone()))),
-            Labels::from_iter(exclude.iter().map(|e| (e.name.clone(), e.value.clone()))),
-        );
+        let filter = TransactionFilter::new(src_bucket, entries, include, exclude);
 
         Self::build(
             ReplicationComponents {
@@ -313,25 +308,15 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: "token".to_string(),
             entries: vec![],
-            include: vec![],
-            exclude: vec![],
+            include: Labels::new(),
+            exclude: Labels::new(),
         };
 
         let filter = TransactionFilter::new(
             settings.src_bucket.clone(),
             settings.entries.clone(),
-            Labels::from_iter(
-                settings
-                    .include
-                    .iter()
-                    .map(|e| (e.name.clone(), e.value.clone())),
-            ),
-            Labels::from_iter(
-                settings
-                    .exclude
-                    .iter()
-                    .map(|e| (e.name.clone(), e.value.clone())),
-            ),
+            settings.include.clone(),
+            settings.exclude.clone(),
         );
 
         let storage = Arc::new(RwLock::new(Storage::new(tmp_dir)));
