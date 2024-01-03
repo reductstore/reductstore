@@ -15,7 +15,7 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
 
-#[derive(IntoResponse, Twin, Default)]
+#[derive(IntoResponse, Twin)]
 pub struct ReplicationSettingsAxum(ReplicationSettings);
 #[async_trait]
 impl<S, B> FromRequest<S, B> for ReplicationSettingsAxum

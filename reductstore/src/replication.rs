@@ -1,19 +1,22 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
+use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::Labels;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-mod engine;
 pub mod proto;
 mod remote_bucket;
 mod replication;
+mod replication_repository;
 mod transaction_filter;
 mod transaction_log;
 
-pub use replication::Replication;
+use crate::storage::storage::Storage;
 
 /// Replication event to be synchronized.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,14 +63,31 @@ pub struct TransactionNotification {
 }
 
 #[async_trait]
-pub trait ReplicationEngine {
-    fn add_replication(&mut self, replication: Replication) -> Result<(), ReductError>;
+pub trait ManageReplications {
+    /// Create a new replication.
+    ///
+    /// # Arguments
+    /// * `name` - Replication name.
+    /// * `settings` - Replication settings.
+    ///
+    /// # Errors
+    ///
+    /// * `ReductError::Conflict` - Replication already exists.
+    /// * `ReductError::BadRequest` - Invalid destination host.
+    /// * `ReductError::NotFound` - Source bucket does not exist.
+    async fn create_replication(
+        &mut self,
+        name: &str,
+        settings: ReplicationSettings,
+    ) -> Result<(), ReductError>;
 
-    fn replications(&self) -> &HashMap<String, Replication>;
+    fn replications(&self) -> HashMap<String, ReplicationSettings>;
 
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
-pub(crate) fn create_replication_engine() -> Box<dyn ReplicationEngine + Send + Sync> {
-    Box::new(engine::ReplicationEngineImpl::new())
+pub(crate) fn create_replication_engine(
+    storage: Arc<RwLock<Storage>>,
+) -> Box<dyn ManageReplications + Send + Sync> {
+    Box::new(replication_repository::ReplicationRepository::new(storage))
 }

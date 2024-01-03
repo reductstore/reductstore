@@ -26,7 +26,7 @@ use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
 use crate::api::replication::create_replication_api_routes;
-use crate::replication::ReplicationEngine;
+use crate::replication::ManageReplications;
 pub use reduct_base::error::ErrorCode;
 
 mod bucket;
@@ -42,7 +42,7 @@ pub struct Components {
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
-    pub replication_engine: Box<dyn ReplicationEngine + Send + Sync>,
+    pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub base_path: String,
 }
 
@@ -188,13 +188,14 @@ mod tests {
 
         token_repo.generate_token("test", permissions).unwrap();
 
+        let storage = Arc::new(RwLock::new(storage));
         let components = Components {
-            storage: Arc::new(RwLock::new(storage)),
+            storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
-            replication_engine: create_replication_engine(),
+            replication_repo: RwLock::new(create_replication_engine(storage)),
         };
 
         Arc::new(components)

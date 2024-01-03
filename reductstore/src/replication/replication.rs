@@ -18,7 +18,8 @@ use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
-pub struct Replication {
+pub(super) struct Replication {
+    name: String,
     settings: ReplicationSettings,
     filter: TransactionFilter,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
@@ -34,9 +35,8 @@ struct ReplicationComponents {
 const TRANSACTION_LOG_SIZE: usize = 1000_000;
 
 impl Replication {
-    pub fn new(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) -> Self {
+    pub fn new(name: String, settings: ReplicationSettings, storage: Arc<RwLock<Storage>>) -> Self {
         let ReplicationSettings {
-            name: _,
             src_bucket,
             dst_bucket: remote_bucket,
             dst_host: remote_host,
@@ -55,16 +55,21 @@ impl Replication {
         let filter = TransactionFilter::new(src_bucket, entries, include, exclude);
 
         Self::build(
+            name,
+            settings,
             ReplicationComponents {
                 remote_bucket,
                 filter,
                 storage,
             },
-            settings,
         )
     }
 
-    fn build(replication_components: ReplicationComponents, settings: ReplicationSettings) -> Self {
+    fn build(
+        name: String,
+        settings: ReplicationSettings,
+        replication_components: ReplicationComponents,
+    ) -> Self {
         let ReplicationComponents {
             mut remote_bucket,
             filter,
@@ -73,6 +78,7 @@ impl Replication {
         let logs = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
         let map_log = logs.clone();
         let config = settings.clone();
+        let replication_name = name.clone();
 
         let local_storage = Arc::clone(&storage);
         tokio::spawn(async move {
@@ -128,7 +134,7 @@ impl Replication {
                                 local_storage.read().await.data_path(),
                                 &config.src_bucket,
                                 &entry_name,
-                                &config.name,
+                                &replication_name,
                             );
                             if let Err(err) = fs::remove_file(&path).await {
                                 error!("Failed to remove transaction log: {:?}", err);
@@ -145,6 +151,7 @@ impl Replication {
         });
 
         Self {
+            name,
             settings,
             storage,
             filter,
@@ -169,7 +176,7 @@ impl Replication {
                             self.storage.read().await.data_path(),
                             &self.settings.src_bucket,
                             &notification.entry,
-                            &self.settings.name,
+                            &self.name,
                         ),
                         TRANSACTION_LOG_SIZE,
                     )
@@ -194,7 +201,7 @@ impl Replication {
     }
 
     pub fn name(&self) -> &String {
-        &self.settings.name
+        &self.name
     }
 
     pub fn settings(&self) -> &ReplicationSettings {
@@ -220,6 +227,7 @@ mod tests {
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::Labels;
     use rstest::*;
 
     mock! {
@@ -301,7 +309,6 @@ mod tests {
     async fn build_replication(remote_bucket: MockRmBucket) -> Replication {
         let tmp_dir = tempfile::tempdir().unwrap().into_path();
         let settings = ReplicationSettings {
-            name: "test".to_string(),
             src_bucket: "src".to_string(),
             dst_bucket: "remote".to_string(),
             dst_host: "http://localhost:8383".to_string(),
@@ -336,12 +343,13 @@ mod tests {
         }
 
         Replication::build(
+            "test".to_string(),
+            settings,
             ReplicationComponents {
                 remote_bucket: Box::new(remote_bucket),
                 filter,
                 storage,
             },
-            settings,
         )
     }
 

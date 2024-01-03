@@ -109,7 +109,9 @@ pub(crate) async fn write_batched_records(
                         senders[index].closed().await;
 
                         components
-                            .replication_engine
+                            .replication_repo
+                            .write()
+                            .await
                             .notify(TransactionNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),

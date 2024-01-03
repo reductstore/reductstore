@@ -6,10 +6,8 @@ use crate::Labels;
 use serde::{Deserialize, Serialize};
 
 // Replication settings
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ReplicationSettings {
-    /// Replication name
-    pub name: String,
     /// Source bucket
     pub src_bucket: String,
     /// Destination bucket

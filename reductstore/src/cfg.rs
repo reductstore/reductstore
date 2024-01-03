@@ -6,7 +6,7 @@ use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
-use crate::replication::{create_replication_engine, Replication, ReplicationEngine};
+use crate::replication::{create_replication_engine, ManageReplications};
 use crate::storage::storage::Storage;
 use bytesize::ByteSize;
 use log::{error, info, warn};
@@ -64,14 +64,16 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         let storage = Arc::new(RwLock::new(self.provision_storage()));
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
-        let replication_engine = self.provision_replication_engine(Arc::clone(&storage))?;
+        let replication_engine = self
+            .provision_replication_repo(Arc::clone(&storage))
+            .await?;
 
         Ok(Components {
             storage,
             token_repo: RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
             console,
-            replication_engine,
+            replication_repo: RwLock::new(replication_engine),
             base_path: self.api_base_path.clone(),
         })
     }
@@ -145,23 +147,22 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         storage
     }
 
-    fn provision_replication_engine(
+    async fn provision_replication_repo(
         &self,
         storage: Arc<RwLock<Storage>>,
-    ) -> Result<Box<dyn ReplicationEngine + Send + Sync>, ReductError> {
-        let mut engine = create_replication_engine();
-        for (_, settings) in &self.replications {
-            let replication = Replication::new(Arc::clone(&storage), settings.clone());
-            if let Err(err) = engine.add_replication(replication) {
-                error!(
-                    "Failed to provision replication '{}': {}",
-                    settings.name, err
-                );
+    ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
+        let mut repo = create_replication_engine(Arc::clone(&storage));
+        for (name, settings) in &self.replications {
+            if let Err(err) = repo
+                .create_replication(name.as_str(), settings.clone())
+                .await
+            {
+                error!("Failed to provision replication '{}': {}", name, err);
             } else {
-                info!("Provisioned replication {:?}", settings);
+                info!("Provisioned replication '{}' with {:?}", name, settings);
             }
         }
-        Ok(engine)
+        Ok(repo)
     }
 
     fn parse_buckets(env: &mut Env<EnvGetter>) -> HashMap<String, BucketSettings> {
@@ -245,10 +246,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     fn parse_replications(env: &mut Env<EnvGetter>) -> HashMap<String, ReplicationSettings> {
-        let mut replications = HashMap::<String, ReplicationSettings>::new();
+        let mut replications = HashMap::<String, (String, ReplicationSettings)>::new();
         for (id, name) in env.matches("RS_REPLICATION_(.*)_NAME") {
             let replication = ReplicationSettings {
-                name,
                 src_bucket: "".to_string(),
                 dst_bucket: "".to_string(),
                 dst_host: "http://localhost".to_string(),
@@ -257,20 +257,17 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 include: Labels::default(),
                 exclude: Labels::default(),
             };
-            replications.insert(id, replication);
+            replications.insert(id, (name, replication));
         }
 
         let mut unfinished_replications = vec![];
-        for (id, replication) in &mut replications {
+        for (id, (name, replication)) in &mut replications {
             if let Some(src_bucket) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_SRC_BUCKET", id))
             {
                 replication.src_bucket = src_bucket;
             } else {
-                error!(
-                    "Replication '{}' has no source bucket. Drop it.",
-                    replication.name
-                );
+                error!("Replication '{}' has no source bucket. Drop it.", name);
                 unfinished_replications.push(id.clone());
                 continue;
             }
@@ -280,10 +277,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             {
                 replication.dst_bucket = remote_bucket;
             } else {
-                error!(
-                    "Replication '{}' has no destination bucket. Drop it.",
-                    replication.name
-                );
+                error!("Replication '{}' has no destination bucket. Drop it.", name);
                 unfinished_replications.push(id.clone());
                 continue;
             }
@@ -296,17 +290,14 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                     Err(err) => {
                         error!(
                             "Replication '{}' has invalid remote host: {}. Drop it.",
-                            replication.name, err
+                            name, err
                         );
                         unfinished_replications.push(id.clone());
                         continue;
                     }
                 }
             } else {
-                error!(
-                    "Replication '{}' has no remote host. Drop it.",
-                    replication.name
-                );
+                error!("Replication '{}' has no remote host. Drop it.", name);
                 unfinished_replications.push(id.clone());
                 continue;
             }
@@ -332,7 +323,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         replications
             .into_iter()
             .filter(|(id, _)| !unfinished_replications.contains(id))
-            .map(|(_, replication)| (replication.name.clone(), replication))
+            .map(|(_, (name, replication))| (name, replication))
             .collect()
     }
 }
@@ -566,6 +557,8 @@ mod tests {
             .return_const(Ok(tmp.into_path().to_str().unwrap().to_string()));
         mock_getter.expect_all().returning(|| {
             let mut map = BTreeMap::new();
+            map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
+
             map.insert(
                 "RS_REPLICATION_1_NAME".to_string(),
                 "replication1".to_string(),
@@ -720,9 +713,13 @@ mod tests {
         async fn test_replications(mut env_with_replications: MockEnvGetter) {
             env_with_replications
                 .expect_get()
+                .with(eq("RS_BUCKET_1_NAME"))
+                .return_const(Ok("bucket1".to_string()));
+
+            env_with_replications
+                .expect_get()
                 .with(eq("RS_REPLICATION_1_NAME"))
                 .return_const(Ok("replication1".to_string()));
-
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
@@ -751,20 +748,19 @@ mod tests {
             let cfg = Cfg::from_env(env_with_replications);
             let components = cfg.build().await.unwrap();
 
-            let engine = components.replication_engine;
-            let replication = engine.replications().get("replication1").unwrap();
-            assert_eq!(replication.settings().name, "replication1");
-            assert_eq!(replication.settings().src_bucket, "bucket1");
-            assert_eq!(replication.settings().dst_bucket, "bucket2");
-            assert_eq!(replication.settings().dst_host, "http://localhost/");
-            assert_eq!(replication.settings().dst_token, "TOKEN");
-            assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
+            let repo = components.replication_repo.read().await;
+            let replication = repo.replications().get("replication1").unwrap().clone();
+            assert_eq!(replication.src_bucket, "bucket1");
+            assert_eq!(replication.dst_bucket, "bucket2");
+            assert_eq!(replication.dst_host, "http://localhost/");
+            assert_eq!(replication.dst_token, "TOKEN");
+            assert_eq!(replication.entries, vec!["entry1", "entry2"]);
             assert_eq!(
-                replication.settings().include,
+                replication.include,
                 Labels::from_iter(vec![("key1".to_string(), "value1".to_string())])
             );
             assert_eq!(
-                replication.settings().exclude,
+                replication.exclude,
                 Labels::from_iter(vec![("key2".to_string(), "value2".to_string())])
             );
         }
@@ -797,8 +793,8 @@ mod tests {
             let cfg = Cfg::from_env(env_with_replications);
             let components = cfg.build().await.unwrap();
 
-            let engine = components.replication_engine;
-            assert!(engine.replications().get("replication1").is_none());
+            let repo = components.replication_repo.read().await;
+            assert!(repo.replications().get("replication1").is_none());
         }
 
         #[rstest]
@@ -829,8 +825,8 @@ mod tests {
             let cfg = Cfg::from_env(env_with_replications);
             let components = cfg.build().await.unwrap();
 
-            let engine = components.replication_engine;
-            assert!(engine.replications().get("replication1").is_none());
+            let repo = components.replication_repo.read().await;
+            assert!(repo.replications().get("replication1").is_none());
         }
 
         #[rstest]
@@ -861,8 +857,8 @@ mod tests {
             let cfg = Cfg::from_env(env_with_replications);
             let components = cfg.build().await.unwrap();
 
-            let engine = components.replication_engine;
-            assert!(engine.replications().get("replication1").is_none());
+            let repo = components.replication_repo.read().await;
+            assert!(repo.replications().get("replication1").is_none());
         }
     }
 }
