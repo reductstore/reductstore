@@ -151,7 +151,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         &self,
         storage: Arc<RwLock<Storage>>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_engine(Arc::clone(&storage));
+        let mut repo = create_replication_engine(Arc::clone(&storage)).await;
         for (name, settings) in &self.replications {
             if let Err(err) = repo
                 .create_replication(name.as_str(), settings.clone())

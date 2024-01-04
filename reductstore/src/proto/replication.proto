@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 syntax = "proto3";
@@ -11,7 +11,6 @@ message Label {
 }
 
 message  ReplicationSettings {
-  string name = 1;            // name of the replication
   string src_bucket = 2;      // source bucket
   string dst_bucket = 3;      // destination bucket
   string dst_host = 4;        // URL of destination host
@@ -19,4 +18,12 @@ message  ReplicationSettings {
   repeated string entries = 6;// list of entries to replicate, empty means all. Wildcards are allowed.
   repeated Label include = 7; // list of labels to include
   repeated Label exclude = 8; // list of labels to exclude
+}
+
+message ReplicationRepo {
+  message Item {
+    string name = 1;
+    ReplicationSettings settings = 2;
+  }
+  repeated Item replications = 1;
 }

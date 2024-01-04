@@ -195,7 +195,7 @@ mod tests {
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
-            replication_repo: RwLock::new(create_replication_engine(storage)),
+            replication_repo: RwLock::new(create_replication_engine(storage).await),
         };
 
         Arc::new(components)

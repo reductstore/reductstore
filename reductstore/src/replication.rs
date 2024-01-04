@@ -86,8 +86,8 @@ pub trait ManageReplications {
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
-pub(crate) fn create_replication_engine(
+pub(crate) async fn create_replication_engine(
     storage: Arc<RwLock<Storage>>,
 ) -> Box<dyn ManageReplications + Send + Sync> {
-    Box::new(replication_repository::ReplicationRepository::new(storage))
+    Box::new(replication_repository::ReplicationRepository::load_or_create(storage).await)
 }
