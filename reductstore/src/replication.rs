@@ -1,11 +1,13 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
+use crate::replication::replication::Replication;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::Labels;
 use std::collections::HashMap;
+use std::format;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -81,7 +83,16 @@ pub trait ManageReplications {
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
 
-    fn replications(&self) -> HashMap<String, ReplicationSettings>;
+    async fn update_replication(
+        &mut self,
+        name: &str,
+        settings: ReplicationSettings,
+    ) -> Result<(), ReductError>;
+
+    fn replications(&self) -> Vec<&String>;
+    fn get_replication(&self, name: &str) -> Result<&Replication, ReductError>;
+
+    fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError>;
 
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 }

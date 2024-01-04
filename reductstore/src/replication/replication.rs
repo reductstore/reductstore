@@ -18,8 +18,9 @@ use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
-pub(super) struct Replication {
+pub struct Replication {
     name: String,
+    is_provisioned: bool,
     settings: ReplicationSettings,
     filter: TransactionFilter,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
@@ -35,7 +36,11 @@ struct ReplicationComponents {
 const TRANSACTION_LOG_SIZE: usize = 1000_000;
 
 impl Replication {
-    pub fn new(name: String, settings: ReplicationSettings, storage: Arc<RwLock<Storage>>) -> Self {
+    pub(super) fn new(
+        name: String,
+        settings: ReplicationSettings,
+        storage: Arc<RwLock<Storage>>,
+    ) -> Self {
         let ReplicationSettings {
             src_bucket,
             dst_bucket: remote_bucket,
@@ -152,6 +157,7 @@ impl Replication {
 
         Self {
             name,
+            is_provisioned: false,
             settings,
             storage,
             filter,
@@ -206,6 +212,13 @@ impl Replication {
 
     pub fn settings(&self) -> &ReplicationSettings {
         &self.settings
+    }
+    pub fn is_provisioned(&self) -> bool {
+        self.is_provisioned
+    }
+
+    pub fn set_provisioned(&mut self, provisioned: bool) {
+        self.is_provisioned = provisioned;
     }
 
     fn build_path_to_transaction_log(

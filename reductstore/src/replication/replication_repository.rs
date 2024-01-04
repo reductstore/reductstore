@@ -88,34 +88,50 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
 
-        // check if destination host is valid
-        if Url::parse(&settings.dst_host).is_err() {
-            return Err(ReductError::bad_request(&format!(
-                "Invalid destination host '{}'",
-                settings.dst_host
-            )));
-        }
-
-        // check if source bucket exists
-        let storage = self.storage.read().await;
-        if storage.get_bucket(&settings.src_bucket).is_err() {
-            return Err(ReductError::not_found(&format!(
-                "Source bucket '{}' for replication '{}' does not exist",
-                settings.src_bucket, name
-            )));
-        }
-
-        let replication = Replication::new(name.to_string(), settings, Arc::clone(&self.storage));
-        self.replications.insert(name.to_string(), replication);
-        self.save_repo()?;
-        Ok(())
+        self.check_and_create_replication(&name, settings).await
     }
 
-    fn replications(&self) -> HashMap<String, ReplicationSettings> {
-        self.replications
-            .iter()
-            .map(|(name, replication)| (name.clone(), replication.settings().clone()))
-            .collect()
+    async fn update_replication(
+        &mut self,
+        name: &str,
+        settings: ReplicationSettings,
+    ) -> Result<(), ReductError> {
+        // check if replication exists and not provisioned
+        match self.replications.get(name) {
+            Some(replication) => {
+                if replication.is_provisioned() {
+                    Err(ReductError::conflict(&format!(
+                        "Can't update provisioned replication '{}'",
+                        name
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+            None => Err(ReductError::not_found(&format!(
+                "Replication '{}' does not exist",
+                name
+            ))),
+        }?;
+
+        self.replications.remove(name); // remove old replication because it may have a different connection configuration
+        self.check_and_create_replication(&name, settings).await
+    }
+
+    fn replications(&self) -> Vec<&String> {
+        self.replications.keys().collect()
+    }
+
+    fn get_replication(&self, name: &str) -> Result<&Replication, ReductError> {
+        self.replications.get(name).ok_or_else(|| {
+            ReductError::not_found(&format!("Replication '{}' does not exist", name))
+        })
+    }
+
+    fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError> {
+        self.replications.get_mut(name).ok_or_else(|| {
+            ReductError::not_found(&format!("Replication '{}' does not exist", name))
+        })
     }
 
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
@@ -191,6 +207,32 @@ impl ReplicationRepository {
             ))
         })
     }
+
+    async fn check_and_create_replication(
+        &mut self,
+        name: &&str,
+        settings: ReplicationSettings,
+    ) -> Result<(), ReductError> {
+        // check if destination host is valid
+        if Url::parse(&settings.dst_host).is_err() {
+            return Err(ReductError::bad_request(&format!(
+                "Invalid destination host '{}'",
+                settings.dst_host
+            )));
+        }
+
+        // check if source bucket exists
+        let storage = self.storage.read().await;
+        if storage.get_bucket(&settings.src_bucket).is_err() {
+            return Err(ReductError::not_found(&format!(
+                "Source bucket '{}' for replication '{}' does not exist",
+                settings.src_bucket, name
+            )));
+        }
+        let replication = Replication::new(name.to_string(), settings, Arc::clone(&self.storage));
+        self.replications.insert(name.to_string(), replication);
+        self.save_repo()
+    }
 }
 
 #[cfg(test)]
@@ -256,7 +298,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn create_and_load_replication(
+    async fn create_and_load_replications(
         storage: Arc<RwLock<Storage>>,
         settings: ReplicationSettings,
     ) {
@@ -270,9 +312,50 @@ mod tests {
         let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
         assert_eq!(repo.replications().len(), 1);
         assert_eq!(
-            repo.replications().get("test").unwrap(),
+            repo.get_replication("test").unwrap().settings(),
             &settings,
             "Should load replication from file"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        repo.create_replication("test", settings.clone())
+            .await
+            .unwrap();
+
+        let mut settings = settings;
+        settings.dst_bucket = "bucket-3".to_string();
+        repo.update_replication("test", settings.clone())
+            .await
+            .unwrap();
+
+        let replication = repo.get_replication("test").unwrap();
+        assert_eq!(replication.settings().dst_bucket, "bucket-3");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_provisioned_replication(
+        storage: Arc<RwLock<Storage>>,
+        settings: ReplicationSettings,
+    ) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        repo.create_replication("test", settings.clone())
+            .await
+            .unwrap();
+
+        let mut replication = repo.get_mut_replication("test").unwrap();
+        replication.set_provisioned(true);
+
+        assert_eq!(
+            repo.update_replication("test", settings).await,
+            Err(ReductError::conflict(
+                "Can't update provisioned replication 'test'"
+            )),
+            "Should not update provisioned replication"
         );
     }
 

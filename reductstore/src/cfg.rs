@@ -153,14 +153,18 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
         let mut repo = create_replication_engine(Arc::clone(&storage)).await;
         for (name, settings) in &self.replications {
-            if let Err(err) = repo
-                .create_replication(name.as_str(), settings.clone())
-                .await
-            {
-                error!("Failed to provision replication '{}': {}", name, err);
-            } else {
-                info!("Provisioned replication '{}' with {:?}", name, settings);
+            if let Err(e) = repo.create_replication(&name, settings.clone()).await {
+                if e.status() == ErrorCode::Conflict {
+                    repo.update_replication(&name, settings.clone()).await?;
+                } else {
+                    error!("Failed to provision replication '{}': {}", name, e);
+                    continue;
+                }
             }
+
+            let mut replication = repo.get_mut_replication(&name).unwrap();
+            replication.set_provisioned(true);
+            info!("Provisioned replication '{}' with {:?}", name, settings);
         }
         Ok(repo)
     }
@@ -749,52 +753,43 @@ mod tests {
             let components = cfg.build().await.unwrap();
 
             let repo = components.replication_repo.read().await;
-            let replication = repo.replications().get("replication1").unwrap().clone();
-            assert_eq!(replication.src_bucket, "bucket1");
-            assert_eq!(replication.dst_bucket, "bucket2");
-            assert_eq!(replication.dst_host, "http://localhost/");
-            assert_eq!(replication.dst_token, "TOKEN");
-            assert_eq!(replication.entries, vec!["entry1", "entry2"]);
+            let replication = repo.get_replication("replication1").unwrap();
+            assert_eq!(replication.settings().src_bucket, "bucket1");
+            assert_eq!(replication.settings().dst_bucket, "bucket2");
+            assert_eq!(replication.settings().dst_host, "http://localhost/");
+            assert_eq!(replication.settings().dst_token, "TOKEN");
+            assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
             assert_eq!(
-                replication.include,
+                replication.settings().include,
                 Labels::from_iter(vec![("key1".to_string(), "value1".to_string())])
             );
             assert_eq!(
-                replication.exclude,
+                replication.settings().exclude,
                 Labels::from_iter(vec![("key2".to_string(), "value2".to_string())])
             );
+            assert!(replication.is_provisioned());
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_replications_needs_src_bucket(mut env_with_replications: MockEnvGetter) {
+        async fn test_override_replication(mut env_with_replications: MockEnvGetter) {
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_BUCKET_1_NAME"))
+                .return_const(Ok("bucket1".to_string()));
+
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_NAME"))
                 .return_const(Ok("replication1".to_string()));
-
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-                .return_const(Err(VarError::NotPresent));
+                .return_const(Ok("bucket1".to_string()));
             env_with_replications
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_DST_BUCKET"))
                 .return_const(Ok("bucket2".to_string()));
-            env_with_replications
-                .expect_get()
-                .with(eq("RS_REPLICATION_1_DST_HOST"))
-                .return_const(Ok("http://localhost".to_string()));
-
-            env_with_replications
-                .expect_get()
-                .return_const(Err(VarError::NotPresent));
-
-            let cfg = Cfg::from_env(env_with_replications);
-            let components = cfg.build().await.unwrap();
-
-            let repo = components.replication_repo.read().await;
-            assert!(repo.replications().get("replication1").is_none());
         }
 
         #[rstest]
@@ -826,7 +821,7 @@ mod tests {
             let components = cfg.build().await.unwrap();
 
             let repo = components.replication_repo.read().await;
-            assert!(repo.replications().get("replication1").is_none());
+            assert_eq!(repo.replications().len(), 0);
         }
 
         #[rstest]
@@ -858,7 +853,7 @@ mod tests {
             let components = cfg.build().await.unwrap();
 
             let repo = components.replication_repo.read().await;
-            assert!(repo.replications().get("replication1").is_none());
+            assert_eq!(repo.replications().len(), 0);
         }
     }
 }
