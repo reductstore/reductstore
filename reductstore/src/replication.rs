@@ -94,6 +94,8 @@ pub trait ManageReplications {
 
     fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError>;
 
+    fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 

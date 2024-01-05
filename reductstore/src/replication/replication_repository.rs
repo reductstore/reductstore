@@ -134,6 +134,13 @@ impl ManageReplications for ReplicationRepository {
         })
     }
 
+    fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
+        self.replications.remove(name).ok_or_else(|| {
+            ReductError::not_found(&format!("Replication '{}' does not exist", name))
+        })?;
+        self.save_repo()
+    }
+
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         for (_, replication) in self.replications.iter() {
             let _ = replication.notify(notification.clone()).await?;
@@ -356,6 +363,40 @@ mod tests {
                 "Can't update provisioned replication 'test'"
             )),
             "Should not update provisioned replication"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        repo.create_replication("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.replications().len(), 1);
+        repo.remove_replication("test").unwrap();
+        assert_eq!(repo.replications().len(), 0);
+
+        // check if replication is removed from file
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        assert_eq!(
+            repo.replications().len(),
+            0,
+            "Should remove replication permanently"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_non_existing_replication(storage: Arc<RwLock<Storage>>) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        assert_eq!(
+            repo.remove_replication("test-2"),
+            Err(ReductError::not_found(
+                "Replication 'test-2' does not exist"
+            )),
+            "Should not remove non existing replication"
         );
     }
 
