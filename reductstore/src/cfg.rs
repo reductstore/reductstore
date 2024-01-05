@@ -821,7 +821,7 @@ mod tests {
             let components = cfg.build().await.unwrap();
 
             let repo = components.replication_repo.read().await;
-            assert_eq!(repo.replications().len(), 0);
+            assert_eq!(repo.replications().await.len(), 0);
         }
 
         #[rstest]
@@ -853,7 +853,7 @@ mod tests {
             let components = cfg.build().await.unwrap();
 
             let repo = components.replication_repo.read().await;
-            assert_eq!(repo.replications().len(), 0);
+            assert_eq!(repo.replications().await.len(), 0);
         }
     }
 }

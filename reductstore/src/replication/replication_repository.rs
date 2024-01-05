@@ -14,7 +14,7 @@ use bytes::Bytes;
 use log::debug;
 use prost::Message;
 use reduct_base::error::ReductError;
-use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -118,8 +118,12 @@ impl ManageReplications for ReplicationRepository {
         self.check_and_create_replication(&name, settings).await
     }
 
-    fn replications(&self) -> Vec<&String> {
-        self.replications.keys().collect()
+    async fn replications(&self) -> Vec<ReplicationInfo> {
+        let mut replications = Vec::new();
+        for (_, replication) in self.replications.iter() {
+            replications.push(replication.info().await);
+        }
+        replications
     }
 
     fn get_replication(&self, name: &str) -> Result<&Replication, ReductError> {
@@ -260,9 +264,18 @@ mod tests {
     #[tokio::test]
     async fn create_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
         let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
-        repo.create_replication("test", settings).await.unwrap();
+        repo.create_replication("test", settings.clone())
+            .await
+            .unwrap();
 
-        assert_eq!(repo.replications().len(), 1);
+        let repls = repo.replications().await;
+        assert_eq!(repls.len(), 1);
+        assert_eq!(repls[0].name, "test");
+        assert_eq!(
+            repo.get_replication("test").unwrap().settings(),
+            &settings,
+            "Should create replication with the same name and settings"
+        );
     }
 
     #[rstest]
@@ -276,7 +289,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(repo.replications().len(), 1);
         assert_eq!(
             repo.create_replication("test", settings).await,
             Err(ReductError::conflict("Replication 'test' already exists")),
@@ -314,10 +326,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(repo.replications().len(), 1);
-
         let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
-        assert_eq!(repo.replications().len(), 1);
+        assert_eq!(repo.replications().await.len(), 1);
         assert_eq!(
             repo.get_replication("test").unwrap().settings(),
             &settings,
@@ -374,14 +384,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(repo.replications().len(), 1);
         repo.remove_replication("test").unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.len(), 0);
 
         // check if replication is removed from file
         let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
         assert_eq!(
-            repo.replications().len(),
+            repo.replications().await.len(),
             0,
             "Should remove replication permanently"
         );

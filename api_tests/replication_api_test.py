@@ -23,7 +23,10 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
     )
 
     assert resp.status_code == 200
-    # todo: check if replication was created
+
+    resp = session.get(f"{base_url}/replications")
+    assert resp.status_code == 200
+    assert replication_name in [r["name"] for r in resp.json()["replications"]]
 
 
 @pytest.mark.usefixtures("bucket")
@@ -83,10 +86,11 @@ def test__remove_replication_ok(base_url, session, bucket_name, replication_name
             "dst_host": "http://localhost:9000",
         },
     )
-
     assert resp.status_code == 200
 
     resp = session.delete(f"{base_url}/replications/{replication_name}")
-
     assert resp.status_code == 200
-    # todo: check if replication was removed
+
+    resp = session.get(f"{base_url}/replications")
+    assert resp.status_code == 200
+    assert replication_name not in [r["name"] for r in resp.json()["replications"]]

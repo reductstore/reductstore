@@ -27,3 +27,21 @@ pub struct ReplicationSettings {
     #[serde(default)]
     pub exclude: Labels,
 }
+
+// Replication info
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ReplicationInfo {
+    /// Replication name
+    pub name: String,
+    /// Remote instance is available and replication is active
+    pub is_active: bool,
+    /// Replication settings
+    pub is_provisioned: bool,
+}
+
+// Replication list
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct ReplicationList {
+    /// Replication list
+    pub replications: Vec<ReplicationInfo>,
+}

@@ -59,6 +59,7 @@ mod tests {
                 .read()
                 .await
                 .replications()
+                .await
                 .len(),
             1
         );

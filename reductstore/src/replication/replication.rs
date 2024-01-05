@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketImpl};
+use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
@@ -10,7 +10,7 @@ use crate::storage::storage::Storage;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 
-use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,12 +25,7 @@ pub struct Replication {
     filter: TransactionFilter,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<RwLock<Storage>>,
-}
-
-struct ReplicationComponents {
-    remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
-    filter: TransactionFilter,
-    storage: Arc<RwLock<Storage>>,
+    remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
 }
 
 const TRANSACTION_LOG_SIZE: usize = 1000_000;
@@ -51,41 +46,30 @@ impl Replication {
             exclude,
         } = settings.clone();
 
-        let remote_bucket = Box::new(RemoteBucketImpl::new(
+        let remote_bucket = create_remote_bucket(
             remote_host.as_str(),
             remote_bucket.as_str(),
             remote_token.as_str(),
-        ));
+        );
 
         let filter = TransactionFilter::new(src_bucket, entries, include, exclude);
 
-        Self::build(
-            name,
-            settings,
-            ReplicationComponents {
-                remote_bucket,
-                filter,
-                storage,
-            },
-        )
+        Self::build(name, settings, remote_bucket, filter, storage)
     }
 
     fn build(
         name: String,
         settings: ReplicationSettings,
-        replication_components: ReplicationComponents,
+        mut remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
+        filter: TransactionFilter,
+        storage: Arc<RwLock<Storage>>,
     ) -> Self {
-        let ReplicationComponents {
-            mut remote_bucket,
-            filter,
-            storage,
-        } = replication_components;
         let logs = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
         let map_log = logs.clone();
         let config = settings.clone();
         let replication_name = name.clone();
-
-        let local_storage = Arc::clone(&storage);
+        let thr_bucket = Arc::clone(&remote_bucket);
+        let thr_storage = Arc::clone(&storage);
         tokio::spawn(async move {
             loop {
                 for (entry_name, log) in map_log.read().await.iter() {
@@ -100,7 +84,7 @@ impl Replication {
                             debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
                             let get_record = async {
-                                local_storage
+                                thr_storage
                                     .read()
                                     .await
                                     .get_bucket(&config.src_bucket)?
@@ -119,7 +103,12 @@ impl Replication {
                                 }
                             };
 
-                            match remote_bucket.write_record(entry_name, read_record).await {
+                            match thr_bucket
+                                .write()
+                                .await
+                                .write_record(entry_name, read_record)
+                                .await
+                            {
                                 Ok(_) => {
                                     log.write().await.pop_front().await.unwrap();
                                 }
@@ -136,7 +125,7 @@ impl Replication {
                             let mut log = log.write().await;
 
                             let path = Self::build_path_to_transaction_log(
-                                local_storage.read().await.data_path(),
+                                thr_storage.read().await.data_path(),
                                 &config.src_bucket,
                                 &entry_name,
                                 &replication_name,
@@ -162,6 +151,7 @@ impl Replication {
             storage,
             filter,
             log_map: logs,
+            remote_bucket,
         }
     }
 
@@ -221,6 +211,14 @@ impl Replication {
         self.is_provisioned = provisioned;
     }
 
+    pub async fn info(&self) -> ReplicationInfo {
+        ReplicationInfo {
+            name: self.name.clone(),
+            is_active: self.remote_bucket.read().await.is_active(),
+            is_provisioned: self.is_provisioned,
+        }
+    }
+
     fn build_path_to_transaction_log(
         storage_path: &PathBuf,
         bucket: &str,
@@ -253,7 +251,10 @@ mod tests {
                 entry_name: &str,
                 record: RecordReader,
             ) -> Result<(), ReductError>;
+
+            fn is_active(&self) -> bool;
         }
+
     }
 
     #[rstest]
@@ -358,11 +359,9 @@ mod tests {
         Replication::build(
             "test".to_string(),
             settings,
-            ReplicationComponents {
-                remote_bucket: Box::new(remote_bucket),
-                filter,
-                storage,
-            },
+            Arc::new(RwLock::new(remote_bucket)),
+            filter,
+            storage,
         )
     }
 
