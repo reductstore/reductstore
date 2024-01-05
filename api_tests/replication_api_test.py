@@ -1,16 +1,23 @@
 """Replication Tests"""
+import pytest
 
 
-def test__create_replication_ok(base_url, session, bucket_name, replication_name):
-    """Should create a replication"""
+@pytest.fixture(name="bucket")
+def _make_bucket(base_url, session, bucket_name):
+    """Create a bucket for tests"""
     resp = session.post(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 200
+
+
+@pytest.mark.usefixtures("bucket")
+def test__create_replication_ok(base_url, session, bucket_name, replication_name):
+    """Should create a replication"""
 
     resp = session.post(
         f"{base_url}/replications/{replication_name}",
         json={
             "src_bucket": bucket_name,
-            "dst_bucket": bucket_name,
+            "dst_bucket": "dst_bucket",
             "dst_host": "http://localhost:9000",
         },
     )
@@ -19,6 +26,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
     # todo: check if replication was created
 
 
+@pytest.mark.usefixtures("bucket")
 def test__create_replication_with_invalid_src_bucket(
     base_url, session, replication_name
 ):
@@ -27,7 +35,7 @@ def test__create_replication_with_invalid_src_bucket(
         f"{base_url}/replications/{replication_name}",
         json={
             "src_bucket": "invalid_bucket",
-            "dst_bucket": "invalid_bucket",
+            "dst_bucket": "dst_bucket",
             "dst_host": "http://localhost:9000",
         },
     )
@@ -35,10 +43,9 @@ def test__create_replication_with_invalid_src_bucket(
     assert resp.status_code == 404
 
 
+@pytest.mark.usefixtures("bucket")
 def test__update_replication_ok(base_url, session, bucket_name, replication_name):
     """Should update a replication"""
-    resp = session.post(f"{base_url}/b/{bucket_name}")
-    assert resp.status_code == 200
 
     resp = session.post(
         f"{base_url}/replications/{replication_name}",
