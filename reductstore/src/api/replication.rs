@@ -1,15 +1,17 @@
 // Copyright 2024 ReductStore
 // Licensed under the Business Source License 1.1
 mod create;
+mod update;
 
 use crate::api::{Components, HttpError};
 use axum::headers::HeaderMapExt;
 
 use crate::api::replication::create::create_replication;
+use crate::api::replication::update::update_replication;
 use async_trait::async_trait;
 use axum::extract::FromRequest;
 use axum::http::Request;
-use axum::routing::post;
+use axum::routing::{post, put};
 use bytes::Bytes;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_macros::{IntoResponse, Twin};
@@ -17,6 +19,7 @@ use std::sync::Arc;
 
 #[derive(IntoResponse, Twin)]
 pub struct ReplicationSettingsAxum(ReplicationSettings);
+
 #[async_trait]
 impl<S, B> FromRequest<S, B> for ReplicationSettingsAxum
 where
@@ -42,5 +45,27 @@ where
 }
 
 pub(crate) fn create_replication_api_routes() -> axum::Router<Arc<Components>> {
-    axum::Router::new().route("/:replication_name", post(create_replication))
+    axum::Router::new()
+        .route("/:replication_name", post(create_replication))
+        .route("/:replication_name", put(update_replication))
+}
+
+#[cfg(test)]
+mod tests {
+    use reduct_base::msg::replication_api::ReplicationSettings;
+    use reduct_base::Labels;
+    use rstest::fixture;
+
+    #[fixture]
+    pub(super) fn settings() -> ReplicationSettings {
+        ReplicationSettings {
+            src_bucket: "bucket-1".to_string(),
+            dst_bucket: "bucket-2".to_string(),
+            dst_host: "http://localhost".to_string(),
+            dst_token: "token".to_string(),
+            entries: vec![],
+            include: Labels::default(),
+            exclude: Labels::default(),
+        }
+    }
 }

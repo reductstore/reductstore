@@ -9,8 +9,8 @@ use axum::extract::{Path, State};
 use axum::headers::HeaderMap;
 use std::sync::Arc;
 
-// POST /api/v1/replications/:replication_name
-pub(crate) async fn create_replication(
+// PUT /api/v1/replications/:replication_name
+pub(crate) async fn update_replication(
     State(components): State<Arc<Components>>,
     Path(replication_name): Path<String>,
     headers: HeaderMap,
@@ -22,7 +22,7 @@ pub(crate) async fn create_replication(
         .replication_repo
         .write()
         .await
-        .create_replication(&replication_name, settings.into())
+        .update_replication(&replication_name, settings.into())
         .await?;
     Ok(())
 }
@@ -31,20 +31,22 @@ pub(crate) async fn create_replication(
 mod tests {
     use super::*;
     use crate::api::replication::tests::settings;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{components as base_components, headers};
     use reduct_base::msg::replication_api::ReplicationSettings;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_replication_ok(
+    async fn test_update_replication_ok(
         #[future] components: Arc<Components>,
         headers: HeaderMap,
-        settings: ReplicationSettings,
+        mut settings: ReplicationSettings,
     ) {
         let components = components.await;
-        create_replication(
+        settings.dst_bucket = "bucket-3".to_string();
+
+        update_replication(
             State(Arc::clone(&components)),
             Path("test".to_string()),
             headers,
@@ -58,15 +60,17 @@ mod tests {
                 .replication_repo
                 .read()
                 .await
-                .replications()
-                .len(),
-            1
+                .get_replication("test")
+                .unwrap()
+                .settings()
+                .dst_bucket,
+            "bucket-3"
         );
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_replication_error(
+    async fn test_update_replication_error(
         #[future] components: Arc<Components>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
@@ -74,7 +78,7 @@ mod tests {
         let components = components.await;
         settings.dst_host = "BROKEN URL".to_string();
 
-        let result = create_replication(
+        let result = update_replication(
             State(Arc::clone(&components)),
             Path("test".to_string()),
             headers,
@@ -83,5 +87,21 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+    }
+
+    #[fixture]
+    async fn components(
+        #[future] base_components: Arc<Components>,
+        settings: ReplicationSettings,
+    ) -> Arc<Components> {
+        let components = base_components.await;
+        components
+            .replication_repo
+            .write()
+            .await
+            .create_replication("test", settings)
+            .await
+            .unwrap();
+        components
     }
 }
