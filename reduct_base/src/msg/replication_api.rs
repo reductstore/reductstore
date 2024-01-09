@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 // Copyright 2024 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -5,7 +6,7 @@
 use crate::Labels;
 use serde::{Deserialize, Serialize};
 
-// Replication settings
+/// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ReplicationSettings {
     /// Source bucket
@@ -28,7 +29,7 @@ pub struct ReplicationSettings {
     pub exclude: Labels,
 }
 
-// Replication info
+/// Replication info
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ReplicationInfo {
     /// Replication name
@@ -39,9 +40,39 @@ pub struct ReplicationInfo {
     pub is_provisioned: bool,
 }
 
-// Replication list
+/// Replication list
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct ReplicationList {
     /// Replication list
     pub replications: Vec<ReplicationInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DiagnosticsError {
+    pub count: u64,
+    pub last_message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct DiagnosticsItem {
+    pub ok: u64,
+    pub errored: u64,
+    pub pending: u64,
+    pub errors: HashMap<u16, DiagnosticsError>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct Diagnostics {
+    pub hourly: DiagnosticsItem,
+}
+
+/// Replication settings
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ReplicationFullInfo {
+    /// Info
+    pub info: ReplicationInfo,
+    /// Settings
+    pub settings: ReplicationSettings,
+    /// Diagnostics
+    pub diagnostics: Diagnostics,
 }

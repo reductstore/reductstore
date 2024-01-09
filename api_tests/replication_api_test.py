@@ -24,9 +24,25 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
 
     assert resp.status_code == 200
 
-    resp = session.get(f"{base_url}/replications")
+    resp = session.get(f"{base_url}/replications/{replication_name}")
     assert resp.status_code == 200
-    assert replication_name in [r["name"] for r in resp.json()["replications"]]
+    assert resp.json() == {
+        "diagnostics": {"hourly": {"errored": 0, "errors": {}, "ok": 0, "pending": 0}},
+        "info": {
+            "is_active": False,
+            "is_provisioned": False,
+            "name": replication_name,
+        },
+        "settings": {
+            "dst_bucket": "dst_bucket",
+            "dst_host": "http://localhost:9000",
+            "dst_token": "",
+            "entries": [],
+            "exclude": {},
+            "include": {},
+            "src_bucket": bucket_name,
+        },
+    }
 
 
 @pytest.mark.usefixtures("bucket")
@@ -71,7 +87,27 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
     )
 
     assert resp.status_code == 200
-    # todo: check if replication was updated
+
+    resp = session.get(f"{base_url}/replications/{replication_name}")
+    assert resp.status_code == 200
+
+    assert resp.json() == {
+        "diagnostics": {"hourly": {"errored": 0, "errors": {}, "ok": 0, "pending": 0}},
+        "info": {
+            "is_active": False,
+            "is_provisioned": False,
+            "name": replication_name,
+        },
+        "settings": {
+            "dst_bucket": bucket_name,
+            "dst_host": "http://localhost:9001",
+            "dst_token": "",
+            "entries": [],
+            "exclude": {},
+            "include": {},
+            "src_bucket": bucket_name,
+        },
+    }
 
 
 @pytest.mark.usefixtures("bucket")
@@ -94,3 +130,6 @@ def test__remove_replication_ok(base_url, session, bucket_name, replication_name
     resp = session.get(f"{base_url}/replications")
     assert resp.status_code == 200
     assert replication_name not in [r["name"] for r in resp.json()["replications"]]
+
+    resp = session.get(f"{base_url}/replications/{replication_name}")
+    assert resp.status_code == 404

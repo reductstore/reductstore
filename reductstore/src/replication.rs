@@ -4,7 +4,9 @@
 use crate::replication::replication::Replication;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
-use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+use reduct_base::msg::replication_api::{
+    ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
+};
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::format;
@@ -90,6 +92,9 @@ pub trait ManageReplications {
     ) -> Result<(), ReductError>;
 
     async fn replications(&self) -> Vec<ReplicationInfo>;
+
+    async fn get_info(&self, name: &str) -> Result<ReplicationFullInfo, ReductError>;
+
     fn get_replication(&self, name: &str) -> Result<&Replication, ReductError>;
 
     fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError>;

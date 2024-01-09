@@ -1,6 +1,7 @@
 // Copyright 2024 ReductStore
 // Licensed under the Business Source License 1.1
 mod create;
+mod get;
 mod list;
 mod remove;
 mod update;
@@ -9,6 +10,7 @@ use crate::api::{Components, HttpError};
 use axum::headers::HeaderMapExt;
 
 use crate::api::replication::create::create_replication;
+use crate::api::replication::get::get_replication;
 use crate::api::replication::list::list_replications;
 use crate::api::replication::remove::remove_replication;
 use crate::api::replication::update::update_replication;
@@ -17,7 +19,9 @@ use axum::extract::FromRequest;
 use axum::http::Request;
 use axum::routing::{delete, get, post, put};
 use bytes::Bytes;
-use reduct_base::msg::replication_api::{ReplicationList, ReplicationSettings};
+use reduct_base::msg::replication_api::{
+    ReplicationFullInfo, ReplicationList, ReplicationSettings,
+};
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
 
@@ -35,7 +39,7 @@ where
 
     async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
         let bytes = Bytes::from_request(req, state).await.map_err(|_| {
-            crate::api::HttpError::new(
+            HttpError::new(
                 reduct_base::error::ErrorCode::UnprocessableEntity,
                 "Invalid body",
             )
@@ -51,9 +55,13 @@ where
 #[derive(IntoResponse, Twin, Default)]
 pub struct ReplicationListAxum(ReplicationList);
 
+#[derive(IntoResponse, Twin)]
+pub struct ReplicationFullInfoAxum(ReplicationFullInfo);
+
 pub(crate) fn create_replication_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/", get(list_replications))
+        .route("/:replication_name", get(get_replication))
         .route("/:replication_name", post(create_replication))
         .route("/:replication_name", put(update_replication))
         .route("/:replication_name", delete(remove_replication))

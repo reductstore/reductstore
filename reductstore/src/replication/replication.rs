@@ -10,7 +10,7 @@ use crate::storage::storage::Storage;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 
-use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+use reduct_base::msg::replication_api::{Diagnostics, ReplicationInfo, ReplicationSettings};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -217,6 +217,10 @@ impl Replication {
             is_active: self.remote_bucket.read().await.is_active(),
             is_provisioned: self.is_provisioned,
         }
+    }
+
+    pub fn diagnostics(&self) -> Diagnostics {
+        Default::default()
     }
 
     fn build_path_to_transaction_log(

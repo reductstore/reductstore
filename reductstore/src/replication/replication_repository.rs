@@ -14,7 +14,9 @@ use bytes::Bytes;
 use log::debug;
 use prost::Message;
 use reduct_base::error::ReductError;
-use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+use reduct_base::msg::replication_api::{
+    Diagnostics, ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -124,6 +126,15 @@ impl ManageReplications for ReplicationRepository {
             replications.push(replication.info().await);
         }
         replications
+    }
+
+    async fn get_info(&self, name: &str) -> Result<ReplicationFullInfo, ReductError> {
+        let info = ReplicationFullInfo {
+            info: self.get_replication(name)?.info().await,
+            settings: self.get_replication(name)?.settings().clone(),
+            diagnostics: Default::default(),
+        };
+        Ok(info)
     }
 
     fn get_replication(&self, name: &str) -> Result<&Replication, ReductError> {
@@ -254,7 +265,7 @@ mod tests {
     use bytes::Buf;
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::replication_api::ReplicationSettings;
+    use reduct_base::msg::replication_api::{Diagnostics, ReplicationSettings};
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
@@ -407,6 +418,21 @@ mod tests {
             )),
             "Should not remove non existing replication"
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        repo.create_replication("test", settings.clone())
+            .await
+            .unwrap();
+
+        let info = repo.get_info("test").await.unwrap();
+        let repl = repo.get_replication("test").unwrap();
+        assert_eq!(info.settings, settings);
+        assert_eq!(info.info, repl.info().await);
+        assert_eq!(info.diagnostics, repl.diagnostics());
     }
 
     #[fixture]
