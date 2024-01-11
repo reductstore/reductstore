@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: Web Console v1.4.0
 - reduct-cli: `bucket` command to manage buckets, [PR-367](https://github.com/reductstore/reductstore/pull/367)
 - reductstore: Data replication, [PR-377](https://github.com/reductstore/reductstore/pull/377)
+- reductstore: CRUD API and diagnostics for replication, [PR-380](https://github.com/reductstore/reductstore/pull/380)
 
 ### Fixed
 
