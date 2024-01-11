@@ -432,7 +432,7 @@ mod tests {
         let repl = repo.get_replication("test").unwrap();
         assert_eq!(info.settings, settings);
         assert_eq!(info.info, repl.info().await);
-        assert_eq!(info.diagnostics, repl.diagnostics());
+        assert_eq!(info.diagnostics, repl.diagnostics().await);
     }
 
     #[fixture]

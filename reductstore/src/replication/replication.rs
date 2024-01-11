@@ -10,6 +10,7 @@ use crate::storage::storage::Storage;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 
+use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::diagnostics::Diagnostics;
 use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
 use std::collections::{BTreeMap, HashMap};
@@ -28,6 +29,7 @@ pub struct Replication {
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<RwLock<Storage>>,
     remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
+    hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
 }
 
 const TRANSACTION_LOG_SIZE: usize = 1000_000;
@@ -66,20 +68,26 @@ impl Replication {
         filter: TransactionFilter,
         storage: Arc<RwLock<Storage>>,
     ) -> Self {
-        let logs = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
-        let map_log = logs.clone();
+        let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
+        let hourly_diagnostics = Arc::new(RwLock::new(DiagnosticsCounter::new(
+            Duration::from_secs(3600),
+        )));
+
         let config = settings.clone();
         let replication_name = name.clone();
+        let thr_log_map = Arc::clone(&log_map);
         let thr_bucket = Arc::clone(&remote_bucket);
         let thr_storage = Arc::clone(&storage);
+        let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
+
         tokio::spawn(async move {
             loop {
-                for (entry_name, log) in map_log.read().await.iter() {
+                for (entry_name, log) in thr_log_map.read().await.iter() {
                     let tr = log.write().await.front().await;
                     match tr {
                         Ok(None) => {
                             // empty log, nothing to do
-                            sleep(std::time::Duration::from_micros(100)).await;
+                            sleep(Duration::from_micros(100)).await;
                             continue;
                         }
                         Ok(Some(transaction)) => {
@@ -100,7 +108,9 @@ impl Replication {
                                     if err.status == ErrorCode::NotFound {
                                         log.write().await.pop_front().await.unwrap();
                                     }
+
                                     error!("Failed to read record: {:?}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
                                     break;
                                 }
                             };
@@ -113,9 +123,11 @@ impl Replication {
                             {
                                 Ok(_) => {
                                     log.write().await.pop_front().await.unwrap();
+                                    thr_hourly_diagnostics.write().await.count(Ok(()));
                                 }
                                 Err(err) => {
                                     debug!("Failed to replicate transaction: {:?}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
                                     break;
                                 }
                             }
@@ -152,8 +164,9 @@ impl Replication {
             settings,
             storage,
             filter,
-            log_map: logs,
+            log_map,
             remote_bucket,
+            hourly_diagnostics,
         }
     }
 
@@ -226,8 +239,10 @@ impl Replication {
         }
     }
 
-    pub fn diagnostics(&self) -> Diagnostics {
-        Default::default()
+    pub async fn diagnostics(&self) -> Diagnostics {
+        Diagnostics {
+            hourly: self.hourly_diagnostics.read().await.diagnostics(),
+        }
     }
 
     fn build_path_to_transaction_log(
@@ -249,6 +264,7 @@ mod tests {
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
     use reduct_base::Labels;
     use rstest::*;
 
@@ -287,6 +303,16 @@ mod tests {
                 is_provisioned: false,
                 pending_records: 0,
             }
+        );
+        assert_eq!(
+            replication.diagnostics().await,
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 60,
+                    errored: 0,
+                    errors: HashMap::new()
+                }
+            }
         )
     }
 
@@ -298,7 +324,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_record()
-            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
@@ -314,7 +340,21 @@ mod tests {
                 is_provisioned: false,
                 pending_records: 1,
             }
-        )
+        );
+        let diagnostics = replication.diagnostics().await.hourly;
+        assert_eq!(diagnostics.ok, 0);
+        assert!(
+            diagnostics.errored > 0,
+            "We have at least one errored transaction",
+        );
+        assert!(
+            diagnostics.errors[&-2].count > 0,
+            "We have at least one timeout error",
+        );
+        assert!(
+            diagnostics.errors[&-2].last_message.contains("Timeout"),
+            "We have at least one timeout error",
+        );
     }
 
     #[rstest]
@@ -339,6 +379,22 @@ mod tests {
                 is_active: true,
                 is_provisioned: false,
                 pending_records: 0,
+            }
+        );
+        assert_eq!(
+            replication.diagnostics().await,
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 0,
+                    errored: 60,
+                    errors: HashMap::from_iter(vec![(
+                        404,
+                        DiagnosticsError {
+                            count: 1,
+                            last_message: "No record with timestamp 100".to_string()
+                        }
+                    )])
+                }
             }
         )
     }

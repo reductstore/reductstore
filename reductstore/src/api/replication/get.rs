@@ -71,7 +71,7 @@ mod tests {
             ReplicationFullInfo {
                 info: repl.info().await,
                 settings: repl.settings().clone(),
-                diagnostics: repl.diagnostics()
+                diagnostics: repl.diagnostics().await,
             }
         );
     }
