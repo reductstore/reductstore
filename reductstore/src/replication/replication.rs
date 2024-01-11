@@ -10,10 +10,12 @@ use crate::storage::storage::Storage;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 
-use reduct_base::msg::replication_api::{Diagnostics, ReplicationInfo, ReplicationSettings};
-use std::collections::HashMap;
+use reduct_base::msg::diagnostics::Diagnostics;
+use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -212,10 +214,15 @@ impl Replication {
     }
 
     pub async fn info(&self) -> ReplicationInfo {
+        let mut pending_records = 0;
+        for (_, log) in self.log_map.read().await.iter() {
+            pending_records += log.read().await.len() as u64;
+        }
         ReplicationInfo {
             name: self.name.clone(),
             is_active: self.remote_bucket.read().await.is_active(),
             is_provisioned: self.is_provisioned,
+            pending_records,
         }
     }
 
@@ -271,7 +278,16 @@ mod tests {
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
-        assert!(transaction_log_is_empty(replication).await);
+        assert!(transaction_log_is_empty(&replication).await);
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 0,
+            }
+        )
     }
 
     #[rstest]
@@ -287,9 +303,18 @@ mod tests {
 
         replication.notify(notification).await.unwrap();
         assert!(
-            !transaction_log_is_empty(replication).await,
+            !transaction_log_is_empty(&replication).await,
             "We keep the transaction in the log to sync later"
         );
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 1,
+            }
+        )
     }
 
     #[rstest]
@@ -304,14 +329,25 @@ mod tests {
         notification.event = Transaction::WriteRecord(100);
         replication.notify(notification).await.unwrap();
         assert!(
-            transaction_log_is_empty(replication).await,
+            transaction_log_is_empty(&replication).await,
             "We don't keep the transaction for a non existing record"
         );
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 0,
+            }
+        )
     }
 
     #[fixture]
     fn remote_bucket() -> MockRmBucket {
-        MockRmBucket::new()
+        let mut bucket = MockRmBucket::new();
+        bucket.expect_is_active().returning(|| true);
+        bucket
     }
 
     #[fixture]
@@ -369,8 +405,8 @@ mod tests {
         )
     }
 
-    async fn transaction_log_is_empty(replication: Replication) -> bool {
-        sleep(std::time::Duration::from_millis(100)).await;
+    async fn transaction_log_is_empty(replication: &Replication) -> bool {
+        sleep(Duration::from_millis(100)).await;
 
         replication
             .log_map

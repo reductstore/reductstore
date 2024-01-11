@@ -1,10 +1,11 @@
-use std::collections::HashMap;
 // Copyright 2024 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use crate::msg::diagnostics::Diagnostics;
 use crate::Labels;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -38,6 +39,8 @@ pub struct ReplicationInfo {
     pub is_active: bool,
     /// Replication settings
     pub is_provisioned: bool,
+    /// Number of records pending replication
+    pub pending_records: u64,
 }
 
 /// Replication list
@@ -45,25 +48,6 @@ pub struct ReplicationInfo {
 pub struct ReplicationList {
     /// Replication list
     pub replications: Vec<ReplicationInfo>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct DiagnosticsError {
-    pub count: u64,
-    pub last_message: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
-pub struct DiagnosticsItem {
-    pub ok: u64,
-    pub errored: u64,
-    pub pending: u64,
-    pub errors: HashMap<u16, DiagnosticsError>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
-pub struct Diagnostics {
-    pub hourly: DiagnosticsItem,
 }
 
 /// Replication settings

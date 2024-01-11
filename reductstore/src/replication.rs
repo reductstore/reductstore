@@ -13,6 +13,7 @@ use std::format;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+mod diagnostics;
 pub mod proto;
 mod remote_bucket;
 mod replication;

@@ -15,7 +15,7 @@ use log::debug;
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
-    Diagnostics, ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
+    ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -265,7 +265,7 @@ mod tests {
     use bytes::Buf;
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::replication_api::{Diagnostics, ReplicationSettings};
+    use reduct_base::msg::replication_api::ReplicationSettings;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
