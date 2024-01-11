@@ -205,7 +205,7 @@ impl ReplicationRepository {
     }
 
     fn save_repo(&self) -> Result<(), ReductError> {
-        let mut proto_repo = ProtoReplicationRepo {
+        let proto_repo = ProtoReplicationRepo {
             replications: self
                 .replications
                 .iter()
@@ -262,7 +262,7 @@ mod tests {
     use crate::replication::replication_repository::ReplicationRepository;
     use crate::replication::ManageReplications;
     use crate::storage::storage::Storage;
-    use bytes::Buf;
+
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::ReplicationSettings;
@@ -337,7 +337,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
         assert_eq!(repo.replications().await.len(), 1);
         assert_eq!(
             repo.get_replication("test").unwrap().settings(),
@@ -375,7 +375,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut replication = repo.get_mut_replication("test").unwrap();
+        let replication = repo.get_mut_replication("test").unwrap();
         replication.set_provisioned(true);
 
         assert_eq!(
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(repo.replications().await.len(), 0);
 
         // check if replication is removed from file
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
         assert_eq!(
             repo.replications().await.len(),
             0,

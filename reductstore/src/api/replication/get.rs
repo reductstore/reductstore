@@ -33,9 +33,7 @@ mod tests {
     use crate::api::replication::tests::settings;
     use crate::api::tests::{components, headers};
     use reduct_base::error::ErrorCode::NotFound;
-    use reduct_base::msg::replication_api::{
-        ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
-    };
+    use reduct_base::msg::replication_api::{ReplicationFullInfo, ReplicationSettings};
     use rstest::rstest;
     use std::sync::Arc;
 

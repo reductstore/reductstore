@@ -162,7 +162,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 }
             }
 
-            let mut replication = repo.get_mut_replication(&name).unwrap();
+            let replication = repo.get_mut_replication(&name).unwrap();
             replication.set_provisioned(true);
             info!("Provisioned replication '{}' with {:?}", name, settings);
         }
@@ -594,7 +594,7 @@ mod tests {
 
     mod provision {
         use super::*;
-        use crate::replication::proto::Label;
+
         use crate::storage::bucket::Bucket;
         use reduct_base::error::ReductError;
         use reduct_base::msg::bucket_api::QuotaType::FIFO;

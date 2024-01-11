@@ -8,8 +8,7 @@ use reduct_base::msg::replication_api::{
     ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
 };
 use reduct_base::Labels;
-use std::collections::HashMap;
-use std::format;
+
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

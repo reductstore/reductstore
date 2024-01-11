@@ -4,7 +4,7 @@
 use reduct_base::error::{IntEnum, ReductError};
 use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
 use std::collections::hash_map::Entry;
-use std::ops::Div;
+
 use std::time::{Duration, Instant};
 
 pub(super) struct DiagnosticsCounter {
@@ -108,7 +108,7 @@ mod tests {
 
     #[rstest]
 
-    fn test_diagnostics_counter_ok(mut counter: DiagnosticsCounter) {
+    fn test_diagnostics_counter_ok(_counter: DiagnosticsCounter) {
         let mut counter =
             DiagnosticsCounter::new(Duration::from_millis(DEFAULT_FRAME_COUNT as u64 * 5));
         counter.count(Ok(()));
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_diagnostics_counter_err(mut counter: DiagnosticsCounter) {
+    fn test_diagnostics_counter_err(_counter: DiagnosticsCounter) {
         let mut counter =
             DiagnosticsCounter::new(Duration::from_millis(DEFAULT_FRAME_COUNT as u64 * 5));
         counter.count(Err(ReductError::internal_server_error("test")));

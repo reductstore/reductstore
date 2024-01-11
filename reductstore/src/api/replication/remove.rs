@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::replication::ReplicationSettingsAxum;
+
 use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};

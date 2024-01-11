@@ -5,7 +5,6 @@
 use crate::msg::diagnostics::Diagnostics;
 use crate::Labels;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

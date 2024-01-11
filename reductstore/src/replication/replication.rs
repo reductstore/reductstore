@@ -13,10 +13,10 @@ use reduct_base::error::{ErrorCode, ReductError};
 use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::diagnostics::Diagnostics;
 use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -64,7 +64,7 @@ impl Replication {
     fn build(
         name: String,
         settings: ReplicationSettings,
-        mut remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
+        remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
         filter: TransactionFilter,
         storage: Arc<RwLock<Storage>>,
     ) -> Self {
