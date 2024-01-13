@@ -150,9 +150,14 @@ impl ManageReplications for ReplicationRepository {
     }
 
     fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
-        self.replications.remove(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let repl = self.get_replication(name)?;
+        if repl.is_provisioned() {
+            return Err(ReductError::conflict(&format!(
+                "Can't remove provisioned replication '{}'",
+                name
+            )));
+        }
+        self.replications.remove(name);
         self.save_repo()
     }
 
@@ -417,6 +422,29 @@ mod tests {
                 "Replication 'test-2' does not exist"
             )),
             "Should not remove non existing replication"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_provioned_replication(
+        storage: Arc<RwLock<Storage>>,
+        settings: ReplicationSettings,
+    ) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        repo.create_replication("test", settings.clone())
+            .await
+            .unwrap();
+
+        let replication = repo.get_mut_replication("test").unwrap();
+        replication.set_provisioned(true);
+
+        assert_eq!(
+            repo.remove_replication("test"),
+            Err(ReductError::conflict(
+                "Can't remove provisioned replication 'test'"
+            )),
+            "Should not remove provisioned replication"
         );
     }
 
