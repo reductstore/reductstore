@@ -7,14 +7,13 @@ mod list;
 pub mod me;
 mod remove;
 
+use axum::async_trait;
 use axum::extract::FromRequest;
-use axum::http::{Request, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::{async_trait, headers};
+use axum::http::Request;
+use axum::response::IntoResponse;
 use bytes::Bytes;
 
 use axum::headers::HeaderMapExt;
-use hyper::HeaderMap;
 
 use axum::routing::{delete, get, post};
 use reduct_base::error::ErrorCode;

@@ -1,0 +1,29 @@
+// Copyright 2023-2024 ReductStore
+// Licensed under the Business Source License 1.1
+
+syntax = "proto3";
+
+package reduct.proto.replication;
+
+message Label {
+  string name = 1;
+  string value = 2;
+}
+
+message  ReplicationSettings {
+  string src_bucket = 2;      // source bucket
+  string dst_bucket = 3;      // destination bucket
+  string dst_host = 4;        // URL of destination host
+  string dst_token = 5;       // access token for destination host
+  repeated string entries = 6;// list of entries to replicate, empty means all. Wildcards are allowed.
+  repeated Label include = 7; // list of labels to include
+  repeated Label exclude = 8; // list of labels to exclude
+}
+
+message ReplicationRepo {
+  message Item {
+    string name = 1;
+    ReplicationSettings settings = 2;
+  }
+  repeated Item replications = 1;
+}

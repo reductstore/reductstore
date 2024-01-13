@@ -8,13 +8,16 @@ use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState}
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::ts_to_us;
 use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
-pub(super) struct RemoteBucketImpl {
+struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
     path: String,
+    is_active: bool,
 }
 
 #[async_trait]
@@ -24,6 +27,8 @@ pub(crate) trait RemoteBucket {
         entry_name: &str,
         record: RecordReader,
     ) -> Result<(), ReductError>;
+
+    fn is_active(&self) -> bool;
 }
 
 impl RemoteBucketImpl {
@@ -31,6 +36,7 @@ impl RemoteBucketImpl {
         Self {
             path: format!("{}/{}", url, bucket_name),
             state: Some(Box::new(InitialState::new(url, bucket_name, api_token))),
+            is_active: false,
         }
     }
 }
@@ -62,7 +68,9 @@ impl RemoteBucket for RemoteBucketImpl {
                 )
                 .await,
         );
-        if self.state.as_ref().unwrap().ok() {
+
+        self.is_active = self.state.as_ref().unwrap().ok();
+        if self.is_active {
             Ok(())
         } else {
             Err(ReductError::internal_server_error(&format!(
@@ -71,6 +79,22 @@ impl RemoteBucket for RemoteBucketImpl {
             )))
         }
     }
+
+    fn is_active(&self) -> bool {
+        self.is_active
+    }
+}
+
+pub(super) fn create_remote_bucket(
+    url: &str,
+    bucket_name: &str,
+    api_token: &str,
+) -> Arc<RwLock<dyn RemoteBucket + Send + Sync>> {
+    Arc::new(RwLock::new(RemoteBucketImpl::new(
+        url,
+        bucket_name,
+        api_token,
+    )))
 }
 
 #[cfg(test)]
@@ -178,8 +202,9 @@ pub(super) mod tests {
             )
             .return_once(move |_, _, _, _, _, _| Box::new(second_state));
 
-        let remote_bucket = create_dst_bucket(first_state);
-        write_record(remote_bucket).await.unwrap();
+        let mut remote_bucket = create_dst_bucket(first_state);
+        write_record(&mut remote_bucket).await.unwrap();
+        assert!(remote_bucket.is_active());
     }
 
     #[rstest]
@@ -193,8 +218,9 @@ pub(super) mod tests {
             .expect_write_record()
             .return_once(move |_, _, _, _, _, _| Box::new(second_state));
 
-        let remote_bucket = create_dst_bucket(first_state);
-        write_record(remote_bucket).await.unwrap_err();
+        let mut remote_bucket = create_dst_bucket(first_state);
+        write_record(&mut remote_bucket).await.unwrap_err();
+        assert!(!remote_bucket.is_active());
     }
 
     fn create_dst_bucket(first_state: MockState) -> RemoteBucketImpl {
@@ -203,7 +229,7 @@ pub(super) mod tests {
         remote_bucket
     }
 
-    async fn write_record(mut remote_bucket: RemoteBucketImpl) -> Result<(), ReductError> {
+    async fn write_record(remote_bucket: &mut RemoteBucketImpl) -> Result<(), ReductError> {
         let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());

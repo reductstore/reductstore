@@ -25,12 +25,14 @@ use crate::storage::storage::Storage;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
-use crate::replication::ReplicationEngine;
+use crate::api::replication::create_replication_api_routes;
+use crate::replication::ManageReplications;
 pub use reduct_base::error::ErrorCode;
 
 mod bucket;
 mod entry;
 mod middleware;
+mod replication;
 mod server;
 mod token;
 mod ui;
@@ -40,7 +42,7 @@ pub struct Components {
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
-    pub replication_engine: Box<dyn ReplicationEngine + Send + Sync>,
+    pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub base_path: String,
 }
 
@@ -120,6 +122,11 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> R
         )
         // Bucket API + Entry API
         .nest(&format!("{}api/v1/b", api_base_path), b_route)
+        // Replication API
+        .nest(
+            &format!("{}api/v1/replications", api_base_path),
+            create_replication_api_routes(),
+        )
         // UI
         .route(&format!("{}", api_base_path), get(redirect_to_index))
         .fallback(get(show_ui))
@@ -181,13 +188,14 @@ mod tests {
 
         token_repo.generate_token("test", permissions).unwrap();
 
+        let storage = Arc::new(RwLock::new(storage));
         let components = Components {
-            storage: Arc::new(RwLock::new(storage)),
+            storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
-            replication_engine: create_replication_engine(),
+            replication_repo: RwLock::new(create_replication_engine(storage).await),
         };
 
         Arc::new(components)

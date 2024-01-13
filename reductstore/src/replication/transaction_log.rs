@@ -118,6 +118,18 @@ impl TransactionLog {
         self.read_pos == self.write_pos
     }
 
+    pub fn len(&self) -> usize {
+        let len_in_bytes = if self.read_pos <= self.write_pos {
+            self.write_pos - self.read_pos
+        } else {
+            self.capacity_in_bytes
+                .wrapping_sub(HEADER_SIZE)
+                .wrapping_sub(self.read_pos)
+                .wrapping_add(self.write_pos)
+        };
+        (len_in_bytes / ENTRY_SIZE) as usize
+    }
+
     pub async fn front(&mut self) -> Result<Option<Transaction>, ReductError> {
         if self.is_empty() {
             return Ok(None);
@@ -190,6 +202,9 @@ mod tests {
                 .unwrap(),
             None
         );
+
+        assert_eq!(transaction_log.len(), 1);
+
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(2))
@@ -197,6 +212,7 @@ mod tests {
                 .unwrap(),
             None
         );
+        assert_eq!(transaction_log.len(), 2);
         assert_eq!(transaction_log.is_empty(), false);
         assert_eq!(
             transaction_log.front().await.unwrap(),
@@ -208,9 +224,11 @@ mod tests {
             transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(2))
         );
+        assert_eq!(transaction_log.len(), 1);
         assert_eq!(transaction_log.is_empty(), false);
 
         transaction_log.pop_front().await.unwrap();
+        assert_eq!(transaction_log.len(), 0);
         assert_eq!(transaction_log.is_empty(), true);
 
         let err = transaction_log.pop_front().await.err().unwrap();
@@ -231,6 +249,7 @@ mod tests {
                 .unwrap();
         }
 
+        assert_eq!(transaction_log.len(), 2);
         assert_eq!(
             transaction_log.front().await.unwrap(),
             Some(Transaction::WriteRecord(3))

@@ -16,7 +16,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".reduct.proto.auth", "#[serde(default)]")
         .extern_path(".google.protobuf.Timestamp", "::prost_wkt_types::Timestamp")
         .compile_protos(
-            &["src/proto/auth.proto", "src/proto/storage.proto"],
+            &[
+                "src/proto/auth.proto",
+                "src/proto/storage.proto",
+                "src/proto/replication.proto",
+            ],
             &["src/protos/"],
         )
         .expect("Failed to compile protos");

@@ -139,7 +139,9 @@ pub(crate) async fn write_record(
             }
             tx.closed().await; //sync with the storage
             components
-                .replication_engine
+                .replication_repo
+                .write()
+                .await
                 .notify(TransactionNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),

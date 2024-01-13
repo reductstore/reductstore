@@ -23,6 +23,11 @@ def _gen_bucket_name() -> str:
     return f"bucket_{random.randint(0, 1000000)}"
 
 
+@pytest.fixture(name="replication_name")
+def _gen_replication_name() -> str:
+    return f"replication_{random.randint(0, 1000000)}"
+
+
 def requires_env(key):
     env = os.environ.get(key)
 

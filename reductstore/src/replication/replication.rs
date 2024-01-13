@@ -1,7 +1,7 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketImpl};
+use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
@@ -9,46 +9,38 @@ use crate::storage::storage::Storage;
 
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::Labels;
 
+use crate::replication::diagnostics::DiagnosticsCounter;
+use reduct_base::msg::diagnostics::Diagnostics;
+use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
-#[derive(Debug, Clone)]
-pub struct ReplicationSettings {
-    pub name: String,
-    pub src_bucket: String,
-    pub dst_bucket: String,
-    pub dst_host: String,
-    pub dst_token: String,
-    pub entries: Vec<String>,
-    pub include: Labels,
-    pub exclude: Labels,
-}
-
 pub struct Replication {
+    name: String,
+    is_provisioned: bool,
     settings: ReplicationSettings,
     filter: TransactionFilter,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<RwLock<Storage>>,
-}
-
-struct ReplicationComponents {
-    remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
-    filter: TransactionFilter,
-    storage: Arc<RwLock<Storage>>,
+    remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
+    hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
 }
 
 const TRANSACTION_LOG_SIZE: usize = 1000_000;
 
 impl Replication {
-    pub fn new(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) -> Self {
+    pub(super) fn new(
+        name: String,
+        settings: ReplicationSettings,
+        storage: Arc<RwLock<Storage>>,
+    ) -> Self {
         let ReplicationSettings {
-            name: _,
             src_bucket,
             dst_bucket: remote_bucket,
             dst_host: remote_host,
@@ -58,50 +50,51 @@ impl Replication {
             exclude,
         } = settings.clone();
 
-        let remote_bucket = Box::new(RemoteBucketImpl::new(
+        let remote_bucket = create_remote_bucket(
             remote_host.as_str(),
             remote_bucket.as_str(),
             remote_token.as_str(),
-        ));
+        );
 
         let filter = TransactionFilter::new(src_bucket, entries, include, exclude);
 
-        Self::build(
-            ReplicationComponents {
-                remote_bucket,
-                filter,
-                storage,
-            },
-            settings,
-        )
+        Self::build(name, settings, remote_bucket, filter, storage)
     }
 
-    fn build(replication_components: ReplicationComponents, settings: ReplicationSettings) -> Self {
-        let ReplicationComponents {
-            mut remote_bucket,
-            filter,
-            storage,
-        } = replication_components;
-        let logs = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
-        let map_log = logs.clone();
-        let config = settings.clone();
+    fn build(
+        name: String,
+        settings: ReplicationSettings,
+        remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
+        filter: TransactionFilter,
+        storage: Arc<RwLock<Storage>>,
+    ) -> Self {
+        let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
+        let hourly_diagnostics = Arc::new(RwLock::new(DiagnosticsCounter::new(
+            Duration::from_secs(3600),
+        )));
 
-        let local_storage = Arc::clone(&storage);
+        let config = settings.clone();
+        let replication_name = name.clone();
+        let thr_log_map = Arc::clone(&log_map);
+        let thr_bucket = Arc::clone(&remote_bucket);
+        let thr_storage = Arc::clone(&storage);
+        let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
+
         tokio::spawn(async move {
             loop {
-                for (entry_name, log) in map_log.read().await.iter() {
+                for (entry_name, log) in thr_log_map.read().await.iter() {
                     let tr = log.write().await.front().await;
                     match tr {
                         Ok(None) => {
                             // empty log, nothing to do
-                            sleep(std::time::Duration::from_micros(100)).await;
+                            sleep(Duration::from_micros(100)).await;
                             continue;
                         }
                         Ok(Some(transaction)) => {
                             debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
                             let get_record = async {
-                                local_storage
+                                thr_storage
                                     .read()
                                     .await
                                     .get_bucket(&config.src_bucket)?
@@ -115,17 +108,26 @@ impl Replication {
                                     if err.status == ErrorCode::NotFound {
                                         log.write().await.pop_front().await.unwrap();
                                     }
+
                                     error!("Failed to read record: {:?}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
                                     break;
                                 }
                             };
 
-                            match remote_bucket.write_record(entry_name, read_record).await {
+                            match thr_bucket
+                                .write()
+                                .await
+                                .write_record(entry_name, read_record)
+                                .await
+                            {
                                 Ok(_) => {
                                     log.write().await.pop_front().await.unwrap();
+                                    thr_hourly_diagnostics.write().await.count(Ok(()));
                                 }
                                 Err(err) => {
                                     debug!("Failed to replicate transaction: {:?}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
                                     break;
                                 }
                             }
@@ -137,10 +139,10 @@ impl Replication {
                             let mut log = log.write().await;
 
                             let path = Self::build_path_to_transaction_log(
-                                local_storage.read().await.data_path(),
+                                thr_storage.read().await.data_path(),
                                 &config.src_bucket,
                                 &entry_name,
-                                &config.name,
+                                &replication_name,
                             );
                             if let Err(err) = fs::remove_file(&path).await {
                                 error!("Failed to remove transaction log: {:?}", err);
@@ -157,10 +159,14 @@ impl Replication {
         });
 
         Self {
+            name,
+            is_provisioned: false,
             settings,
             storage,
             filter,
-            log_map: logs,
+            log_map,
+            remote_bucket,
+            hourly_diagnostics,
         }
     }
 
@@ -181,7 +187,7 @@ impl Replication {
                             self.storage.read().await.data_path(),
                             &self.settings.src_bucket,
                             &notification.entry,
-                            &self.settings.name,
+                            &self.name,
                         ),
                         TRANSACTION_LOG_SIZE,
                     )
@@ -206,11 +212,37 @@ impl Replication {
     }
 
     pub fn name(&self) -> &String {
-        &self.settings.name
+        &self.name
     }
 
     pub fn settings(&self) -> &ReplicationSettings {
         &self.settings
+    }
+    pub fn is_provisioned(&self) -> bool {
+        self.is_provisioned
+    }
+
+    pub fn set_provisioned(&mut self, provisioned: bool) {
+        self.is_provisioned = provisioned;
+    }
+
+    pub async fn info(&self) -> ReplicationInfo {
+        let mut pending_records = 0;
+        for (_, log) in self.log_map.read().await.iter() {
+            pending_records += log.read().await.len() as u64;
+        }
+        ReplicationInfo {
+            name: self.name.clone(),
+            is_active: self.remote_bucket.read().await.is_active(),
+            is_provisioned: self.is_provisioned,
+            pending_records,
+        }
+    }
+
+    pub async fn diagnostics(&self) -> Diagnostics {
+        Diagnostics {
+            hourly: self.hourly_diagnostics.read().await.diagnostics(),
+        }
     }
 
     fn build_path_to_transaction_log(
@@ -232,6 +264,8 @@ mod tests {
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
+    use reduct_base::Labels;
     use rstest::*;
 
     mock! {
@@ -244,7 +278,10 @@ mod tests {
                 entry_name: &str,
                 record: RecordReader,
             ) -> Result<(), ReductError>;
+
+            fn is_active(&self) -> bool;
         }
+
     }
 
     #[rstest]
@@ -257,7 +294,26 @@ mod tests {
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
-        assert!(transaction_log_is_empty(replication).await);
+        assert!(transaction_log_is_empty(&replication).await);
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 0,
+            }
+        );
+        assert_eq!(
+            replication.diagnostics().await,
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 60,
+                    errored: 0,
+                    errors: HashMap::new()
+                }
+            }
+        )
     }
 
     #[rstest]
@@ -268,13 +324,36 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_record()
-            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
         assert!(
-            !transaction_log_is_empty(replication).await,
+            !transaction_log_is_empty(&replication).await,
             "We keep the transaction in the log to sync later"
+        );
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 1,
+            }
+        );
+        let diagnostics = replication.diagnostics().await.hourly;
+        assert_eq!(diagnostics.ok, 0);
+        assert!(
+            diagnostics.errored > 0,
+            "We have at least one errored transaction",
+        );
+        assert!(
+            diagnostics.errors[&-2].count > 0,
+            "We have at least one timeout error",
+        );
+        assert!(
+            diagnostics.errors[&-2].last_message.contains("Timeout"),
+            "We have at least one timeout error",
         );
     }
 
@@ -290,14 +369,41 @@ mod tests {
         notification.event = Transaction::WriteRecord(100);
         replication.notify(notification).await.unwrap();
         assert!(
-            transaction_log_is_empty(replication).await,
+            transaction_log_is_empty(&replication).await,
             "We don't keep the transaction for a non existing record"
         );
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 0,
+            }
+        );
+        assert_eq!(
+            replication.diagnostics().await,
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 0,
+                    errored: 60,
+                    errors: HashMap::from_iter(vec![(
+                        404,
+                        DiagnosticsError {
+                            count: 1,
+                            last_message: "No record with timestamp 100".to_string()
+                        }
+                    )])
+                }
+            }
+        )
     }
 
     #[fixture]
     fn remote_bucket() -> MockRmBucket {
-        MockRmBucket::new()
+        let mut bucket = MockRmBucket::new();
+        bucket.expect_is_active().returning(|| true);
+        bucket
     }
 
     #[fixture]
@@ -313,14 +419,13 @@ mod tests {
     async fn build_replication(remote_bucket: MockRmBucket) -> Replication {
         let tmp_dir = tempfile::tempdir().unwrap().into_path();
         let settings = ReplicationSettings {
-            name: "test".to_string(),
             src_bucket: "src".to_string(),
             dst_bucket: "remote".to_string(),
             dst_host: "http://localhost:8383".to_string(),
             dst_token: "token".to_string(),
             entries: vec![],
-            include: HashMap::new(),
-            exclude: HashMap::new(),
+            include: Labels::new(),
+            exclude: Labels::new(),
         };
 
         let filter = TransactionFilter::new(
@@ -348,17 +453,16 @@ mod tests {
         }
 
         Replication::build(
-            ReplicationComponents {
-                remote_bucket: Box::new(remote_bucket),
-                filter,
-                storage,
-            },
+            "test".to_string(),
             settings,
+            Arc::new(RwLock::new(remote_bucket)),
+            filter,
+            storage,
         )
     }
 
-    async fn transaction_log_is_empty(replication: Replication) -> bool {
-        sleep(std::time::Duration::from_millis(100)).await;
+    async fn transaction_log_is_empty(replication: &Replication) -> bool {
+        sleep(Duration::from_millis(100)).await;
 
         replication
             .log_map
