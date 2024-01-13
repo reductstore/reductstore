@@ -98,6 +98,7 @@ impl DiagnosticsCounter {
 }
 
 #[cfg(test)]
+#[cfg(unix)] // run only on unix because of bad time precision on windows
 mod tests {
     use super::*;
     use reduct_base::error::ReductError;
