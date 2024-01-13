@@ -153,7 +153,7 @@ mod tests {
     }
 
     fn wait_for_next_frame() {
-        sleep(Duration::from_millis(FRAME_INTERVAL_MS));
+        sleep(Duration::from_millis(FRAME_INTERVAL_MS + 1));
     }
 
     #[rstest]
