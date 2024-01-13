@@ -86,7 +86,7 @@ impl DiagnosticsCounter {
     }
 
     fn check_and_create_new_frame(&mut self) {
-        let delta = self.frame_last.elapsed().as_micros() / self.frame_interval.as_micros();
+        let delta = self.frame_last.elapsed().as_millis() / self.frame_interval.as_millis();
         for _ in 0..delta {
             self.frame_last = Instant::now();
             self.frames.push(DiagnosticsItem::default());
@@ -98,6 +98,7 @@ impl DiagnosticsCounter {
 }
 
 #[cfg(test)]
+#[cfg(target_os = "linux")] // sleep is not precise on macos and windows in CI
 mod tests {
     use super::*;
     use reduct_base::error::ReductError;
