@@ -98,7 +98,6 @@ impl DiagnosticsCounter {
 }
 
 #[cfg(test)]
-#[cfg(unix)] // run only on unix because of bad time precision on windows
 mod tests {
     use super::*;
     use reduct_base::error::ReductError;
@@ -107,11 +106,14 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
+    const FRAME_INTERVAL_MS: u64 = 20;
+
     #[rstest]
 
     fn test_diagnostics_counter_ok(_counter: DiagnosticsCounter) {
-        let mut counter =
-            DiagnosticsCounter::new(Duration::from_millis(DEFAULT_FRAME_COUNT as u64 * 5));
+        let mut counter = DiagnosticsCounter::new(Duration::from_millis(
+            DEFAULT_FRAME_COUNT as u64 * FRAME_INTERVAL_MS,
+        ));
         counter.count(Ok(()));
 
         assert_eq!(
@@ -121,7 +123,7 @@ mod tests {
         );
         assert_eq!(counter.diagnostics().errored, 0);
 
-        sleep(Duration::from_millis(5));
+        wait_for_next_frame();
         counter.count(Ok(()));
         assert_eq!(
             counter.diagnostics().ok,
@@ -129,7 +131,7 @@ mod tests {
             "should approximate for DEFAULT_FRAME_COUNT intervals"
         );
 
-        sleep(Duration::from_millis(5));
+        wait_for_next_frame();
         counter.count(Ok(()));
         counter.count(Ok(()));
         assert_eq!(
@@ -139,7 +141,7 @@ mod tests {
         );
 
         for _ in 0..DEFAULT_FRAME_COUNT {
-            sleep(Duration::from_millis(5));
+            wait_for_next_frame();
             counter.count(Ok(()));
         }
 
@@ -150,10 +152,15 @@ mod tests {
         );
     }
 
+    fn wait_for_next_frame() {
+        sleep(Duration::from_millis(FRAME_INTERVAL_MS));
+    }
+
     #[rstest]
     fn test_diagnostics_counter_err(_counter: DiagnosticsCounter) {
-        let mut counter =
-            DiagnosticsCounter::new(Duration::from_millis(DEFAULT_FRAME_COUNT as u64 * 5));
+        let mut counter = DiagnosticsCounter::new(Duration::from_millis(
+            DEFAULT_FRAME_COUNT as u64 * FRAME_INTERVAL_MS,
+        ));
         counter.count(Err(ReductError::internal_server_error("test")));
 
         assert_eq!(
@@ -163,7 +170,7 @@ mod tests {
         );
         assert_eq!(counter.diagnostics().ok, 0);
 
-        sleep(Duration::from_millis(5));
+        wait_for_next_frame();
         counter.count(Err(ReductError::internal_server_error("test")));
         assert_eq!(
             counter.diagnostics().errored,
@@ -171,7 +178,7 @@ mod tests {
             "should approximate for DEFAULT_FRAME_COUNT intervals"
         );
 
-        sleep(Duration::from_millis(5));
+        wait_for_next_frame();
         counter.count(Err(ReductError::internal_server_error("test")));
         counter.count(Err(ReductError::internal_server_error("test")));
         assert_eq!(
@@ -181,7 +188,7 @@ mod tests {
         );
 
         for _ in 0..DEFAULT_FRAME_COUNT {
-            sleep(Duration::from_millis(5));
+            wait_for_next_frame();
             counter.count(Err(ReductError::internal_server_error("test")));
         }
 
@@ -197,7 +204,7 @@ mod tests {
         counter.count(Err(ReductError::internal_server_error("test")));
         counter.count(Ok(()));
 
-        sleep(Duration::from_millis(10));
+        sleep(Duration::from_millis(FRAME_INTERVAL_MS * 2));
 
         counter.count(Err(ReductError::internal_server_error("test")));
         counter.count(Ok(()));
@@ -214,7 +221,7 @@ mod tests {
         );
 
         for _ in 0..DEFAULT_FRAME_COUNT / 2 {
-            sleep(Duration::from_millis(10));
+            sleep(Duration::from_millis(FRAME_INTERVAL_MS * 2));
             counter.count(Ok(()));
             counter.count(Err(ReductError::internal_server_error("test")));
         }
@@ -303,7 +310,7 @@ mod tests {
         );
 
         for i in 0..DEFAULT_FRAME_COUNT / 2 {
-            sleep(Duration::from_millis(10));
+            sleep(Duration::from_millis(FRAME_INTERVAL_MS * 2));
             counter.count(Err(ReductError::internal_server_error(&format!(
                 "test-{}",
                 i
@@ -335,6 +342,8 @@ mod tests {
 
     #[fixture]
     fn counter() -> DiagnosticsCounter {
-        DiagnosticsCounter::new(Duration::from_millis(DEFAULT_FRAME_COUNT as u64 * 5))
+        DiagnosticsCounter::new(Duration::from_millis(
+            DEFAULT_FRAME_COUNT as u64 * FRAME_INTERVAL_MS,
+        ))
     }
 }
