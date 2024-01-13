@@ -237,7 +237,7 @@ impl ReplicationRepository {
     ) -> Result<(), ReductError> {
         // check if destination host is valid
         if Url::parse(&settings.dst_host).is_err() {
-            return Err(ReductError::bad_request(&format!(
+            return Err(ReductError::unprocessable_entity(&format!(
                 "Invalid destination host '{}'",
                 settings.dst_host
             )));
@@ -319,7 +319,7 @@ mod tests {
 
         assert_eq!(
             repo.create_replication("test", settings).await,
-            Err(ReductError::bad_request(
+            Err(ReductError::unprocessable_entity(
                 "Invalid destination host 'invalid_url'"
             )),
             "Should not create replication with invalid url"
