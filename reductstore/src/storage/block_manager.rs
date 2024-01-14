@@ -115,13 +115,18 @@ impl BlockManager {
     ) -> Result<(), ReductError> {
         let mut block = self.load(block_id)?;
         let record = &mut block.records[record_index];
-        let _timestamp = ts_to_us(&record.timestamp.as_ref().unwrap());
+        let timestamp = ts_to_us(&record.timestamp.as_ref().unwrap());
         record.state = i32::from(state);
         block.invalid = state == record::State::Invalid;
 
         *self.writer_count.get_mut(&block_id).unwrap() -= 1;
         self.clean_readers_or_writers(block_id);
+
         self.save(block)?;
+        debug!(
+            "Finished writing record {} with state {:?}",
+            timestamp, state
+        );
 
         Ok(())
     }
@@ -370,6 +375,7 @@ pub async fn spawn_read_task(
         .begin_read(&block, record_index)
         .await?;
 
+    let record_ts = ts_to_us(&block.records[record_index].timestamp.as_ref().unwrap());
     let (tx, rx) = channel(1);
     let content_size =
         (block.records[record_index].end - block.records[record_index].begin) as usize;
@@ -403,7 +409,7 @@ pub async fn spawn_read_task(
                 break;
             }
             if let Err(e) = tx.send(Ok(Bytes::from(buf))).await {
-                debug!("Failed to send record chunk: {}", e); // for some reason the receiver is closed
+                debug!("Failed to send record {} chunk: {}", record_ts, e); // for some reason the receiver is closed
                 break;
             }
 
@@ -449,19 +455,34 @@ pub async fn spawn_write_task(
     let block_id = ts_to_us(block.begin_time.as_ref().unwrap());
     let content_size =
         (block.records[record_index].end - block.records[record_index].begin) as usize;
+    let record_ts = ts_to_us(&block.records[record_index].timestamp.as_ref().unwrap());
+
     tokio::spawn(async move {
         let recv = async move {
-            let written_bytes = None;
+            let mut written_bytes = 0;
             while let Some(chunk) = rx.recv().await {
-                let written_bytes =
-                    write_transaction(&content_size, &mut file, written_bytes, chunk).await?;
+                let chunk: Option<Bytes> = chunk?;
+                match chunk {
+                    Some(chunk) => {
+                        written_bytes += chunk.len();
+                        if written_bytes > content_size {
+                            return Err(ReductError::bad_request(
+                                "Content is bigger than in content-length",
+                            ));
+                        }
+                        file.write_all(chunk.as_ref()).await?;
+                    }
+                    None => {
+                        break;
+                    }
+                }
 
-                if written_bytes.is_none() || written_bytes >= Some(content_size) {
+                if written_bytes >= content_size {
                     break;
                 }
             }
 
-            if written_bytes.is_some_and(|x| x < content_size) {
+            if written_bytes < content_size {
                 Err(ReductError::bad_request(
                     "Content is smaller than in content-length",
                 ))
@@ -474,7 +495,7 @@ pub async fn spawn_write_task(
         let state = match recv.await {
             Ok(_) => record::State::Finished,
             Err(err) => {
-                error!("Failed to write record: {}", err);
+                error!("Failed to write record {}: {}", record_ts, err);
                 if err.status == ErrorCode::InternalServerError {
                     record::State::Invalid
                 } else {
@@ -489,47 +510,10 @@ pub async fn spawn_write_task(
             .finish_write_record(block_id, state, record_index)
             .await
         {
-            error!("Failed to finish writing record: {}", err);
+            error!("Failed to finish writing {} record: {}", record_ts, err);
         }
     });
     Ok(tx)
-}
-
-/// Write a transaction to a file.
-///
-/// # Arguments
-///
-/// * `content_size` - Size of the content to write.
-/// * `file` - File to write to.
-/// * `written_bytes` - Number of bytes already written.
-/// * `chunk` - Chunk to write.
-///
-/// # Returns
-///
-/// * `Ok(written_bytes)` - Number of bytes written.
-/// * `Ok(None)` - If the chunk is None. This means that the transaction is finished.
-async fn write_transaction(
-    content_size: &usize,
-    file: &mut File,
-    written_bytes: Option<usize>,
-    chunk: Result<Option<Bytes>, ReductError>,
-) -> Result<Option<usize>, ReductError> {
-    let chunk = chunk?;
-    if chunk.is_none() {
-        return Ok(None);
-    }
-
-    let mut written_bytes = written_bytes.unwrap_or(0);
-
-    let chunk = chunk.unwrap();
-    written_bytes += chunk.len();
-    if written_bytes > *content_size {
-        return Err(ReductError::bad_request(
-            "Content is bigger than in content-length",
-        ));
-    }
-    file.write_all(chunk.as_ref()).await?;
-    Ok(Some(written_bytes))
 }
 
 #[cfg(test)]

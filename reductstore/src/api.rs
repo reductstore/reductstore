@@ -90,7 +90,7 @@ impl IntoResponse for HttpError {
 
 impl From<axum::Error> for HttpError {
     fn from(err: axum::Error) -> Self {
-        HttpError::from(BaseHttpError::bad_request(&format!("HTTP layer: {}", err)))
+        HttpError::from(BaseHttpError::bad_request(&format!("{}", err)))
     }
 }
 

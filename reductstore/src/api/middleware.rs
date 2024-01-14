@@ -5,7 +5,7 @@ use axum::http::{HeaderMap, Request};
 
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use log::{debug, error};
+use log::{debug, error, info};
 
 use crate::api::{Components, HttpError};
 use crate::auth::policy::Policy;
@@ -39,6 +39,7 @@ pub async fn print_statuses<B>(
         request.uri().path_and_query().unwrap()
     );
 
+    info!("{} - started", msg);
     let response = next.run(request).await;
     let err_msg = match response.headers().get("x-reduct-error") {
         Some(msg) => msg.to_str().unwrap(),
