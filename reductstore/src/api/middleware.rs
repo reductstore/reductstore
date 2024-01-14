@@ -5,7 +5,7 @@ use axum::http::{HeaderMap, Request};
 
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use log::{debug, error, info};
+use log::{debug, error};
 
 use crate::api::{Components, HttpError};
 use crate::auth::policy::Policy;
