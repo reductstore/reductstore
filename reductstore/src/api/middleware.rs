@@ -39,7 +39,6 @@ pub async fn print_statuses<B>(
         request.uri().path_and_query().unwrap()
     );
 
-    info!("{} - started", msg);
     let response = next.run(request).await;
     let err_msg = match response.headers().get("x-reduct-error") {
         Some(msg) => msg.to_str().unwrap(),
