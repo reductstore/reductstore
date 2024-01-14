@@ -519,6 +519,7 @@ pub async fn spawn_write_task(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::proto::record::State::Errored;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
@@ -601,6 +602,28 @@ mod tests {
         )))
         .unwrap();
         assert_eq!(file.metadata().unwrap().len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_unfinished_writting(
+        #[future] block_manager: BlockManager,
+        #[future] block: Block,
+        block_id: u64,
+    ) {
+        let block_manager = Arc::new(RwLock::new(block_manager.await));
+        let block = block.await;
+        let tx = spawn_write_task(Arc::clone(&block_manager), block, 0)
+            .await
+            .unwrap();
+
+        tx.send(Ok(None)).await.unwrap();
+        drop(tx);
+        sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
+        assert_eq!(
+            block_manager.read().await.load(block_id).unwrap().records[0].state,
+            2
+        );
     }
 
     #[rstest]
