@@ -105,11 +105,8 @@ impl Replication {
                             let read_record = match get_record.await {
                                 Ok(record) => record,
                                 Err(err) => {
-                                    if err.status == ErrorCode::NotFound {
-                                        log.write().await.pop_front().await.unwrap();
-                                    }
-
-                                    error!("Failed to read record: {:?}", err);
+                                    log.write().await.pop_front().await.unwrap();
+                                    error!("Failed to read record: {}", err);
                                     thr_hourly_diagnostics.write().await.count(Err(err));
                                     break;
                                 }
@@ -310,7 +307,7 @@ mod tests {
                 hourly: DiagnosticsItem {
                     ok: 60,
                     errored: 0,
-                    errors: HashMap::new()
+                    errors: HashMap::new(),
                 }
             }
         )
@@ -391,9 +388,9 @@ mod tests {
                         404,
                         DiagnosticsError {
                             count: 1,
-                            last_message: "No record with timestamp 100".to_string()
+                            last_message: "No record with timestamp 100".to_string(),
                         }
-                    )])
+                    )]),
                 }
             }
         )

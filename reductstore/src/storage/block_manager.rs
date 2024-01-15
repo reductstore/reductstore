@@ -606,7 +606,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_unfinished_writting(
+    async fn test_unfinished_writing(
         #[future] block_manager: BlockManager,
         #[future] block: Block,
         block_id: u64,
