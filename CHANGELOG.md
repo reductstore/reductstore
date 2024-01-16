@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: Sync write tasks with HTTP API to avoid unfinished records, [PR-374](https://github.com/reductstore/reductstore/pull/374)
 - reductstore: Re-create a transaction log of replication if it is broken, [PR-379](https://github.com/reductstore/reductstore/pull/379)
 - reductstore: Status for unfinished records, [PR-381](https://github.com/reductstore/reductstore/pull/381)
-
+- reductstore: Remove a transaction for any storage errors, [PR-382](https://github.com/reductstore/reductstore/pull/382)
+-
 ### Changed
 
 - reductstore: Refactor read and write operation with tokio channels, [PR-370](https://github.com/reductstore/reductstore/pull/370)
