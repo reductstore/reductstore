@@ -129,10 +129,11 @@ impl ManageReplications for ReplicationRepository {
     }
 
     async fn get_info(&self, name: &str) -> Result<ReplicationFullInfo, ReductError> {
+        let replication = self.get_replication(name)?;
         let info = ReplicationFullInfo {
-            info: self.get_replication(name)?.info().await,
-            settings: self.get_replication(name)?.settings().clone(),
-            diagnostics: Default::default(),
+            info: replication.info().await,
+            settings: replication.settings().clone(),
+            diagnostics: replication.diagnostics().await,
         };
         Ok(info)
     }
@@ -265,16 +266,19 @@ impl ReplicationRepository {
 #[cfg(test)]
 mod tests {
     use crate::replication::replication_repository::ReplicationRepository;
-    use crate::replication::ManageReplications;
+    use crate::replication::{ManageReplications, TransactionNotification};
     use crate::storage::storage::Storage;
 
+    use crate::replication::Transaction::WriteRecord;
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::ReplicationSettings;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio::sync::RwLock;
+    use tokio::time::sleep;
 
     #[rstest]
     #[tokio::test]
@@ -455,6 +459,18 @@ mod tests {
         repo.create_replication("test", settings.clone())
             .await
             .unwrap();
+        {
+            let repl = repo.get_mut_replication("test").unwrap();
+            repl.notify(TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                labels: Labels::default(),
+                event: WriteRecord(0),
+            })
+            .await
+            .unwrap();
+            sleep(Duration::from_millis(100)).await;
+        }
 
         let info = repo.get_info("test").await.unwrap();
         let repl = repo.get_replication("test").unwrap();
@@ -480,9 +496,10 @@ mod tests {
     fn storage() -> Arc<RwLock<Storage>> {
         let tmp_dir = tempfile::tempdir().unwrap();
         let mut storage = Storage::new(tmp_dir.into_path());
-        storage
+        let mut bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap();
+        let _ = bucket.get_or_create_entry("entry-1").unwrap();
         Arc::new(RwLock::new(storage))
     }
 }
