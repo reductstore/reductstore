@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use log::error;
 use reduct_base::Labels;
 
+use reduct_base::error::{ErrorCode, ReductError};
 use tokio::time::{Duration, Instant};
 
 pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
@@ -17,6 +18,7 @@ pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     bucket_name: String,
     init_time: Instant,
     timeout: Duration,
+    last_result: Result<(), ReductError>,
 }
 
 #[async_trait]
@@ -39,32 +41,43 @@ impl RemoteBucketState for BucketUnavailableState {
                         .write_record(entry, timestamp, labels, content_type, content_length, rx)
                         .await
                 }
-                Err(_) => {
+                Err(err) => {
                     error!(
                         "Failed to get remote bucket {}/{}",
                         self.client.url(),
                         self.bucket_name
                     );
-                    Box::new(BucketUnavailableState::new(self.client, self.bucket_name))
+                    Box::new(BucketUnavailableState::new(
+                        self.client,
+                        self.bucket_name,
+                        err,
+                    ))
                 }
             };
         }
 
-        self
+        let mut me = *self;
+        me.last_result = Ok(());
+        Box::new(me)
     }
 
-    fn ok(&self) -> bool {
+    fn last_result(&self) -> &Result<(), ReductError> {
+        &self.last_result
+    }
+
+    fn is_available(&self) -> bool {
         false
     }
 }
 
 impl BucketUnavailableState {
-    pub fn new(client: BoxedClientApi, bucket_name: String) -> Self {
+    pub fn new(client: BoxedClientApi, bucket_name: String, error: ReductError) -> Self {
         Self {
             client,
             bucket_name,
             init_time: Instant::now(),
-            timeout: Duration::new(60, 0),
+            timeout: Duration::new(5, 0),
+            last_result: Err(error),
         }
     }
 }
@@ -86,13 +99,19 @@ mod tests {
 
         let client = Box::new(client);
         let bucket_name = "bucket".to_string();
-        let state = Box::new(BucketUnavailableState::new(client, bucket_name));
+        let error = ReductError::new(ErrorCode::ConnectionError, "test");
+        let state = Box::new(BucketUnavailableState::new(
+            client,
+            bucket_name,
+            error.clone(),
+        ));
 
         let (_, rx) = tokio::sync::mpsc::channel(1);
         let state = state
             .write_record("entry", 1234, Labels::new(), "text/plain", 5, rx)
             .await;
-        assert_eq!(state.ok(), false);
+        assert_eq!(state.last_result(), &Ok(()));
+        assert!(!state.is_available());
     }
 
     #[rstest]
@@ -108,7 +127,8 @@ mod tests {
         let state = state
             .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
             .await;
-        assert_eq!(state.ok(), false);
+        assert_eq!(state.last_result(), &Err(ReductError::not_found("")));
+        assert!(!state.is_available());
     }
 
     #[rstest]
@@ -138,7 +158,8 @@ mod tests {
         let state = state
             .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
             .await;
-        assert!(state.ok());
+        assert!(state.last_result().is_ok());
+        assert!(state.is_available());
     }
 
     fn state_without_timeout(client: MockReductClientApi) -> Box<BucketUnavailableState> {
@@ -147,6 +168,7 @@ mod tests {
             bucket_name: "test_bucket".to_string(),
             init_time: Instant::now() - Duration::new(61, 0),
             timeout: Duration::new(0, 0),
+            last_result: Ok(()),
         })
     }
 }

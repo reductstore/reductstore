@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: Discard replication for any storage errors, [PR-382](https://github.com/reductstore/reductstore/pull/382)
 - reductstore: CPU consumption for replication, [PR-383](https://github.com/reductstore/reductstore/pull/383)
 - reductstore: GET /api/v1/replications/:replication_name empty diagnostics, [PR-384](https://github.com/reductstore/reductstore/pull/384)
+- reductstore: Fix error counting in replication diagnostics, [PR-385](https://github.com/reductstore/reductstore/pull/385)
 
 ### Changed
 

@@ -84,74 +84,72 @@ impl Replication {
             loop {
                 let mut no_transactions = true;
                 for (entry_name, log) in thr_log_map.read().await.iter() {
-                    loop {
-                        let tr = log.write().await.front().await;
-                        match tr {
-                            Ok(None) => {
-                                no_transactions = false;
-                                break;
-                            }
-                            Ok(Some(transaction)) => {
-                                debug!("Replicating transaction {}/{:?}", entry_name, transaction);
+                    let tr = log.write().await.front().await;
+                    match tr {
+                        Ok(None) => {
+                            no_transactions = false;
+                            break;
+                        }
+                        Ok(Some(transaction)) => {
+                            debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
-                                let get_record = async {
-                                    thr_storage
-                                        .read()
-                                        .await
-                                        .get_bucket(&config.src_bucket)?
-                                        .begin_read(&entry_name, *transaction.timestamp())
-                                        .await
-                                };
-
-                                let read_record = match get_record.await {
-                                    Ok(record) => record,
-                                    Err(err) => {
-                                        log.write().await.pop_front().await.unwrap();
-                                        error!("Failed to read record: {}", err);
-                                        thr_hourly_diagnostics.write().await.count(Err(err));
-                                        break;
-                                    }
-                                };
-
-                                match thr_bucket
-                                    .write()
+                            let get_record = async {
+                                thr_storage
+                                    .read()
                                     .await
-                                    .write_record(entry_name, read_record)
+                                    .get_bucket(&config.src_bucket)?
+                                    .begin_read(&entry_name, *transaction.timestamp())
                                     .await
-                                {
-                                    Ok(_) => {
+                            };
+
+                            let read_record = match get_record.await {
+                                Ok(record) => record,
+                                Err(err) => {
+                                    log.write().await.pop_front().await.unwrap();
+                                    error!("Failed to read record: {}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
+                                    break;
+                                }
+                            };
+
+                            let mut bucket = thr_bucket.write().await;
+                            match bucket.write_record(entry_name, read_record).await {
+                                Ok(_) => {
+                                    if bucket.is_active() {
+                                        // We keep transactions if the destination bucket is not available
                                         log.write().await.pop_front().await.unwrap();
                                         thr_hourly_diagnostics.write().await.count(Ok(()));
-                                    }
-                                    Err(err) => {
-                                        debug!("Failed to replicate transaction: {:?}", err);
-                                        thr_hourly_diagnostics.write().await.count(Err(err));
-                                        break;
+                                    } else {
+                                        sleep(Duration::from_millis(100)).await;
                                     }
                                 }
-                            }
-
-                            Err(err) => {
-                                error!("Failed to read transaction: {:?}", err);
-                                info!("Transaction log is corrupted, dropping the whole log");
-                                let mut log = log.write().await;
-
-                                let path = Self::build_path_to_transaction_log(
-                                    thr_storage.read().await.data_path(),
-                                    &config.src_bucket,
-                                    &entry_name,
-                                    &replication_name,
-                                );
-                                if let Err(err) = fs::remove_file(&path).await {
-                                    error!("Failed to remove transaction log: {:?}", err);
+                                Err(err) => {
+                                    debug!("Failed to replicate transaction: {:?}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
+                                    break;
                                 }
-
-                                info!("Creating a new transaction log");
-                                *log =
-                                    TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                                        .await
-                                        .unwrap();
                             }
+                        }
+
+                        Err(err) => {
+                            error!("Failed to read transaction: {:?}", err);
+                            info!("Transaction log is corrupted, dropping the whole log");
+                            let mut log = log.write().await;
+
+                            let path = Self::build_path_to_transaction_log(
+                                thr_storage.read().await.data_path(),
+                                &config.src_bucket,
+                                &entry_name,
+                                &replication_name,
+                            );
+                            if let Err(err) = fs::remove_file(&path).await {
+                                error!("Failed to remove transaction log: {:?}", err);
+                            }
+
+                            info!("Creating a new transaction log");
+                            *log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
+                                .await
+                                .unwrap();
                         }
                     }
                 }
@@ -291,11 +289,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_replication_ok(
+    async fn test_replication_ok_active(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
     ) {
         remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
@@ -323,6 +322,40 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_replication_ok_not_active(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+    ) {
+        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_is_active().return_const(false);
+        let replication = build_replication(remote_bucket).await;
+
+        replication.notify(notification).await.unwrap();
+        assert!(!transaction_log_is_empty(&replication).await);
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: false,
+                is_provisioned: false,
+                pending_records: 1,
+            }
+        );
+        assert_eq!(
+            replication.diagnostics().await,
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 0,
+                    errored: 0,
+                    errors: HashMap::new(),
+                }
+            },
+            "should not count errors for non active replication"
+        )
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_replication_comm_err(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
@@ -330,6 +363,7 @@ mod tests {
         remote_bucket
             .expect_write_record()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
+        remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
@@ -369,6 +403,7 @@ mod tests {
         mut notification: TransactionNotification,
     ) {
         remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket).await;
 
         notification.event = Transaction::WriteRecord(100);
@@ -407,7 +442,6 @@ mod tests {
     #[fixture]
     fn remote_bucket() -> MockRmBucket {
         let mut bucket = MockRmBucket::new();
-        bucket.expect_is_active().returning(|| true);
         bucket
     }
 
@@ -467,7 +501,8 @@ mod tests {
     }
 
     async fn transaction_log_is_empty(replication: &Replication) -> bool {
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
 
         replication
             .log_map

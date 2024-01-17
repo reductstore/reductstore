@@ -8,6 +8,7 @@ use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use log::error;
+use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
 /// Initial state of the remote bucket.
@@ -55,12 +56,19 @@ impl RemoteBucketState for InitialState {
                     self.bucket_name,
                     err
                 );
-                Box::new(BucketUnavailableState::new(self.client, self.bucket_name))
+                Box::new(BucketUnavailableState::new(
+                    self.client,
+                    self.bucket_name,
+                    err,
+                ))
             }
         }
     }
 
-    fn ok(&self) -> bool {
+    fn last_result(&self) -> &Result<(), ReductError> {
+        &Ok(())
+    }
+    fn is_available(&self) -> bool {
         false
     }
 }
@@ -81,7 +89,7 @@ mod tests {
         let bucket_name = "test_bucket";
         let api_token = "test_token";
         let state = InitialState::new(url, bucket_name, api_token);
-        assert_eq!(state.ok(), false);
+        assert_eq!(state.last_result(), &Ok(()));
     }
 
     #[rstest]
@@ -115,7 +123,8 @@ mod tests {
             .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
             .await;
 
-        assert_eq!(state.ok(), true);
+        assert_eq!(state.last_result(), &Ok(()));
+        assert_eq!(state.is_available(), true);
     }
 
     #[rstest]
@@ -135,6 +144,10 @@ mod tests {
             .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
             .await;
 
-        assert_eq!(state.ok(), false);
+        assert_eq!(
+            state.last_result(),
+            &Err(ReductError::bad_request("test error"))
+        );
+        assert_eq!(state.is_available(), false);
     }
 }
