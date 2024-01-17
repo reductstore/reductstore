@@ -7,25 +7,30 @@ use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use log::{debug, error};
-use reduct_base::error::IntEnum;
+use reduct_base::error::{IntEnum, ReductError};
 use reduct_base::Labels;
 
 /// A state when the remote bucket is available.
 pub(in crate::replication::remote_bucket) struct BucketAvailableState {
     client: BoxedClientApi,
     bucket: BoxedBucketApi,
+    last_result: Result<(), ReductError>,
 }
 
 impl BucketAvailableState {
     pub fn new(client: BoxedClientApi, bucket: BoxedBucketApi) -> Self {
-        Self { client, bucket }
+        Self {
+            client,
+            bucket,
+            last_result: Ok(()),
+        }
     }
 }
 
 #[async_trait]
 impl RemoteBucketState for BucketAvailableState {
     async fn write_record(
-        self: Box<Self>,
+        mut self: Box<Self>,
         entry: &str,
         timestamp: u64,
         labels: Labels,
@@ -58,16 +63,17 @@ impl RemoteBucketState for BucketAvailableState {
                     Box::new(BucketUnavailableState::new(
                         self.client,
                         self.bucket.name().to_string(),
+                        err,
                     ))
                 } else {
-                    self
+                    self.last_result = Err(err);
                 }
             }
         }
     }
 
-    fn ok(&self) -> bool {
-        true
+    fn last_result(&self) -> &Result<(), ReductError> {
+        &self.last_result
     }
 }
 

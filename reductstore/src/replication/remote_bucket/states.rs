@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use reduct_base::Labels;
 
 pub(super) use initial_state::InitialState;
+use reduct_base::error::ReductError;
 
 /// A state of the remote bucket.
 #[async_trait]
@@ -23,5 +24,5 @@ pub(super) trait RemoteBucketState {
     ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
     /// Is the bucket available?
-    fn ok(&self) -> bool;
+    fn last_result(&self) -> &Result<(), ReductError>;
 }

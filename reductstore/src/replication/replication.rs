@@ -84,74 +84,71 @@ impl Replication {
             loop {
                 let mut no_transactions = true;
                 for (entry_name, log) in thr_log_map.read().await.iter() {
-                    loop {
-                        let tr = log.write().await.front().await;
-                        match tr {
-                            Ok(None) => {
-                                no_transactions = false;
-                                break;
-                            }
-                            Ok(Some(transaction)) => {
-                                debug!("Replicating transaction {}/{:?}", entry_name, transaction);
+                    let tr = log.write().await.front().await;
+                    match tr {
+                        Ok(None) => {
+                            no_transactions = false;
+                            break;
+                        }
+                        Ok(Some(transaction)) => {
+                            debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
-                                let get_record = async {
-                                    thr_storage
-                                        .read()
-                                        .await
-                                        .get_bucket(&config.src_bucket)?
-                                        .begin_read(&entry_name, *transaction.timestamp())
-                                        .await
-                                };
-
-                                let read_record = match get_record.await {
-                                    Ok(record) => record,
-                                    Err(err) => {
-                                        log.write().await.pop_front().await.unwrap();
-                                        error!("Failed to read record: {}", err);
-                                        thr_hourly_diagnostics.write().await.count(Err(err));
-                                        break;
-                                    }
-                                };
-
-                                match thr_bucket
-                                    .write()
+                            let get_record = async {
+                                thr_storage
+                                    .read()
                                     .await
-                                    .write_record(entry_name, read_record)
+                                    .get_bucket(&config.src_bucket)?
+                                    .begin_read(&entry_name, *transaction.timestamp())
                                     .await
-                                {
-                                    Ok(_) => {
-                                        log.write().await.pop_front().await.unwrap();
-                                        thr_hourly_diagnostics.write().await.count(Ok(()));
-                                    }
-                                    Err(err) => {
-                                        debug!("Failed to replicate transaction: {:?}", err);
-                                        thr_hourly_diagnostics.write().await.count(Err(err));
-                                        break;
-                                    }
+                            };
+
+                            let read_record = match get_record.await {
+                                Ok(record) => record,
+                                Err(err) => {
+                                    log.write().await.pop_front().await.unwrap();
+                                    error!("Failed to read record: {}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
+                                    break;
+                                }
+                            };
+
+                            match thr_bucket
+                                .write()
+                                .await
+                                .write_record(entry_name, read_record)
+                                .await
+                            {
+                                Ok(_) => {
+                                    log.write().await.pop_front().await.unwrap();
+                                    thr_hourly_diagnostics.write().await.count(Ok(()));
+                                }
+                                Err(err) => {
+                                    debug!("Failed to replicate transaction: {:?}", err);
+                                    thr_hourly_diagnostics.write().await.count(Err(err));
+                                    break;
                                 }
                             }
+                        }
 
-                            Err(err) => {
-                                error!("Failed to read transaction: {:?}", err);
-                                info!("Transaction log is corrupted, dropping the whole log");
-                                let mut log = log.write().await;
+                        Err(err) => {
+                            error!("Failed to read transaction: {:?}", err);
+                            info!("Transaction log is corrupted, dropping the whole log");
+                            let mut log = log.write().await;
 
-                                let path = Self::build_path_to_transaction_log(
-                                    thr_storage.read().await.data_path(),
-                                    &config.src_bucket,
-                                    &entry_name,
-                                    &replication_name,
-                                );
-                                if let Err(err) = fs::remove_file(&path).await {
-                                    error!("Failed to remove transaction log: {:?}", err);
-                                }
-
-                                info!("Creating a new transaction log");
-                                *log =
-                                    TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                                        .await
-                                        .unwrap();
+                            let path = Self::build_path_to_transaction_log(
+                                thr_storage.read().await.data_path(),
+                                &config.src_bucket,
+                                &entry_name,
+                                &replication_name,
+                            );
+                            if let Err(err) = fs::remove_file(&path).await {
+                                error!("Failed to remove transaction log: {:?}", err);
                             }
+
+                            info!("Creating a new transaction log");
+                            *log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
+                                .await
+                                .unwrap();
                         }
                     }
                 }

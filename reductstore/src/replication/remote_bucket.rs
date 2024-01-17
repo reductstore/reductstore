@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::Labels;
 
 struct RemoteBucketImpl {
@@ -73,10 +73,10 @@ impl RemoteBucket for RemoteBucketImpl {
         if self.is_active {
             Ok(())
         } else {
-            Err(ReductError::internal_server_error(&format!(
-                "Remote bucket {} is not available",
-                self.path
-            )))
+            Err(ReductError::new(
+                ErrorCode::ConnectionError,
+                &format!("Remote bucket {} is not available", self.path),
+            ))
         }
     }
 

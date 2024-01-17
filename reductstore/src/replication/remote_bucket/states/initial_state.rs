@@ -8,6 +8,7 @@ use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use log::error;
+use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
 /// Initial state of the remote bucket.
@@ -55,13 +56,17 @@ impl RemoteBucketState for InitialState {
                     self.bucket_name,
                     err
                 );
-                Box::new(BucketUnavailableState::new(self.client, self.bucket_name))
+                Box::new(BucketUnavailableState::new(
+                    self.client,
+                    self.bucket_name,
+                    err,
+                ))
             }
         }
     }
 
-    fn ok(&self) -> bool {
-        false
+    fn last_result(&self) -> &Result<(), ReductError> {
+        &Ok(())
     }
 }
 
