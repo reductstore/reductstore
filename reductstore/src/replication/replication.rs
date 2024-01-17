@@ -114,20 +114,20 @@ impl Replication {
 
                             let mut bucket = thr_bucket.write().await;
                             match bucket.write_record(entry_name, read_record).await {
-                                Ok(_) => {
-                                    if bucket.is_active() {
-                                        // We keep transactions if the destination bucket is not available
-                                        log.write().await.pop_front().await.unwrap();
-                                        thr_hourly_diagnostics.write().await.count(Ok(()));
-                                    } else {
-                                        sleep(Duration::from_millis(100)).await;
-                                    }
-                                }
+                                Ok(_) => {}
                                 Err(err) => {
                                     debug!("Failed to replicate transaction: {:?}", err);
                                     thr_hourly_diagnostics.write().await.count(Err(err));
                                     break;
                                 }
+                            }
+
+                            if bucket.is_active() {
+                                // We keep transactions if the destination bucket is not available
+                                log.write().await.pop_front().await.unwrap();
+                                thr_hourly_diagnostics.write().await.count(Ok(()));
+                            } else {
+                                sleep(Duration::from_millis(100)).await;
                             }
                         }
 
@@ -363,7 +363,7 @@ mod tests {
         remote_bucket
             .expect_write_record()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
-        remote_bucket.expect_is_active().return_const(true);
+        remote_bucket.expect_is_active().return_const(false);
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
@@ -375,7 +375,7 @@ mod tests {
             replication.info().await,
             ReplicationInfo {
                 name: "test".to_string(),
-                is_active: true,
+                is_active: false,
                 is_provisioned: false,
                 pending_records: 1,
             }
