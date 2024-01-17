@@ -114,18 +114,20 @@ impl Replication {
 
                             let mut bucket = thr_bucket.write().await;
                             match bucket.write_record(entry_name, read_record).await {
-                                Ok(_) => {}
+                                Ok(_) => {
+                                    if bucket.is_active() {
+                                        thr_hourly_diagnostics.write().await.count(Ok(()));
+                                    }
+                                }
                                 Err(err) => {
                                     debug!("Failed to replicate transaction: {:?}", err);
                                     thr_hourly_diagnostics.write().await.count(Err(err));
-                                    break;
                                 }
                             }
 
                             if bucket.is_active() {
                                 // We keep transactions if the destination bucket is not available
                                 log.write().await.pop_front().await.unwrap();
-                                thr_hourly_diagnostics.write().await.count(Ok(()));
                             } else {
                                 sleep(Duration::from_millis(100)).await;
                             }
