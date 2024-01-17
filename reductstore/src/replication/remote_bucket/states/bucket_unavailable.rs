@@ -76,7 +76,7 @@ impl BucketUnavailableState {
             client,
             bucket_name,
             init_time: Instant::now(),
-            timeout: Duration::new(60, 0),
+            timeout: Duration::new(5, 0),
             last_result: Err(error),
         }
     }

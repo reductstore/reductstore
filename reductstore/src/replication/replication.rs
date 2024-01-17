@@ -112,15 +112,16 @@ impl Replication {
                                 }
                             };
 
-                            match thr_bucket
-                                .write()
-                                .await
-                                .write_record(entry_name, read_record)
-                                .await
-                            {
+                            let mut bucket = thr_bucket.write().await;
+                            match bucket.write_record(entry_name, read_record).await {
                                 Ok(_) => {
-                                    log.write().await.pop_front().await.unwrap();
-                                    thr_hourly_diagnostics.write().await.count(Ok(()));
+                                    if bucket.is_active() {
+                                        // We keep transactions if the destination bucket is not available
+                                        log.write().await.pop_front().await.unwrap();
+                                        thr_hourly_diagnostics.write().await.count(Ok(()));
+                                    } else {
+                                        sleep(Duration::from_millis(100)).await;
+                                    }
                                 }
                                 Err(err) => {
                                     debug!("Failed to replicate transaction: {:?}", err);
@@ -288,11 +289,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_replication_ok(
+    async fn test_replication_ok_active(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
     ) {
         remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
@@ -320,6 +322,40 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_replication_ok_not_active(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+    ) {
+        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_is_active().return_const(false);
+        let replication = build_replication(remote_bucket).await;
+
+        replication.notify(notification).await.unwrap();
+        assert!(!transaction_log_is_empty(&replication).await);
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: false,
+                is_provisioned: false,
+                pending_records: 1,
+            }
+        );
+        assert_eq!(
+            replication.diagnostics().await,
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 0,
+                    errored: 0,
+                    errors: HashMap::new(),
+                }
+            },
+            "should not count errors for non active replication"
+        )
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_replication_comm_err(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
@@ -327,6 +363,7 @@ mod tests {
         remote_bucket
             .expect_write_record()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
+        remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket).await;
 
         replication.notify(notification).await.unwrap();
@@ -366,6 +403,7 @@ mod tests {
         mut notification: TransactionNotification,
     ) {
         remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket).await;
 
         notification.event = Transaction::WriteRecord(100);
@@ -404,7 +442,6 @@ mod tests {
     #[fixture]
     fn remote_bucket() -> MockRmBucket {
         let mut bucket = MockRmBucket::new();
-        bucket.expect_is_active().returning(|| true);
         bucket
     }
 
@@ -464,7 +501,8 @@ mod tests {
     }
 
     async fn transaction_log_is_empty(replication: &Replication) -> bool {
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
 
         replication
             .log_map
