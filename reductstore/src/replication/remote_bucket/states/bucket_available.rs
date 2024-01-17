@@ -67,6 +67,7 @@ impl RemoteBucketState for BucketAvailableState {
                     ))
                 } else {
                     self.last_result = Err(err);
+                    self
                 }
             }
         }
@@ -74,6 +75,10 @@ impl RemoteBucketState for BucketAvailableState {
 
     fn last_result(&self) -> &Result<(), ReductError> {
         &self.last_result
+    }
+
+    fn is_available(&self) -> bool {
+        true
     }
 }
 
@@ -111,7 +116,8 @@ mod tests {
         let state = state
             .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
             .await;
-        assert!(state.ok());
+        assert!(state.last_result().is_ok());
+        assert!(state.is_available());
     }
 
     #[rstest]
@@ -130,7 +136,11 @@ mod tests {
         let state = state
             .write_record("test", 0, Labels::new(), "text/plain", 0, rx)
             .await;
-        assert_eq!(state.ok(), false);
+        assert_eq!(
+            state.last_result(),
+            &Err(ReductError::new(ErrorCode::Timeout, ""))
+        );
+        assert!(!state.is_available());
     }
 
     #[rstest]
@@ -149,6 +159,10 @@ mod tests {
         let state = state
             .write_record("test", 0, Labels::new(), "text/plain", 0, rx)
             .await;
-        assert_eq!(state.ok(), true);
+        assert_eq!(
+            state.last_result(),
+            &Err(ReductError::new(ErrorCode::InternalServerError, ""))
+        );
+        assert!(state.is_available());
     }
 }

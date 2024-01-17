@@ -24,5 +24,8 @@ pub(super) trait RemoteBucketState {
     ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
     /// Is the bucket available?
+    fn is_available(&self) -> bool;
+
+    // Get the last result of the write operation.
     fn last_result(&self) -> &Result<(), ReductError>;
 }

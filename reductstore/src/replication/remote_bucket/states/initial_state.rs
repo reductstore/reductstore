@@ -68,6 +68,9 @@ impl RemoteBucketState for InitialState {
     fn last_result(&self) -> &Result<(), ReductError> {
         &Ok(())
     }
+    fn is_available(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -86,7 +89,7 @@ mod tests {
         let bucket_name = "test_bucket";
         let api_token = "test_token";
         let state = InitialState::new(url, bucket_name, api_token);
-        assert_eq!(state.ok(), false);
+        assert_eq!(state.last_result(), &Ok(()));
     }
 
     #[rstest]
@@ -120,7 +123,8 @@ mod tests {
             .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
             .await;
 
-        assert_eq!(state.ok(), true);
+        assert_eq!(state.last_result(), &Ok(()));
+        assert_eq!(state.is_available(), true);
     }
 
     #[rstest]
@@ -140,6 +144,10 @@ mod tests {
             .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
             .await;
 
-        assert_eq!(state.ok(), false);
+        assert_eq!(
+            state.last_result(),
+            &Err(ReductError::bad_request("test error"))
+        );
+        assert_eq!(state.is_available(), false);
     }
 }

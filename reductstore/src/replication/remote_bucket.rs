@@ -48,7 +48,6 @@ impl RemoteBucket for RemoteBucketImpl {
         entry_name: &str,
         record: RecordReader,
     ) -> Result<(), ReductError> {
-        let state = self.state.take().unwrap();
         let labels = Labels::from_iter(
             record
                 .labels()
@@ -57,7 +56,9 @@ impl RemoteBucket for RemoteBucketImpl {
         );
         let rc = record.record().clone();
         self.state = Some(
-            state
+            self.state
+                .take()
+                .unwrap()
                 .write_record(
                     entry_name,
                     ts_to_us(&rc.timestamp.unwrap()),
@@ -69,15 +70,9 @@ impl RemoteBucket for RemoteBucketImpl {
                 .await,
         );
 
-        self.is_active = self.state.as_ref().unwrap().ok();
-        if self.is_active {
-            Ok(())
-        } else {
-            Err(ReductError::new(
-                ErrorCode::ConnectionError,
-                &format!("Remote bucket {} is not available", self.path),
-            ))
-        }
+        let state = self.state.as_ref().unwrap();
+        self.is_active = state.is_available();
+        state.last_result().clone()
     }
 
     fn is_active(&self) -> bool {
@@ -160,7 +155,9 @@ pub(super) mod tests {
                 rx: RecordRx,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
-            fn ok(&self) -> bool;
+            fn last_result(&self) -> &Result<(), ReductError>;
+
+            fn is_available(&self) -> bool;
         }
     }
 
@@ -188,7 +185,8 @@ pub(super) mod tests {
     async fn test_write_record_ok() {
         let mut first_state = MockState::new();
         let mut second_state = MockState::new();
-        second_state.expect_ok().returning(|| true);
+        second_state.expect_last_result().return_const(Ok(()));
+        second_state.expect_is_available().return_const(true);
 
         first_state
             .expect_write_record()
@@ -212,14 +210,20 @@ pub(super) mod tests {
     async fn test_write_record_err() {
         let mut first_state = MockState::new();
         let mut second_state = MockState::new();
-        second_state.expect_ok().returning(|| false);
+        second_state
+            .expect_last_result()
+            .return_const(Err(ReductError::new(ErrorCode::ConnectionError, "test")));
+        second_state.expect_is_available().return_const(false);
 
         first_state
             .expect_write_record()
             .return_once(move |_, _, _, _, _, _| Box::new(second_state));
 
         let mut remote_bucket = create_dst_bucket(first_state);
-        write_record(&mut remote_bucket).await.unwrap_err();
+        assert_eq!(
+            write_record(&mut remote_bucket).await.unwrap_err(),
+            ReductError::new(ErrorCode::ConnectionError, "test")
+        );
         assert!(!remote_bucket.is_active());
     }
 
