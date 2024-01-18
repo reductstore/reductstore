@@ -88,7 +88,6 @@ impl Replication {
                     match tr {
                         Ok(None) => {
                             no_transactions = false;
-                            break;
                         }
                         Ok(Some(transaction)) => {
                             debug!("Replicating transaction {}/{:?}", entry_name, transaction);
