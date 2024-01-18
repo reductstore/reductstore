@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use log::error;
 use reduct_base::Labels;
 
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use tokio::time::{Duration, Instant};
 
 pub(in crate::replication::remote_bucket) struct BucketUnavailableState {

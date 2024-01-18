@@ -8,7 +8,7 @@ use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
 
 use log::{debug, error, info};
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 
 use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -268,6 +268,7 @@ mod tests {
     use async_trait::async_trait;
     use bytes::Bytes;
     use mockall::mock;
+    use reduct_base::error::ErrorCode;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
     use reduct_base::Labels;
