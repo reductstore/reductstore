@@ -6,6 +6,7 @@
 use reqwest::{Method, Url};
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::bucket::BucketBuilder;
 use crate::http_client::HttpClient;
@@ -18,6 +19,7 @@ use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, Token
 pub struct ReductClientBuilder {
     url: String,
     api_token: String,
+    timeout: Duration,
 }
 
 pub type Result<T> = std::result::Result<T, ReductError>;
@@ -29,6 +31,7 @@ impl ReductClientBuilder {
         Self {
             url: String::new(),
             api_token: String::new(),
+            timeout: Duration::from_secs(30),
         }
     }
 
@@ -51,7 +54,7 @@ impl ReductClientBuilder {
         }
         ReductError::new(ErrorCode::UrlParseError, "URL must be set");
         Ok(ReductClient {
-            http_client: Arc::new(HttpClient::new(&self.url, &self.api_token)?),
+            http_client: Arc::new(HttpClient::new(&self.url, &self.api_token, self.timeout)?),
         })
     }
 
@@ -65,6 +68,12 @@ impl ReductClientBuilder {
     /// Set the API token to use for authentication.
     pub fn api_token(mut self, api_token: &str) -> Self {
         self.api_token = api_token.to_string();
+        self
+    }
+
+    /// Set the timeout for HTTP requests.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
         self
     }
 }

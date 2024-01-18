@@ -50,6 +50,7 @@ impl ReductClientWrapper {
         let client = ReductClient::builder()
             .url(url)
             .api_token(api_token)
+            .timeout(std::time::Duration::from_secs(1))
             .build();
 
         Self { client }

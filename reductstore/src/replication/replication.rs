@@ -86,10 +86,10 @@ impl Replication {
                 for (entry_name, log) in thr_log_map.read().await.iter() {
                     let tr = log.write().await.front().await;
                     match tr {
-                        Ok(None) => {
-                            no_transactions = false;
-                        }
+                        Ok(None) => {}
                         Ok(Some(transaction)) => {
+                            no_transactions = false;
+
                             debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
                             let get_record = async {
@@ -128,7 +128,8 @@ impl Replication {
                                 // We keep transactions if the destination bucket is not available
                                 log.write().await.pop_front().await.unwrap();
                             } else {
-                                sleep(Duration::from_millis(100)).await;
+                                drop(bucket); // drop lock
+                                sleep(Duration::from_secs(5)).await;
                             }
                         }
 
