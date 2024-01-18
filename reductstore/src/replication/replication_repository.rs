@@ -496,7 +496,7 @@ mod tests {
     fn storage() -> Arc<RwLock<Storage>> {
         let tmp_dir = tempfile::tempdir().unwrap();
         let mut storage = Storage::new(tmp_dir.into_path());
-        let mut bucket = storage
+        let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap();
         let _ = bucket.get_or_create_entry("entry-1").unwrap();

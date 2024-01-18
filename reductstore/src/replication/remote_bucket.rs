@@ -16,7 +16,6 @@ use reduct_base::Labels;
 
 struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
-    path: String,
     is_active: bool,
 }
 
@@ -34,7 +33,6 @@ pub(crate) trait RemoteBucket {
 impl RemoteBucketImpl {
     pub fn new(url: &str, bucket_name: &str, api_token: &str) -> Self {
         Self {
-            path: format!("{}/{}", url, bucket_name),
             state: Some(Box::new(InitialState::new(url, bucket_name, api_token))),
             is_active: false,
         }
@@ -103,6 +101,7 @@ pub(super) mod tests {
     use async_trait::async_trait;
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
+    use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
     mock! {

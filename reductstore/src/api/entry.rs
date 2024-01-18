@@ -23,7 +23,6 @@ use axum::extract::FromRequest;
 use axum::headers::HeaderMapExt;
 
 use axum::http::Request;
-use axum::response::IntoResponse;
 use axum::routing::{delete, get, head, post};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;

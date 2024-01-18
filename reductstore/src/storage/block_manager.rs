@@ -519,7 +519,6 @@ pub async fn spawn_write_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::record::State::Errored;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;

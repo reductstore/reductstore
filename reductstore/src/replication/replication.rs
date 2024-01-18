@@ -444,7 +444,7 @@ mod tests {
 
     #[fixture]
     fn remote_bucket() -> MockRmBucket {
-        let mut bucket = MockRmBucket::new();
+        let bucket = MockRmBucket::new();
         bucket
     }
 

@@ -89,7 +89,7 @@ mod tests {
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
     use mockall::predicate;
-    use reduct_base::error::ReductError;
+    use reduct_base::error::{ErrorCode, ReductError};
     use rstest::rstest;
 
     #[rstest]
