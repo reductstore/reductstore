@@ -20,6 +20,7 @@ pub struct ReductClientBuilder {
     url: String,
     api_token: String,
     timeout: Duration,
+    http1_only: bool,
 }
 
 pub type Result<T> = std::result::Result<T, ReductError>;
@@ -32,6 +33,7 @@ impl ReductClientBuilder {
             url: String::new(),
             api_token: String::new(),
             timeout: Duration::from_secs(30),
+            http1_only: false,
         }
     }
 
@@ -53,8 +55,23 @@ impl ReductClientBuilder {
             ));
         }
         ReductError::new(ErrorCode::UrlParseError, "URL must be set");
+        let builder = reqwest::ClientBuilder::new().timeout(self.timeout);
+        let builder = if self.http1_only {
+            builder.http1_only()
+        } else {
+            builder
+        };
         Ok(ReductClient {
-            http_client: Arc::new(HttpClient::new(&self.url, &self.api_token, self.timeout)?),
+            http_client: Arc::new(HttpClient::new(
+                &self.url,
+                &self.api_token,
+                builder.build().map_err(|e| {
+                    ReductError::new(
+                        ErrorCode::Unknown,
+                        &format!("Failed to create HTTP client: {}", e),
+                    )
+                })?,
+            )?),
         })
     }
 
@@ -74,6 +91,12 @@ impl ReductClientBuilder {
     /// Set the timeout for HTTP requests.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Set the HTTP version to HTTP/1.1 only.
+    pub fn http1_only(mut self) -> Self {
+        self.http1_only = true;
         self
     }
 }

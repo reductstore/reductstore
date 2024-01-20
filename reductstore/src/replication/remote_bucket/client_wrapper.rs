@@ -51,6 +51,7 @@ impl ReductClientWrapper {
             .url(url)
             .api_token(api_token)
             .timeout(std::time::Duration::from_secs(1))
+            .http1_only()
             .build();
 
         Self { client }

@@ -17,19 +17,11 @@ pub(crate) struct HttpClient {
 }
 
 impl HttpClient {
-    pub fn new(base_url: &str, api_token: &str, timeout: Duration) -> Result<Self> {
+    pub(super) fn new(base_url: &str, api_token: &str, client: reqwest::Client) -> Result<Self> {
         Ok(Self {
             base_url: Url::parse(base_url)?,
             api_token: format!("Bearer {}", api_token),
-            client: reqwest::Client::builder()
-                .timeout(timeout)
-                .build()
-                .map_err(|e| {
-                    ReductError::new(
-                        ErrorCode::Unknown,
-                        &format!("Failed to create HTTP client: {}", e),
-                    )
-                })?,
+            client,
         })
     }
 
