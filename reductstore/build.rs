@@ -45,10 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(feature = "web-console")]
 fn download_web_console() {
-    const WEB_CONSOLE_VERSION: &str = "v1.4.0";
-
+    const WEB_CONSOLE_VERSION: &str = "v1.4.1";
     let out_dir = env::var("OUT_DIR").unwrap();
-    if Path::exists(Path::new(&format!("{}/console.zip", out_dir))) {
+    let console_path = &format!("{}/console-{}.zip", out_dir, WEB_CONSOLE_VERSION);
+    if Path::exists(Path::new(console_path)) {
         return;
     }
 
@@ -65,8 +65,8 @@ fn download_web_console() {
             panic!("Failed to download Web Console: {}", resp.status());
         }
     }
-    fs::write(format!("{}/console.zip", out_dir), resp.bytes().unwrap())
-        .expect("Failed to write console.zip");
+    fs::write(console_path, resp.bytes().unwrap()).expect("Failed to write console.zip");
+    fs::copy(console_path, format!("{}/console.zip", out_dir)).expect("Failed to copy console.zip");
 }
 
 #[cfg(not(feature = "web-console"))]
