@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reductstore: Refactor read and write operation with tokio channels, [PR-370](https://github.com/reductstore/reductstore/pull/370)
 - docs: update link to new website, [PR-375](https://github.com/reductstore/reductstore/pull/375)
+- reductstore: Update Web Console to v1.4.1, [PR-389](https://github.com/reductstore/reductstore/pull/389)
 
 ### Removed
 
