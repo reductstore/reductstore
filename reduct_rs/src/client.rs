@@ -319,7 +319,8 @@ impl ReductClient {
     /// async fn main() {
     ///     let client = ReductClient::builder()
     ///         .url("http://127.0.0.1:8383")
-    ///         .api_token("my-api-token");
+    ///         .api_token("my-api-token")
+    ///         .build();
     ///
     ///     client.create_replication("test-replication")
     ///         .src_bucket("test-bucket-1")
@@ -509,10 +510,10 @@ pub(crate) mod tests {
             let client = client.await;
             client
                 .create_replication("test-replication")
-                .src_bucket(settings.src_bucket.clone())
-                .dst_bucket(settings.dst_bucket.clone())
-                .dst_host(settings.dst_host.clone())
-                .dst_token(settings.dst_token.clone())
+                .src_bucket(settings.src_bucket.as_str())
+                .dst_bucket(settings.dst_bucket.as_str())
+                .dst_host(settings.dst_host.as_str())
+                .dst_token(settings.dst_token.as_str())
                 .entries(settings.entries.clone())
                 .include(settings.include.clone())
                 .exclude(settings.exclude.clone())

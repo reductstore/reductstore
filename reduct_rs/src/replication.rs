@@ -41,8 +41,8 @@ impl ReplicationBuilder {
     /// # Arguments
     ///
     /// * `bucket` - Source bucket. Required and must exist.
-    pub fn src_bucket(mut self, bucket: String) -> Self {
-        self.settings.src_bucket = bucket;
+    pub fn src_bucket(mut self, bucket: &str) -> Self {
+        self.settings.src_bucket = bucket.to_string();
         self
     }
 
@@ -51,8 +51,8 @@ impl ReplicationBuilder {
     /// # Arguments
     ///
     /// * `bucket` - Destination bucket. Required and must exist.
-    pub fn dst_bucket(mut self, bucket: String) -> Self {
-        self.settings.dst_bucket = bucket;
+    pub fn dst_bucket(mut self, bucket: &str) -> Self {
+        self.settings.dst_bucket = bucket.to_string();
         self
     }
 
@@ -61,8 +61,8 @@ impl ReplicationBuilder {
     /// # Arguments
     ///
     /// * `host` - Destination host. Required.
-    pub fn dst_host(mut self, host: String) -> Self {
-        self.settings.dst_host = host;
+    pub fn dst_host(mut self, host: &str) -> Self {
+        self.settings.dst_host = host.to_string();
         self
     }
 
@@ -71,8 +71,8 @@ impl ReplicationBuilder {
     /// # Arguments
     ///
     /// * `token` - Destination token.
-    pub fn dst_token(mut self, token: String) -> Self {
-        self.settings.dst_token = token;
+    pub fn dst_token(mut self, token: &str) -> Self {
+        self.settings.dst_token = token.to_string();
         self
     }
 
