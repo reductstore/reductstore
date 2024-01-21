@@ -12,6 +12,7 @@ use crate::bucket::BucketBuilder;
 use crate::http_client::HttpClient;
 use crate::Bucket;
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationList};
 
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
@@ -140,7 +141,7 @@ impl ReductClient {
     /// The server info
     pub async fn server_info(&self) -> Result<ServerInfo> {
         self.http_client
-            .send_and_receive_json::<(), ServerInfo>(reqwest::Method::GET, "/info", None)
+            .send_and_receive_json::<(), ServerInfo>(Method::GET, "/info", None)
             .await
     }
 
@@ -205,7 +206,7 @@ impl ReductClient {
     /// The token or HttpError
     pub async fn me(&self) -> Result<Token> {
         self.http_client
-            .send_and_receive_json::<(), Token>(reqwest::Method::GET, "/me", None)
+            .send_and_receive_json::<(), Token>(Method::GET, "/me", None)
             .await
     }
 
@@ -223,7 +224,7 @@ impl ReductClient {
         let token = self
             .http_client
             .send_and_receive_json::<Permissions, TokenCreateResponse>(
-                reqwest::Method::POST,
+                Method::POST,
                 &format!("/tokens/{}", name),
                 Some(permissions),
             )
@@ -256,9 +257,98 @@ impl ReductClient {
     pub async fn list_tokens(&self) -> Result<Vec<Token>> {
         let list = self
             .http_client
-            .send_and_receive_json::<(), TokenList>(reqwest::Method::GET, "/tokens", None)
+            .send_and_receive_json::<(), TokenList>(Method::GET, "/tokens", None)
             .await?;
         Ok(list.tokens)
+    }
+
+    /// Get list of replications
+    ///
+    /// # Returns
+    ///
+    /// The list of replications or an error
+    pub async fn list_replications(&self) -> Result<Vec<ReplicationInfo>> {
+        let list = self
+            .http_client
+            .send_and_receive_json::<(), ReplicationList>(Method::GET, "/replications", None)
+            .await?;
+        Ok(list.replications)
+    }
+
+    /// Get full replication info
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the replication
+    ///
+    /// # Returns
+    ///
+    /// The replication info or an error
+    pub async fn get_replication(&self, name: &str) -> Result<ReplicationInfo> {
+        let info = self
+            .http_client
+            .send_and_receive_json::<(), ReplicationInfo>(
+                Method::GET,
+                &format!("/replications/{}", name),
+                None,
+            )
+            .await?;
+        Ok(info)
+    }
+
+    /// Create a replication
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the replication
+    /// * `settings` - The replication settings
+    ///
+    /// # Returns
+    ///
+    /// Ok if the replication was created, otherwise an error
+    pub async fn create_replication(&self, name: &str, settings: &str) -> Result<()> {
+        let request = self
+            .http_client
+            .request(Method::POST, &format!("/replications/{}", name))
+            .body(settings.to_string());
+        self.http_client.send_request(request).await?;
+        Ok(())
+    }
+
+    /// Update a replication
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the replication
+    /// * `settings` - The replication settings
+    ///
+    /// # Returns
+    ///
+    /// Ok if the replication was updated, otherwise an error
+    pub async fn update_replication(&self, name: &str, settings: &str) -> Result<()> {
+        let request = self
+            .http_client
+            .request(Method::PUT, &format!("/replications/{}", name))
+            .body(settings.to_string());
+        self.http_client.send_request(request).await?;
+        Ok(())
+    }
+
+    /// Delete a replication
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the replication
+    ///
+    /// # Returns
+    ///
+    /// Ok if the replication was deleted, otherwise an error
+    pub async fn delete_replication(&self, name: &str) -> Result<()> {
+        let request = self
+            .http_client
+            .request(Method::DELETE, &format!("/replications/{}", name));
+        self.http_client.send_request(request).await?;
+        Ok(())
     }
 }
 
@@ -374,6 +464,18 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             client.delete_token("test-token").await.unwrap();
+        }
+    }
+
+    mod replication_api {
+        use super::*;
+        use reduct_base::msg::replication_api::ReplicationSettings;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_list_replications(#[future] client: ReductClient) {
+            let replications = client.await.list_replications().await.unwrap();
+            assert!(replications.is_empty());
         }
     }
 
