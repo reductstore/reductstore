@@ -53,16 +53,18 @@ impl ContextBuilder {
         ContextBuilder { config }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn config_path(mut self, config_dir: &str) -> Self {
         self.config.config_path = config_dir.to_string();
         self
     }
-
+    #[allow(dead_code)]
     pub(crate) fn output(mut self, output: Box<dyn Output>) -> Self {
         self.config.output = output;
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn input(mut self, input: Box<dyn Input>) -> Self {
         self.config.input = input;
         self
