@@ -33,7 +33,7 @@ mod tests {
     use crate::api::replication::tests::settings;
     use crate::api::tests::{components, headers};
     use reduct_base::error::ErrorCode::NotFound;
-    use reduct_base::msg::replication_api::{ReplicationFullInfo, ReplicationSettings};
+    use reduct_base::msg::replication_api::{FullReplicationInfo, ReplicationSettings};
     use rstest::rstest;
     use std::sync::Arc;
 
@@ -66,7 +66,7 @@ mod tests {
 
         assert_eq!(
             info.0,
-            ReplicationFullInfo {
+            FullReplicationInfo {
                 info: repl.info().await,
                 settings: repl.masked_settings().clone(),
                 diagnostics: repl.diagnostics().await,

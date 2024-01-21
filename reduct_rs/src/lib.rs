@@ -7,6 +7,7 @@ mod bucket;
 mod client;
 mod http_client;
 mod record;
+mod replication;
 
 pub use bucket::Bucket;
 pub use client::ReductClient;

@@ -51,7 +51,7 @@ pub struct ReplicationList {
 
 /// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ReplicationFullInfo {
+pub struct FullReplicationInfo {
     /// Info
     pub info: ReplicationInfo,
     /// Settings
