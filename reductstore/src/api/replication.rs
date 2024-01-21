@@ -20,7 +20,7 @@ use axum::http::Request;
 use axum::routing::{delete, get, post, put};
 use bytes::Bytes;
 use reduct_base::msg::replication_api::{
-    ReplicationFullInfo, ReplicationList, ReplicationSettings,
+    FullReplicationInfo, ReplicationList, ReplicationSettings,
 };
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
@@ -56,7 +56,7 @@ where
 pub struct ReplicationListAxum(ReplicationList);
 
 #[derive(IntoResponse, Twin)]
-pub struct ReplicationFullInfoAxum(ReplicationFullInfo);
+pub struct ReplicationFullInfoAxum(FullReplicationInfo);
 
 pub(crate) fn create_replication_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()

@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -12,8 +12,12 @@ use crate::bucket::BucketBuilder;
 use crate::http_client::HttpClient;
 use crate::Bucket;
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationList};
+use reduct_base::msg::bucket_api::BucketSettings;
+use reduct_base::msg::replication_api::{
+    FullReplicationInfo, ReplicationInfo, ReplicationList, ReplicationSettings,
+};
 
+use crate::replication::ReplicationBuilder;
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
 
@@ -284,10 +288,10 @@ impl ReductClient {
     /// # Returns
     ///
     /// The replication info or an error
-    pub async fn get_replication(&self, name: &str) -> Result<ReplicationInfo> {
+    pub async fn get_replication(&self, name: &str) -> Result<FullReplicationInfo> {
         let info = self
             .http_client
-            .send_and_receive_json::<(), ReplicationInfo>(
+            .send_and_receive_json::<(), FullReplicationInfo>(
                 Method::GET,
                 &format!("/replications/{}", name),
                 None,
@@ -301,18 +305,34 @@ impl ReductClient {
     /// # Arguments
     ///
     /// * `name` - The name of the replication
-    /// * `settings` - The replication settings
     ///
     /// # Returns
     ///
-    /// Ok if the replication was created, otherwise an error
-    pub async fn create_replication(&self, name: &str, settings: &str) -> Result<()> {
-        let request = self
-            .http_client
-            .request(Method::POST, &format!("/replications/{}", name))
-            .body(settings.to_string());
-        self.http_client.send_request(request).await?;
-        Ok(())
+    /// a replication builder to set the replication settings
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reduct_rs::ReductClient;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let client = ReductClient::builder()
+    ///         .url("http://127.0.0.1:8383")
+    ///         .api_token("my-api-token");
+    ///
+    ///     client.create_replication("test-replication")
+    ///         .src_bucket("test-bucket-1")
+    ///         .dst_bucket("test-bucket-2")
+    ///         .dst_host("https://play.reduct.store")
+    ///         .dst_token("reductstore")
+    ///         .send()
+    ///         .await
+    ///         .unwrap();
+    /// }
+    ///
+    pub fn create_replication(&self, name: &str) -> ReplicationBuilder {
+        ReplicationBuilder::new(name.to_string(), Arc::clone(&self.http_client))
     }
 
     /// Update a replication
@@ -325,13 +345,14 @@ impl ReductClient {
     /// # Returns
     ///
     /// Ok if the replication was updated, otherwise an error
-    pub async fn update_replication(&self, name: &str, settings: &str) -> Result<()> {
-        let request = self
-            .http_client
-            .request(Method::PUT, &format!("/replications/{}", name))
-            .body(settings.to_string());
-        self.http_client.send_request(request).await?;
-        Ok(())
+    pub async fn update_replication(
+        &self,
+        name: &str,
+        settings: ReplicationSettings,
+    ) -> Result<()> {
+        self.http_client
+            .send_json(Method::PUT, &format!("/replications/{}", name), settings)
+            .await
     }
 
     /// Delete a replication
@@ -469,6 +490,7 @@ pub(crate) mod tests {
 
     mod replication_api {
         use super::*;
+        use reduct_base::msg::diagnostics::Diagnostics;
         use reduct_base::msg::replication_api::ReplicationSettings;
 
         #[rstest]
@@ -476,6 +498,118 @@ pub(crate) mod tests {
         async fn test_list_replications(#[future] client: ReductClient) {
             let replications = client.await.list_replications().await.unwrap();
             assert!(replications.is_empty());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_replication(
+            #[future] client: ReductClient,
+            settings: ReplicationSettings,
+        ) {
+            let client = client.await;
+            client
+                .create_replication("test-replication")
+                .src_bucket(settings.src_bucket.clone())
+                .dst_bucket(settings.dst_bucket.clone())
+                .dst_host(settings.dst_host.clone())
+                .dst_token(settings.dst_token.clone())
+                .entries(settings.entries.clone())
+                .include(settings.include.clone())
+                .exclude(settings.exclude.clone())
+                .send()
+                .await
+                .unwrap();
+            let replications = client.list_replications().await.unwrap();
+            assert_eq!(replications.len(), 1);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_replication(
+            #[future] client: ReductClient,
+            settings: ReplicationSettings,
+        ) {
+            let client = client.await;
+            client
+                .create_replication("test-replication")
+                .set_settings(settings.clone())
+                .send()
+                .await
+                .unwrap();
+            let replication = client.get_replication("test-replication").await.unwrap();
+            assert_eq!(
+                replication.info,
+                ReplicationInfo {
+                    name: "test-replication".to_string(),
+                    is_active: false,
+                    is_provisioned: false,
+                    pending_records: 0,
+                }
+            );
+
+            assert_eq!(
+                replication.settings,
+                ReplicationSettings {
+                    dst_token: "***".to_string(),
+                    ..settings
+                }
+            );
+            assert_eq!(replication.diagnostics, Diagnostics::default());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_replication(
+            #[future] client: ReductClient,
+            settings: ReplicationSettings,
+        ) {
+            let client = client.await;
+            client
+                .create_replication("test-replication")
+                .set_settings(settings.clone())
+                .send()
+                .await
+                .unwrap();
+            let replication = client.get_replication("test-replication").await.unwrap();
+
+            assert_eq!(
+                replication.settings,
+                ReplicationSettings {
+                    dst_token: "***".to_string(),
+                    ..settings
+                }
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_delete_replication(
+            #[future] client: ReductClient,
+            settings: ReplicationSettings,
+        ) {
+            let client = client.await;
+            client
+                .create_replication("test-replication")
+                .set_settings(settings.clone())
+                .send()
+                .await
+                .unwrap();
+            client.delete_replication("test-replication").await.unwrap();
+            let replications = client.list_replications().await.unwrap();
+            assert!(replications.is_empty());
+        }
+
+        #[fixture]
+        fn settings() -> ReplicationSettings {
+            ReplicationSettings {
+                src_bucket: "test-bucket-1".to_string(),
+                dst_bucket: "test-bucket-2".to_string(),
+                dst_host: "http://127.0.0.1:8383".to_string(),
+                dst_token: std::env::var("RS_API_TOKEN").unwrap_or("".to_string()),
+                entries: vec![],
+                include: Labels::default(),
+                exclude: Labels::default(),
+            }
         }
     }
 
@@ -506,6 +640,12 @@ pub(crate) mod tests {
             if bucket.name.starts_with("test-bucket") {
                 let bucket = client.get_bucket(&bucket.name).await.unwrap();
                 bucket.remove().await.unwrap();
+            }
+        }
+
+        for replication in client.list_replications().await.unwrap() {
+            if replication.name.starts_with("test-replication") {
+                client.delete_replication(&replication.name).await.unwrap();
             }
         }
 

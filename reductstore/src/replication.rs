@@ -5,7 +5,7 @@ use crate::replication::replication::Replication;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
-    ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
+    FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
 use reduct_base::Labels;
 
@@ -93,7 +93,7 @@ pub trait ManageReplications {
 
     async fn replications(&self) -> Vec<ReplicationInfo>;
 
-    async fn get_info(&self, name: &str) -> Result<ReplicationFullInfo, ReductError>;
+    async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
     fn get_replication(&self, name: &str) -> Result<&Replication, ReductError>;
 

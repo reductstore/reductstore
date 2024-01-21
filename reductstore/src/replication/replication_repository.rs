@@ -11,11 +11,11 @@ use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::storage::Storage;
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::debug;
+use log::{debug, error};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
-    ReplicationFullInfo, ReplicationInfo, ReplicationSettings,
+    FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -128,9 +128,9 @@ impl ManageReplications for ReplicationRepository {
         replications
     }
 
-    async fn get_info(&self, name: &str) -> Result<ReplicationFullInfo, ReductError> {
+    async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
         let replication = self.get_replication(name)?;
-        let info = ReplicationFullInfo {
+        let info = FullReplicationInfo {
             info: replication.info().await,
             settings: replication.masked_settings().clone(),
             diagnostics: replication.diagnostics().await,
@@ -193,9 +193,12 @@ impl ReplicationRepository {
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(data))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
-                    repo.create_replication(&item.name, item.settings.unwrap().into())
+                    if let Err(err) = repo
+                        .create_replication(&item.name, item.settings.unwrap().into())
                         .await
-                        .unwrap();
+                    {
+                        error!("Failed to load replication '{}': {}", item.name, err);
+                    }
                 }
             }
             Err(_) => {
