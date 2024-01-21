@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reductstore: Error counting in replication diagnostics, [PR-385](https://github.com/reductstore/reductstore/pull/385)
 - reductstore: Discard transaction from replication log if remote bucket is available, [PR-386](https://github.com/reductstore/reductstore/pull/386)
 - reductstore: Use only HTTP1 for replication engine, [PR-388](https://github.com/reductstore/reductstore/pull/388)
+- reductstore: Mask access token for remote instance in replication, [PR-390](https://github.com/reductstore/reductstore/pull/390)
 
 ### Changed
 

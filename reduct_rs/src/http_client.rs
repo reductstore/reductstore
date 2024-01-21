@@ -7,7 +7,6 @@ use crate::client::Result;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reqwest::header::HeaderValue;
 use reqwest::{Method, RequestBuilder, Response, Url};
-use std::time::Duration;
 
 /// Internal HTTP client to wrap reqwest.
 pub(crate) struct HttpClient {

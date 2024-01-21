@@ -220,9 +220,18 @@ impl Replication {
         &self.name
     }
 
+    /// Get the replication settings with the destination token masked.
+    pub fn masked_settings(&self) -> ReplicationSettings {
+        ReplicationSettings {
+            dst_token: "***".to_string(),
+            ..self.settings.clone()
+        }
+    }
+
     pub fn settings(&self) -> &ReplicationSettings {
         &self.settings
     }
+
     pub fn is_provisioned(&self) -> bool {
         self.is_provisioned
     }

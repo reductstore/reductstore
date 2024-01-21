@@ -164,7 +164,12 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
             let replication = repo.get_mut_replication(&name).unwrap();
             replication.set_provisioned(true);
-            info!("Provisioned replication '{}' with {:?}", name, settings);
+
+            info!(
+                "Provisioned replication '{}' with {:?}",
+                name,
+                replication.masked_settings()
+            );
         }
         Ok(repo)
     }
