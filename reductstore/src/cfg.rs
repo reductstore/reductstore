@@ -15,6 +15,7 @@ use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::token_api::{Permissions, Token};
 use reduct_base::Labels;
+use regex::Replacer;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
@@ -164,7 +165,12 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
             let replication = repo.get_mut_replication(&name).unwrap();
             replication.set_provisioned(true);
-            info!("Provisioned replication '{}' with {:?}", name, settings);
+
+            info!(
+                "Provisioned replication '{}' with {:?}",
+                name,
+                replication.masked_settings()
+            );
         }
         Ok(repo)
     }

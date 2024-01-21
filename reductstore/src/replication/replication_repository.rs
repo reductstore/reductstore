@@ -132,7 +132,7 @@ impl ManageReplications for ReplicationRepository {
         let replication = self.get_replication(name)?;
         let info = ReplicationFullInfo {
             info: replication.info().await,
-            settings: replication.settings().clone(),
+            settings: replication.masked_settings().clone(),
             diagnostics: replication.diagnostics().await,
         };
         Ok(info)
@@ -474,7 +474,7 @@ mod tests {
 
         let info = repo.get_info("test").await.unwrap();
         let repl = repo.get_replication("test").unwrap();
-        assert_eq!(info.settings, settings);
+        assert_eq!(info.settings, repl.masked_settings().clone());
         assert_eq!(info.info, repl.info().await);
         assert_eq!(info.diagnostics, repl.diagnostics().await);
     }
