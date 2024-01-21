@@ -5,7 +5,7 @@
 
 use crate::client::Result;
 use crate::http_client::HttpClient;
-use crate::Bucket;
+
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::Labels;
 use reqwest::Method;

@@ -12,7 +12,7 @@ use crate::bucket::BucketBuilder;
 use crate::http_client::HttpClient;
 use crate::Bucket;
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::bucket_api::BucketSettings;
+
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationList, ReplicationSettings,
 };
