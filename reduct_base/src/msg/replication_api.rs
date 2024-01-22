@@ -36,7 +36,7 @@ pub struct ReplicationInfo {
     pub name: String,
     /// Remote instance is available and replication is active
     pub is_active: bool,
-    /// Replication settings
+    /// Replication is provisioned
     pub is_provisioned: bool,
     /// Number of records pending replication
     pub pending_records: u64,
