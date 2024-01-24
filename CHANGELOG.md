@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2024-01-24
+
 ### Added
 
 - reductstore: Cargo feature `web-console` to build without Web Console, [PR-365](https://github.com/reductstore/reductstore/pull/365)
@@ -593,7 +595,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.7.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.8.0...HEAD
+
+[1.8.0]: https://github.com/reductstore/reductstore/compare/v1.7.3...v1.8.0
 
 [1.7.3]: https://github.com/reductstore/reductstore/compare/v1.7.2...v1.7.3
 
