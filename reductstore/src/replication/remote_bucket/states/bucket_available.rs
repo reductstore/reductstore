@@ -43,7 +43,10 @@ impl RemoteBucketState for BucketAvailableState {
             .write_record(entry, timestamp, labels, content_type, content_length, rx)
             .await
         {
-            Ok(_) => self,
+            Ok(_) => {
+                self.last_result = Ok(());
+                self
+            }
             Err(err) => {
                 debug!(
                     "Failed to write record to remote bucket {}/{}: {}",
@@ -107,10 +110,11 @@ mod tests {
             )
             .returning(|_, _, _, _, _, _| Ok(()));
 
-        let state = Box::new(BucketAvailableState::new(
-            Box::new(client),
-            Box::new(bucket),
-        ));
+        let state = Box::new(BucketAvailableState {
+            client: Box::new(client),
+            bucket: Box::new(bucket),
+            last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
+        });
 
         let (_, rx) = tokio::sync::mpsc::channel(1);
         let state = state
