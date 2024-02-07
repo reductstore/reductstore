@@ -187,7 +187,6 @@ jobs:
       - build_snap
       - api_tests
       - cli_tests
-      - sdk_examples
       - check_tag
     steps:
       - uses: actions/download-artifact@v3
