@@ -5,7 +5,7 @@ use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::Stream;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::Labels;
 use reduct_rs::{Bucket, ReductClient};
 use std::pin::Pin;
@@ -71,7 +71,12 @@ impl BucketWrapper {
 #[async_trait]
 impl ReductClientApi for ReductClientWrapper {
     async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
-        let bucket = self.client.get_bucket(bucket_name).await?;
+        let bucket = self.client.get_bucket(bucket_name).await.map_err(|e| {
+            ReductError::new(
+                ErrorCode::from_int(e.status.int_value()).unwrap(),
+                &e.message,
+            )
+        })?;
         Ok(Box::new(BucketWrapper::new(bucket)))
     }
 
@@ -115,6 +120,14 @@ impl ReductBucketApi for BucketWrapper {
             .stream(RxWrapper { rx: rx })
             .send()
             .await
+            .map_err(|e| {
+                ReductError::new(
+                    ErrorCode::from_int(e.status.int_value()).unwrap(),
+                    &e.message,
+                )
+            })?;
+
+        Ok(())
     }
 
     fn server_url(&self) -> &str {

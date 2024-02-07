@@ -3,7 +3,6 @@
 members = [
     "reductstore",
     "reduct_cli",
-    "reduct_rs",
     "reduct_base",
     "reduct_macros"
 ]
@@ -11,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.8.1"
+version = "1.9.0-dev"
 authors = ["Alexey Timin <atimin@reduct.store>"]
 edition = "2021"
 rust-version = "1.75.0"
