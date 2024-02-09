@@ -90,7 +90,7 @@ ReductStore is built with adaptability in mind. While it comes with a straightfo
 To streamline your development process and make integrations smoother, we've developed a series of client SDKs tailored for different programming languages and environments. These SDKs wrap around the core API, offering a more intuitive and language-native way to interact with ReductStore, thus accelerating your development cycle.
 Here are the client SDKs available:
 
-- [Rust Client SDK](https://github.com/reductstore/reductstore/tree/main/reduct_rs)
+- [Rust Client SDK](https://github.com/reductstore/reduct-rs)
 - [Python Client SDK](https://github.com/reductstore/reduct-py)
 - [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
 - [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
