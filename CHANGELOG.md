@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-162: Fix locked block by read/write operation, [PR-398](https://github.com/reductstore/reductstore/pull/398)
+- RS-155: Wait for incomplete records during replication, [PR-399](https://github.com/reductstore/reductstore/pull/399)
 
 ## [1.8.1] - 2024-01-28
 

@@ -8,7 +8,7 @@ use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
 
 use log::{debug, error, info};
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 
 use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -92,16 +92,40 @@ impl Replication {
 
                             debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
-                            let get_record = async {
-                                thr_storage
-                                    .read()
-                                    .await
-                                    .get_bucket(&config.src_bucket)?
-                                    .begin_read(&entry_name, *transaction.timestamp())
-                                    .await
+                            let read_record_from_storage = async {
+                                let mut atempts = 3;
+                                loop {
+                                    let read_record = async {
+                                        thr_storage
+                                            .read()
+                                            .await
+                                            .get_bucket(&config.src_bucket)?
+                                            .begin_read(&entry_name, *transaction.timestamp())
+                                            .await
+                                    };
+                                    let record = read_record.await;
+                                    match record {
+                                        Err(ReductError {
+                                            status: ErrorCode::TooEarly,
+                                            ..
+                                        }) => {
+                                            debug!("Transaction is too early, retrying later");
+                                            sleep(Duration::from_millis(10)).await;
+                                            atempts -= 1;
+                                        }
+
+                                        _ => {
+                                            atempts = 0;
+                                        }
+                                    }
+
+                                    if atempts == 0 {
+                                        break record;
+                                    }
+                                }
                             };
 
-                            let read_record = match get_record.await {
+                            let record_to_sync = match read_record_from_storage.await {
                                 Ok(record) => record,
                                 Err(err) => {
                                     log.write().await.pop_front().await.unwrap();
@@ -112,7 +136,7 @@ impl Replication {
                             };
 
                             let mut bucket = thr_bucket.write().await;
-                            match bucket.write_record(entry_name, read_record).await {
+                            match bucket.write_record(entry_name, record_to_sync).await {
                                 Ok(_) => {
                                     if bucket.is_active() {
                                         thr_hourly_diagnostics.write().await.count(Ok(()));
@@ -449,6 +473,62 @@ mod tests {
                 }
             }
         )
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_too_early(
+        mut remote_bucket: MockRmBucket,
+        mut notification: TransactionNotification,
+    ) {
+        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_is_active().return_const(true);
+        let replication = build_replication(remote_bucket).await;
+
+        let _tx = replication
+            .storage
+            .write()
+            .await
+            .get_mut_bucket("src")
+            .unwrap()
+            .write_record("test", 20, 4, "".to_string(), Labels::new())
+            .await
+            .unwrap();
+        notification.event = Transaction::WriteRecord(20);
+        replication.notify(notification).await.unwrap();
+        assert!(
+            !transaction_log_is_empty(&replication).await,
+            "We keep the transaction in the log to sync later"
+        );
+        assert_eq!(
+            replication.info().await,
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 1,
+            }
+        );
+        assert_eq!(replication.diagnostics().await, Diagnostics::default(),);
+
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            replication.diagnostics().await,
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 0,
+                    errored: 60,
+                    errors: HashMap::from_iter(vec![(
+                        425,
+                        DiagnosticsError {
+                            count: 1,
+                            last_message: "Record with timestamp 20 is still being written"
+                                .to_string(),
+                        }
+                    )]),
+                }
+            }
+        );
     }
 
     #[fixture]

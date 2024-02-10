@@ -547,7 +547,6 @@ pub async fn spawn_write_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Buf;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
