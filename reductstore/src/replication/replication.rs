@@ -8,7 +8,7 @@ use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
 
 use log::{debug, error, info};
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 
 use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -92,27 +92,50 @@ impl Replication {
 
                             debug!("Replicating transaction {}/{:?}", entry_name, transaction);
 
-                            let get_record = async {
-                                thr_storage
-                                    .read()
-                                    .await
-                                    .get_bucket(&config.src_bucket)?
-                                    .begin_read(&entry_name, *transaction.timestamp())
-                                    .await
+                            let read_record_from_storage = async {
+                                let mut record = None;
+                                let mut attempts = 3;
+                                while record.is_none() && attempts > 0 {
+                                    attempts -= 1;
+                                    let read_record = async {
+                                        thr_storage
+                                            .read()
+                                            .await
+                                            .get_bucket(&config.src_bucket)?
+                                            .begin_read(&entry_name, *transaction.timestamp())
+                                            .await
+                                    };
+                                    let rec = match read_record.await {
+                                        Ok(record) => record,
+                                        Err(ReductError {
+                                            status: ErrorCode::TooEarly,
+                                            ..
+                                        }) => {
+                                            debug!("Transaction is too early, retrying later");
+                                            sleep(Duration::from_millis(10)).await;
+                                            continue;
+                                        }
+                                        Err(err) => {
+                                            log.write().await.pop_front().await.unwrap();
+                                            error!("Failed to read record: {}", err);
+                                            thr_hourly_diagnostics.write().await.count(Err(err));
+                                            break;
+                                        }
+                                    };
+                                    record = Some(rec);
+                                }
+                                record
                             };
 
-                            let read_record = match get_record.await {
-                                Ok(record) => record,
-                                Err(err) => {
-                                    log.write().await.pop_front().await.unwrap();
-                                    error!("Failed to read record: {}", err);
-                                    thr_hourly_diagnostics.write().await.count(Err(err));
-                                    break;
+                            let record_to_sync = match read_record_from_storage.await {
+                                Some(record) => record,
+                                None => {
+                                    continue;
                                 }
                             };
 
                             let mut bucket = thr_bucket.write().await;
-                            match bucket.write_record(entry_name, read_record).await {
+                            match bucket.write_record(entry_name, record_to_sync).await {
                                 Ok(_) => {
                                     if bucket.is_active() {
                                         thr_hourly_diagnostics.write().await.count(Ok(()));
