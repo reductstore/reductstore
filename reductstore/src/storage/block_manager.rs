@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -30,13 +31,15 @@ pub const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 /// because it does not lock the block descriptor file. Use it with RwLock<BlockManager>
 pub struct BlockManager {
     path: PathBuf,
-    reader_count: HashMap<u64, usize>,
-    writer_count: HashMap<u64, usize>,
+    reader_count: HashMap<u64, (usize, Instant)>,
+    writer_count: HashMap<u64, (usize, Instant)>,
     last_block: Option<Block>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
+
+const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Find the first block id that contains data for a given timestamp  in indexes
 ///
@@ -93,10 +96,11 @@ impl BlockManager {
         let block_id = ts_to_us(&ts);
         match self.writer_count.entry(block_id) {
             Entry::Occupied(mut e) => {
-                *e.get_mut() += 1;
+                e.get_mut().0 += 1;
+                e.get_mut().1 = Instant::now();
             }
             Entry::Vacant(e) => {
-                e.insert(1);
+                e.insert((1, Instant::now()));
             }
         }
 
@@ -119,7 +123,11 @@ impl BlockManager {
         record.state = i32::from(state);
         block.invalid = state == record::State::Invalid;
 
-        *self.writer_count.get_mut(&block_id).unwrap() -= 1;
+        // check if write wasn't removed by timeout
+        if let Some(count) = self.writer_count.get_mut(&block_id) {
+            count.0 -= 1;
+        }
+
         self.clean_readers_or_writers(block_id);
 
         self.save(block)?;
@@ -142,10 +150,11 @@ impl BlockManager {
         let block_id = ts_to_us(&ts);
         match self.reader_count.entry(block_id) {
             Entry::Occupied(mut e) => {
-                *e.get_mut() += 1;
+                e.get_mut().0 += 1;
+                e.get_mut().1 = Instant::now();
             }
             Entry::Vacant(e) => {
-                e.insert(1);
+                e.insert((1, Instant::now()));
             }
         }
 
@@ -156,7 +165,10 @@ impl BlockManager {
     }
 
     pub fn finish_read_record(&mut self, block_id: u64) {
-        *self.reader_count.get_mut(&block_id).unwrap() -= 1;
+        // check if read wasn't removed by timeout
+        if let Some(count) = self.reader_count.get_mut(&block_id) {
+            count.0 -= 1;
+        }
         self.clean_readers_or_writers(block_id);
     }
 
@@ -183,7 +195,7 @@ impl BlockManager {
     fn clean_readers_or_writers(&mut self, block_id: u64) -> bool {
         let readers_empty = match self.reader_count.get_mut(&block_id) {
             Some(count) => {
-                if *count == 0 {
+                if count.0 == 0 || count.1.elapsed() > IO_OPERATION_TIMEOUT {
                     self.reader_count.remove(&block_id);
                     true
                 } else {
@@ -195,7 +207,7 @@ impl BlockManager {
 
         let writers_empty = match self.writer_count.get_mut(&block_id) {
             Some(count) => {
-                if *count == 0 {
+                if count.0 == 0 || count.1.elapsed() > IO_OPERATION_TIMEOUT {
                     self.writer_count.remove(&block_id);
                     true
                 } else {
@@ -417,6 +429,14 @@ pub async fn spawn_read_task(
             if offset == content_size {
                 break;
             }
+
+            block_manager
+                .write()
+                .await
+                .reader_count
+                .entry(block_id)
+                .or_insert((0, Instant::now()))
+                .1 = Instant::now();
         }
 
         block_manager.write().await.finish_read_record(block_id);
@@ -480,6 +500,14 @@ pub async fn spawn_write_task(
                 if written_bytes >= content_size {
                     break;
                 }
+
+                block_manager
+                    .write()
+                    .await
+                    .writer_count
+                    .entry(block_id)
+                    .or_insert((0, Instant::now()))
+                    .1 = Instant::now();
             }
 
             if written_bytes < content_size {
@@ -519,6 +547,7 @@ pub async fn spawn_write_task(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Buf;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
@@ -647,8 +676,28 @@ mod tests {
 
         tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
         drop(tx);
-        sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
+        sleep(Duration::from_millis(10)).await; // wait for thread to finish
         assert_eq!(block_manager.write().await.remove(block_id).err(), None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_block_with_writers_timeout(
+        #[future] block_manager: BlockManager,
+        #[future] block: Block,
+        block_id: u64,
+    ) {
+        let block_manager = Arc::new(RwLock::new(block_manager.await));
+        spawn_write_task(Arc::clone(&block_manager), block.await, 0)
+            .await
+            .unwrap();
+        assert!(block_manager.write().await.remove(block_id).err().is_some());
+
+        sleep(IO_OPERATION_TIMEOUT).await;
+        assert!(
+            block_manager.write().await.remove(block_id).err().is_none(),
+            "Timeout should have unlocked the block"
+        );
     }
 
     #[rstest]
@@ -677,6 +726,26 @@ mod tests {
         sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
 
         assert_eq!(block_manager.write().await.remove(block_id).err(), None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_block_with_readers_timeout(
+        #[future] block_manager: BlockManager,
+        #[future] block: Block,
+        block_id: u64,
+    ) {
+        let block_manager = Arc::new(RwLock::new(block_manager.await));
+        spawn_read_task(Arc::clone(&block_manager), &block.await, 0)
+            .await
+            .unwrap();
+        assert!(block_manager.write().await.remove(block_id).err().is_some());
+
+        sleep(IO_OPERATION_TIMEOUT).await;
+        assert!(
+            block_manager.write().await.remove(block_id).err().is_none(),
+            "Timeout should have unlocked the block"
+        );
     }
 
     #[fixture]

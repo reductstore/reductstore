@@ -7,15 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- reduct-rs: Move `reduct-rs` to separated repository, [PR-395](https://github.com/reductstore/reductstore/pull/395)
+
+### Fixed
+
+- RS-162: Fix locked block by read/write operation, [PR-398](https://github.com/reductstore/reductstore/pull/398)
+
 ## [1.8.1] - 2024-01-28
 
 ### Fixed
 
 - Stuck last replication error, [PR-393](https://github.com/reductstore/reductstore/pull/393)
-
-### Changed
-
-- reduct-rs: Move `reduct-rs` to separated repository, [PR-395](https://github.com/reductstore/reductstore/pull/395)
 
 ## [1.8.0] - 2024-01-24
 
