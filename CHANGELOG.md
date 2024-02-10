@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.2] - 2024-02-10
+
 ### Fixed
 
 - RS-162: Fix locked block by read/write operation, [PR-398](https://github.com/reductstore/reductstore/pull/398)
@@ -606,7 +608,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.8.2...HEAD
+
+[1.8.1]: https://github.com/reductstore/reductstore/compare/v1.8.1...v1.8.2
 
 [1.8.1]: https://github.com/reductstore/reductstore/compare/v1.8.0...v1.8.1
 
