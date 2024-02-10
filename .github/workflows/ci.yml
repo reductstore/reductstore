@@ -407,8 +407,6 @@ jobs:
         run: cargo publish -p reduct-base
       - name: Publish reduct-macros
         run: cargo publish -p reduct-macros
-      - name: Publish reduct-rs
-        run: cargo publish -p reduct-rs
       - name: Publish reductstore
         run: cargo publish -p reductstore
 
