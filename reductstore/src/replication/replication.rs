@@ -566,7 +566,7 @@ mod tests {
             settings.exclude.clone(),
         );
 
-        let storage = Arc::new(RwLock::new(Storage::new(tmp_dir)));
+        let storage = Arc::new(RwLock::new(Storage::new(tmp_dir, None)));
 
         {
             let mut lock = storage.write().await;

@@ -267,7 +267,7 @@ mod tests {
                 .unwrap();
         }
 
-        let storage = Storage::new(storage.data_path);
+        let storage = Storage::new(storage.data_path, None);
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
@@ -377,7 +377,7 @@ mod tests {
         let result = storage.remove_bucket("test");
         assert_eq!(result, Ok(()));
 
-        let storage = Storage::new(path);
+        let storage = Storage::new(path, None);
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
@@ -417,6 +417,6 @@ mod tests {
 
     #[fixture]
     fn storage(path: PathBuf) -> Storage {
-        Storage::new(path)
+        Storage::new(path, None)
     }
 }

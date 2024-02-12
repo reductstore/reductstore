@@ -117,7 +117,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
     fn provision_storage(&self) -> Storage {
         let license = if self.license_path.is_some() {
-            parse_license(self.license_path.as_ref().unwrap())
+            parse_license(PathBuf::from(self.license_path.clone().unwrap()))
         } else {
             None
         };
