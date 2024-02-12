@@ -12,6 +12,7 @@ use std::time::Instant;
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
+use crate::license::License;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, ServerInfo};
 
@@ -24,7 +25,7 @@ pub struct Storage {
 
 impl Storage {
     /// Create a new Storage
-    pub(crate) fn new(data_path: PathBuf) -> Storage {
+    pub(crate) fn new(data_path: PathBuf, license: Option<License>) -> Storage {
         if !data_path.exists() {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();

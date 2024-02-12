@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::Components;
@@ -6,6 +6,7 @@ use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
+use crate::license::parse_license;
 use crate::replication::{create_replication_engine, ManageReplications};
 use crate::storage::storage::Storage;
 use bytesize::ByteSize;
@@ -31,6 +32,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub api_token: String,
     pub cert_path: String,
     pub cert_key_path: String,
+    pub license_path: Option<String>,
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ReplicationSettings>,
@@ -50,6 +52,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
             cert_path: env.get_masked("RS_CERT_PATH", "".to_string()),
             cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
+            license_path: env.get_optional("RS_LICENSE_PATH"),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications: Self::parse_replications(&mut env),
@@ -113,7 +116,13 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     fn provision_storage(&self) -> Storage {
-        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()));
+        let license = if self.license_path.is_some() {
+            parse_license(self.license_path.as_ref().unwrap())
+        } else {
+            None
+        };
+
+        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()), license);
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {
