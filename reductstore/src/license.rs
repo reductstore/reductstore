@@ -1,6 +1,8 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use bytesize::ByteSize;
 use chrono::{Date, DateTime, NaiveDate, Utc};
 use jsonwebtoken::{decode, DecodingKey, Validation};
@@ -22,8 +24,7 @@ pub(crate) struct License {
 #[derive(Debug, serde::Deserialize)]
 struct LicenseFile {
     lic: String,
-    e: String,
-    n: String,
+    key: String,
 }
 
 pub(crate) fn parse_license(license_path: &str) -> Option<License> {
@@ -40,24 +41,17 @@ pub(crate) fn parse_license(license_path: &str) -> Option<License> {
     }
     let license_key = license_key.unwrap();
 
-    // remove paddings before decoding uses URL_SAFE_NO_PAD
-    let license_key = LicenseFile {
-        lic: license_key.lic,
-        e: license_key.e.replace("=", ""),
-        n: license_key.n.replace("=", ""),
-    };
-
     // Parse the license file
-    let decoding_key =
-        DecodingKey::from_rsa_components(license_key.n.as_str(), license_key.e.as_str());
-    if let Err(e) = decoding_key {
-        error!("Failed to parse public key: {}", e);
+    let encoded_key = BASE64_STANDARD.decode(license_key.key.as_str());
+    if let Err(e) = encoded_key {
+        error!("Failed to decode license key: {}", e);
         return None;
     }
+    let decoding_key = DecodingKey::from_rsa_der(encoded_key.unwrap().as_slice());
 
     let mut validate = Validation::new(jsonwebtoken::Algorithm::RS256);
     validate.validate_exp = false;
-    let license = decode::<License>(license_key.lic.as_str(), &decoding_key.unwrap(), &validate);
+    let license = decode::<License>(license_key.lic.as_str(), &decoding_key, &validate);
     if let Err(e) = license {
         error!("Failed to parse license: {}", e);
         return None;

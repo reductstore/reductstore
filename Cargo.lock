@@ -1707,6 +1707,7 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-server",
+ "base64",
  "bytes",
  "bytesize",
  "chrono",
