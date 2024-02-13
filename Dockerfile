@@ -14,7 +14,6 @@ WORKDIR /src
 
 COPY reductstore reductstore
 COPY reduct_cli reduct_cli
-COPY reduct_rs reduct_rs
 COPY reduct_base reduct_base
 COPY reduct_macros reduct_macros
 COPY .cargo .cargo
