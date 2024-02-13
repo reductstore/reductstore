@@ -78,6 +78,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             console,
             replication_repo: RwLock::new(replication_engine),
             base_path: self.api_base_path.clone(),
+            license: parse_license(self.license_path.clone()),
         })
     }
 
@@ -116,13 +117,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     fn provision_storage(&self) -> Storage {
-        let license = if self.license_path.is_some() {
-            parse_license(PathBuf::from(self.license_path.clone().unwrap()))
-        } else {
-            None
-        };
-
-        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()), license);
+        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()));
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {

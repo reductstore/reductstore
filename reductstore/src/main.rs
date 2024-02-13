@@ -34,16 +34,19 @@ async fn main() {
         format!("v{}", version)
     };
 
-    info!(
-        "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
-        git_ref
-    );
-
     let cfg = Cfg::from_env(StdEnvGetter::default());
     Logger::init(&cfg.log_level);
     info!("Configuration: \n {}", cfg);
 
     let components = cfg.build().await.expect("Failed to build components");
+    if let Some(license) = &components.license {
+        info!("License Information: {}", license);
+    } else {
+        info!(
+            "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
+            git_ref
+        );
+    }
 
     let scheme = if cfg.cert_path.is_empty() {
         "http"

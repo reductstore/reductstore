@@ -25,7 +25,7 @@ pub struct Storage {
 
 impl Storage {
     /// Create a new Storage
-    pub(crate) fn new(data_path: PathBuf, license: Option<License>) -> Storage {
+    pub(crate) fn new(data_path: PathBuf) -> Storage {
         if !data_path.exists() {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
@@ -267,7 +267,7 @@ mod tests {
                 .unwrap();
         }
 
-        let storage = Storage::new(storage.data_path, None);
+        let storage = Storage::new(storage.data_path);
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
@@ -377,7 +377,7 @@ mod tests {
         let result = storage.remove_bucket("test");
         assert_eq!(result, Ok(()));
 
-        let storage = Storage::new(path, None);
+        let storage = Storage::new(path);
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
@@ -417,6 +417,6 @@ mod tests {
 
     #[fixture]
     fn storage(path: PathBuf) -> Storage {
-        Storage::new(path, None)
+        Storage::new(path)
     }
 }
