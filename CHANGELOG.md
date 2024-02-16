@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- RS-156: Support for commercial license, [PR-400](https://github.com/reductstore/reductstore/pull/400)
+
 ### Changed
 
 - reduct-rs: Move `reduct-rs` to separated repository, [PR-395](https://github.com/reductstore/reductstore/pull/395)
