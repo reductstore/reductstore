@@ -114,6 +114,7 @@ jobs:
       matrix:
         token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
+        license_path: [ "", "/misc/license.lic" ]
         include:
           - cert_path: "/misc/certificate.crt"
             url: https://127.0.0.1:8383
@@ -131,11 +132,17 @@ jobs:
           docker load --input /tmp/image.tar
           docker image ls -a
       - name: Run Database
-        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}} --env RS_CERT_PATH=${{matrix.cert_path}} --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
+        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}
+          --env RS_CERT_PATH=${{matrix.cert_path}}
+          --env RS_LICENSE_PATH=${{matrix.license_path}}
+          --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
       - name: Build API tests
         run: docker build -t api_tests ./api_tests
       - name: Run API tests
-        run: docker run --network=host --env API_TOKEN=${{matrix.token}} --env STORAGE_URL=${{matrix.url}} api_tests
+        run: docker run --network=host
+          --env API_TOKEN=${{matrix.token}}
+          --env LICENSE_PATH=${{matrix.license_path}}
+          --env STORAGE_URL=${{matrix.url}} api_tests
 
   build_snap:
     runs-on: ubuntu-latest

@@ -34,16 +34,26 @@ async fn main() {
         format!("v{}", version)
     };
 
-    info!(
-        "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
-        git_ref
-    );
-
     let cfg = Cfg::from_env(StdEnvGetter::default());
     Logger::init(&cfg.log_level);
     info!("Configuration: \n {}", cfg);
 
     let components = cfg.build().await.expect("Failed to build components");
+    let info = components
+        .storage
+        .read()
+        .await
+        .info()
+        .await
+        .expect("Failed to get server info");
+    if let Some(license) = &info.license {
+        info!("License Information: {}", license);
+    } else {
+        info!(
+            "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
+            git_ref
+        );
+    }
 
     let scheme = if cfg.cert_path.is_empty() {
         "http"
