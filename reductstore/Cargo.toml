@@ -59,6 +59,7 @@ async-trait = "0.1.77"
 url = { version = "2.5.0", features = ["serde"] }
 jsonwebtoken = "9.2.0"
 base64 = "0.21.7"
+ring = "0.17.7"
 
 [build-dependencies]
 prost-build = "0.12.3"

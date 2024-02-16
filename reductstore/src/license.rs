@@ -4,6 +4,7 @@
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use hex::ToHex;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use log::error;
 use serde_json::de;
@@ -20,14 +21,16 @@ pub struct License {
     plan: String,
     device_number: u32,
     disk_quota: i32,
+    #[serde(default)]
+    fingerprint: String,
 }
 
 impl Display for License {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "\n\tLicensee: {}\n\tInvoice: {}\n\tExpiry Date: {}\n\tPlan: {}\n\tNumber of Devices: {}\n\tDisk Quota: {} TB",
-            self.licensee, self.invoice, self.expiry_date, self.plan, self.device_number, self.disk_quota
+            "\n\tLicensee: {}\n\tInvoice: {}\n\tExpiry Date: {}\n\tPlan: {}\n\tNumber of Devices: {}\n\tDisk Quota: {} TB,\n\tFingerprint: {}",
+            self.licensee, self.invoice, self.expiry_date, self.plan, self.device_number, self.disk_quota, self.fingerprint
         )
     }
 }
@@ -73,7 +76,10 @@ pub(crate) fn parse_license(license_path: Option<String>) -> Option<License> {
         return None;
     }
 
-    Some(license.unwrap().claims)
+    let mut license = license.unwrap().claims;
+    license.fingerprint =
+        ring::digest::digest(&ring::digest::SHA256, license_key.lic.as_bytes()).encode_hex();
+    Some(license)
 }
 
 #[cfg(test)]
@@ -83,7 +89,7 @@ mod tests {
     use std::fs;
     use std::io::Write;
     use std::path::PathBuf;
-    use tempfile::{tempdir, tempfile};
+    use tempfile::tempdir;
 
     #[rstest]
     fn test_parse_license(license_file: PathBuf) {
@@ -95,6 +101,10 @@ mod tests {
         assert_eq!(license.plan, "STANDARD");
         assert_eq!(license.device_number, 1);
         assert_eq!(license.disk_quota, 5);
+        assert_eq!(
+            license.fingerprint,
+            "eacc62490ac0968adacf0f8860032942d63f4c2443519336ae1ee5ae8e31708c"
+        );
     }
 
     #[rstest]

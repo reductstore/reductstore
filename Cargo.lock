@@ -1730,6 +1730,7 @@ dependencies = [
  "reduct-rs",
  "regex",
  "reqwest",
+ "ring",
  "rstest",
  "rustls 0.22.2",
  "serde",
