@@ -7,33 +7,10 @@ use chrono::{DateTime, Utc};
 use hex::ToHex;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use log::error;
+use reduct_base::msg::server_api::License;
 use serde_json::de;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
-
-/// A license for ReductStore.
-///
-#[derive(Debug, serde::Deserialize)]
-pub struct License {
-    licensee: String,
-    invoice: String,
-    expiry_date: DateTime<Utc>,
-    plan: String,
-    device_number: u32,
-    disk_quota: i32,
-    #[serde(default)]
-    fingerprint: String,
-}
-
-impl Display for License {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "\n\tLicensee: {}\n\tInvoice: {}\n\tExpiry Date: {}\n\tPlan: {}\n\tNumber of Devices: {}\n\tDisk Quota: {} TB,\n\tFingerprint: {}",
-            self.licensee, self.invoice, self.expiry_date, self.plan, self.device_number, self.disk_quota, self.fingerprint
-        )
-    }
-}
 
 #[derive(Debug, serde::Deserialize)]
 struct LicenseFile {

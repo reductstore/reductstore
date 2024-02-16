@@ -39,7 +39,14 @@ async fn main() {
     info!("Configuration: \n {}", cfg);
 
     let components = cfg.build().await.expect("Failed to build components");
-    if let Some(license) = &components.license {
+    let info = components
+        .storage
+        .read()
+        .await
+        .info()
+        .await
+        .expect("Failed to get server info");
+    if let Some(license) = &info.license {
         info!("License Information: {}", license);
     } else {
         info!(

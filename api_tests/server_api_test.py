@@ -26,6 +26,24 @@ def test__get_info(base_url, session):
     assert resp.headers["Content-Type"] == "application/json"
 
 
+@requires_env("LICENSE_PATH")
+def test__get_lic_info(base_url, session):
+    """Should provide information abount license"""
+    resp = session.get(f"{base_url}/info")
+
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert data["license"] == {
+        "device_number": 1,
+        "disk_quota": 0,
+        "expiry_date": "2035-01-01T00:00:00Z",
+        "fingerprint": "8ab3caf4c8b29236930ff297d374aaaa94cd98c7ae54568102b20c0b12b4bc5c",
+        "invoice": "xxxxxx",
+        "licensee": "ReductStore,LLC",
+        "plan": "UNLIMITED",
+    }
+
+
 @requires_env("API_TOKEN")
 def test__authorized_info(base_url, session, token_without_permissions):
     """Needs authenticated token /info with token"""

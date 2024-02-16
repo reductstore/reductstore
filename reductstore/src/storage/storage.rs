@@ -12,20 +12,20 @@ use std::time::Instant;
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
-use crate::license::License;
 use reduct_base::msg::bucket_api::BucketSettings;
-use reduct_base::msg::server_api::{BucketInfoList, Defaults, ServerInfo};
+use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 
 /// Storage is the main entry point for the storage service.
 pub struct Storage {
     data_path: PathBuf,
     start_time: Instant,
     buckets: BTreeMap<String, Bucket>,
+    license: Option<License>,
 }
 
 impl Storage {
     /// Create a new Storage
-    pub(crate) fn new(data_path: PathBuf) -> Storage {
+    pub(crate) fn new(data_path: PathBuf, license: Option<License>) -> Storage {
         if !data_path.exists() {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
@@ -47,6 +47,7 @@ impl Storage {
             data_path,
             start_time: Instant::now(),
             buckets,
+            license,
         }
     }
 
@@ -79,6 +80,7 @@ impl Storage {
             defaults: Defaults {
                 bucket: Bucket::defaults(),
             },
+            license: self.license.clone(),
         })
     }
 
@@ -216,6 +218,7 @@ mod tests {
                 defaults: Defaults {
                     bucket: Bucket::defaults(),
                 },
+                license: None,
             }
         );
     }
@@ -267,7 +270,7 @@ mod tests {
                 .unwrap();
         }
 
-        let storage = Storage::new(storage.data_path);
+        let storage = Storage::new(storage.data_path, None);
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
@@ -280,12 +283,30 @@ mod tests {
                 defaults: Defaults {
                     bucket: Bucket::defaults(),
                 },
+                license: None,
             }
         );
 
         let bucket = storage.get_bucket("test").unwrap();
         assert_eq!(bucket.name(), "test");
         assert_eq!(bucket.settings(), &bucket_settings);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_license_info(storage: Storage) {
+        let license = License {
+            licensee: "ReductStore".to_string(),
+            invoice: "2021-0001".to_string(),
+            expiry_date: chrono::Utc::now(),
+            plan: "Enterprise".to_string(),
+            device_number: 100,
+            disk_quota: 100,
+            fingerprint: "fingerprint".to_string(),
+        };
+
+        let storage = Storage::new(storage.data_path, Some(license.clone()));
+        assert_eq!(storage.info().await.unwrap().license, Some(license));
     }
 
     #[rstest]
@@ -377,7 +398,7 @@ mod tests {
         let result = storage.remove_bucket("test");
         assert_eq!(result, Ok(()));
 
-        let storage = Storage::new(path);
+        let storage = Storage::new(path, None);
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
@@ -417,6 +438,6 @@ mod tests {
 
     #[fixture]
     fn storage(path: PathBuf) -> Storage {
-        Storage::new(path)
+        Storage::new(path, None)
     }
 }

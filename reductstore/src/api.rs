@@ -26,7 +26,6 @@ use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
 use crate::api::replication::create_replication_api_routes;
-use crate::license::License;
 use crate::replication::ManageReplications;
 pub use reduct_base::error::ErrorCode;
 
@@ -45,7 +44,6 @@ pub struct Components {
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub base_path: String,
-    pub license: Option<License>,
 }
 
 #[derive(Twin, PartialEq)]
@@ -156,7 +154,7 @@ mod tests {
     pub(crate) async fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut storage = Storage::new(data_path.clone());
+        let mut storage = Storage::new(data_path.clone(), None);
         let mut token_repo = create_token_repository(data_path.clone(), "init-token");
 
         storage
@@ -195,7 +193,6 @@ mod tests {
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
             replication_repo: RwLock::new(create_replication_engine(storage).await),
-            license: None,
         };
 
         Arc::new(components)
