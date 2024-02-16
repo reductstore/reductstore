@@ -3,14 +3,12 @@
 
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
-use chrono::{DateTime, Utc};
+
 use hex::ToHex;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use log::error;
 use reduct_base::msg::server_api::License;
 use serde_json::de;
-use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
 
 #[derive(Debug, serde::Deserialize)]
 struct LicenseFile {
@@ -64,7 +62,7 @@ mod tests {
     use super::*;
     use rstest::{fixture, rstest};
     use std::fs;
-    use std::io::Write;
+
     use std::path::PathBuf;
     use tempfile::tempdir;
 
