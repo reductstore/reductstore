@@ -55,7 +55,7 @@ pub(crate) fn parse_license(license_path: Option<String>) -> Option<License> {
 
     let mut license = license.unwrap().claims;
     license.fingerprint =
-        ring::digest::digest(&ring::digest::SHA256, license_key.lic.as_bytes()).encode_hex();
+        ring::digest::digest(&ring::digest::SHA256, license_key.key.as_bytes()).encode_hex();
     Some(license)
 }
 
@@ -80,7 +80,7 @@ mod tests {
         assert_eq!(license.disk_quota, 5);
         assert_eq!(
             license.fingerprint,
-            "eacc62490ac0968adacf0f8860032942d63f4c2443519336ae1ee5ae8e31708c"
+            "ca0a4a6aafc2500713e5c63010c857eb694f6dd3152082e0ba92ae8583732fc1"
         );
     }
 

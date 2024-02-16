@@ -37,7 +37,7 @@ def test__get_lic_info(base_url, session):
         "device_number": 1,
         "disk_quota": 0,
         "expiry_date": "2035-01-01T00:00:00Z",
-        "fingerprint": "8ab3caf4c8b29236930ff297d374aaaa94cd98c7ae54568102b20c0b12b4bc5c",
+        "fingerprint": "df92c95a7c9b56c2af99b290c39d8471c3e6cbf9dc33dc9bdb4116b98d465cc9",
         "invoice": "xxxxxx",
         "licensee": "ReductStore,LLC",
         "plan": "UNLIMITED",
