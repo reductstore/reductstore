@@ -261,7 +261,6 @@ mod tests {
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
-    use axum::body::Full;
     use axum::extract::FromRequest;
     use axum::http::Request;
     use rstest::{fixture, rstest};
@@ -272,7 +271,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         headers.insert("content-length", "10".parse().unwrap());
         headers.insert("x-reduct-time-xxx", "10".parse().unwrap());
@@ -302,7 +301,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         headers.insert("content-length", "10".parse().unwrap());
         headers.insert("x-reduct-time-1", "".parse().unwrap());
@@ -329,7 +328,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         let components = components.await;
         headers.insert("content-length", "48".parse().unwrap());
@@ -404,7 +403,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         let components = components.await;
         {
@@ -462,12 +461,7 @@ mod tests {
     }
 
     #[fixture]
-    async fn body_stream() -> BodyStream {
-        let body = Full::new(Bytes::from(
-            "1234567890abcdef1234567890abcdef1234567890abcdef",
-        ));
-        let request = Request::builder().body(body).unwrap();
-        let stream = BodyStream::from_request(request, &()).await.unwrap();
-        stream
+    async fn body_stream() -> Body {
+        Body::from("1234567890abcdef1234567890abcdef1234567890abcdef")
     }
 }

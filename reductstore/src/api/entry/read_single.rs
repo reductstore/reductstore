@@ -138,7 +138,7 @@ async fn fetch_and_response_single_record(
 mod tests {
     use super::*;
 
-    use axum::body::HttpBody;
+    use axum::body::{to_bytes, HttpBody};
 
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!(headers["content-length"], "6");
 
         assert_eq!(
-            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             Bytes::from(body)
         );
     }
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(headers["content-length"], "6");
 
         assert_eq!(
-            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             Bytes::from(body)
         );
     }

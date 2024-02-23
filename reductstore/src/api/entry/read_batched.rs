@@ -166,7 +166,7 @@ async fn fetch_and_response_batched_records(
                 return Poll::Ready(None);
             }
 
-            loop {
+            while !self.readers.is_empty() {
                 if let Poll::Ready(data) = self.readers[0].rx().poll_recv(_cx) {
                     match data {
                         Some(Ok(chunk)) => {
@@ -181,6 +181,7 @@ async fn fetch_and_response_batched_records(
                     return Poll::Pending;
                 }
             }
+            Poll::Ready(None)
         }
         fn size_hint(&self) -> (usize, Option<usize>) {
             (0, None)
@@ -199,8 +200,10 @@ async fn fetch_and_response_batched_records(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ops::Deref;
 
-    use axum::body::HttpBody;
+    use axum::body::{to_bytes, HttpBody};
+    use futures_util::StreamExt;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
@@ -252,7 +255,7 @@ mod tests {
         assert_eq!(headers["x-reduct-last"], "true");
 
         assert_eq!(
-            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             Bytes::from(body)
         );
     }

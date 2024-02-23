@@ -79,7 +79,6 @@ mod tests {
     use super::*;
 
     use axum::http::Method;
-    use hyper::Body;
 
     #[tokio::test]
     async fn test_bucket_settings_quota_parsing() {
