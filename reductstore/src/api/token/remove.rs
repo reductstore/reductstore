@@ -1,11 +1,11 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
-use axum::headers::HeaderMap;
+use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // DELETE /tokens/:name

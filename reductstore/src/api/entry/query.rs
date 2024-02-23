@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::QueryInfoAxum;
@@ -8,7 +8,7 @@ use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::query::base::QueryOptions;
 
 use axum::extract::{Path, Query, State};
-use axum::headers::HeaderMap;
+use axum_extra::headers::HeaderMap;
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
 use std::collections::HashMap;

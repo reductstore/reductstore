@@ -1,13 +1,14 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use axum::extract::{BodyStream, Path, State};
-use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
+use axum::body::{Body, BodyDataStream};
+use axum::extract::{Path, State};
 use axum::http::HeaderName;
 use axum::response::IntoResponse;
+use axum_extra::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures_util::StreamExt;
 
@@ -27,7 +28,7 @@ pub(crate) async fn write_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
-    mut stream: BodyStream,
+    mut body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     check_permissions(
@@ -42,6 +43,7 @@ pub(crate) async fn write_batched_records(
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_name(&headers);
     let mut error_map = BTreeMap::new();
+    let mut stream = body.into_data_stream();
 
     let process_stream = async {
         let mut timed_headers: Vec<(u64, RecordHeader)> = Vec::new();
@@ -82,6 +84,7 @@ pub(crate) async fn write_batched_records(
 
         let mut index = 0;
         let mut written = 0;
+
         while let Some(chunk) = stream.next().await {
             let mut chunk = chunk?;
 

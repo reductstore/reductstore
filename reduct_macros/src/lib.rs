@@ -22,8 +22,8 @@ fn impl_into_response(ast: &syn::DeriveInput) -> TokenStream {
     let gen = quote! {
         impl axum::response::IntoResponse for #name {
             fn into_response(self) -> axum::response::Response {
-                let mut headers = axum::headers::HeaderMap::new();
-                headers.typed_insert(axum::headers::ContentType::json());
+                let mut headers = axum_extra::headers::HeaderMap::new();
+                headers.typed_insert(axum_extra::headers::ContentType::json());
                 (
                     hyper::StatusCode::OK,
                     headers,

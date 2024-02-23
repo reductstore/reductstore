@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
@@ -7,10 +7,10 @@ use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::{Bucket, RecordReader};
 
-use axum::body::StreamBody;
+use axum::body::{Body, BodyDataStream};
 use axum::extract::{Path, Query, State};
-use axum::headers::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::IntoResponse;
+use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
@@ -189,7 +189,7 @@ async fn fetch_and_response_batched_records(
 
     Ok((
         headers,
-        StreamBody::new(ReadersWrapper {
+        Body::from_stream(ReadersWrapper {
             readers,
             empty_body,
         }),

@@ -6,7 +6,7 @@ use crate::api::token::{PermissionsAxum, TokenCreateResponseAxum};
 use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
-use axum::headers::HeaderMap;
+use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // POST /tokens/:token_name

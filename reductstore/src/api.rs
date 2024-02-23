@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 //
 
@@ -143,8 +143,8 @@ mod tests {
     use crate::auth::token_repository::create_token_repository;
     use crate::replication::create_replication_engine;
     use axum::extract::{BodyStream, FromRequest, Path};
-    use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
     use axum::http::Request;
+    use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::Permissions;

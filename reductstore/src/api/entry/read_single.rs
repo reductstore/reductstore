@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::{check_and_extract_ts_or_query_id, MethodExtractor};
@@ -8,10 +8,10 @@ use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::{Bucket, RecordReader};
 
-use axum::body::StreamBody;
+use axum::body::{Body, BodyDataStream};
 use axum::extract::{Path, Query, State};
-use axum::headers::{HeaderMap, HeaderName};
 use axum::response::IntoResponse;
+use axum_extra::headers::{HeaderMap, HeaderName};
 use bytes::Bytes;
 use futures_util::Stream;
 
@@ -130,7 +130,7 @@ async fn fetch_and_response_single_record(
 
     Ok((
         headers,
-        StreamBody::new(ReaderWrapper { reader, empty_body }),
+        Body::from_stream(ReaderWrapper { reader, empty_body }),
     ))
 }
 

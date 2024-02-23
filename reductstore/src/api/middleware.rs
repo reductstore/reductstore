@@ -1,6 +1,7 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
+use axum::body::Body;
 use axum::http::{HeaderMap, Request};
 
 use axum::middleware::Next;
@@ -10,9 +11,9 @@ use log::{debug, error};
 use crate::api::{Components, HttpError};
 use crate::auth::policy::Policy;
 
-pub async fn default_headers<B>(
-    request: Request<B>,
-    next: Next<B>,
+pub async fn default_headers(
+    request: Request<Body>,
+    next: Next,
 ) -> Result<impl IntoResponse, HttpError> {
     let mut response = next.run(request).await;
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -29,9 +30,9 @@ pub async fn default_headers<B>(
     Ok(response)
 }
 
-pub async fn print_statuses<B>(
-    request: Request<B>,
-    next: Next<B>,
+pub async fn print_statuses(
+    request: Request<Body>,
+    next: Next,
 ) -> Result<impl IntoResponse, HttpError> {
     let msg = format!(
         "{} {}",
