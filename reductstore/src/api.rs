@@ -142,8 +142,8 @@ mod tests {
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
     use crate::replication::create_replication_engine;
-    use axum::extract::{FromRequest, Path};
-    use axum::http::Request;
+    use axum::extract::Path;
+
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;

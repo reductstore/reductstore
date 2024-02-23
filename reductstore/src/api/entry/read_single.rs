@@ -8,7 +8,7 @@ use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::{Bucket, RecordReader};
 
-use axum::body::{Body, BodyDataStream};
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum_extra::headers::{HeaderMap, HeaderName};
@@ -138,7 +138,7 @@ async fn fetch_and_response_single_record(
 mod tests {
     use super::*;
 
-    use axum::body::{to_bytes, HttpBody};
+    use axum::body::to_bytes;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
@@ -158,7 +158,7 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
-        let mut response = read_single_record(
+        let response = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -208,7 +208,7 @@ mod tests {
                 .unwrap()
         };
 
-        let mut response = read_single_record(
+        let response = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(

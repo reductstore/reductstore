@@ -4,7 +4,7 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use axum::body::{Body, BodyDataStream};
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::{Expect, Header, HeaderMap};
 
@@ -24,7 +24,7 @@ pub(crate) async fn write_record(
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
-    mut body: Body,
+    body: Body,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
     check_permissions(

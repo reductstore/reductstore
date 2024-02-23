@@ -7,7 +7,7 @@ use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::{Bucket, RecordReader};
 
-use axum::body::{Body, BodyDataStream};
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
@@ -200,10 +200,8 @@ async fn fetch_and_response_batched_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ops::Deref;
 
-    use axum::body::{to_bytes, HttpBody};
-    use futures_util::StreamExt;
+    use axum::body::to_bytes;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
@@ -234,7 +232,7 @@ mod tests {
                 .unwrap()
         };
 
-        let mut response = read_batched_records(
+        let response = read_batched_records(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(

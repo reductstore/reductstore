@@ -4,7 +4,7 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use axum::body::{Body, BodyDataStream};
+use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::HeaderName;
 use axum::response::IntoResponse;
@@ -28,7 +28,7 @@ pub(crate) async fn write_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
-    mut body: Body,
+    body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     check_permissions(
@@ -261,8 +261,7 @@ mod tests {
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
-    use axum::extract::FromRequest;
-    use axum::http::Request;
+
     use rstest::{fixture, rstest};
 
     #[rstest]
