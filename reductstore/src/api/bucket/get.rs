@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::bucket::FullBucketInfoAxum;
@@ -7,7 +7,7 @@ use crate::api::Components;
 use crate::api::HttpError;
 use crate::auth::policy::AuthenticatedPolicy;
 use axum::extract::{Path, State};
-use axum::headers::HeaderMap;
+use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /b/:bucket_name

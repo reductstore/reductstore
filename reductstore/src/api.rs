@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 //
 
@@ -136,15 +136,15 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Empty;
+    use axum::body::Body;
     use std::collections::HashMap;
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
     use crate::replication::create_replication_engine;
-    use axum::extract::{BodyStream, FromRequest, Path};
-    use axum::headers::{Authorization, HeaderMap, HeaderMapExt};
-    use axum::http::Request;
+    use axum::extract::Path;
+
+    use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::Permissions;
@@ -215,9 +215,7 @@ mod tests {
     }
 
     #[fixture]
-    pub async fn empty_body() -> BodyStream {
-        let emtpy_stream: Empty<Bytes> = Empty::new();
-        let request = Request::builder().body(emtpy_stream).unwrap();
-        BodyStream::from_request(request, &()).await.unwrap()
+    pub async fn empty_body() -> Body {
+        Body::empty()
     }
 }

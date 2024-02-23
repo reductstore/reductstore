@@ -1,11 +1,12 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use axum::extract::{BodyStream, Path, Query, State};
-use axum::headers::{Expect, Header, HeaderMap};
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
+use axum_extra::headers::{Expect, Header, HeaderMap};
 
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
@@ -23,7 +24,7 @@ pub(crate) async fn write_record(
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
-    mut stream: BodyStream,
+    body: Body,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
     check_permissions(
@@ -34,6 +35,8 @@ pub(crate) async fn write_record(
         },
     )
     .await?;
+
+    let mut stream = body.into_data_stream();
 
     let check_request_and_get_sender = async {
         if !params.contains_key("ts") {
@@ -169,7 +172,7 @@ mod tests {
 
     use crate::api::tests::{components, empty_body, path_to_entry_1};
     use crate::storage::proto::record::Label;
-    use axum::headers::{Authorization, HeaderMapExt};
+    use axum_extra::headers::{Authorization, HeaderMapExt};
     use rstest::*;
 
     #[rstest]
@@ -178,7 +181,7 @@ mod tests {
         #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] empty_body: BodyStream,
+        #[future] empty_body: Body,
     ) {
         let components = components.await;
         write_record(
@@ -218,7 +221,7 @@ mod tests {
     async fn test_write_bucket_not_found(
         #[future] components: Arc<Components>,
         headers: HeaderMap,
-        #[future] empty_body: BodyStream,
+        #[future] empty_body: Body,
     ) {
         let components = components.await;
         let path = Path(HashMap::from_iter(vec![
@@ -251,7 +254,7 @@ mod tests {
         #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] empty_body: BodyStream,
+        #[future] empty_body: Body,
     ) {
         let components = components.await;
         let err = write_record(

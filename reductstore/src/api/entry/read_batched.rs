@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
@@ -7,10 +7,10 @@ use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::{Bucket, RecordReader};
 
-use axum::body::StreamBody;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::headers::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::IntoResponse;
+use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
@@ -166,7 +166,7 @@ async fn fetch_and_response_batched_records(
                 return Poll::Ready(None);
             }
 
-            loop {
+            while !self.readers.is_empty() {
                 if let Poll::Ready(data) = self.readers[0].rx().poll_recv(_cx) {
                     match data {
                         Some(Ok(chunk)) => {
@@ -181,6 +181,7 @@ async fn fetch_and_response_batched_records(
                     return Poll::Pending;
                 }
             }
+            Poll::Ready(None)
         }
         fn size_hint(&self) -> (usize, Option<usize>) {
             (0, None)
@@ -189,7 +190,7 @@ async fn fetch_and_response_batched_records(
 
     Ok((
         headers,
-        StreamBody::new(ReadersWrapper {
+        Body::from_stream(ReadersWrapper {
             readers,
             empty_body,
         }),
@@ -200,7 +201,7 @@ async fn fetch_and_response_batched_records(
 mod tests {
     use super::*;
 
-    use axum::body::HttpBody;
+    use axum::body::to_bytes;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
@@ -231,7 +232,7 @@ mod tests {
                 .unwrap()
         };
 
-        let mut response = read_batched_records(
+        let response = read_batched_records(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -252,7 +253,7 @@ mod tests {
         assert_eq!(headers["x-reduct-last"], "true");
 
         assert_eq!(
-            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             Bytes::from(body)
         );
     }

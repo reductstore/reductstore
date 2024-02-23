@@ -6,7 +6,7 @@ use crate::api::replication::ReplicationListAxum;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::State;
-use axum::headers::HeaderMap;
+use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /api/v1/replications/

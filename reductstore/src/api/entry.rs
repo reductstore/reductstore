@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 mod query;
@@ -20,8 +20,9 @@ use crate::storage::storage::Storage;
 use axum::async_trait;
 use axum::extract::FromRequest;
 
-use axum::headers::HeaderMapExt;
+use axum_extra::headers::HeaderMapExt;
 
+use axum::body::Body;
 use axum::http::Request;
 use axum::routing::{delete, get, head, post};
 use reduct_base::error::ErrorCode;
@@ -48,14 +49,13 @@ impl MethodExtractor {
 }
 
 #[async_trait]
-impl<S, B> FromRequest<S, B> for MethodExtractor
+impl<S> FromRequest<S> for MethodExtractor
 where
     S: Send + Sync + 'static,
-    B: Send + Sync + 'static,
 {
     type Rejection = HttpError;
 
-    async fn from_request(req: Request<B>, _: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request<Body>, _: &S) -> Result<Self, Self::Rejection> {
         let method = req.method().to_string();
         Ok(MethodExtractor { name: method })
     }

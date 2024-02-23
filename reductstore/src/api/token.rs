@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 mod create;
@@ -12,8 +12,9 @@ use axum::extract::FromRequest;
 use axum::http::Request;
 use bytes::Bytes;
 
-use axum::headers::HeaderMapExt;
+use axum_extra::headers::HeaderMapExt;
 
+use axum::body::Body;
 use axum::routing::{delete, get, post};
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
@@ -40,15 +41,14 @@ pub struct TokenListAxum(TokenList);
 pub struct PermissionsAxum(Permissions);
 
 #[async_trait]
-impl<S, B> FromRequest<S, B> for PermissionsAxum
+impl<S> FromRequest<S> for PermissionsAxum
 where
-    Bytes: FromRequest<S, B>,
-    B: Send + 'static,
+    Bytes: FromRequest<S>,
     S: Send + Sync,
 {
     type Rejection = HttpError;
 
-    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         let bytes = Bytes::from_request(req, state)
             .await
             .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid body"))?;

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - reduct-rs: Move `reduct-rs` to separated repository, [PR-395](https://github.com/reductstore/reductstore/pull/395)
+- RS-95: Update `axum` up to 0.7, [PR-401](https://github.com/reductstore/reductstore/pull/401)
 
 ## [1.8.2] - 2024-02-10
 
@@ -618,7 +619,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/reductstore/reductstore/compare/v1.8.2...HEAD
 
-[1.8.1]: https://github.com/reductstore/reductstore/compare/v1.8.1...v1.8.2
+[1.8.2]: https://github.com/reductstore/reductstore/compare/v1.8.1...v1.8.2
 
 [1.8.1]: https://github.com/reductstore/reductstore/compare/v1.8.0...v1.8.1
 

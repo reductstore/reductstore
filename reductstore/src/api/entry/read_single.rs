@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::{check_and_extract_ts_or_query_id, MethodExtractor};
@@ -8,10 +8,10 @@ use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::{Bucket, RecordReader};
 
-use axum::body::StreamBody;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::headers::{HeaderMap, HeaderName};
 use axum::response::IntoResponse;
+use axum_extra::headers::{HeaderMap, HeaderName};
 use bytes::Bytes;
 use futures_util::Stream;
 
@@ -130,7 +130,7 @@ async fn fetch_and_response_single_record(
 
     Ok((
         headers,
-        StreamBody::new(ReaderWrapper { reader, empty_body }),
+        Body::from_stream(ReaderWrapper { reader, empty_body }),
     ))
 }
 
@@ -138,7 +138,7 @@ async fn fetch_and_response_single_record(
 mod tests {
     use super::*;
 
-    use axum::body::HttpBody;
+    use axum::body::to_bytes;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::query::base::QueryOptions;
@@ -158,7 +158,7 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
-        let mut response = read_single_record(
+        let response = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!(headers["content-length"], "6");
 
         assert_eq!(
-            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             Bytes::from(body)
         );
     }
@@ -208,7 +208,7 @@ mod tests {
                 .unwrap()
         };
 
-        let mut response = read_single_record(
+        let response = read_single_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(headers["content-length"], "6");
 
         assert_eq!(
-            response.data().await.unwrap_or(Ok(Bytes::new())).unwrap(),
+            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             Bytes::from(body)
         );
     }

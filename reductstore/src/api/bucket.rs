@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 mod create;
@@ -10,11 +10,12 @@ mod update;
 use std::sync::Arc;
 
 use axum::async_trait;
+use axum::body::Body;
 use axum::extract::FromRequest;
-use axum::headers::HeaderMapExt;
 use axum::http::Request;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, head, post, put};
+use axum_extra::headers::HeaderMapExt;
 use bytes::Bytes;
 
 use crate::api::bucket::create::create_bucket;
@@ -42,15 +43,14 @@ impl Default for BucketSettingsAxum {
 pub struct FullBucketInfoAxum(FullBucketInfo);
 
 #[async_trait]
-impl<S, B> FromRequest<S, B> for BucketSettingsAxum
+impl<S> FromRequest<S> for BucketSettingsAxum
 where
-    Bytes: FromRequest<S, B>,
-    B: Send + 'static,
+    Bytes: FromRequest<S>,
     S: Send + Sync,
 {
     type Rejection = Response;
 
-    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         let body = Bytes::from_request(req, state)
             .await
             .map_err(IntoResponse::into_response)?;
@@ -79,7 +79,6 @@ mod tests {
     use super::*;
 
     use axum::http::Method;
-    use hyper::Body;
 
     #[tokio::test]
     async fn test_bucket_settings_quota_parsing() {

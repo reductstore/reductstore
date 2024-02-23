@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 //
 
@@ -6,12 +6,12 @@ use crate::api::Components;
 use crate::api::HttpError;
 use axum::extract::State;
 
-use axum::headers::HeaderMap;
+use axum::body::Body;
 use axum::http::header::{CONTENT_TYPE, LOCATION};
 use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::IntoResponse;
+use axum_extra::headers::HeaderMap;
 use bytes::Bytes;
-use hyper::Body;
 use log::debug;
 use mime_guess::mime;
 use reduct_base::error::ErrorCode;

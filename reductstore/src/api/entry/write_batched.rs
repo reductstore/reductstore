@@ -1,13 +1,14 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use axum::extract::{BodyStream, Path, State};
-use axum::headers::{Expect, Header, HeaderMap, HeaderValue};
+use axum::body::Body;
+use axum::extract::{Path, State};
 use axum::http::HeaderName;
 use axum::response::IntoResponse;
+use axum_extra::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures_util::StreamExt;
 
@@ -27,7 +28,7 @@ pub(crate) async fn write_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
-    mut stream: BodyStream,
+    body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     check_permissions(
@@ -42,6 +43,7 @@ pub(crate) async fn write_batched_records(
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_name(&headers);
     let mut error_map = BTreeMap::new();
+    let mut stream = body.into_data_stream();
 
     let process_stream = async {
         let mut timed_headers: Vec<(u64, RecordHeader)> = Vec::new();
@@ -82,6 +84,7 @@ pub(crate) async fn write_batched_records(
 
         let mut index = 0;
         let mut written = 0;
+
         while let Some(chunk) = stream.next().await {
             let mut chunk = chunk?;
 
@@ -258,9 +261,7 @@ mod tests {
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
-    use axum::body::Full;
-    use axum::extract::FromRequest;
-    use axum::http::Request;
+
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -269,7 +270,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         headers.insert("content-length", "10".parse().unwrap());
         headers.insert("x-reduct-time-xxx", "10".parse().unwrap());
@@ -299,7 +300,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         headers.insert("content-length", "10".parse().unwrap());
         headers.insert("x-reduct-time-1", "".parse().unwrap());
@@ -326,7 +327,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         let components = components.await;
         headers.insert("content-length", "48".parse().unwrap());
@@ -401,7 +402,7 @@ mod tests {
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: BodyStream,
+        #[future] body_stream: Body,
     ) {
         let components = components.await;
         {
@@ -459,12 +460,7 @@ mod tests {
     }
 
     #[fixture]
-    async fn body_stream() -> BodyStream {
-        let body = Full::new(Bytes::from(
-            "1234567890abcdef1234567890abcdef1234567890abcdef",
-        ));
-        let request = Request::builder().body(body).unwrap();
-        let stream = BodyStream::from_request(request, &()).await.unwrap();
-        stream
+    async fn body_stream() -> Body {
+        Body::from("1234567890abcdef1234567890abcdef1234567890abcdef")
     }
 }

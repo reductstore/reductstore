@@ -7,9 +7,9 @@ mod list;
 use crate::api::token::me::me;
 use crate::api::Components;
 
-use axum::headers::HeaderMapExt;
 use axum::http::StatusCode;
 use axum::routing::{get, head};
+use axum_extra::headers::HeaderMapExt;
 use reduct_base::msg::server_api::{BucketInfoList, ServerInfo};
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;

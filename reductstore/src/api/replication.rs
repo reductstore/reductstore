@@ -7,7 +7,7 @@ mod remove;
 mod update;
 
 use crate::api::{Components, HttpError};
-use axum::headers::HeaderMapExt;
+use axum_extra::headers::HeaderMapExt;
 
 use crate::api::replication::create::create_replication;
 use crate::api::replication::get::get_replication;
@@ -15,6 +15,7 @@ use crate::api::replication::list::list_replications;
 use crate::api::replication::remove::remove_replication;
 use crate::api::replication::update::update_replication;
 use async_trait::async_trait;
+use axum::body::Body;
 use axum::extract::FromRequest;
 use axum::http::Request;
 use axum::routing::{delete, get, post, put};
@@ -29,15 +30,14 @@ use std::sync::Arc;
 pub struct ReplicationSettingsAxum(ReplicationSettings);
 
 #[async_trait]
-impl<S, B> FromRequest<S, B> for ReplicationSettingsAxum
+impl<S> FromRequest<S> for ReplicationSettingsAxum
 where
-    Bytes: FromRequest<S, B>,
-    B: Send + 'static,
+    Bytes: FromRequest<S>,
     S: Send + Sync,
 {
     type Rejection = HttpError;
 
-    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         let bytes = Bytes::from_request(req, state).await.map_err(|_| {
             HttpError::new(
                 reduct_base::error::ErrorCode::UnprocessableEntity,
