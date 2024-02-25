@@ -530,10 +530,11 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
+    #[tokio::test]
+    async fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
         assert_eq!(bucket.settings(), &settings);
 
-        let bucket = Bucket::restore(bucket.path.clone()).unwrap();
+        let bucket = Bucket::restore(bucket.path.clone()).await.unwrap();
         assert_eq!(bucket.name(), "test");
         assert_eq!(bucket.settings(), &settings);
     }

@@ -117,7 +117,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
     async fn provision_storage(&self) -> Storage {
         let license = parse_license(self.license_path.clone());
-        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()), license).await;
+        let mut storage = Storage::load(PathBuf::from(self.data_path.clone()), license).await;
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {

@@ -285,8 +285,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn create_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+    async fn create_replication(
+        #[future] storage: Arc<RwLock<Storage>>,
+        settings: ReplicationSettings,
+    ) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         repo.create_replication("test", settings.clone())
             .await
             .unwrap();
@@ -304,10 +307,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn create_replication_with_same_name(
-        storage: Arc<RwLock<Storage>>,
+        #[future] storage: Arc<RwLock<Storage>>,
         settings: ReplicationSettings,
     ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         repo.create_replication("test", settings.clone())
             .await
             .unwrap();
@@ -322,10 +325,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn create_replication_with_invalid_url(
-        storage: Arc<RwLock<Storage>>,
+        #[future] storage: Arc<RwLock<Storage>>,
         settings: ReplicationSettings,
     ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         let mut settings = settings;
         settings.dst_host = "invalid_url".to_string();
 
@@ -341,9 +344,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn create_and_load_replications(
-        storage: Arc<RwLock<Storage>>,
+        #[future] storage: Arc<RwLock<Storage>>,
         settings: ReplicationSettings,
     ) {
+        let storage = storage.await;
         let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
         repo.create_replication("test", settings.clone())
             .await
@@ -360,8 +364,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+    async fn test_update_replication(
+        #[future] storage: Arc<RwLock<Storage>>,
+        settings: ReplicationSettings,
+    ) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         repo.create_replication("test", settings.clone())
             .await
             .unwrap();
@@ -379,10 +386,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_provisioned_replication(
-        storage: Arc<RwLock<Storage>>,
+        #[future] storage: Arc<RwLock<Storage>>,
         settings: ReplicationSettings,
     ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         repo.create_replication("test", settings.clone())
             .await
             .unwrap();
@@ -401,7 +408,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
+    async fn test_remove_replication(
+        #[future] storage: Arc<RwLock<Storage>>,
+        settings: ReplicationSettings,
+    ) {
+        let storage = storage.await;
         let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
         repo.create_replication("test", settings.clone())
             .await
@@ -421,8 +432,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_non_existing_replication(storage: Arc<RwLock<Storage>>) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+    async fn test_remove_non_existing_replication(#[future] storage: Arc<RwLock<Storage>>) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         assert_eq!(
             repo.remove_replication("test-2"),
             Err(ReductError::not_found(
@@ -435,10 +446,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_provioned_replication(
-        storage: Arc<RwLock<Storage>>,
+        #[future] storage: Arc<RwLock<Storage>>,
         settings: ReplicationSettings,
     ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         repo.create_replication("test", settings.clone())
             .await
             .unwrap();
@@ -457,8 +468,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_replication(storage: Arc<RwLock<Storage>>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+    async fn test_get_replication(
+        #[future] storage: Arc<RwLock<Storage>>,
+        settings: ReplicationSettings,
+    ) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
         repo.create_replication("test", settings.clone())
             .await
             .unwrap();
@@ -496,9 +510,9 @@ mod tests {
     }
 
     #[fixture]
-    fn storage() -> Arc<RwLock<Storage>> {
+    async fn storage() -> Arc<RwLock<Storage>> {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let mut storage = Storage::new(tmp_dir.into_path(), None);
+        let mut storage = Storage::load(tmp_dir.into_path(), None).await;
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap();
