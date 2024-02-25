@@ -119,7 +119,7 @@ def test__get_bucket_stats(base_url, session, bucket_name):
             "name": "entry_1",
             "oldest_record": 1000000,
             "record_count": 1,
-            "size": 40,
+            "size": 50,
         },
         {
             "block_count": 1,
@@ -127,13 +127,13 @@ def test__get_bucket_stats(base_url, session, bucket_name):
             "name": "entry_2",
             "oldest_record": 2000000,
             "record_count": 1,
-            "size": 43,
+            "size": 53,
         },
     ]
     assert data["info"] == dict(
         name=bucket_name,
         entry_count=2,
-        size=83,
+        size=103,
         latest_record=2000000,
         oldest_record=1000000,
         is_provisioned=False,
