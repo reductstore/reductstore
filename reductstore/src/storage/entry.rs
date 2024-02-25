@@ -96,7 +96,7 @@ impl Entry {
 
             // Migration for old blocks without fields to speed up the restore process
             // todo: remove this migration in the future rel 1.12
-            if block.records_count == 0 {
+            if block.record_count == 0 {
                 debug!("Record count is 0. Migrate the block");
                 let mut full_block = match Block::decode(Bytes::from(fs::read(path.clone())?)) {
                     Ok(block) => block,
@@ -105,10 +105,10 @@ impl Entry {
                     }
                 };
 
-                full_block.records_count = full_block.records.len() as u64;
+                full_block.record_count = full_block.records.len() as u64;
                 full_block.metadata_size = full_block.encoded_len() as u64;
 
-                block.records_count = full_block.records_count;
+                block.record_count = full_block.record_count;
                 block.metadata_size = full_block.metadata_size;
 
                 let mut file = fs::File::create(path.clone())?;
@@ -121,7 +121,7 @@ impl Entry {
                 remove_bad_block!("begin time mismatch");
             };
 
-            record_count += block.records_count as u64;
+            record_count += block.record_count as u64;
             size += block.size + block.metadata_size;
             block_index.insert(id);
         }
@@ -249,7 +249,7 @@ impl Entry {
 
         block.size += content_size as u64;
         block.records.push(record);
-        block.records_count = block.records.len() as u64;
+        block.record_count = block.records.len() as u64;
 
         // recalculate the metadata size
         if block.records.len() > 1 {
