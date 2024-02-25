@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::{
@@ -6,9 +6,10 @@ use crate::storage::block_manager::{
     DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::bucket::RecordReader;
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, Record};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, MinimalBlock, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
+use bytesize::ByteSize;
 use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
@@ -17,6 +18,7 @@ use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -62,6 +64,8 @@ impl Entry {
         let mut record_count = 0;
         let mut size = 0;
         let mut block_index = BTreeSet::new();
+        let start_time = std::time::Instant::now();
+
         for filein in fs::read_dir(path.clone())? {
             let file = filein?;
             let path = file.path();
@@ -83,27 +87,55 @@ impl Entry {
             }
 
             let buf = fs::read(path.clone())?;
-            let block = match Block::decode(Bytes::from(buf)) {
+            let mut block = match MinimalBlock::decode(Bytes::from(buf)) {
                 Ok(block) => block,
                 Err(err) => {
                     remove_bad_block!(err);
                 }
             };
 
-            let metadata_size = block.encoded_len() as u64;
+            // Migration for old blocks without fields to speed up the restore process
+            // todo: remove this migration in the future rel 1.12
+            if block.record_count == 0 {
+                debug!("Record count is 0. Migrate the block");
+                let mut full_block = match Block::decode(Bytes::from(fs::read(path.clone())?)) {
+                    Ok(block) => block,
+                    Err(err) => {
+                        remove_bad_block!(err);
+                    }
+                };
+
+                full_block.record_count = full_block.records.len() as u64;
+                full_block.metadata_size = full_block.encoded_len() as u64;
+
+                block.record_count = full_block.record_count;
+                block.metadata_size = full_block.metadata_size;
+
+                let mut file = fs::File::create(path.clone())?;
+                file.write_all(&block.encode_to_vec())?;
+            }
+
             let id = if let Some(begin_time) = block.begin_time {
                 ts_to_us(&begin_time)
             } else {
                 remove_bad_block!("begin time mismatch");
             };
 
-            record_count += block.records.len() as u64;
-            size += block.size + metadata_size;
+            record_count += block.record_count as u64;
+            size += block.size + block.metadata_size;
             block_index.insert(id);
         }
 
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        debug!(
+            "Restored entry `{}` in {}ms: size={}, records={}",
+            name,
+            start_time.elapsed().as_millis(),
+            ByteSize::b(size),
+            record_count
+        );
         Ok(Self {
-            name: path.file_name().unwrap().to_str().unwrap().to_string(),
+            name,
             settings: options,
             block_index,
             block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
@@ -185,7 +217,7 @@ impl Entry {
         let content_size = content_size;
         let has_no_space = block.size + content_size as u64 > self.settings.max_block_size;
         let has_too_many_records =
-            block.records.len() + 1 >= self.settings.max_block_records as usize;
+            block.records.len() + 1 > self.settings.max_block_records as usize;
 
         let mut block = if record_type == RecordType::Latest
             && (has_no_space || has_too_many_records || block.invalid)
@@ -213,10 +245,18 @@ impl Entry {
 
         // count the record and usage size with protobuf overhead
         self.record_count += 1;
-        self.size += (content_size + record.encoded_len()) as u64;
+        self.size += content_size as u64;
 
         block.size += content_size as u64;
         block.records.push(record);
+        block.record_count = block.records.len() as u64;
+
+        // recalculate the metadata size
+        if block.records.len() > 1 {
+            self.size -= block.metadata_size;
+        }
+        block.metadata_size = block.encoded_len() as u64;
+        self.size += block.metadata_size;
 
         if record_type != RecordType::Belated {
             block.latest_record_time = Some(us_to_ts(&time));
@@ -399,7 +439,7 @@ impl Entry {
         self.block_manager.write().await.remove(oldest_block_id)?;
         self.block_index.remove(&oldest_block_id);
 
-        self.size -= block.size;
+        self.size -= block.size + block.metadata_size;
         self.record_count -= block.records.len() as u64;
 
         Ok(())
@@ -832,7 +872,7 @@ mod tests {
 
         let info = entry.info().await.unwrap();
         assert_eq!(info.name, "entry");
-        assert_eq!(info.size, 88);
+        assert_eq!(info.size, 112);
         assert_eq!(info.record_count, 3);
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1000000);
@@ -859,53 +899,90 @@ mod tests {
         assert_eq!(reader.timestamp(), 3000000);
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_try_remove_block_from_empty_entry(mut entry: Entry) {
-        assert_eq!(
-            entry.try_remove_oldest_block().await,
-            Err(ReductError::internal_server_error("No block to remove"))
-        );
-    }
+    mod try_remove_oldest_block {
+        use super::*;
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_try_remove_block_from_entry_which_has_reader(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        let _rx = entry.begin_read(1000000).await.unwrap();
+        #[rstest]
+        #[tokio::test]
+        async fn test_empty_entry(mut entry: Entry) {
+            assert_eq!(
+                entry.try_remove_oldest_block().await,
+                Err(ReductError::internal_server_error("No block to remove"))
+            );
+        }
 
-        assert_eq!(
-            entry.try_remove_oldest_block().await,
-            Err(ReductError::internal_server_error(
-                "Cannot remove block 1000000 because it is still in use"
-            ))
-        );
-        let info = entry.info().await.unwrap();
-        assert_eq!(info.block_count, 1);
-        assert_eq!(info.size, 28);
-    }
+        #[rstest]
+        #[tokio::test]
+        async fn test_entry_which_has_reader(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            let _rx = entry.begin_read(1000000).await.unwrap();
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_try_remove_from_entry_which_has_writer(mut entry: Entry) {
-        let sender = entry
-            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .await
+            assert_eq!(
+                entry.try_remove_oldest_block().await,
+                Err(ReductError::internal_server_error(
+                    "Cannot remove block 1000000 because it is still in use"
+                ))
+            );
+            let info = entry.info().await.unwrap();
+            assert_eq!(info.block_count, 1);
+            assert_eq!(info.size, 38);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_entry_which_has_writer(mut entry: Entry) {
+            let sender = entry
+                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
+            sender
+                .send(Ok(Some(Bytes::from_static(b"456789"))))
+                .await
+                .unwrap();
+
+            assert_eq!(
+                entry.try_remove_oldest_block().await,
+                Err(ReductError::internal_server_error(
+                    "Cannot remove block 1000000 because it is still in use"
+                ))
+            );
+            let info = entry.info().await.unwrap();
+            assert_eq!(info.block_count, 1);
+            assert_eq!(info.size, 38);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_size_counting(path: PathBuf) {
+            let mut entry = Entry::new(
+                "entry",
+                path.clone(),
+                EntrySettings {
+                    max_block_size: 100000,
+                    max_block_records: 2,
+                },
+            )
             .unwrap();
-        sender
-            .send(Ok(Some(Bytes::from_static(b"456789"))))
-            .await
-            .unwrap();
 
-        assert_eq!(
-            entry.try_remove_oldest_block().await,
-            Err(ReductError::internal_server_error(
-                "Cannot remove block 1000000 because it is still in use"
-            ))
-        );
-        let info = entry.info().await.unwrap();
-        assert_eq!(info.block_count, 1);
-        assert_eq!(info.size, 28);
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            write_stub_record(&mut entry, 2000000).await.unwrap();
+            write_stub_record(&mut entry, 3000000).await.unwrap();
+            write_stub_record(&mut entry, 4000000).await.unwrap();
+
+            assert_eq!(entry.info().await.unwrap().block_count, 2);
+            assert_eq!(entry.info().await.unwrap().record_count, 4);
+            assert_eq!(entry.info().await.unwrap().size, 156);
+
+            entry.try_remove_oldest_block().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 1);
+            assert_eq!(entry.info().await.unwrap().record_count, 2);
+            assert_eq!(entry.info().await.unwrap().size, 78);
+
+            entry.try_remove_oldest_block().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert_eq!(entry.info().await.unwrap().record_count, 0);
+            assert_eq!(entry.info().await.unwrap().size, 0);
+        }
     }
 
     #[fixture]

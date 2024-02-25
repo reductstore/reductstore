@@ -16,6 +16,7 @@ use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinSet;
 
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -151,7 +152,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
+    pub(crate) async fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             ReductError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
@@ -161,19 +162,32 @@ impl Bucket {
         let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
 
         let mut entries = BTreeMap::new();
+        let mut task_set = JoinSet::new();
+
         for entry in std::fs::read_dir(&path)? {
             let path = entry?.path();
             if path.is_dir() {
                 let _entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
-                let entry = Entry::restore(
-                    path,
-                    EntrySettings {
-                        max_block_size: settings.max_block_size.unwrap(),
-                        max_block_records: settings.max_block_records.unwrap(),
-                    },
-                )?;
-                entries.insert(entry.name().to_string(), entry);
+                task_set.spawn(async move {
+                    Entry::restore(
+                        path,
+                        EntrySettings {
+                            max_block_size: settings.max_block_size.unwrap(),
+                            max_block_records: settings.max_block_records.unwrap(),
+                        },
+                    )
+                });
             }
+        }
+
+        while let Some(entry) = task_set.join_next().await {
+            let entry = entry.map_err(|e| {
+                ReductError::internal_server_error(
+                    format!("Failed to restore entry: {}", e).as_str(),
+                )
+            })?;
+            let entry = entry?;
+            entries.insert(entry.name().to_string(), entry);
         }
 
         Ok(Bucket {
@@ -516,10 +530,11 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
+    #[tokio::test]
+    async fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
         assert_eq!(bucket.settings(), &settings);
 
-        let bucket = Bucket::restore(bucket.path.clone()).unwrap();
+        let bucket = Bucket::restore(bucket.path.clone()).await.unwrap();
         assert_eq!(bucket.name(), "test");
         assert_eq!(bucket.settings(), &settings);
     }
@@ -589,13 +604,13 @@ mod tests {
         let blob: &[u8] = &[0u8; 40];
 
         write(&mut bucket, "test-1", 0, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 44);
+        assert_eq!(bucket.info().await.unwrap().info.size, 52);
 
         write(&mut bucket, "test-2", 1, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 91);
+        assert_eq!(bucket.info().await.unwrap().info.size, 110);
 
         write(&mut bucket, "test-3", 2, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 94);
+        assert_eq!(bucket.info().await.unwrap().info.size, 116);
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).await.err(),
@@ -619,7 +634,7 @@ mod tests {
         );
 
         write(&mut bucket, "test-1", 0, b"test").await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 8);
+        assert_eq!(bucket.info().await.unwrap().info.size, 16);
 
         let result = write(&mut bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(

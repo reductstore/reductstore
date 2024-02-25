@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use log::info;
@@ -24,8 +24,22 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Create a new Storage
-    pub(crate) fn new(data_path: PathBuf, license: Option<License>) -> Storage {
+    /// Load storage from the file system.
+    /// If the data_path doesn't exist, it will be created.
+    ///
+    /// # Arguments
+    ///
+    /// * `data_path` - The path to the data folder
+    /// * `license` - The license info
+    ///
+    /// # Returns
+    ///
+    /// * `Storage` - The storage instance
+    ///
+    /// # Panics
+    ///
+    /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
+    pub(crate) async fn load(data_path: PathBuf, license: Option<License>) -> Storage {
         if !data_path.exists() {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
@@ -36,7 +50,9 @@ impl Storage {
         for entry in std::fs::read_dir(&data_path).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                let bucket = Bucket::restore(path).unwrap();
+                let bucket = Bucket::restore(path.clone())
+                    .await
+                    .expect(format!("Failed to restore bucket '{:?}'", path).as_str());
                 buckets.insert(bucket.name().to_string(), bucket);
             }
         }
@@ -202,7 +218,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_info(storage: Storage) {
+    async fn test_info(#[future] storage: Storage) {
+        let storage = storage.await;
         sleep(Duration::from_secs(1)); // uptime is 1 second
 
         let info = storage.info().await.unwrap();
@@ -225,7 +242,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_recover_from_fs(mut storage: Storage) {
+    async fn test_recover_from_fs(#[future] storage: Storage) {
+        let mut storage = storage.await;
         let bucket_settings = BucketSettings {
             quota_size: Some(100),
             quota_type: Some(QuotaType::FIFO),
@@ -270,13 +288,13 @@ mod tests {
                 .unwrap();
         }
 
-        let storage = Storage::new(storage.data_path, None);
+        let storage = Storage::load(storage.data_path, None).await;
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 bucket_count: 1,
-                usage: 130,
+                usage: 127,
                 uptime: 0,
                 oldest_record: 1000,
                 latest_record: 5000,
@@ -294,7 +312,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_license_info(storage: Storage) {
+    async fn test_license_info(#[future] storage: Storage) {
         let license = License {
             licensee: "ReductStore".to_string(),
             invoice: "2021-0001".to_string(),
@@ -305,12 +323,14 @@ mod tests {
             fingerprint: "fingerprint".to_string(),
         };
 
-        let storage = Storage::new(storage.data_path, Some(license.clone()));
+        let storage = Storage::load(storage.await.data_path, Some(license.clone())).await;
         assert_eq!(storage.info().await.unwrap().license, Some(license));
     }
 
     #[rstest]
-    fn test_create_bucket(mut storage: Storage) {
+    #[tokio::test]
+    async fn test_create_bucket(#[future] storage: Storage) {
+        let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -318,7 +338,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_bucket_with_invalid_name(mut storage: Storage) {
+    #[tokio::test]
+    async fn test_create_bucket_with_invalid_name(#[future] storage: Storage) {
+        let mut storage = storage.await;
         let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
             result.err(),
@@ -329,7 +351,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_bucket_with_existing_name(mut storage: Storage) {
+    #[tokio::test]
+    async fn test_create_bucket_with_existing_name(#[future] storage: Storage) {
+        let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -343,7 +367,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket(mut storage: Storage) {
+    #[tokio::test]
+    async fn test_get_bucket(#[future] storage: Storage) {
+        let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -354,51 +380,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket_with_non_existing_name(storage: Storage) {
-        let result = storage.get_bucket("test");
-        assert_eq!(
-            result.err(),
-            Some(ReductError::not_found("Bucket 'test' is not found"))
-        );
-    }
-
-    #[rstest]
-    fn test_remove_bucket(mut storage: Storage) {
-        let bucket = storage
-            .create_bucket("test", BucketSettings::default())
-            .unwrap();
-        assert_eq!(bucket.name(), "test");
-
-        let result = storage.remove_bucket("test");
-        assert_eq!(result, Ok(()));
-
-        let result = storage.get_bucket("test");
-        assert_eq!(
-            result.err(),
-            Some(ReductError::not_found("Bucket 'test' is not found"))
-        );
-    }
-
-    #[rstest]
-    fn test_remove_bucket_with_non_existing_name(mut storage: Storage) {
-        let result = storage.remove_bucket("test");
-        assert_eq!(
-            result,
-            Err(ReductError::not_found("Bucket 'test' is not found"))
-        );
-    }
-
-    #[rstest]
-    fn test_remove_bucket_persistent(path: PathBuf, mut storage: Storage) {
-        let bucket = storage
-            .create_bucket("test", BucketSettings::default())
-            .unwrap();
-        assert_eq!(bucket.name(), "test");
-
-        let result = storage.remove_bucket("test");
-        assert_eq!(result, Ok(()));
-
-        let storage = Storage::new(path, None);
+    #[tokio::test]
+    async fn test_get_bucket_with_non_existing_name(#[future] storage: Storage) {
+        let storage = storage.await;
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
@@ -408,7 +392,57 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket_list(mut storage: Storage) {
+    async fn test_remove_bucket(#[future] storage: Storage) {
+        let mut storage = storage.await;
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
+        assert_eq!(bucket.name(), "test");
+
+        let result = storage.remove_bucket("test");
+        assert_eq!(result, Ok(()));
+
+        let result = storage.get_bucket("test");
+        assert_eq!(
+            result.err(),
+            Some(ReductError::not_found("Bucket 'test' is not found"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_bucket_with_non_existing_name(#[future] storage: Storage) {
+        let result = storage.await.remove_bucket("test");
+        assert_eq!(
+            result,
+            Err(ReductError::not_found("Bucket 'test' is not found"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_bucket_persistent(path: PathBuf, #[future] storage: Storage) {
+        let mut storage = storage.await;
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap();
+        assert_eq!(bucket.name(), "test");
+
+        let result = storage.remove_bucket("test");
+        assert_eq!(result, Ok(()));
+
+        let storage = Storage::load(path, None).await;
+        let result = storage.get_bucket("test");
+        assert_eq!(
+            result.err(),
+            Some(ReductError::not_found("Bucket 'test' is not found"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_bucket_list(#[future] storage: Storage) {
+        let mut storage = storage.await;
         storage.create_bucket("test1", Bucket::defaults()).unwrap();
         storage.create_bucket("test2", Bucket::defaults()).unwrap();
 
@@ -419,7 +453,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_remove(mut storage: Storage) {
+    #[tokio::test]
+    async fn test_provisioned_remove(#[future] storage: Storage) {
+        let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap();
@@ -437,7 +473,7 @@ mod tests {
     }
 
     #[fixture]
-    fn storage(path: PathBuf) -> Storage {
-        Storage::new(path, None)
+    async fn storage(path: PathBuf) -> Storage {
+        Storage::load(path, None).await
     }
 }

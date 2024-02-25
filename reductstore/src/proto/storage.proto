@@ -55,5 +55,16 @@ message Block {
   uint64 size = 3;                                // size of block in bytes (with protobuf overhead)
   repeated Record records = 4;                    // stored records
   bool invalid = 5;                               // mark block as invalid if some IO happened
+  uint64 record_count = 6;                       // number of records in the block
+  uint64 metadata_size = 7;                       // size of metadata in bytes
+}
 
+// Represents a minimal block of records with no records
+// to speed up the listing of blocks
+message MinimalBlock {
+  google.protobuf.Timestamp begin_time = 1;           // when the block started being recorded
+  google.protobuf.Timestamp latest_record_time = 2;    // the timestamp of the latest record
+  uint64 size = 3;                                // size of block in bytes (with protobuf overhead)
+  uint64 record_count = 6;                       // number of records in the block
+  uint64 metadata_size = 7;                       // size of metadata in bytes
 }

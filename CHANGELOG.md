@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - RS-156: Support for commercial license, [PR-400](https://github.com/reductstore/reductstore/pull/400)
+- RS-187: Speed up startup time, [PR-402](https://github.com/reductstore/reductstore/pull/403/)
 
 ### Changed
 
