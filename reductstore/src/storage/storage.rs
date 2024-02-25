@@ -242,7 +242,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_recover_from_fs(#[future] mut storage: Storage) {
+    async fn test_recover_from_fs(#[future] storage: Storage) {
         let mut storage = storage.await;
         let bucket_settings = BucketSettings {
             quota_size: Some(100),
@@ -329,7 +329,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket(#[future] mut storage: Storage) {
+    async fn test_create_bucket(#[future] storage: Storage) {
         let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
@@ -339,7 +339,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_with_invalid_name(#[future] mut storage: Storage) {
+    async fn test_create_bucket_with_invalid_name(#[future] storage: Storage) {
         let mut storage = storage.await;
         let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
@@ -352,7 +352,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket_with_existing_name(#[future] mut storage: Storage) {
+    async fn test_create_bucket_with_existing_name(#[future] storage: Storage) {
         let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
@@ -368,7 +368,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket(#[future] mut storage: Storage) {
+    async fn test_get_bucket(#[future] storage: Storage) {
         let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
@@ -382,7 +382,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_get_bucket_with_non_existing_name(#[future] storage: Storage) {
-        let mut storage = storage.await;
+        let storage = storage.await;
         let result = storage.get_bucket("test");
         assert_eq!(
             result.err(),
@@ -392,7 +392,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket(#[future] mut storage: Storage) {
+    async fn test_remove_bucket(#[future] storage: Storage) {
         let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
@@ -411,7 +411,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_with_non_existing_name(#[future] mut storage: Storage) {
+    async fn test_remove_bucket_with_non_existing_name(#[future] storage: Storage) {
         let result = storage.await.remove_bucket("test");
         assert_eq!(
             result,
@@ -421,7 +421,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_persistent(path: PathBuf, #[future] mut storage: Storage) {
+    async fn test_remove_bucket_persistent(path: PathBuf, #[future] storage: Storage) {
         let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
@@ -441,7 +441,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket_list(#[future] mut storage: Storage) {
+    async fn test_get_bucket_list(#[future] storage: Storage) {
         let mut storage = storage.await;
         storage.create_bucket("test1", Bucket::defaults()).unwrap();
         storage.create_bucket("test2", Bucket::defaults()).unwrap();
@@ -454,7 +454,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_provisioned_remove(#[future] mut storage: Storage) {
+    async fn test_provisioned_remove(#[future] storage: Storage) {
         let mut storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
