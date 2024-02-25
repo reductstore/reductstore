@@ -64,7 +64,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub async fn build(&self) -> Result<Components, ReductError> {
-        let storage = Arc::new(RwLock::new(self.provision_storage()));
+        let storage = Arc::new(RwLock::new(self.provision_storage().await));
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
         let replication_engine = self
@@ -115,9 +115,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         token_repo
     }
 
-    fn provision_storage(&self) -> Storage {
+    async fn provision_storage(&self) -> Storage {
         let license = parse_license(self.license_path.clone());
-        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()), license);
+        let mut storage = Storage::new(PathBuf::from(self.data_path.clone()), license).await;
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {

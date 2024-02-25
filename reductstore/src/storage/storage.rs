@@ -25,7 +25,7 @@ pub struct Storage {
 
 impl Storage {
     /// Create a new Storage
-    pub(crate) fn new(data_path: PathBuf, license: Option<License>) -> Storage {
+    pub(crate) async fn new(data_path: PathBuf, license: Option<License>) -> Storage {
         if !data_path.exists() {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
@@ -36,7 +36,9 @@ impl Storage {
         for entry in std::fs::read_dir(&data_path).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                let bucket = Bucket::restore(path).unwrap();
+                let bucket = Bucket::restore(path.clone())
+                    .await
+                    .expect(format!("Failed to restore bucket '{:?}'", path).as_str());
                 buckets.insert(bucket.name().to_string(), bucket);
             }
         }
