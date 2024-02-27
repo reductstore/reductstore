@@ -132,7 +132,7 @@ jobs:
           docker load --input /tmp/image.tar
           docker image ls -a
       - name: Create license
-        run: echo "${{ secrets.LICENSE_KEY }}" > /misc/license.lic
+        run: echo "${{ secrets.LICENSE_KEY }}" > ./misc/license.lic
       - name: Run Database
         run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}
           --env RS_CERT_PATH=${{matrix.cert_path}}
