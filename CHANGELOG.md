@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-95: Update `axum` up to 0.7, [PR-401](https://github.com/reductstore/reductstore/pull/401)
 - Update Web Console to v1.5.0, [PR-406](https://github.com/reductstore/reductstore/pull/406)
 
+### Fixed
+
+- RS-195: check path and query before unwrap them in middleware, [PR-407](https://github.com/reductstore/reductstore/pull/407)
+
 ## [1.8.2] - 2024-02-10
 
 ### Fixed
