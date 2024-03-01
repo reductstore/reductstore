@@ -7,6 +7,7 @@ use axum::http::{HeaderMap, Request};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error};
+use reduct_base::error::ErrorCode;
 
 use crate::api::{Components, HttpError};
 use crate::auth::policy::Policy;
@@ -34,15 +35,20 @@ pub async fn print_statuses(
     request: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, HttpError> {
-    let msg = format!(
-        "{} {}",
-        request.method(),
-        request.uri().path_and_query().unwrap()
-    );
+    if request.uri().path_and_query().is_none() {
+        return Err(HttpError::new(
+            ErrorCode::BadRequest,
+            "Failed to get path and query",
+        ));
+    }
+
+    let path_and_query = request.uri().path_and_query().unwrap();
+
+    let msg = format!("{} {}", request.method(), path_and_query);
 
     let response = next.run(request).await;
     let err_msg = match response.headers().get("x-reduct-error") {
-        Some(msg) => msg.to_str().unwrap(),
+        Some(msg) => msg.to_str().unwrap_or("Failed to get error message"),
         None => "",
     };
 
@@ -66,7 +72,7 @@ where
     components.auth.check(
         headers
             .get("Authorization")
-            .map(|header| header.to_str().unwrap()),
+            .map(|header| header.to_str().unwrap_or("")),
         components.token_repo.read().await.as_ref(),
         policy,
     )?;
