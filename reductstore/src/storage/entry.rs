@@ -380,7 +380,9 @@ impl Entry {
         let query = self
             .queries
             .get_mut(&query_id)
-            .ok_or_else(|| ReductError::not_found(&format!("Query {} not found", query_id)))?;
+            .ok_or_else(||
+                ReductError::not_found(
+                    &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
         query
             .next(&self.block_index, Arc::clone(&self.block_manager))
             .await
@@ -811,7 +813,7 @@ mod tests {
         );
         assert_eq!(
             entry.next(id).await.err(),
-            Some(ReductError::not_found(&format!("Query {} not found", id)))
+            Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
         );
     }
 
@@ -851,7 +853,7 @@ mod tests {
         sleep(Duration::from_millis(600));
         assert_eq!(
             entry.next(id).await.err(),
-            Some(ReductError::not_found(&format!("Query {} not found", id)))
+            Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
         );
     }
 
