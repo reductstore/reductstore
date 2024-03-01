@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reduct-rs: Move `reduct-rs` to separated repository, [PR-395](https://github.com/reductstore/reductstore/pull/395)
 - RS-95: Update `axum` up to 0.7, [PR-401](https://github.com/reductstore/reductstore/pull/401)
 - Update Web Console to v1.5.0, [PR-406](https://github.com/reductstore/reductstore/pull/406)
+- RS-198: improve error message for expired query id, [PR-408](https://github.com/reductstore/reductstore/pull/408)
 
 ### Fixed
 
