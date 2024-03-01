@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(feature = "web-console")]
 fn download_web_console() {
-    const WEB_CONSOLE_VERSION: &str = "v1.4.1";
+    const WEB_CONSOLE_VERSION: &str = "v1.5.0";
     let out_dir = env::var("OUT_DIR").unwrap();
     let console_path = &format!("{}/console-{}.zip", out_dir, WEB_CONSOLE_VERSION);
     if Path::exists(Path::new(console_path)) {
