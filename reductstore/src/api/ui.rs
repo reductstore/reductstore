@@ -86,6 +86,6 @@ mod tests {
             .unwrap()
             .into_response();
         assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/png");
-        assert_eq!(response.body().size_hint().lower(), 7037);
+        assert_eq!(response.body().size_hint().lower(), 592);
     }
 }
