@@ -17,7 +17,7 @@ use reduct_rs::BucketInfoList;
 
 pub(super) fn ls_bucket_cmd() -> Command {
     Command::new("ls")
-        .about("list buckets")
+        .about("List buckets")
         .arg(
             Arg::new("ALIAS_OR_URL")
                 .help(ALIAS_OR_URL_HELP)

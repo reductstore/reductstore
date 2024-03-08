@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::context::CliContext;
 
-use crate::cmd::BUCKET_PATH_HELP;
+use crate::cmd::RESOURCE_PATH_HELP;
 use crate::io::reduct::build_client;
 use crate::io::std::{input, output};
 use crate::parsers::BucketPathParser;
@@ -14,10 +14,10 @@ use reduct_rs::ReductClient;
 
 pub(super) fn rm_bucket_cmd() -> Command {
     Command::new("rm")
-        .about("remove a bucket")
+        .about("Remove a bucket")
         .arg(
             Arg::new("BUCKET_PATH")
-                .help(BUCKET_PATH_HELP)
+                .help(RESOURCE_PATH_HELP)
                 .value_parser(BucketPathParser::new())
                 .required(true),
         )

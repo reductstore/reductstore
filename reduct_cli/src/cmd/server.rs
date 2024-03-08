@@ -11,7 +11,7 @@ use clap::Command;
 
 pub(crate) fn server_cmd() -> Command {
     Command::new("server")
-        .about("Commands to get information about a ReductStore instance")
+        .about("Get information about a ReductStore instance")
         .arg_required_else_help(true)
         .subcommand(alive::check_server_cmd())
         .subcommand(status::server_status_cmd())

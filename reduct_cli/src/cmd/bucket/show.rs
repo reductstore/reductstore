@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::cmd::BUCKET_PATH_HELP;
+use crate::cmd::RESOURCE_PATH_HELP;
 use crate::context::CliContext;
 use crate::helpers::timestamp_to_iso;
 use crate::io::reduct::build_client;
@@ -17,10 +17,10 @@ use reduct_rs::{BucketInfo, FullBucketInfo, ReductClient};
 
 pub(super) fn show_bucket_cmd() -> Command {
     Command::new("show")
-        .about("show bucket information")
+        .about("Show bucket information")
         .arg(
             Arg::new("BUCKET_PATH")
-                .help(BUCKET_PATH_HELP)
+                .help(RESOURCE_PATH_HELP)
                 .value_parser(BucketPathParser::new())
                 .required(true),
         )

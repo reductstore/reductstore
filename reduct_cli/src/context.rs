@@ -189,4 +189,20 @@ pub(crate) mod tests {
 
         "test_bucket".to_string()
     }
+
+    #[fixture]
+    pub(crate) async fn token(context: CliContext) -> String {
+        let client = build_client(&context, "local").unwrap();
+        // remove the token if it already exists
+        if let Ok(token) = client
+            .list_tokens()
+            .await
+            .unwrap_or_default()
+            .contains("test_token")
+        {
+            token.remove().await.unwrap_or_default();
+        }
+
+        "test_token".to_string()
+    }
 }
