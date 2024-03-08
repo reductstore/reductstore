@@ -48,5 +48,4 @@ HEALTHCHECK --interval=5s --timeout=3s \
 
 EXPOSE 8383
 
-ENV PATH=/usr/local/bin/
 CMD ["reductstore"]
