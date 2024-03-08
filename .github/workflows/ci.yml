@@ -77,6 +77,8 @@ jobs:
       - name: Install rustfmt
         run: rustup component add rustfmt
 
+      - uses: ilammy/setup-nasm@v1
+
       - name: Run Tests
         run: cargo test --release -p reductstore
 
