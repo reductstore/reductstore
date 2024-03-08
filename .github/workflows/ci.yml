@@ -74,6 +74,9 @@ jobs:
       - name: Install CMake
         run: pip install cmake
 
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+
       - name: Run Tests
         run: cargo test --release -p reductstore
 
