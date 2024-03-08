@@ -1703,13 +1703,12 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd48afb3ef32fa64464ea40251be274b05f43bec366fa3bf30f35b92cae31fe0"
+version = "1.9.1"
 dependencies = [
  "chrono",
  "http 1.1.0",
  "int-enum",
+ "rstest",
  "serde",
  "serde_json",
  "url",
@@ -1718,11 +1717,12 @@ dependencies = [
 [[package]]
 name = "reduct-base"
 version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32be1b82607c1e2066b22903dfdcc759df696f6f4d9e8e2ac202bb4a2e0fca16"
 dependencies = [
  "chrono",
  "http 1.1.0",
  "int-enum",
- "rstest",
  "serde",
  "serde_json",
  "url",
@@ -1771,7 +1771,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http 1.1.0",
- "reduct-base 1.9.0",
+ "reduct-base 1.9.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "reqwest",
  "rustls",
  "serde",
