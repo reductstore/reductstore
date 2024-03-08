@@ -71,6 +71,9 @@ jobs:
         with:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
 
+      - name: Install CMake
+        run: pip install cmake
+
       - name: Run Tests
         run: cargo test --release -p reductstore
 
