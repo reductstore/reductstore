@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "A CLI client for ReductStore written in Rust"
 
 [dependencies]
-reduct-rs = "1.8.1"
+reduct-rs = "1.9.0"
 clap = { version = "4.5.1", features = ["cargo"] }
 dirs = "5.0.1"
 toml = "0.8.10"

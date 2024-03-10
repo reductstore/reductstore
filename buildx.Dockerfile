@@ -9,6 +9,7 @@ ARG GCC_COMPILER=gcc-11
 ARG GIT_COMMIT=unspecified
 
 RUN apt-get update && apt-get install -y \
+    cmake \
     build-essential \
     curl \
     protobuf-compiler \
@@ -47,5 +48,4 @@ HEALTHCHECK --interval=5s --timeout=3s \
 
 EXPOSE 8383
 
-ENV PATH=/usr/local/bin/
 CMD ["reductstore"]

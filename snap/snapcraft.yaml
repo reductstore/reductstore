@@ -44,6 +44,7 @@ parts:
       - cargo
       - protobuf-compiler
       - libprotobuf-dev
+      - cmake
   hooks:
     plugin: dump
     source: snap/local/hooks

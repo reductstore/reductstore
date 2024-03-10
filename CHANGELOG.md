@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2024-03-09
+
+### Fixed
+
+- Fix build on ARM32, [PR-411](https://github.com/reductstore/reductstore/pull/411)
+
+## [1.9.0] - 2024-03-08
+
 ### Added
 
 - RS-156: Support for commercial license, [PR-400](https://github.com/reductstore/reductstore/pull/400)
@@ -22,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-195: check path and query before unwrap them in middleware, [PR-407](https://github.com/reductstore/reductstore/pull/407)
+
+### Security
+
+- Bump mio from 0.8.10 to 0.8.11, [PR-409](https://github.com/reductstore/reductstore/pull/409)
 
 ## [1.8.2] - 2024-02-10
 
@@ -624,7 +636,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.8.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.0...HEAD
+
+[1.9.0]: https://github.com/reductstore/reductstore/compare/v1.8.2...v1.9.0
 
 [1.8.2]: https://github.com/reductstore/reductstore/compare/v1.8.1...v1.8.2
 
