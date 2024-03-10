@@ -4,8 +4,10 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod create;
+mod rm;
 
 use crate::cmd::token::create::create_token_cmd;
+use crate::cmd::token::rm::rm_token_cmd;
 use crate::context::CliContext;
 use clap::Command;
 
@@ -14,6 +16,7 @@ pub(crate) fn token_cmd() -> Command {
         .about("Manage access tokens in a ReductStore instance")
         .arg_required_else_help(true)
         .subcommand(create_token_cmd())
+        .subcommand(rm_token_cmd())
 }
 
 pub(crate) async fn token_handler(
@@ -22,6 +25,7 @@ pub(crate) async fn token_handler(
 ) -> anyhow::Result<()> {
     match matches {
         Some(("create", args)) => create::create_token(ctx, args).await?,
+        Some(("rm", args)) => rm::rm_token(ctx, args).await?,
         _ => (),
     }
     Ok(())
