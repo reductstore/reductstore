@@ -86,25 +86,29 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_create_token_cmd() {
-        let cmd = create_token_cmd();
-        let args = cmd.get_matches_from(vec!["create", "test"]);
-        assert_eq!(args.value_of("TOKEN_PATH").unwrap(), "test");
+    #[tokio::test]
+    async fn test_create_token(context: CliContext, #[future] token: String) {
+        let args = create_token_cmd()
+            .try_get_matches_from(vec![
+                "create",
+                format!("local/{}", token.await).as_str(),
+                "--full-access",
+                "--read-bucket",
+                "test",
+                "--write-bucket",
+                "test",
+            ])
+            .unwrap();
+        create_token(&context, &args).await.unwrap();
+        assert!(
+            context.stdout().history()[0].starts_with("Token 'test_token' created: test_token-")
+        );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_create_token(context: CliContext, #[future] token: String) {
-        let args = create_token_cmd().get_matches_from(vec![
-            "create",
-            format!("local/{}", token.await).as_str(),
-            "--full-access",
-            "--read-bucket",
-            "test",
-            "--write-bucket",
-            "test",
-        ]);
-        create_token(&context, &args).await.unwrap();
-        assert_eq!(context.stdout().history(), vec!["test"]);
+    fn test_create_token_bad_path() {
+        let cmd = create_token_cmd();
+        let args = cmd.try_get_matches_from(vec!["create", "test"]);
+        assert_eq!(args.unwrap_err().to_string(), "error: invalid value 'test' for '<TOKEN_PATH>'\n\nFor more information, try '--help'.\n");
     }
 }

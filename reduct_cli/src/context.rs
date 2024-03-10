@@ -83,6 +83,7 @@ pub(crate) mod tests {
     use crate::io::std::Output;
     use rstest::fixture;
     use std::cell::RefCell;
+    use std::io::Read;
     use tempfile::tempdir;
 
     pub struct MockOutput {
@@ -194,13 +195,8 @@ pub(crate) mod tests {
     pub(crate) async fn token(context: CliContext) -> String {
         let client = build_client(&context, "local").unwrap();
         // remove the token if it already exists
-        if let Ok(token) = client
-            .list_tokens()
-            .await
-            .unwrap_or_default()
-            .contains("test_token")
-        {
-            token.remove().await.unwrap_or_default();
+        if let Ok(_) = client.get_token("test_token").await {
+            client.delete_token("test_token").await.unwrap_or_default();
         }
 
         "test_token".to_string()
