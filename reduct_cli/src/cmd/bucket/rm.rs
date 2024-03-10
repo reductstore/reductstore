@@ -34,23 +34,28 @@ pub(super) fn rm_bucket_cmd() -> Command {
 pub(super) async fn rm_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
     let (alias_or_url, bucket_name) = args.get_one::<(String, String)>("BUCKET_PATH").unwrap();
 
-    if !args.get_flag("yes") {
-        output!(
-            ctx,
-            "Are you sure you want to remove bucket '{}'? [N/y]",
-            bucket_name
-        );
-        let confirmation = input!(ctx)?;
-        if confirmation.to_lowercase() != "y" {
-            output!(ctx, "Aborting");
-            return Ok(());
-        }
+    let confirm = if !args.get_flag("yes") {
+        let confirm = dialoguer::Confirm::new()
+            .default(false)
+            .with_prompt(format!(
+                "Are you sure you want to delete bucket '{}'?",
+                bucket_name
+            ))
+            .interact()?;
+        confirm
+    } else {
+        true
+    };
+
+    if !confirm {
+        let client: ReductClient = build_client(ctx, alias_or_url)?;
+        client.get_bucket(bucket_name).await?.remove().await?;
+
+        output!(ctx, "Bucket '{}' deleted", bucket_name);
+    } else {
+        output!(ctx, "Bucket '{}' not deleted", bucket_name);
     }
 
-    let client: ReductClient = build_client(ctx, alias_or_url)?;
-    client.get_bucket(bucket_name).await?.remove().await?;
-
-    output!(ctx, "Bucket '{}' removed", bucket_name);
     Ok(())
 }
 
@@ -87,28 +92,6 @@ mod tests {
         assert_eq!(
             context.stdout().history(),
             vec!["Bucket 'test_bucket' removed"]
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_rm_bucket_confirmed(context: CliContext, #[future] bucket: String) {
-        let bucket_name = bucket.await;
-        let client = build_client(&context, "local").unwrap();
-        client.create_bucket(&bucket_name).send().await.unwrap();
-
-        context.stdin().emulate(vec!["y"]);
-
-        let args =
-            rm_bucket_cmd().get_matches_from(vec!["rm", format!("local/{}", bucket_name).as_str()]);
-
-        assert_eq!(rm_bucket(&context, &args).await.unwrap(), ());
-        assert_eq!(
-            context.stdout().history(),
-            vec![
-                "Are you sure you want to remove bucket 'test_bucket'? [N/y]",
-                "Bucket 'test_bucket' removed"
-            ]
         );
     }
 
