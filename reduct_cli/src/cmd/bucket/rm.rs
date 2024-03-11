@@ -47,7 +47,7 @@ pub(super) async fn rm_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Re
         true
     };
 
-    if !confirm {
+    if confirm {
         let client: ReductClient = build_client(ctx, alias_or_url)?;
         client.get_bucket(bucket_name).await?.remove().await?;
 
@@ -91,7 +91,7 @@ mod tests {
         );
         assert_eq!(
             context.stdout().history(),
-            vec!["Bucket 'test_bucket' removed"]
+            vec!["Bucket 'test_bucket' deleted"]
         );
     }
 
