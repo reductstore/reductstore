@@ -83,7 +83,7 @@ pub(crate) mod tests {
     use crate::io::std::Output;
     use rstest::fixture;
     use std::cell::RefCell;
-    use std::io::Read;
+
     use tempfile::tempdir;
 
     pub struct MockOutput {

@@ -67,5 +67,3 @@ macro_rules! input {
         $ctx.stdin().read()
     };
 }
-
-pub(crate) use input;

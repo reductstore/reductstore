@@ -8,7 +8,7 @@ use crate::context::CliContext;
 use crate::io::reduct::build_client;
 use crate::io::std::output;
 use crate::parsers::BucketPathParser;
-use clap::ArgAction::SetTrue;
+
 use clap::{Arg, ArgMatches, Command};
 
 pub(super) fn show_token_cmd() -> Command {

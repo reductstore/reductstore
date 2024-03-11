@@ -6,7 +6,7 @@ use crate::context::CliContext;
 
 use crate::cmd::RESOURCE_PATH_HELP;
 use crate::io::reduct::build_client;
-use crate::io::std::{input, output};
+use crate::io::std::output;
 use crate::parsers::BucketPathParser;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
