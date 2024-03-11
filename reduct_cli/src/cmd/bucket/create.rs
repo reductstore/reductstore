@@ -13,7 +13,7 @@ use clap::{ArgMatches, Command};
 use reduct_rs::ReductClient;
 
 pub(super) fn create_bucket_cmd() -> Command {
-    let cmd = Command::new("create").about("create a bucket");
+    let cmd = Command::new("create").about("Create a bucket");
     create_update_bucket_args(cmd)
 }
 

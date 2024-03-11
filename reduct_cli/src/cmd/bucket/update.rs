@@ -12,7 +12,7 @@ use clap::{ArgMatches, Command};
 use reduct_rs::ReductClient;
 
 pub(super) fn update_bucket_cmd() -> Command {
-    let cmd = Command::new("update").about("update a bucket");
+    let cmd = Command::new("update").about("Update bucket settings");
     create_update_bucket_args(cmd)
 }
 

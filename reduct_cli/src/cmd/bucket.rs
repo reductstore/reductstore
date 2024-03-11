@@ -8,7 +8,7 @@ mod rm;
 mod show;
 mod update;
 
-use crate::cmd::BUCKET_PATH_HELP;
+use crate::cmd::RESOURCE_PATH_HELP;
 use crate::context::CliContext;
 use crate::parsers::{BucketPathParser, ByteSizeParser, QuotaTypeParser};
 use bytesize::ByteSize;
@@ -18,7 +18,7 @@ use reduct_rs::{BucketSettings, QuotaType};
 
 pub(crate) fn bucket_cmd() -> Command {
     Command::new("bucket")
-        .about("Manage buckets")
+        .about("Manage buckets in a ReductStore instance")
         .arg_required_else_help(true)
         .subcommand(create::create_bucket_cmd())
         .subcommand(update::update_bucket_cmd())
@@ -47,7 +47,7 @@ pub(crate) async fn bucket_handler(
 fn create_update_bucket_args(cmd: Command) -> Command {
     cmd.arg(
         Arg::new("BUCKET_PATH")
-            .help(BUCKET_PATH_HELP)
+            .help(RESOURCE_PATH_HELP)
             .value_parser(BucketPathParser::new())
             .required(true),
     )

@@ -6,6 +6,8 @@ pub(crate) mod alias;
 pub(crate) mod bucket;
 pub(crate) mod server;
 
+pub(crate) mod token;
+
 const ALIAS_OR_URL_HELP: &str =
     "Alias or URL (e.g. http://token@localhost:8383) of the ReductStore instance to use";
-const BUCKET_PATH_HELP: &str = "Path to the bucket to use (e.g. SERVER_ALIAS/BUCKET_NAME or http://token@localhost:8383/BUCKET_NAME)";
+const RESOURCE_PATH_HELP: &str = "Path to a resource to use (e.g. SERVER_ALIAS/<RESOURCE_NAME> or http://token@localhost:8383/RESOURCE_NAME)";
