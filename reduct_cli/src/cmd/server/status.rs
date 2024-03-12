@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -35,6 +35,17 @@ pub(super) async fn get_server_status(
         "Uptime: \t{}",
         HumanTime::from_seconds(info.uptime as i64).to_text_en(Accuracy::Rough, Tense::Present)
     );
+
+    if let Some(license) = info.license {
+        output!(
+            ctx,
+            "License:\t{}, expired at {}",
+            license.plan,
+            license.expiry_date
+        );
+    } else {
+        output!(ctx, "License:\tBUSL-1.1 (Limited commercial use)");
+    }
     Ok(())
 }
 
@@ -49,12 +60,16 @@ mod tests {
     async fn test_get_server_status(context: crate::context::CliContext) {
         let args = server_status_cmd().get_matches_from(vec!["status", "local"]);
         get_server_status(&context, &args).await.unwrap();
-        assert_eq!(context.stdout().history().len(), 3);
+        assert_eq!(context.stdout().history().len(), 4);
         assert_eq!(context.stdout().history()[0], "Status: \tOk");
         assert_eq!(
             context.stdout().history()[1],
             format!("Version:\t{}", env!("CARGO_PKG_VERSION"))
         );
         assert!(context.stdout().history()[2].starts_with("Uptime: \t"));
+        assert_eq!(
+            context.stdout().history()[3],
+            "License:\tBUSL-1.1 (Limited commercial use)"
+        );
     }
 }

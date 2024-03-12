@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod alive;
+mod license;
 mod status;
 
 use crate::context::CliContext;
@@ -15,6 +16,7 @@ pub(crate) fn server_cmd() -> Command {
         .arg_required_else_help(true)
         .subcommand(alive::check_server_cmd())
         .subcommand(status::server_status_cmd())
+        .subcommand(license::server_license_cmd())
 }
 
 pub(crate) async fn server_handler(
@@ -24,6 +26,7 @@ pub(crate) async fn server_handler(
     match matches {
         Some(("alive", args)) => alive::check_server(ctx, args).await?,
         Some(("status", args)) => status::get_server_status(ctx, args).await?,
+        Some(("license", args)) => license::get_server_license(ctx, args).await?,
         _ => (),
     }
     Ok(())
