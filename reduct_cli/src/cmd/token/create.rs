@@ -63,7 +63,7 @@ pub(super) async fn create_token(ctx: &CliContext, args: &ArgMatches) -> anyhow:
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
 
-    let client: ReductClient = build_client(ctx, alias_or_url)?;
+    let client: ReductClient = build_client(ctx, alias_or_url).await?;
     let token = client
         .create_token(
             token_name,

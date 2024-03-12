@@ -35,7 +35,7 @@ pub(super) fn ls_bucket_cmd() -> Command {
 
 pub(super) async fn ls_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
     let alias_or_url = args.get_one::<String>("ALIAS_OR_URL").unwrap();
-    let client = build_client(ctx, alias_or_url)?;
+    let client = build_client(ctx, alias_or_url).await?;
 
     let bucket_list = client.bucket_list().await?;
     if args.get_flag("full") {
@@ -95,6 +95,7 @@ mod tests {
     async fn test_ls_bucket(context: CliContext, #[future] bucket: String) {
         let args = ls_bucket_cmd().get_matches_from(vec!["ls", "local"]);
         build_client(&context, "local")
+            .await
             .unwrap()
             .create_bucket(&bucket.await)
             .send()
@@ -113,6 +114,7 @@ mod tests {
     async fn test_ls_bucket_full(context: CliContext, #[future] bucket: String) {
         let args = ls_bucket_cmd().get_matches_from(vec!["ls", "local", "--full"]);
         let bucket = build_client(&context, "local")
+            .await
             .unwrap()
             .create_bucket(&bucket.await)
             .send()

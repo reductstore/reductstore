@@ -37,7 +37,7 @@ pub(super) fn show_bucket_cmd() -> Command {
 pub(super) async fn show_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
     let (alias_or_url, bucket_name) = args.get_one::<(String, String)>("BUCKET_PATH").unwrap();
 
-    let client: ReductClient = build_client(ctx, alias_or_url)?;
+    let client: ReductClient = build_client(ctx, alias_or_url).await?;
     let bucket = client.get_bucket(bucket_name).await?.full_info().await?;
 
     if args.get_flag("full") {
@@ -152,7 +152,7 @@ mod tests {
     #[tokio::test]
     async fn test_show_bucket(context: CliContext, #[future] bucket: String) {
         let bucket_name = bucket.await;
-        let client = build_client(&context, "local").unwrap();
+        let client = build_client(&context, "local").await.unwrap();
         client.create_bucket(&bucket_name).send().await.unwrap();
 
         let args = show_bucket_cmd()
@@ -175,7 +175,7 @@ mod tests {
     #[tokio::test]
     async fn test_show_bucket_full(context: CliContext, #[future] bucket: String) {
         let bucket_name = bucket.await;
-        let client = build_client(&context, "local").unwrap();
+        let client = build_client(&context, "local").await.unwrap();
         let bucket = client.create_bucket(&bucket_name).send().await.unwrap();
         bucket
             .write_record("test")

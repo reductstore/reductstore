@@ -26,7 +26,7 @@ pub(super) fn show_token_cmd() -> Command {
 pub(super) async fn show_token(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
     let (alias_or_url, token_name) = args.get_one::<(String, String)>("TOKEN_PATH").unwrap();
 
-    let client = build_client(ctx, alias_or_url)?;
+    let client = build_client(ctx, alias_or_url).await?;
     let token = client.get_token(token_name).await?;
 
     output!(ctx, "Token: {}", token_name);
@@ -53,7 +53,7 @@ mod tests {
     #[tokio::test]
     async fn test_show_token(context: CliContext, #[future] token: String) {
         let token = token.await;
-        let client = build_client(&context, "local").unwrap();
+        let client = build_client(&context, "local").await.unwrap();
         client
             .create_token(&token, Permissions::default())
             .await
