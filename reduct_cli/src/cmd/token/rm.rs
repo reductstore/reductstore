@@ -48,7 +48,7 @@ pub(super) async fn rm_token(ctx: &CliContext, args: &ArgMatches) -> anyhow::Res
     };
 
     if confirm {
-        let client = build_client(ctx, alias_or_url)?;
+        let client = build_client(ctx, alias_or_url).await?;
         client.delete_token(token_name).await?;
         output!(ctx, "Token '{}' deleted", token_name);
     } else {
@@ -70,7 +70,7 @@ mod tests {
     #[tokio::test]
     async fn test_rm_token(context: CliContext, #[future] token: String) {
         let token = token.await;
-        let client = build_client(&context, "local").unwrap();
+        let client = build_client(&context, "local").await.unwrap();
         client
             .create_token(&token, Default::default())
             .await

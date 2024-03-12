@@ -21,7 +21,7 @@ pub(super) fn check_server_cmd() -> Command {
 
 pub(super) async fn check_server(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
     let alias_or_url = args.get_one::<String>("ALIAS_OR_URL").unwrap();
-    let client = build_client(ctx, alias_or_url)?;
+    let client = build_client(ctx, alias_or_url).await?;
     client.alive().await?;
     Ok(())
 }

@@ -20,7 +20,7 @@ pub(super) async fn update_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow
     let (alias_or_url, bucket_name) = args.get_one::<(String, String)>("BUCKET_PATH").unwrap();
     let bucket_settings = parse_bucket_settings(args);
 
-    let client: ReductClient = build_client(ctx, alias_or_url)?;
+    let client: ReductClient = build_client(ctx, alias_or_url).await?;
     client
         .get_bucket(bucket_name)
         .await?
@@ -42,7 +42,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_bucket(context: CliContext, #[future] bucket: String) {
         let bucket_name = bucket.await;
-        let client = build_client(&context, "local").unwrap();
+        let client = build_client(&context, "local").await.unwrap();
         client.create_bucket(&bucket_name).send().await.unwrap();
 
         let args = update_bucket_cmd().get_matches_from(vec![

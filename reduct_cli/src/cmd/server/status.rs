@@ -25,7 +25,7 @@ pub(super) async fn get_server_status(
 ) -> anyhow::Result<()> {
     let alias = args.get_one::<String>("ALIAS_OR_URL").unwrap();
 
-    let client = build_client(ctx, alias)?;
+    let client = build_client(ctx, alias).await?;
     let info = client.server_info().await?;
 
     output!(ctx, "Status: \tOk");

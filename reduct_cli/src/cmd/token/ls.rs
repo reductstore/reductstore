@@ -19,7 +19,7 @@ pub(super) fn ls_tokens_cmd() -> Command {
 
 pub(super) async fn ls_tokens(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
     let alias_or_url = args.get_one::<String>("ALIAS_OR_URL").unwrap();
-    let client = build_client(ctx, alias_or_url)?;
+    let client = build_client(ctx, alias_or_url).await?;
 
     let token_list = client.list_tokens().await?;
     for token in token_list {
@@ -39,7 +39,7 @@ mod tests {
     #[tokio::test]
     async fn test_ls_tokens(context: CliContext, #[future] token: String) {
         let token = token.await;
-        let client = build_client(&context, "local").unwrap();
+        let client = build_client(&context, "local").await.unwrap();
         client
             .create_token(&token, Permissions::default())
             .await

@@ -48,7 +48,7 @@ pub(super) async fn rm_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Re
     };
 
     if confirm {
-        let client: ReductClient = build_client(ctx, alias_or_url)?;
+        let client: ReductClient = build_client(ctx, alias_or_url).await?;
         client.get_bucket(bucket_name).await?.remove().await?;
 
         output!(ctx, "Bucket '{}' deleted", bucket_name);
@@ -70,7 +70,7 @@ mod tests {
     #[tokio::test]
     async fn test_rm_bucket(context: CliContext, #[future] bucket: String) {
         let bucket_name = bucket.await;
-        let client = build_client(&context, "local").unwrap();
+        let client = build_client(&context, "local").await.unwrap();
         client.create_bucket(&bucket_name).send().await.unwrap();
 
         let args = rm_bucket_cmd().get_matches_from(vec![

@@ -23,7 +23,7 @@ pub(super) async fn get_server_license(
 ) -> anyhow::Result<()> {
     let alias = args.get_one::<String>("ALIAS_OR_URL").unwrap();
 
-    let client = crate::io::reduct::build_client(ctx, alias)?;
+    let client = crate::io::reduct::build_client(ctx, alias).await?;
 
     if let Some(license) = client.server_info().await?.license {
         output!(ctx, "Licensee:\t{}", license.licensee);
