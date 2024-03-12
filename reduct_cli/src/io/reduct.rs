@@ -83,21 +83,27 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_build_client_with_url(context: CliContext) {
-        let client = build_client(&context, "http://localhost:8000")
+        let err = build_client(&context, "http://localhost:8383")
             .await
+            .err()
             .unwrap();
-        assert_eq!(client.url(), "http://localhost:8000");
-        assert_eq!(client.api_token(), "");
+        assert_eq!(
+            err.to_string(),
+            "[Unauthorized] No bearer token in request header"
+        );
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_build_client_with_url_and_token(context: CliContext) {
-        let client = build_client(&context, "http://sometoken@localhost:8000")
-            .await
-            .unwrap();
-        assert_eq!(client.url(), "http://localhost:8000");
-        assert_eq!(client.api_token(), "sometoken");
+    async fn test_build_client_with_url_and_token(context: CliContext, current_token: String) {
+        let client = build_client(
+            &context,
+            &format!("http://{}@localhost:8383", current_token),
+        )
+        .await
+        .unwrap();
+        assert_eq!(client.url(), "http://localhost:8383");
+        assert_eq!(client.api_token(), current_token);
     }
 
     #[rstest]
