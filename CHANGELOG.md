@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - RS-18: implement token management commands in `reduct-cli`, [PR-413](https://github.com/reductstore/reductstore/pull/413)
+- RS-181: add support for commercial license in `reduct-cli`, [PR-414](https://github.com/reductstore/reductstore/pull/414)
 
 ## [1.9.1] - 2024-03-09
 
