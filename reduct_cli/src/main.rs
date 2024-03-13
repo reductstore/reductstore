@@ -30,7 +30,7 @@ fn cli() -> Command {
                 .short('i')
                 .help("Ignore SSL certificate verification")
                 .required(false)
-                .action(SetFalse)
+                .action(SetTrue)
                 .global(true),
         )
         .subcommand(alias_cmd())
@@ -41,8 +41,11 @@ fn cli() -> Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ctx = ContextBuilder::new().build();
     let matches = cli().get_matches();
+    let ctx = ContextBuilder::new()
+        .ignore_ssl(matches.get_flag("ignore-ssl"))
+        .build();
+
     match matches.subcommand() {
         Some(("alias", args)) => alias_handler(&ctx, args.subcommand()),
         Some(("server", args)) => server_handler(&ctx, args.subcommand()).await,
