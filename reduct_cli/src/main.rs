@@ -16,7 +16,7 @@ use crate::context::ContextBuilder;
 use crate::cmd::bucket::{bucket_cmd, bucket_handler};
 use crate::cmd::server::{server_cmd, server_handler};
 use crate::cmd::token::{token_cmd, token_handler};
-use clap::ArgAction::{SetFalse, SetTrue};
+use clap::ArgAction::SetTrue;
 use clap::{crate_description, crate_name, crate_version, Arg, Command};
 
 fn cli() -> Command {
