@@ -11,6 +11,7 @@ pub(crate) struct CliContext {
     config_path: String,
     output: Box<dyn Output>,
     input: Box<dyn Input>,
+    ignore_ssl: bool,
 }
 
 impl CliContext {
@@ -24,6 +25,10 @@ impl CliContext {
     pub(crate) fn stdin(&self) -> &dyn Input {
         &*self.input
     }
+
+    pub(crate) fn ignore_ssl(&self) -> bool {
+        self.ignore_ssl
+    }
 }
 
 pub(crate) struct ContextBuilder {
@@ -36,6 +41,7 @@ impl ContextBuilder {
             config_path: String::new(),
             output: Box::new(StdOutput::new()),
             input: Box::new(StdInput::new()),
+            ignore_ssl: false,
         };
         config.config_path = match home_dir() {
             Some(path) => path
@@ -67,6 +73,11 @@ impl ContextBuilder {
     #[allow(dead_code)]
     pub(crate) fn input(mut self, input: Box<dyn Input>) -> Self {
         self.config.input = input;
+        self
+    }
+
+    pub(crate) fn ignore_ssl(mut self, ignore_ssl: bool) -> Self {
+        self.config.ignore_ssl = ignore_ssl;
         self
     }
 
