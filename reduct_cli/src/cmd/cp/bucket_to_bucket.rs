@@ -5,6 +5,7 @@ use std::ptr::write;
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
+use bytesize::ByteSize;
 use chrono::DateTime;
 use clap::ArgMatches;
 use futures_util::StreamExt;
@@ -106,20 +107,25 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
         let query_builder = build_query(&src_bucket, &entry, &query_params);
 
         let local_dst_bucket = Arc::clone(&dst_bucket);
-        let local_progress = ProgressBar::new(entry.latest_record as u64);
+        let local_progress = ProgressBar::new(entry.latest_record - entry.oldest_record);
         let local_progress = progress.add(local_progress);
         local_progress.set_style(sty.clone());
+        let mut transferred_bytes = 0;
 
         tasks.spawn(async move {
-            local_progress.set_message(format!("Copying {}", entry.name));
+            local_progress.set_message(format!(
+                "Copying {} ({})",
+                entry.name,
+                ByteSize::b(transferred_bytes)
+            ));
             let record_stream = query_builder.send().await?;
             tokio::pin!(record_stream);
 
             while let Some(record) = record_stream.next().await {
                 let record = record?;
-                local_progress.set_position(record.timestamp_us() as u64);
+                local_progress.set_position(record.timestamp_us() - entry.oldest_record);
 
-                let timestamp = record.timestamp_us();
+                let content_length = record.content_length();
                 let result = local_dst_bucket
                     .write()
                     .await
@@ -131,15 +137,23 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
                     .stream(record.stream_bytes())
                     .send()
                     .await;
+
+                transferred_bytes += content_length as u64;
+
                 if let Err(err) = result {
                     // ignore conflict errors
-
                     if err.status() != ErrorCode::Conflict {
                         local_progress.set_message(err.to_string());
                         local_progress.abandon();
                         return Err(err);
                     }
                 }
+
+                local_progress.set_message(format!(
+                    "Copying {} ({})",
+                    entry.name,
+                    ByteSize::b(transferred_bytes)
+                ));
             }
 
             Ok(())
