@@ -487,64 +487,112 @@ mod tests {
     use std::time::Duration;
     use tempfile;
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-        write_stub_record(&mut entry, 1).await.unwrap();
-        write_stub_record(&mut entry, 2000010).await.unwrap();
+    mod restore {
+        use super::*;
 
-        let bm = entry.block_manager.read().await;
-        let records = bm.load(1).unwrap().records.clone();
-        assert_eq!(records.len(), 2);
-        assert_eq!(
-            records[0],
-            Record {
+        #[rstest]
+        #[tokio::test]
+        async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
+            let mut entry = entry(entry_settings.clone(), path.clone());
+            write_stub_record(&mut entry, 1).await.unwrap();
+            write_stub_record(&mut entry, 2000010).await.unwrap();
+
+            let bm = entry.block_manager.read().await;
+            let records = bm.load(1).unwrap().records.clone();
+            assert_eq!(records.len(), 2);
+            assert_eq!(
+                records[0],
+                Record {
+                    timestamp: Some(us_to_ts(&1)),
+                    begin: 0,
+                    end: 10,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                }
+            );
+
+            assert_eq!(
+                records[1],
+                Record {
+                    timestamp: Some(us_to_ts(&2000010)),
+                    begin: 10,
+                    end: 20,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                }
+            );
+
+            let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
+
+            assert_eq!(entry.name(), "entry");
+            assert_eq!(entry.record_count, 2);
+            assert_eq!(entry.size, 84);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
+            let mut entry = entry(entry_settings.clone(), path.clone());
+
+            write_stub_record(&mut entry, 1).await.unwrap();
+
+            File::options()
+                .write(true)
+                .open(path.join("entry/1.meta"))
+                .unwrap()
+                .set_len(0)
+                .unwrap();
+
+            let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
+            assert_eq!(entry.name(), "entry");
+            assert_eq!(entry.record_count, 0);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
+            let path = path.join("entry");
+            fs::create_dir_all(path.clone()).unwrap();
+            let mut block_manager = BlockManager::new(path.clone());
+            let mut block_v18 = block_manager.start(1, 100).unwrap();
+            block_v18.records.push(Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
                 end: 10,
                 content_type: "text/plain".to_string(),
                 state: record::State::Finished as i32,
                 labels: vec![],
-            }
-        );
-
-        assert_eq!(
-            records[1],
-            Record {
-                timestamp: Some(us_to_ts(&2000010)),
-                begin: 10,
-                end: 20,
+            });
+            block_v18.records.push(Record {
+                timestamp: Some(us_to_ts(&2)),
+                begin: 0,
+                end: 10,
                 content_type: "text/plain".to_string(),
                 state: record::State::Finished as i32,
                 labels: vec![],
-            }
-        );
+            });
+            block_v18.size = 10;
+            block_v18.begin_time = Some(us_to_ts(&1));
+            block_manager.save(block_v18).unwrap();
 
-        let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
+            // repack the block
+            let entry = Entry::restore(path.clone(), entry_settings).unwrap();
+            let info = entry.info().await.unwrap();
 
-        assert_eq!(entry.name(), "entry");
-        assert_eq!(entry.record_count, 2);
-        assert_eq!(entry.size, 84);
-    }
+            assert_eq!(info.size, 65);
+            assert_eq!(info.record_count, 2);
+            assert_eq!(info.block_count, 1);
+            assert_eq!(info.oldest_record, 1);
+            assert_eq!(info.latest_record, 2);
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-
-        write_stub_record(&mut entry, 1).await.unwrap();
-
-        File::options()
-            .write(true)
-            .open(path.join("entry/1.meta"))
-            .unwrap()
-            .set_len(0)
-            .unwrap();
-
-        let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
-        assert_eq!(entry.name(), "entry");
-        assert_eq!(entry.record_count, 0);
+            let block_manager = BlockManager::new(path); // reload the block manager
+            let block_v19 = block_manager.load(1).unwrap();
+            assert_eq!(block_v19.record_count, 2);
+            assert_eq!(block_v19.size, 10);
+            assert_eq!(block_v19.metadata_size, 55);
+        }
     }
 
     #[rstest]
