@@ -7,7 +7,7 @@ use crate::cmd::RESOURCE_PATH_HELP;
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
 use crate::io::std::output;
-use crate::parsers::BucketPathParser;
+use crate::parsers::ResourcePathParser;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
 use reduct_rs::{Permissions, ReductClient};
@@ -18,7 +18,7 @@ pub(super) fn create_token_cmd() -> Command {
         .arg(
             Arg::new("TOKEN_PATH")
                 .help(RESOURCE_PATH_HELP)
-                .value_parser(BucketPathParser::new())
+                .value_parser(ResourcePathParser::new())
                 .required(true),
         )
         .arg(

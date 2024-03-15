@@ -1771,6 +1771,7 @@ dependencies = [
  "colored",
  "dialoguer",
  "dirs",
+ "futures-util",
  "mockall",
  "reduct-rs",
  "rstest",

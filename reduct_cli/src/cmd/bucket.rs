@@ -10,7 +10,7 @@ mod update;
 
 use crate::cmd::RESOURCE_PATH_HELP;
 use crate::context::CliContext;
-use crate::parsers::{BucketPathParser, ByteSizeParser, QuotaTypeParser};
+use crate::parsers::{ByteSizeParser, QuotaTypeParser, ResourcePathParser};
 use bytesize::ByteSize;
 use clap::builder::RangedU64ValueParser;
 use clap::{Arg, ArgMatches, Command};
@@ -48,7 +48,7 @@ fn create_update_bucket_args(cmd: Command) -> Command {
     cmd.arg(
         Arg::new("BUCKET_PATH")
             .help(RESOURCE_PATH_HELP)
-            .value_parser(BucketPathParser::new())
+            .value_parser(ResourcePathParser::new())
             .required(true),
     )
     .arg(

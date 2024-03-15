@@ -9,9 +9,9 @@ use clap::{Arg, Command, Error};
 use std::ffi::OsStr;
 
 #[derive(Clone)]
-pub(crate) struct BucketPathParser {}
+pub(crate) struct ResourcePathParser {}
 
-impl TypedValueParser for BucketPathParser {
+impl TypedValueParser for ResourcePathParser {
     type Value = (String, String);
 
     fn parse_ref(
@@ -37,7 +37,7 @@ impl TypedValueParser for BucketPathParser {
     }
 }
 
-impl BucketPathParser {
+impl ResourcePathParser {
     pub fn new() -> Self {
         Self {}
     }
