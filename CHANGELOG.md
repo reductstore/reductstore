@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-218: Fix block migration, [PR-416](https://github.com/reductstore/reductstore/pull/416)
+
 ## [1.9.1] - 2024-03-09
 
 ### Fixed
