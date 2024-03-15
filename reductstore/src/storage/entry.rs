@@ -112,7 +112,7 @@ impl Entry {
                 block.metadata_size = full_block.metadata_size;
 
                 let mut file = fs::File::create(path.clone())?;
-                file.write_all(&block.encode_to_vec())?;
+                file.write_all(&full_block.encode_to_vec())?;
             }
 
             let id = if let Some(begin_time) = block.begin_time {
