@@ -1,3 +1,4 @@
+use std::ptr::write;
 // Copyright 2024 ReductStore
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,16 +8,22 @@ use crate::io::reduct::build_client;
 use chrono::DateTime;
 use clap::ArgMatches;
 use futures_util::StreamExt;
-use reduct_rs::{EntryInfo, ErrorCode};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use reduct_rs::{Bucket, EntryInfo, ErrorCode, QueryBuilder, ReductError};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::task::{JoinHandle, JoinSet};
 
-pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
-    let (src_instance, src_bucket) = args
-        .get_one::<(String, String)>("SOURCE_BUCKET_OR_FOLDER")
-        .unwrap();
-    let (dst_instance, dst_bucket) = args
-        .get_one::<(String, String)>("DESTINATION_BUCKET_OR_FOLDER")
-        .unwrap();
+struct QueryParams {
+    start: Option<i64>,
+    stop: Option<i64>,
+    include_labels: Vec<String>,
+    exclude_labels: Vec<String>,
+    limit: Option<u64>,
+    entries_filter: Vec<String>,
+}
 
+fn parse_query_params(args: &ArgMatches) -> anyhow::Result<QueryParams> {
     let start = parse_time(args.get_one::<String>("start"))?;
     let stop = parse_time(args.get_one::<String>("stop"))?;
     let include_labels = args
@@ -31,27 +38,49 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
 
-    let limit = args.get_one::<u64>("limit");
+    let limit = args.get_one::<u64>("limit").map(|limit| *limit);
 
     let entries_filter = args
-        .get_many::<String>("entries")
+        .get_many::<String>("entry")
         .unwrap_or_default()
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
 
-    let src_bucket = build_client(ctx, src_instance)
+    Ok(QueryParams {
+        start,
+        stop,
+        include_labels,
+        exclude_labels,
+        limit,
+        entries_filter,
+    })
+}
+
+pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
+    let (src_instance, src_bucket) = args
+        .get_one::<(String, String)>("SOURCE_BUCKET_OR_FOLDER")
+        .map(|(src_instance, src_bucket)| (src_instance.clone(), src_bucket.clone()))
+        .unwrap();
+    let (dst_instance, dst_bucket) = args
+        .get_one::<(String, String)>("DESTINATION_BUCKET_OR_FOLDER")
+        .map(|(dst_instance, dst_bucket)| (dst_instance.clone(), dst_bucket.clone()))
+        .unwrap();
+
+    let query_params = parse_query_params(&args)?;
+
+    let src_bucket = build_client(ctx, &src_instance)
         .await?
-        .get_bucket(src_bucket)
+        .get_bucket(&src_bucket)
         .await?;
 
-    let dst_client = build_client(ctx, dst_instance).await?;
-    let dst_bucket = match dst_client.get_bucket(dst_bucket).await {
+    let dst_client = build_client(ctx, &dst_instance).await?;
+    let dst_bucket = match dst_client.get_bucket(&dst_bucket).await {
         Ok(bucket) => bucket,
         Err(err) => {
             if err.status() == ErrorCode::NotFound {
                 // Create the bucket if it does not exist with the same settings as the source bucket
                 dst_client
-                    .create_bucket(dst_bucket)
+                    .create_bucket(&dst_bucket)
                     .settings(src_bucket.settings().await?)
                     .send()
                     .await?
@@ -61,6 +90,106 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
         }
     };
 
+    let entries = find_entries_to_copy(&src_bucket, &query_params).await?;
+
+    let mut tasks: JoinSet<Result<(), ReductError>> = JoinSet::new();
+    let dst_bucket = Arc::new(RwLock::new(dst_bucket));
+
+    let progress = MultiProgress::new();
+    let sty = ProgressStyle::with_template(
+        "[{elapsed_precise}] {bar:40.cyan/blue} {percent_precise:6}% {msg}",
+    )
+    .unwrap()
+    .progress_chars("##-");
+
+    for entry in entries {
+        let query_builder = build_query(&src_bucket, &entry, &query_params);
+
+        let local_dst_bucket = Arc::clone(&dst_bucket);
+        let local_progress = ProgressBar::new(entry.latest_record as u64);
+        let local_progress = progress.add(local_progress);
+        local_progress.set_style(sty.clone());
+
+        tasks.spawn(async move {
+            local_progress.set_message(format!("Copying {}", entry.name));
+            let record_stream = query_builder.send().await?;
+            tokio::pin!(record_stream);
+
+            while let Some(record) = record_stream.next().await {
+                let record = record?;
+                local_progress.set_position(record.timestamp_us() as u64);
+
+                let timestamp = record.timestamp_us();
+                let result = local_dst_bucket
+                    .write()
+                    .await
+                    .write_record(&entry.name)
+                    .timestamp_us(record.timestamp_us())
+                    .labels(record.labels().clone())
+                    .content_type(record.content_type())
+                    .content_length(record.content_length() as u64)
+                    .stream(record.stream_bytes())
+                    .send()
+                    .await;
+                if let Err(err) = result {
+                    // ignore conflict errors
+
+                    if err.status() != ErrorCode::Conflict {
+                        local_progress.set_message(err.to_string());
+                        local_progress.abandon();
+                        return Err(err);
+                    }
+                }
+            }
+
+            Ok(())
+        });
+    }
+
+    while let Some(result) = tasks.join_next().await {
+        result?;
+    }
+
+    Ok(())
+}
+
+fn build_query(src_bucket: &Bucket, entry: &EntryInfo, query_params: &QueryParams) -> QueryBuilder {
+    let mut query_builder = src_bucket.query(&entry.name);
+    if let Some(start) = query_params.start {
+        query_builder = query_builder.start_us(start as u64);
+    }
+    if let Some(stop) = query_params.stop {
+        query_builder = query_builder.stop_us(stop as u64);
+    }
+    if !query_params.include_labels.is_empty() {
+        for label in &query_params.include_labels {
+            let mut label = label.splitn(2, '=');
+            let key = label.next().unwrap();
+            let value = label.next().unwrap();
+            query_builder = query_builder.add_include(key, value);
+        }
+    }
+
+    if !query_params.exclude_labels.is_empty() {
+        for label in &query_params.exclude_labels {
+            let mut label = label.splitn(2, '=');
+            let key = label.next().unwrap();
+            let value = label.next().unwrap();
+            query_builder = query_builder.add_exclude(key, value);
+        }
+    }
+
+    if let Some(limit) = query_params.limit {
+        query_builder = query_builder.limit(limit);
+    }
+    query_builder
+}
+
+async fn find_entries_to_copy(
+    src_bucket: &Bucket,
+    query_params: &QueryParams,
+) -> anyhow::Result<Vec<EntryInfo>> {
+    let entries_filter = &query_params.entries_filter;
     let entries = src_bucket
         .entries()
         .await?
@@ -77,63 +206,7 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
         })
         .map(|entry| entry.clone())
         .collect::<Vec<EntryInfo>>();
-
-    for entry in entries {
-        let mut query_builder = src_bucket.query(&entry.name);
-        if let Some(start) = start {
-            query_builder = query_builder.start_us(start as u64);
-        }
-        if let Some(stop) = stop {
-            query_builder = query_builder.stop_us(stop as u64);
-        }
-        if !include_labels.is_empty() {
-            for label in &include_labels {
-                let mut label = label.splitn(2, '=');
-                let key = label.next().unwrap();
-                let value = label.next().unwrap();
-                query_builder = query_builder.add_include(key, value);
-            }
-        }
-
-        if !exclude_labels.is_empty() {
-            for label in &exclude_labels {
-                let mut label = label.splitn(2, '=');
-                let key = label.next().unwrap();
-                let value = label.next().unwrap();
-                query_builder = query_builder.add_exclude(key, value);
-            }
-        }
-
-        if let Some(limit) = limit {
-            query_builder = query_builder.limit(*limit);
-        }
-
-        let record_stream = query_builder.send().await?;
-        tokio::pin!(record_stream);
-        while let Some(record) = record_stream.next().await {
-            let record = record?;
-
-            let result = dst_bucket
-                .write_record(&entry.name)
-                .timestamp_us(record.timestamp_us())
-                .labels(record.labels().clone())
-                .content_type(record.content_type())
-                .content_length(record.content_length() as u64)
-                .stream(record.stream_bytes())
-                .send()
-                .await;
-            if let Err(err) = result {
-                // ignore conflict errors
-                if err.status() != ErrorCode::Conflict {
-                    return Err(err.into());
-                }
-            }
-
-            println!("Record copied from {} to {}", src_instance, dst_instance);
-        }
-    }
-
-    Ok(())
+    Ok(entries)
 }
 
 fn parse_time(time_str: Option<&String>) -> anyhow::Result<Option<i64>> {
