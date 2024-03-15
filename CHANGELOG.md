@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.2] - 2024-03-15
+
 ### Fixed
 
 - RS-218: Fix block migration, [PR-416](https://github.com/reductstore/reductstore/pull/416)
@@ -640,7 +642,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.2...HEAD
+
+[1.9.2]: https://github.com/reductstore/reductstore/compare/v1.9.1...v1.9.2
+
+[1.9.1]: https://github.com/reductstore/reductstore/compare/v1.9.0...v1.9.1
 
 [1.9.0]: https://github.com/reductstore/reductstore/compare/v1.8.2...v1.9.0
 

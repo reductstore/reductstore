@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "chrono",
  "http 1.1.0",
@@ -1730,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-cli"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "anyhow",
  "bytesize",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "quote",
  "syn 2.0.52",
@@ -1781,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -1805,7 +1805,7 @@ dependencies = [
  "prost-wkt-build",
  "prost-wkt-types",
  "rand",
- "reduct-base 1.9.1",
+ "reduct-base 1.9.2",
  "reduct-macros",
  "reduct-rs",
  "regex",
