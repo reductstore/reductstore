@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.3] - 2024-03-16
+
 ### Fixed
 
 - RS-221: Fix body draining in write a record and batch edpoints, [PR-418](https://github.com/reductstore/reductstore/pull/418)
@@ -646,7 +648,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.3...HEAD
+
+[1.9.3]: https://github.com/reductstore/reductstore/compare/v1.9.2...v1.9.3
 
 [1.9.2]: https://github.com/reductstore/reductstore/compare/v1.9.1...v1.9.2
 
