@@ -142,7 +142,7 @@ pub(crate) async fn write_batched_records(
     };
 
     if let Err(err) = process_stream.await {
-        if !!headers.contains_key(Expect::name()) {
+        if !headers.contains_key(Expect::name()) {
             debug!("draining the stream");
             while let Some(_) = stream.next().await {}
         }
