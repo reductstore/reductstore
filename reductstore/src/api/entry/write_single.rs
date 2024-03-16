@@ -156,7 +156,7 @@ pub(crate) async fn write_record(
         }
         Err(e) => {
             // drain the stream in the case if a client doesn't support Expect: 100-continue
-            if !!headers.contains_key(Expect::name()) {
+            if !headers.contains_key(Expect::name()) {
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}
             }
