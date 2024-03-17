@@ -400,9 +400,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.2"
+version = "4.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b230ab84b0ffdf890d5a10abdbc8b83ae1c4918275daea1ab8801f71536b2651"
+checksum = "949626d00e063efc93b6dca932419ceb5432f99769911c0b995f7e884c778813"
 dependencies = [
  "clap_builder",
 ]
@@ -821,9 +821,9 @@ checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
 name = "h2"
-version = "0.3.24"
+version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb2c4422095b67ee78da96fbb51a4cc413b3b25883c7717ff7ca1ab31022c9c9"
+checksum = "4fbd2820c5e49886948654ab546d0688ff24530286bdcf8fca3cefb16d4618eb"
 dependencies = [
  "bytes",
  "fnv",
@@ -840,9 +840,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31d030e59af851932b72ceebadf4a2b5986dba4c3b99dd2493f8273a0f151943"
+checksum = "51ee2dd2e4f378392eeff5d51618cd9a63166a2513846bbc55f21cfacd9199d4"
 dependencies = [
  "bytes",
  "fnv",
@@ -1001,7 +1001,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.3.24",
+ "h2 0.3.25",
  "http 0.2.12",
  "http-body 0.4.6",
  "httparse",
@@ -1024,7 +1024,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "h2 0.4.2",
+ "h2 0.4.3",
  "http 1.1.0",
  "http-body 1.0.0",
  "httparse",
@@ -1770,19 +1770,6 @@ dependencies = [
 [[package]]
 name = "reduct-base"
 version = "1.9.2"
-dependencies = [
- "chrono",
- "http 1.1.0",
- "int-enum",
- "rstest",
- "serde",
- "serde_json",
- "url",
-]
-
-[[package]]
-name = "reduct-base"
-version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a310cfec041bcf7a9aae3ecc7a8ffa92251ddc23ee5dc79e3b34657581227c5"
 dependencies = [
@@ -1795,8 +1782,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reduct-base"
+version = "1.9.3"
+dependencies = [
+ "chrono",
+ "http 1.1.0",
+ "int-enum",
+ "rstest",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "reduct-cli"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "anyhow",
  "bytesize",
@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "quote",
  "syn 2.0.52",
@@ -1840,7 +1840,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http 1.1.0",
- "reduct-base 1.9.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "reduct-base 1.9.2",
  "reqwest",
  "rustls",
  "serde",
@@ -1850,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -1874,7 +1874,7 @@ dependencies = [
  "prost-wkt-build",
  "prost-wkt-types",
  "rand",
- "reduct-base 1.9.2",
+ "reduct-base 1.9.3",
  "reduct-macros",
  "reduct-rs",
  "regex",
@@ -1938,7 +1938,7 @@ dependencies = [
  "encoding_rs",
  "futures-core",
  "futures-util",
- "h2 0.3.24",
+ "h2 0.3.25",
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.28",
