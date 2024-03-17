@@ -6,7 +6,7 @@ use std::ptr::write;
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
 use bytesize::ByteSize;
-use chrono::DateTime;
+use chrono::{DateTime, NaiveDateTime};
 use clap::ArgMatches;
 use futures_util::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -236,7 +236,9 @@ fn parse_time(time_str: Option<&String>) -> anyhow::Result<Option<i64>> {
         time
     } else {
         // try parse as ISO 8601
-        DateTime::parse_from_rfc3339(time_str)?.timestamp_micros()
+        DateTime::parse_from_rfc3339(time_str)
+            .map_err(|err| anyhow::anyhow!("Failed to parse time {}: {}", time_str, err))?
+            .timestamp_micros()
     };
 
     Ok(Some(time))
