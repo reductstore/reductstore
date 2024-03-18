@@ -3,18 +3,20 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use bytesize::ByteSize;
 use chrono::DateTime;
 use clap::ArgMatches;
 use futures_util::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reduct_rs::{Bucket, EntryInfo, ErrorCode, QueryBuilder, Record, ReductError};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tokio::time::{sleep, Instant};
 
+#[derive(Default)]
 pub(super) struct QueryParams {
     start: Option<i64>,
     stop: Option<i64>,
@@ -274,8 +276,9 @@ mod tests {
     use rstest::*;
 
     mod parse_query_params {
-        use super::*;
         use crate::cmd::cp::cp_cmd;
+
+        use super::*;
 
         #[rstest]
         fn parse_start_stop() {
@@ -381,6 +384,264 @@ mod tests {
                 query_params.entries_filter,
                 vec![String::from("entry-1"), String::from("entry-2")]
             );
+        }
+    }
+
+    mod downloading {
+        use super::*;
+        use crate::context::tests::{bucket, context};
+        use crate::context::CliContext;
+        use crate::io::reduct::build_client;
+        use async_trait::async_trait;
+        use bytes::Bytes;
+        use mockall::mock;
+        use mockall::predicate::{always, eq};
+
+        mock! {
+            pub Visitor {}
+            #[async_trait]
+            impl Visitor for Visitor {
+                async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError>;
+            }
+        }
+
+        #[fixture]
+        fn visitor() -> MockVisitor {
+            MockVisitor::new()
+        }
+
+        #[fixture]
+        async fn src_bucket(context: CliContext, #[future] bucket: String) -> Bucket {
+            let client = build_client(&context, "local").await.unwrap();
+            let bucket = client.create_bucket(&bucket.await).send().await.unwrap();
+            bucket
+                .write_record("entry-1")
+                .data(Bytes::from_static(b"rec-1"))
+                .send()
+                .await
+                .unwrap();
+            bucket
+                .write_record("entry-2")
+                .data(Bytes::from_static(b"rec-2"))
+                .send()
+                .await
+                .unwrap();
+
+            bucket
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading(#[future] src_bucket: Bucket, mut visitor: MockVisitor) {
+            let src_bucket = src_bucket.await;
+            visitor.expect_visit().times(2).return_const(Ok(()));
+
+            start_loading(
+                &src_bucket,
+                &QueryParams::default(),
+                Arc::new(RwLock::new(visitor)),
+            )
+            .await
+            .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading_metadata(#[future] src_bucket: Bucket, mut visitor: MockVisitor) {
+            let src_bucket = src_bucket.await;
+            visitor
+                .expect_visit()
+                .withf(|entry, record| entry == "entry-1")
+                .times(1)
+                .return_const(Ok(()));
+            visitor
+                .expect_visit()
+                .withf(|entry, record| entry == "entry-2")
+                .times(1)
+                .return_const(Ok(()));
+            visitor
+                .expect_visit()
+                .withf(|entry, record| {
+                    entry == "entry-3"
+                        && record.timestamp_us() == 1
+                        && record.labels().get("key").unwrap() == "value"
+                        && record.content_type() == "text/plain"
+                })
+                .times(1)
+                .return_const(Ok(()));
+
+            src_bucket
+                .write_record("entry-3")
+                .timestamp_us(1)
+                .add_label("key", "value")
+                .content_type("text/plain")
+                .data(Bytes::from_static(b"rec-3"))
+                .send()
+                .await
+                .unwrap();
+
+            start_loading(
+                &src_bucket,
+                &QueryParams::default(),
+                Arc::new(RwLock::new(visitor)),
+            )
+            .await
+            .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading_finish_rest_if_one_fails(
+            #[future] src_bucket: Bucket,
+            mut visitor: MockVisitor,
+        ) {
+            let src_bucket = src_bucket.await;
+            visitor
+                .expect_visit()
+                .withf(|entry, record| entry == "entry-1")
+                .times(1)
+                .return_const(Err(ReductError::new(ErrorCode::Conflict, "Conflict")));
+            visitor
+                .expect_visit()
+                .withf(|entry, record| entry == "entry-2")
+                .times(1)
+                .return_const(Ok(()));
+
+            let visitor = Arc::new(RwLock::new(visitor));
+            let result = start_loading(&src_bucket, &QueryParams::default(), visitor).await;
+            assert!(result.is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading_entry_wildcard(
+            #[future] src_bucket: Bucket,
+            mut visitor: MockVisitor,
+        ) {
+            let src_bucket = src_bucket.await;
+            visitor.expect_visit().times(2).return_const(Ok(()));
+
+            let params = QueryParams {
+                entries_filter: vec!["entry-*".to_string()],
+                ..Default::default()
+            };
+
+            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
+                .await
+                .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading_entry_filter(
+            #[future] src_bucket: Bucket,
+            mut visitor: MockVisitor,
+        ) {
+            let src_bucket = src_bucket.await;
+            visitor
+                .expect_visit()
+                .times(1)
+                .with(eq("entry-1"), always())
+                .return_const(Ok(()));
+
+            let params = QueryParams {
+                entries_filter: vec!["entry-1".to_string()],
+                ..Default::default()
+            };
+
+            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
+                .await
+                .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading_limit(#[future] src_bucket: Bucket, mut visitor: MockVisitor) {
+            let src_bucket = src_bucket.await;
+            visitor.expect_visit().times(2).return_const(Ok(()));
+
+            src_bucket
+                .write_record("entry-1")
+                .data(Bytes::from_static(b"rec-3"))
+                .send()
+                .await
+                .unwrap();
+            src_bucket
+                .write_record("entry-2")
+                .data(Bytes::from_static(b"rec-4"))
+                .send()
+                .await
+                .unwrap();
+
+            let params = QueryParams {
+                limit: Some(1),
+                ..Default::default()
+            };
+
+            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
+                .await
+                .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading_include(#[future] src_bucket: Bucket, mut visitor: MockVisitor) {
+            let src_bucket = src_bucket.await;
+            visitor
+                .expect_visit()
+                .times(1)
+                .with(eq("entry-1"), always())
+                .return_const(Ok(()));
+
+            src_bucket
+                .write_record("entry-1")
+                .data(Bytes::from_static(b"rec-3"))
+                .add_label("key1", "value1")
+                .send()
+                .await
+                .unwrap();
+
+            let params = QueryParams {
+                include_labels: vec!["key1=value1".to_string()],
+                ..Default::default()
+            };
+
+            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
+                .await
+                .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_downloading_exclude(#[future] src_bucket: Bucket, mut visitor: MockVisitor) {
+            let src_bucket = src_bucket.await;
+            visitor
+                .expect_visit()
+                .times(1)
+                .with(eq("entry-1"), always())
+                .return_const(Ok(()));
+            visitor
+                .expect_visit()
+                .times(1)
+                .with(eq("entry-2"), always())
+                .return_const(Ok(()));
+
+            src_bucket
+                .write_record("entry-1")
+                .data(Bytes::from_static(b"rec-3"))
+                .add_label("key1", "value1")
+                .send()
+                .await
+                .unwrap();
+
+            let params = QueryParams {
+                exclude_labels: vec!["key1=value1".to_string()],
+                ..Default::default()
+            };
+
+            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
+                .await
+                .unwrap();
         }
     }
 }
