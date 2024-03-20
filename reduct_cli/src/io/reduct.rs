@@ -33,6 +33,7 @@ pub(crate) async fn build_client(
         .api_token(token.as_str())
         .verify_ssl(!ctx.ignore_ssl())
         .http1_only()
+        .timeout(ctx.timeout())
         .try_build()?;
 
     let status = client.server_info().await?;

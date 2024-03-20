@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::context::CliContext;
 use bytesize::ByteSize;
 use chrono::DateTime;
 use clap::ArgMatches;
@@ -24,6 +25,8 @@ pub(super) struct QueryParams {
     exclude_labels: Vec<String>,
     limit: Option<u64>,
     entries_filter: Vec<String>,
+    parallel: usize,
+    ttl: Duration,
 }
 
 pub(super) struct TransferProgress {
@@ -78,7 +81,10 @@ impl TransferProgress {
     }
 }
 
-pub(super) fn parse_query_params(args: &ArgMatches) -> anyhow::Result<QueryParams> {
+pub(super) fn parse_query_params(
+    ctx: &CliContext,
+    args: &ArgMatches,
+) -> anyhow::Result<QueryParams> {
     let start = parse_time(args.get_one::<String>("start"))?;
     let stop = parse_time(args.get_one::<String>("stop"))?;
     let include_labels = args
@@ -108,6 +114,8 @@ pub(super) fn parse_query_params(args: &ArgMatches) -> anyhow::Result<QueryParam
         exclude_labels,
         limit,
         entries_filter,
+        parallel: ctx.parallel(),
+        ttl: ctx.timeout() * ctx.parallel() as u32,
     })
 }
 
@@ -185,7 +193,8 @@ fn build_query(src_bucket: &Bucket, entry: &EntryInfo, query_params: &QueryParam
     if let Some(limit) = query_params.limit {
         query_builder = query_builder.limit(limit);
     }
-    query_builder
+
+    query_builder.ttl(query_params.ttl)
 }
 
 #[async_trait::async_trait]
@@ -219,18 +228,21 @@ where
     )
     .unwrap()
     .progress_chars("##-");
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(query_params.parallel));
 
     for entry in entries {
         let query_builder = build_query(&src_bucket, &entry, &query_params);
         let local_progress = ProgressBar::new(entry.latest_record - entry.oldest_record);
         let local_progress = progress.add(local_progress);
+        let local_sem = Arc::clone(&semaphore);
         local_progress.set_style(sty.clone());
 
         let local_visitor = Arc::clone(&visitor);
-
         tasks.spawn(async move {
             let mut transfer_progress = TransferProgress::new(entry.clone());
             local_progress.set_message(transfer_progress.message());
+
+            let _permit = local_sem.acquire().await.unwrap();
 
             let record_stream = query_builder.send().await?;
             tokio::pin!(record_stream);
@@ -277,22 +289,23 @@ mod tests {
 
     mod parse_query_params {
         use crate::cmd::cp::cp_cmd;
+        use crate::context::tests::context;
 
         use super::*;
 
         #[rstest]
-        fn parse_start_stop() {
+        fn parse_start_stop(context: CliContext) {
             let args = cp_cmd()
                 .try_get_matches_from(vec!["cp", "serv/buck1", "serv/buck2"])
                 .unwrap();
-            let query_params = parse_query_params(&args).unwrap();
+            let query_params = parse_query_params(&context, &args).unwrap();
 
             assert_eq!(query_params.start, None);
             assert_eq!(query_params.stop, None);
         }
 
         #[rstest]
-        fn parse_start_stop_with_values() {
+        fn parse_start_stop_with_values(context: CliContext) {
             let args = cp_cmd()
                 .try_get_matches_from(vec![
                     "cp",
@@ -304,14 +317,14 @@ mod tests {
                     "200",
                 ])
                 .unwrap();
-            let query_params = parse_query_params(&args).unwrap();
+            let query_params = parse_query_params(&context, &args).unwrap();
 
             assert_eq!(query_params.start, Some(100));
             assert_eq!(query_params.stop, Some(200));
         }
 
         #[rstest]
-        fn parse_start_stop_iso8601() {
+        fn parse_start_stop_iso8601(context: CliContext) {
             let args = cp_cmd()
                 .try_get_matches_from(vec![
                     "cp",
@@ -323,14 +336,14 @@ mod tests {
                     "2023-01-02T00:00:00Z",
                 ])
                 .unwrap();
-            let query_params = parse_query_params(&args).unwrap();
+            let query_params = parse_query_params(&context, &args).unwrap();
 
             assert_eq!(query_params.start, Some(1672531200000000));
             assert_eq!(query_params.stop, Some(1672617600000000));
         }
 
         #[rstest]
-        fn parse_include_exclude() {
+        fn parse_include_exclude(context: CliContext) {
             let args = cp_cmd()
                 .try_get_matches_from(vec![
                     "cp",
@@ -344,7 +357,7 @@ mod tests {
                     "key4=value4",
                 ])
                 .unwrap();
-            let query_params = parse_query_params(&args).unwrap();
+            let query_params = parse_query_params(&context, &args).unwrap();
 
             assert_eq!(
                 query_params.include_labels,
@@ -357,17 +370,17 @@ mod tests {
         }
 
         #[rstest]
-        fn parse_limit() {
+        fn parse_limit(context: CliContext) {
             let args = cp_cmd()
                 .try_get_matches_from(vec!["cp", "serv/buck1", "serv/buck2", "--limit", "100"])
                 .unwrap();
-            let query_params = parse_query_params(&args).unwrap();
+            let query_params = parse_query_params(&context, &args).unwrap();
 
             assert_eq!(query_params.limit, Some(100));
         }
 
         #[rstest]
-        fn parse_entries_filter() {
+        fn parse_entries_filter(context: CliContext) {
             let args = cp_cmd()
                 .try_get_matches_from(vec![
                     "cp",
@@ -378,7 +391,7 @@ mod tests {
                     "entry-2",
                 ])
                 .unwrap();
-            let query_params = parse_query_params(&args).unwrap();
+            let query_params = parse_query_params(&context, &args).unwrap();
 
             assert_eq!(
                 query_params.entries_filter,

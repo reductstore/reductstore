@@ -6,12 +6,15 @@
 use crate::io::std::{Input, Output, StdInput, StdOutput};
 use dirs::home_dir;
 use std::env::current_dir;
+use std::time::Duration;
 
 pub(crate) struct CliContext {
     config_path: String,
     output: Box<dyn Output>,
     input: Box<dyn Input>,
     ignore_ssl: bool,
+    timeout: Duration,
+    parallel: usize,
 }
 
 impl CliContext {
@@ -29,6 +32,14 @@ impl CliContext {
     pub(crate) fn ignore_ssl(&self) -> bool {
         self.ignore_ssl
     }
+
+    pub(crate) fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    pub(crate) fn parallel(&self) -> usize {
+        self.parallel
+    }
 }
 
 pub(crate) struct ContextBuilder {
@@ -42,6 +53,8 @@ impl ContextBuilder {
             output: Box::new(StdOutput::new()),
             input: Box::new(StdInput::new()),
             ignore_ssl: false,
+            timeout: Duration::from_secs(30),
+            parallel: 10,
         };
         config.config_path = match home_dir() {
             Some(path) => path
@@ -78,6 +91,16 @@ impl ContextBuilder {
 
     pub(crate) fn ignore_ssl(mut self, ignore_ssl: bool) -> Self {
         self.config.ignore_ssl = ignore_ssl;
+        self
+    }
+
+    pub(crate) fn timeout(mut self, timeout: Duration) -> Self {
+        self.config.timeout = timeout;
+        self
+    }
+
+    pub(crate) fn parallel(mut self, parallel: usize) -> Self {
+        self.config.parallel = parallel;
         self
     }
 

@@ -45,7 +45,7 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
         .map(|(dst_instance, dst_bucket)| (dst_instance.clone(), dst_bucket.clone()))
         .unwrap();
 
-    let query_params = parse_query_params(&args)?;
+    let query_params = parse_query_params(ctx, &args)?;
 
     let src_bucket = build_client(ctx, &src_instance)
         .await?
