@@ -196,10 +196,21 @@ pub(crate) mod tests {
         let client = build_client(&context, "local").await.unwrap();
         // remove the bucket if it already exists
         if let Ok(bucket) = client.get_bucket("test_bucket").await {
-            bucket.remove().await.unwrap_or_default();
+            bucket.remove().await.unwrap();
         }
 
         "test_bucket".to_string()
+    }
+
+    #[fixture]
+    pub(crate) async fn bucket2(context: CliContext) -> String {
+        let client = build_client(&context, "local").await.unwrap();
+        // remove the bucket if it already exists
+        if let Ok(bucket) = client.get_bucket("test_bucket_2").await {
+            bucket.remove().await.unwrap();
+        }
+
+        "test_bucket_2".to_string()
     }
 
     #[fixture]
