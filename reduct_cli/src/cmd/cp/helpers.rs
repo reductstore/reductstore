@@ -17,7 +17,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tokio::time::{sleep, Instant};
 
-#[derive(Default)]
 pub(super) struct QueryParams {
     start: Option<i64>,
     stop: Option<i64>,
@@ -27,6 +26,21 @@ pub(super) struct QueryParams {
     entries_filter: Vec<String>,
     parallel: usize,
     ttl: Duration,
+}
+
+impl Default for QueryParams {
+    fn default() -> Self {
+        Self {
+            start: None,
+            stop: None,
+            include_labels: Vec::new(),
+            exclude_labels: Vec::new(),
+            limit: None,
+            entries_filter: Vec::new(),
+            parallel: 1,
+            ttl: Duration::from_secs(60),
+        }
+    }
 }
 
 pub(super) struct TransferProgress {
@@ -464,12 +478,12 @@ mod tests {
             let src_bucket = src_bucket.await;
             visitor
                 .expect_visit()
-                .withf(|entry, record| entry == "entry-1")
+                .withf(|entry, _record| entry == "entry-1")
                 .times(1)
                 .return_const(Ok(()));
             visitor
                 .expect_visit()
-                .withf(|entry, record| entry == "entry-2")
+                .withf(|entry, _record| entry == "entry-2")
                 .times(1)
                 .return_const(Ok(()));
             visitor
@@ -511,12 +525,12 @@ mod tests {
             let src_bucket = src_bucket.await;
             visitor
                 .expect_visit()
-                .withf(|entry, record| entry == "entry-1")
+                .withf(|entry, _record| entry == "entry-1")
                 .times(1)
                 .return_const(Err(ReductError::new(ErrorCode::Conflict, "Conflict")));
             visitor
                 .expect_visit()
-                .withf(|entry, record| entry == "entry-2")
+                .withf(|entry, _record| entry == "entry-2")
                 .times(1)
                 .return_const(Ok(()));
 

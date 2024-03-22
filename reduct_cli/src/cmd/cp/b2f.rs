@@ -130,7 +130,6 @@ pub(crate) async fn cp_bucket_to_folder(ctx: &CliContext, args: &ArgMatches) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::cp::b2b::cp_bucket_to_bucket;
     use crate::cmd::cp::cp_cmd;
     use crate::context::tests::{bucket, context};
     use bytes::Bytes;
@@ -140,9 +139,6 @@ mod tests {
 
     mod visitor {
         use super::*;
-        use bytes::Bytes;
-        use reduct_rs::RecordBuilder;
-        use std::env::temp_dir;
         use tempfile::tempdir;
 
         #[rstest]
