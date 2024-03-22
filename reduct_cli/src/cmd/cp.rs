@@ -12,9 +12,8 @@ use crate::cmd::cp::b2f::cp_bucket_to_folder;
 use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::context::CliContext;
 use crate::parsers::ResourcePathParser;
-use clap::ArgAction::{SetFalse, SetTrue};
+use clap::ArgAction::SetTrue;
 use clap::{value_parser, Arg, Command};
-use url::Url;
 
 pub(crate) fn cp_cmd() -> Command {
     Command::new("cp")
