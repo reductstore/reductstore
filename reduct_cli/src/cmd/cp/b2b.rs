@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use reduct_rs::{Bucket, ErrorCode, Record, ReductError};
 use tokio::sync::RwLock;
 
-use crate::cmd::cp::helpers::{parse_query_params, start_loading, Visitor};
+use crate::cmd::cp::helpers::{parse_query_params, start_loading, CopyVisitor};
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
 
@@ -19,7 +19,7 @@ struct CopyToBucketVisitor {
 }
 
 #[async_trait::async_trait]
-impl Visitor for CopyToBucketVisitor {
+impl CopyVisitor for CopyToBucketVisitor {
     async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError> {
         self.dst_bucket
             .write()

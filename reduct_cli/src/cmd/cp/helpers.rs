@@ -198,7 +198,7 @@ fn build_query(src_bucket: &Bucket, entry: &EntryInfo, query_params: &QueryParam
 }
 
 #[async_trait::async_trait]
-pub(super) trait Visitor {
+pub(super) trait CopyVisitor {
     async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError>;
 }
 
@@ -217,7 +217,7 @@ pub(super) async fn start_loading<V>(
     visitor: Arc<RwLock<V>>,
 ) -> anyhow::Result<()>
 where
-    V: Visitor + Send + Sync + 'static,
+    V: CopyVisitor + Send + Sync + 'static,
 {
     let entries = find_entries_to_copy(&src_bucket, &query_params).await?;
 
@@ -413,7 +413,7 @@ mod tests {
         mock! {
             pub Visitor {}
             #[async_trait]
-            impl Visitor for Visitor {
+            impl CopyVisitor for Visitor {
                 async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError>;
             }
         }

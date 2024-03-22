@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::cmd::cp::helpers::{parse_query_params, start_loading, Visitor};
+use crate::cmd::cp::helpers::{parse_query_params, start_loading, CopyVisitor};
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
 use clap::ArgMatches;
@@ -32,7 +32,7 @@ struct Meta {
 }
 
 #[async_trait::async_trait]
-impl Visitor for CopyToFolderVisitor {
+impl CopyVisitor for CopyToFolderVisitor {
     async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError> {
         fs::create_dir_all(&self.dst_folder.join(entry_name)).await?;
 
