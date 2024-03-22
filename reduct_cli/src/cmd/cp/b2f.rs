@@ -122,3 +122,47 @@ pub(crate) async fn cp_bucket_to_folder(ctx: &CliContext, args: &ArgMatches) -> 
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::*;
+
+    mod visitor {
+        use super::*;
+        use bytes::Bytes;
+        use reduct_rs::RecordBuilder;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_copy_to_folder_visitor(record: Record) {
+            let visitor = CopyToFolderVisitor {
+                dst_folder: PathBuf::from("/tmp"),
+                ext: None,
+                with_meta: false,
+            };
+
+            let entry_name = "test";
+            let result = visitor.visit(entry_name, record).await;
+            assert!(result.is_ok());
+
+            let file_path = PathBuf::from("/tmp")
+                .join(entry_name)
+                .join("1234567890.txt");
+            assert!(file_path.exists());
+            assert_eq!(
+                fs::read_to_string(file_path).await.unwrap(),
+                "Hello, World!"
+            );
+        }
+
+        #[fixture]
+        fn record() -> Record {
+            RecordBuilder::new()
+                .timestamp_us(1234567890)
+                .data(Bytes::from_static(b"Hello, World!"))
+                .content_type("text/plain".to_string())
+                .build()
+        }
+    }
+}

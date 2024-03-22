@@ -20,6 +20,7 @@ use crate::cmd::server::{server_cmd, server_handler};
 use crate::cmd::token::{token_cmd, token_handler};
 use clap::ArgAction::SetTrue;
 use clap::{crate_description, crate_name, crate_version, value_parser, Arg, Command};
+use colored::Colorize;
 
 fn cli() -> Command {
     Command::new(crate_name!())
@@ -75,14 +76,19 @@ async fn main() -> anyhow::Result<()> {
         .parallel(*matches.get_one::<usize>("parallel").unwrap())
         .build();
 
-    match matches.subcommand() {
+    let result = match matches.subcommand() {
         Some(("alias", args)) => alias_handler(&ctx, args.subcommand()),
         Some(("server", args)) => server_handler(&ctx, args.subcommand()).await,
         Some(("bucket", args)) => bucket_handler(&ctx, args.subcommand()).await,
         Some(("token", args)) => token_handler(&ctx, args.subcommand()).await,
         Some(("cp", args)) => cp_handler(&ctx, args).await,
         _ => Ok(()),
-    }?;
+    };
+
+    if let Err(err) = result {
+        eprintln!("{}", err.to_string().red().bold(),);
+        std::process::exit(1);
+    }
 
     Ok(())
 }

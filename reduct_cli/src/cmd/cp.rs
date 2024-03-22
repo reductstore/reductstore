@@ -100,14 +100,12 @@ pub(crate) fn cp_cmd() -> Command {
 }
 
 pub(crate) async fn cp_handler(ctx: &CliContext, args: &clap::ArgMatches) -> anyhow::Result<()> {
-    let (source, src_res) = args
+    let (_, src_res) = args
         .get_one::<(String, String)>("SOURCE_BUCKET_OR_FOLDER")
         .unwrap();
-    let (destination, dst_res) = args
+    let (_, dst_res) = args
         .get_one::<(String, String)>("DESTINATION_BUCKET_OR_FOLDER")
         .unwrap();
-
-    println!("{}, {}", source, destination);
 
     if src_res.is_empty() && dst_res.is_empty() {
         return Err(anyhow::anyhow!("Folder to folder copy is not supported."));
