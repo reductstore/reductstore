@@ -4,9 +4,11 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod b2b;
+mod b2f;
 mod helpers;
 
 use crate::cmd::cp::b2b::cp_bucket_to_bucket;
+use crate::cmd::cp::b2f::cp_bucket_to_folder;
 use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::context::CliContext;
 use crate::parsers::ResourcePathParser;
@@ -93,24 +95,28 @@ pub(crate) fn cp_cmd() -> Command {
                 .short('m')
                 .help("Export the metadata of the records along with the records in JSON format.\nIf not specified, only the records will be exported.")
                 .required(false)
-                .action(SetFalse)
+                .action(SetTrue)
         )
 }
 
 pub(crate) async fn cp_handler(ctx: &CliContext, args: &clap::ArgMatches) -> anyhow::Result<()> {
-    let (source, _) = args
+    let (source, src_res) = args
         .get_one::<(String, String)>("SOURCE_BUCKET_OR_FOLDER")
         .unwrap();
-    let (destination, _) = args
+    let (destination, dst_res) = args
         .get_one::<(String, String)>("DESTINATION_BUCKET_OR_FOLDER")
         .unwrap();
 
-    if source.starts_with("./") && destination.starts_with("./") {
-        return Err(anyhow::anyhow!("Local to local copy is not supported."));
-    } else if source.starts_with("./") {
+    println!("{}, {}", source, destination);
+
+    if src_res.is_empty() && dst_res.is_empty() {
+        return Err(anyhow::anyhow!("Folder to folder copy is not supported."));
+    } else if src_res.is_empty() {
         // Copy from filesystem to remote bucket
-    } else if destination.starts_with("./") {
+        return Err(anyhow::anyhow!("Folder to bucket copy is not supported."));
+    } else if dst_res.is_empty() {
         // Copy from remote bucket to filesystem
+        cp_bucket_to_folder(ctx, args).await?;
     } else {
         // Copy from remote bucket to remote bucket
         cp_bucket_to_bucket(ctx, args).await?;

@@ -1809,10 +1809,12 @@ dependencies = [
  "dirs",
  "futures-util",
  "indicatif",
+ "mime_guess",
  "mockall",
  "reduct-rs",
  "rstest",
  "serde",
+ "serde_json",
  "tempfile",
  "thread-id",
  "time-humanize",
@@ -1831,9 +1833,9 @@ dependencies = [
 
 [[package]]
 name = "reduct-rs"
-version = "1.9.2"
+version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a056038572689131de8b571a29dea6fa3478a0d2995f4aea6f668466300d885a"
+checksum = "1eec3b8670b22c49cab4c9a3a859b791000da1da55ebe5da0571ef9e2b03fd53"
 dependencies = [
  "async-channel",
  "async-stream",

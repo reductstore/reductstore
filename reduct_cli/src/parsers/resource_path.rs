@@ -20,18 +20,21 @@ impl TypedValueParser for ResourcePathParser {
         arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, Error> {
-        if let Some((alias_or_url, bucket_name)) = value.to_string_lossy().rsplit_once('/') {
-            Ok((alias_or_url.to_string(), bucket_name.to_string()))
+        let value = value.to_string_lossy().to_string();
+        let is_folder = [".", "/", ".."].iter().any(|s| value.starts_with(s));
+        if is_folder {
+            return Ok((value, "".to_string()));
+        }
+
+        if let Some((alias_or_url, resource_name)) = value.rsplit_once('/') {
+            Ok((alias_or_url.to_string(), resource_name.to_string()))
         } else {
             let mut err = Error::new(ErrorKind::ValueValidation).with_cmd(cmd);
             err.insert(
                 ContextKind::InvalidArg,
                 ContextValue::String(arg.unwrap().to_string()),
             );
-            err.insert(
-                ContextKind::InvalidValue,
-                ContextValue::String(value.to_string_lossy().to_string()),
-            );
+            err.insert(ContextKind::InvalidValue, ContextValue::String(value));
             Err(err)
         }
     }

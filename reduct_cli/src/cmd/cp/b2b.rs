@@ -14,12 +14,12 @@ use crate::cmd::cp::helpers::{parse_query_params, start_loading, Visitor};
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
 
-struct CopyVisitor {
+struct CopyToBucketVisitor {
     dst_bucket: Arc<RwLock<Bucket>>,
 }
 
 #[async_trait::async_trait]
-impl Visitor for CopyVisitor {
+impl Visitor for CopyToBucketVisitor {
     async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError> {
         self.dst_bucket
             .write()
@@ -71,7 +71,7 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
 
     let dst_bucket = Arc::new(RwLock::new(dst_bucket));
 
-    let visitor = Arc::new(RwLock::new(CopyVisitor {
+    let visitor = Arc::new(RwLock::new(CopyToBucketVisitor {
         dst_bucket: dst_bucket.clone(),
     }));
 
@@ -107,7 +107,7 @@ mod tests {
                 .unwrap();
 
             let dst_bucket = Arc::new(RwLock::new(dst_bucket));
-            let visitor = CopyVisitor {
+            let visitor = CopyToBucketVisitor {
                 dst_bucket: Arc::clone(&dst_bucket),
             };
 
