@@ -10,7 +10,7 @@ use clap::ArgMatches;
 use futures_util::StreamExt;
 use mime_guess::{get_extensions, get_mime_extensions, get_mime_extensions_str};
 use reduct_rs::{Bucket, ErrorCode, Labels, Record, ReductError};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -23,7 +23,7 @@ struct CopyToFolderVisitor {
     with_meta: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Meta {
     timestamp: u64,
     labels: Labels,
@@ -41,7 +41,11 @@ impl Visitor for CopyToFolderVisitor {
         } else {
             if let Some((top, sub)) = record.content_type().split_once('/') {
                 if let Some(ext) = get_extensions(top, sub) {
-                    ext.last().unwrap_or(&"bin").to_string()
+                    if ext.contains(&sub) {
+                        sub.to_string()
+                    } else {
+                        ext.first().unwrap_or(&"bin").to_string()
+                    }
                 } else {
                     "bin".to_string()
                 }
@@ -126,29 +130,34 @@ pub(crate) async fn cp_bucket_to_folder(ctx: &CliContext, args: &ArgMatches) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cmd::cp::b2b::cp_bucket_to_bucket;
+    use crate::cmd::cp::cp_cmd;
+    use crate::context::tests::{bucket, context};
+    use bytes::Bytes;
+    use reduct_rs::RecordBuilder;
     use rstest::*;
+    use tempfile::tempdir;
 
     mod visitor {
         use super::*;
         use bytes::Bytes;
         use reduct_rs::RecordBuilder;
+        use std::env::temp_dir;
+        use tempfile::tempdir;
 
         #[rstest]
         #[tokio::test]
-        async fn test_copy_to_folder_visitor(record: Record) {
-            let visitor = CopyToFolderVisitor {
-                dst_folder: PathBuf::from("/tmp"),
-                ext: None,
-                with_meta: false,
-            };
-
-            let entry_name = "test";
-            let result = visitor.visit(entry_name, record).await;
+        async fn test_copy_to_folder_visitor(
+            visitor: CopyToFolderVisitor,
+            entry_name: String,
+            record: Record,
+        ) {
+            let result = visitor.visit(&entry_name, record).await;
             assert!(result.is_ok());
 
-            let file_path = PathBuf::from("/tmp")
-                .join(entry_name)
-                .join("1234567890.txt");
+            let file_path = PathBuf::from(visitor.dst_folder)
+                .join(&entry_name)
+                .join("1234567890.html");
             assert!(file_path.exists());
             assert_eq!(
                 fs::read_to_string(file_path).await.unwrap(),
@@ -156,13 +165,118 @@ mod tests {
             );
         }
 
-        #[fixture]
-        fn record() -> Record {
-            RecordBuilder::new()
-                .timestamp_us(1234567890)
-                .data(Bytes::from_static(b"Hello, World!"))
-                .content_type("text/plain".to_string())
-                .build()
+        #[rstest]
+        #[tokio::test]
+        async fn test_copy_to_folder_visitor_ext(
+            mut visitor: CopyToFolderVisitor,
+            entry_name: String,
+            record: Record,
+        ) {
+            visitor.ext = Some("md".to_string());
+            let result = visitor.visit(&entry_name, record).await;
+            assert!(result.is_ok());
+
+            let file_path = PathBuf::from(visitor.dst_folder)
+                .join(&entry_name)
+                .join("1234567890.md");
+            assert!(file_path.exists());
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_copy_to_folder_visitor_with_meta(
+            mut visitor: CopyToFolderVisitor,
+            entry_name: String,
+            record: Record,
+        ) {
+            visitor.with_meta = true;
+            let result = visitor.visit(&entry_name, record).await;
+            assert!(result.is_ok());
+
+            let file_path = PathBuf::from(visitor.dst_folder.clone())
+                .join(&entry_name)
+                .join("1234567890.html");
+            assert!(file_path.exists());
+            assert_eq!(
+                fs::read_to_string(file_path).await.unwrap(),
+                "Hello, World!"
+            );
+
+            let meta_path = PathBuf::from(visitor.dst_folder)
+                .join(&entry_name)
+                .join("1234567890-meta.json");
+            assert!(meta_path.exists());
+
+            let meta = fs::read_to_string(meta_path).await.unwrap();
+            let meta: Meta = serde_json::from_str(&meta).unwrap();
+            assert_eq!(meta.timestamp, 1234567890);
+            assert_eq!(meta.content_type, "text/html");
+            assert_eq!(meta.content_length, 13);
+            assert_eq!(meta.labels["planet"], "Earth");
+            assert_eq!(meta.labels["greeting"], "Hello");
+        }
+
+        #[fixture]
+        fn visitor() -> CopyToFolderVisitor {
+            CopyToFolderVisitor {
+                dst_folder: tempdir().unwrap().into_path(),
+                ext: None,
+                with_meta: false,
+            }
+        }
+
+        #[fixture]
+        fn entry_name() -> String {
+            "test".to_string()
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_cp_bucket_to_folder(
+        context: CliContext,
+        #[future] bucket: String,
+        record: Record,
+    ) {
+        let client = build_client(&context, "local").await.unwrap();
+        let src_bucket = client.create_bucket(&bucket.await).send().await.unwrap();
+
+        src_bucket
+            .write_record("test")
+            .timestamp_us(record.timestamp_us())
+            .content_type(&*record.content_type().to_string())
+            .labels(record.labels().clone())
+            .data(record.bytes().await.unwrap())
+            .send()
+            .await;
+
+        let path = tempdir().unwrap().into_path();
+        let args = cp_cmd()
+            .try_get_matches_from(vec![
+                "cp",
+                format!("local/{}", src_bucket.name()).as_str(),
+                format!("{}", path.to_string_lossy()).as_str(),
+            ])
+            .unwrap();
+
+        cp_bucket_to_folder(&context, &args).await.unwrap();
+
+        let file_path = path.join("test").join("1234567890.html");
+        assert!(file_path.exists());
+        assert_eq!(
+            fs::read_to_string(file_path).await.unwrap(),
+            "Hello, World!"
+        );
+    }
+
+    #[fixture]
+    fn record() -> Record {
+        RecordBuilder::new()
+            .timestamp_us(1234567890)
+            .data(Bytes::from_static(b"Hello, World!"))
+            .content_type("text/html".to_string())
+            .add_label("planet".to_string(), "Earth".to_string())
+            .add_label("greeting".to_string(), "Hello".to_string())
+            .build()
     }
 }

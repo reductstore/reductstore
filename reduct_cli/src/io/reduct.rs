@@ -51,7 +51,7 @@ pub(crate) async fn build_client(
             );
         }
 
-        if license.disk_quota > 0 && status.usage > (license.disk_quota * 1000_000_000i32) as u64 {
+        if license.disk_quota > 0 && status.usage > (license.disk_quota as u64 * 1000_000_000u64) {
             eprintln!(
                 "{}",
                 format!(

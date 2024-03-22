@@ -121,3 +121,30 @@ pub(crate) async fn cp_handler(ctx: &CliContext, args: &clap::ArgMatches) -> any
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::tests::context;
+    use rstest::*;
+
+    #[rstest]
+    #[tokio::test]
+    async fn folder_to_folder_unsupported(context: CliContext) {
+        let args = cp_cmd()
+            .try_get_matches_from(vec!["cp", "./", "./"])
+            .unwrap();
+        let result = cp_handler(&context, &args).await;
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn folder_to_bucket_unsupported(context: CliContext) {
+        let args = cp_cmd()
+            .try_get_matches_from(vec!["cp", "./", "local/bucket"])
+            .unwrap();
+        let result = cp_handler(&context, &args).await;
+        assert!(result.is_err());
+    }
+}
