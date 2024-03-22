@@ -61,7 +61,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v2
+      - uses: arduino/setup-protoc@v1
         with:
           version: '3.x'
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
@@ -362,7 +362,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
-      - uses: arduino/setup-protoc@v2
+      - uses: arduino/setup-protoc@v1
         with:
           version: '3.x'
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
