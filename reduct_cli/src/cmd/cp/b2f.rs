@@ -248,7 +248,8 @@ mod tests {
             .labels(record.labels().clone())
             .data(record.bytes().await.unwrap())
             .send()
-            .await;
+            .await
+            .unwrap();
 
         let path = tempdir().unwrap().into_path();
         let args = cp_cmd()
