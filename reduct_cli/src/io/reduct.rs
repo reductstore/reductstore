@@ -32,6 +32,8 @@ pub(crate) async fn build_client(
         .url(url.as_str())
         .api_token(token.as_str())
         .verify_ssl(!ctx.ignore_ssl())
+        .http1_only()
+        .timeout(ctx.timeout())
         .try_build()?;
 
     let status = client.server_info().await?;
@@ -49,7 +51,7 @@ pub(crate) async fn build_client(
             );
         }
 
-        if license.disk_quota > 0 && status.usage > (license.disk_quota * 1000_000_000i32) as u64 {
+        if license.disk_quota > 0 && status.usage > (license.disk_quota as u64 * 1000_000_000u64) {
             eprintln!(
                 "{}",
                 format!(

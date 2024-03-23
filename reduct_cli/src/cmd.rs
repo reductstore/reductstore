@@ -6,6 +6,7 @@ pub(crate) mod alias;
 pub(crate) mod bucket;
 pub(crate) mod server;
 
+pub(crate) mod cp;
 pub(crate) mod token;
 
 const ALIAS_OR_URL_HELP: &str =
