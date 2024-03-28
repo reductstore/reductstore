@@ -104,13 +104,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.3] - 2023-11-08
 
-## Fixed
+### Fixed
 
 - reductstore: Fix entry size calculation, [PR-373](https://github.com/reductstore/reductstore/pull/373)
 
 ## [1.7.2] - 2023-11-01
 
-## Fixed
+### Fixed
 
 - reduct-rs: Fix query URL in ReductClient, [PR-372](https://github.com/reductstore/reductstore/pull/372)
 
@@ -142,7 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reduct-rs: Normalize instance URL in `ClientBuilder.url`, [PR-343](https://github.com/reductstore/reductstore/pull/343)
 
-# [1.6.2] - 2023-09-20
+## [1.6.2] - 2023-09-20
 
 ### Fixed
 
