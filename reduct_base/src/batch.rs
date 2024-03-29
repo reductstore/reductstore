@@ -71,14 +71,28 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
     })
 }
 
-pub fn sort_headers_by_name(headers: &HeaderMap) -> Vec<(String, HeaderValue)> {
+pub fn sort_headers_by_time(headers: &HeaderMap) -> Result<Vec<(u64, HeaderValue)>, ReductError> {
     let mut sorted_headers: Vec<_> = headers
         .clone()
         .into_iter()
-        .map(|(key, value)| (key.unwrap().as_str().to_string(), value))
+        .filter(|(name, _)| name.is_some())
+        .map(|(name, value)| (name.unwrap().to_string(), value))
+        .filter(|(name, _)| name.starts_with("x-reduct-time-"))
+        .map(|(key, value)| (key[14..].parse::<u64>().ok(), value))
         .collect();
-    sorted_headers.sort_by(|(name1, _), (name2, _)| name1.cmp(name2));
-    sorted_headers
+
+    if sorted_headers.iter().any(|(time, _)| time.is_none()) {
+        return Err(ReductError::unprocessable_entity(
+            "Invalid header'x-reduct-time-xxx': must be an unix timestamp in microseconds",
+        ));
+    }
+
+    let mut sorted_headers: Vec<(u64, HeaderValue)> = sorted_headers
+        .into_iter()
+        .map(|(time, value)| (time.unwrap(), value))
+        .collect();
+    sorted_headers.sort_by(|(ts1, _), (ts2, _)| ts1.cmp(ts2));
+    Ok(sorted_headers)
 }
 
 #[cfg(test)]

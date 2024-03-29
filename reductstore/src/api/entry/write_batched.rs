@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::RecordTx;
 use log::debug;
-use reduct_base::batch::{parse_batched_header, sort_headers_by_name, RecordHeader};
+use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
@@ -41,26 +41,13 @@ pub(crate) async fn write_batched_records(
     .await?;
 
     let entry_name = path.get("entry_name").unwrap();
-    let record_headers: Vec<_> = sort_headers_by_name(&headers);
+    let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
     let mut error_map = BTreeMap::new();
     let mut stream = body.into_data_stream();
 
     let process_stream = async {
         let mut timed_headers: Vec<(u64, RecordHeader)> = Vec::new();
-        for (k, v) in record_headers
-            .iter()
-            .filter(|(k, _)| k.as_str().starts_with("x-reduct-time-"))
-        {
-            let time = k[14..].parse::<u64>().map_err(|_| {
-                ReductError::new(
-                    ErrorCode::UnprocessableEntity,
-                    &format!(
-                        "Invalid header'{}': must be an unix timestamp in microseconds",
-                        k
-                    ),
-                )
-            })?;
-
+        for (time, v) in record_headers {
             let header = parse_batched_header(v.to_str().unwrap())?;
             timed_headers.push((time, header));
         }
@@ -336,7 +323,7 @@ mod tests {
             "x-reduct-time-2",
             "20,text/plain,c=\"d,f\"".parse().unwrap(),
         );
-        headers.insert("x-reduct-time-3", "18,text/plain".parse().unwrap());
+        headers.insert("x-reduct-time-10", "18,text/plain".parse().unwrap());
 
         let stream = body_stream.await;
 
@@ -385,7 +372,7 @@ mod tests {
             );
         }
         {
-            let mut reader = bucket.begin_read("entry-1", 3).await.unwrap();
+            let mut reader = bucket.begin_read("entry-1", 10).await.unwrap();
             assert!(reader.labels().is_empty());
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 18);
