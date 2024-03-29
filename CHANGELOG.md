@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.9.4] - 2024-03-22
+
+## [1.9.4] - 2024-03-29
 
 - RS-233: fix wrong order of timestamps in batched write request, [PR-421](https://github.com/reductstore/reductstore/pull/421)
 
