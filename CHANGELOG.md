@@ -14,17 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-181: add support for commercial license in `reduct-cli`, [PR-414](https://github.com/reductstore/reductstore/pull/414)
 - RS-212: add --ignore-ssl flag to `reduct-cli`, [PR-415](https://github.com/reductstore/reductstore/pull/415)
 
+
+## [1.9.4] - 2024-03-29
+
+### Fixed
+
+- RS-233: fix wrong order of timestamps in batched write request, [PR-421](https://github.com/reductstore/reductstore/pull/421)
+
 ## [1.9.3] - 2024-03-16
 
 ### Fixed
 
-- RS-221: Fix body draining in write a record and batch edpoints, [PR-418](https://github.com/reductstore/reductstore/pull/418)
+- RS-221: fix body draining in write a record and batch edpoints, [PR-418](https://github.com/reductstore/reductstore/pull/418)
 
 ## [1.9.2] - 2024-03-15
 
 ### Fixed
 
-- RS-218: Fix block migration, [PR-416](https://github.com/reductstore/reductstore/pull/416)
+- RS-218: fix block migration, [PR-416](https://github.com/reductstore/reductstore/pull/416)
 
 ## [1.9.1] - 2024-03-09
 
