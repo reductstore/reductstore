@@ -307,6 +307,7 @@ jobs:
 
       - name: Merge digests
         run: |
+          mkdir -p /tmp/merged_digests
           find /tmp/digests -type f -print0 | xargs -0 mv -t /tmp/merged_digests
           ls /tmp/merged_digests
 
