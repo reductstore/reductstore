@@ -305,9 +305,11 @@ jobs:
           pattern: digests-*
           path: /tmp/digests
 
-      - name: Print digests
+      - name: Merge digests
         run: |
-          ls -l /tmp/digests
+          find /tmp/digests -type f -print0 | xargs -0 mv -t /tmp/merged_digests
+          ls /tmp/merged_digests
+
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -323,7 +325,7 @@ jobs:
           password: ${{ secrets.DOCKER_TOKEN }}
 
       - name: Create manifest list and push
-        working-directory: /tmp/digests
+        working-directory: /tmp/merged_digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
