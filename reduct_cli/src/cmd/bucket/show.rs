@@ -8,7 +8,7 @@ use crate::context::CliContext;
 use crate::helpers::timestamp_to_iso;
 use crate::io::reduct::build_client;
 use crate::io::std::output;
-use crate::parsers::ResourcePathParser;
+use crate::parse::ResourcePathParser;
 use bytesize::ByteSize;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};

@@ -246,4 +246,18 @@ pub(crate) mod tests {
 
         "test_token".to_string()
     }
+
+    #[fixture]
+    pub(crate) async fn replica(context: CliContext) -> String {
+        let client = build_client(&context, "local").await.unwrap();
+        // remove the replica if it already exists
+        if let Ok(_) = client.get_replication("test_replica").await {
+            client
+                .delete_replication("test_replica")
+                .await
+                .unwrap_or_default();
+        }
+
+        "test_replica".to_string()
+    }
 }

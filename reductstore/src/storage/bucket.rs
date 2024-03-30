@@ -116,7 +116,7 @@ impl Bucket {
     /// * `name` - The name of the bucket
     /// * `path` - The path to folder with buckets
     /// * `settings` - The settings for the bucket
-    /// * `repl_agent_builder` - The replication agent builder
+    /// * `repl_agent_builder` - The replica agent builder
     ///
     /// # Returns
     ///
@@ -147,7 +147,7 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `path` - The path to the bucket
-    /// * `repl_agent_builder` - The replication agent builder
+    /// * `repl_agent_builder` - The replica agent builder
     ///
     /// # Returns
     ///

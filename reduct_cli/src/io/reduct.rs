@@ -15,17 +15,9 @@ pub(crate) async fn build_client(
     ctx: &CliContext,
     alias_or_url: &str,
 ) -> anyhow::Result<ReductClient> {
-    let (url, token) = match find_alias(ctx, alias_or_url) {
-        Ok(alias) => (alias.url, alias.token),
-        Err(_) => {
-            if let Ok(mut url) = Url::parse(alias_or_url) {
-                let token = url.username().to_string();
-                url.set_username("").unwrap();
-                (url, token)
-            } else {
-                return Err(anyhow!("'{}' isn't an alias or a valid URL", alias_or_url));
-            }
-        }
+    let (url, token) = match parse_url_and_token(ctx, alias_or_url) {
+        Ok(value) => value,
+        Err(err) => return Err(err),
     };
 
     let client = ReductClient::builder()
@@ -67,6 +59,29 @@ pub(crate) async fn build_client(
     }
 
     Ok(client)
+}
+
+/// Parse an alias or URL into a URL and a token
+///
+/// If the input is an alias, the URL and token are retrieved from the alias.
+/// If the input is a URL, the token is extracted from the username part of the URL.
+pub(crate) fn parse_url_and_token(
+    ctx: &CliContext,
+    alias_or_url: &str,
+) -> anyhow::Result<(Url, String)> {
+    let (url, token) = match find_alias(ctx, alias_or_url) {
+        Ok(alias) => (alias.url, alias.token),
+        Err(_) => {
+            if let Ok(mut url) = Url::parse(alias_or_url) {
+                let token = url.username().to_string();
+                url.set_username("").unwrap();
+                (url, token)
+            } else {
+                return Err(anyhow!("'{}' isn't an alias or a valid URL", alias_or_url));
+            }
+        }
+    };
+    Ok((url, token))
 }
 
 #[cfg(test)]

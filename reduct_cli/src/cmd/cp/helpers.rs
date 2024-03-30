@@ -116,7 +116,7 @@ pub(super) fn parse_query_params(
     let limit = args.get_one::<u64>("limit").map(|limit| *limit);
 
     let entries_filter = args
-        .get_many::<String>("entry")
+        .get_many::<String>("entries")
         .unwrap_or_default()
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
@@ -186,21 +186,26 @@ fn build_query(src_bucket: &Bucket, entry: &EntryInfo, query_params: &QueryParam
     if let Some(stop) = query_params.stop {
         query_builder = query_builder.stop_us(stop as u64);
     }
+
+    let parse_label = |label: &str| -> (String, String) {
+        let mut label = label.splitn(2, '=');
+        (
+            label.next().unwrap().to_string(),
+            label.next().unwrap().to_string(),
+        )
+    };
+
     if !query_params.include_labels.is_empty() {
         for label in &query_params.include_labels {
-            let mut label = label.splitn(2, '=');
-            let key = label.next().unwrap();
-            let value = label.next().unwrap();
-            query_builder = query_builder.add_include(key, value);
+            let (key, value) = parse_label(label);
+            query_builder = query_builder.add_include(&key, &value);
         }
     }
 
     if !query_params.exclude_labels.is_empty() {
         for label in &query_params.exclude_labels {
-            let mut label = label.splitn(2, '=');
-            let key = label.next().unwrap();
-            let value = label.next().unwrap();
-            query_builder = query_builder.add_exclude(key, value);
+            let (key, value) = parse_label(label);
+            query_builder = query_builder.add_exclude(&key, &value);
         }
     }
 
