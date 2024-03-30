@@ -1,0 +1,171 @@
+// Copyright 2024 ReductStore
+// This Source Code Form is subject to the terms of the Mozilla Public
+//    License, v. 2.0. If a copy of the MPL was not distributed with this
+//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::cmd::ALIAS_OR_URL_HELP;
+use crate::io::std::output;
+use clap::ArgAction::SetTrue;
+use clap::{Arg, Command};
+use colored::Colorize;
+use reduct_rs::{ReplicationInfo, ReplicationList};
+
+pub(super) fn ls_replica_cmd() -> Command {
+    Command::new("ls")
+        .about("List replications")
+        .arg(
+            Arg::new("ALIAS_OR_URL")
+                .help(ALIAS_OR_URL_HELP)
+                .required(true),
+        )
+        .arg(
+            Arg::new("full")
+                .long("full")
+                .short('f')
+                .action(SetTrue)
+                .help("Show full replication information")
+                .required(false),
+        )
+}
+
+pub(super) async fn ls_replica(
+    _ctx: &crate::context::CliContext,
+    args: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    let alias_or_url = args.get_one::<String>("ALIAS_OR_URL").unwrap();
+    let client = crate::io::reduct::build_client(_ctx, alias_or_url).await?;
+
+    let print_list = |ctx: &crate::context::CliContext, replication_list: Vec<ReplicationInfo>| {
+        for replication in replication_list {
+            output!(ctx, "{}", replication.name);
+        }
+    };
+
+    let print_full_list = |ctx: &crate::context::CliContext,
+                           replication_list: Vec<ReplicationInfo>| {
+        macro_rules! print_table {
+            ($($x:expr),*) => {
+                output!(ctx, "{:20}| {:10}| {:20} | {:15} |", $($x),*);
+            };
+        }
+        print_table!(
+            "Name".bold(),
+            "State".bold(),
+            "Pending Records".bold(),
+            "Provisioned".bold()
+        );
+        print_table!(
+            "--------------------",
+            "----------",
+            "--------------------",
+            "---------------"
+        );
+        for replication in replication_list {
+            print_table!(
+                replication.name,
+                if replication.is_active {
+                    "Active"
+                } else {
+                    "Inactive"
+                },
+                replication.pending_records,
+                replication.is_provisioned
+            );
+        }
+    };
+
+    if args.get_flag("full") {
+        print_full_list(_ctx, client.list_replications().await?);
+    } else {
+        print_list(_ctx, client.list_replications().await?);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::context::tests::{bucket, bucket2, context, replica};
+
+    use crate::context::CliContext;
+    use crate::io::reduct::build_client;
+    use rstest::rstest;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_list_replications(
+        context: CliContext,
+        #[future] replica: String,
+        #[future] bucket: String,
+        #[future] bucket2: String,
+    ) {
+        let replica = replica.await;
+        let bucket = bucket.await;
+        let bucket2 = bucket2.await;
+
+        prepare_replication(&context, &replica, &bucket, &bucket2)
+            .await
+            .unwrap();
+
+        let args = ls_replica_cmd()
+            .try_get_matches_from(vec!["ls", "local"])
+            .unwrap();
+
+        ls_replica(&context, &args).await.unwrap();
+        assert_eq!(context.stdout().history(), vec![replica]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_list_replications_full(
+        context: CliContext,
+        #[future] replica: String,
+        #[future] bucket: String,
+        #[future] bucket2: String,
+    ) {
+        let replica = replica.await;
+        let bucket = bucket.await;
+        let bucket2 = bucket2.await;
+
+        prepare_replication(&context, &replica, &bucket, &bucket2)
+            .await
+            .unwrap();
+
+        let args = ls_replica_cmd()
+            .try_get_matches_from(vec!["ls", "local", "--full"])
+            .unwrap();
+
+        ls_replica(&context, &args).await.unwrap();
+        assert_eq!(
+            context.stdout().history(),
+            vec![
+                "Name                | State     | Pending Records      | Provisioned     |",
+                "--------------------| ----------| -------------------- | --------------- |",
+                "test_replica        | Inactive  |                    0 | false           |",
+            ]
+        );
+    }
+
+    async fn prepare_replication(
+        context: &CliContext,
+        replica: &str,
+        bucket: &str,
+        bucket2: &str,
+    ) -> anyhow::Result<()> {
+        let client = build_client(&context, "local").await?;
+        client.create_bucket(bucket).send().await?;
+        client.create_bucket(bucket2).send().await?;
+
+        client
+            .create_replication(replica)
+            .dst_host("http://localhost:8383")
+            .src_bucket(bucket)
+            .dst_bucket(bucket2)
+            .send()
+            .await?;
+
+        Ok(())
+    }
+}

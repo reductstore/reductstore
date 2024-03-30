@@ -43,14 +43,15 @@ pub(crate) async fn build_client(
             );
         }
 
-        if license.disk_quota > 0 && status.usage > (license.disk_quota as u64 * 1000_000_000u64) {
+        const TB: u64 = 1000_000_000_000u64;
+        if license.disk_quota > 0 && status.usage > (license.disk_quota as u64 * TB) {
             eprintln!(
                 "{}",
                 format!(
                     "Warning: Disk usage of {} exceeds licensed quota of {} TB, currently at {} TB",
                     url.as_str(),
                     license.disk_quota,
-                    status.usage / 1000_000_000u64
+                    status.usage / TB
                 )
                 .yellow()
                 .bold()

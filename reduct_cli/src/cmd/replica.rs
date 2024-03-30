@@ -4,7 +4,9 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod create;
+mod ls;
 
+use crate::cmd::replica::ls::{ls_replica, ls_replica_cmd};
 use clap::Command;
 use create::{create_replica, create_replica_cmd};
 
@@ -13,6 +15,7 @@ pub(crate) fn replication_cmd() -> Command {
         .about("Manage replications in a ReductStore instance")
         .arg_required_else_help(true)
         .subcommand(create_replica_cmd())
+        .subcommand(ls_replica_cmd())
 }
 
 pub(crate) async fn replication_handler(
@@ -21,6 +24,7 @@ pub(crate) async fn replication_handler(
 ) -> anyhow::Result<()> {
     match matches {
         Some(("create", args)) => create_replica(_ctx, args).await?,
+        Some(("ls", args)) => ls_replica(_ctx, args).await?,
         _ => (),
     }
     Ok(())
