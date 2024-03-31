@@ -143,8 +143,11 @@ mod tests {
         ls_replica(&context, &args).await.unwrap();
         assert_eq!(
             context.stdout().history(),
-            vec!["| Name         | State    | Pending Records | Provisioned |\n|--------------|----------|-----------------|-------------|\n| test_replica | Inactive | 0               | false       |"]
-
+            vec![
+                "| Name         | State    | Pending Records | Provisioned |\n\
+            |--------------|----------|-----------------|-------------|\n\
+            | test_replica | Inactive | 0               | false       |"
+            ]
         );
     }
 

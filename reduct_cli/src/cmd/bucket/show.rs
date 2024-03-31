@@ -196,7 +196,11 @@ mod tests {
         assert_eq!(show_bucket(&context, &args).await.unwrap(), ());
         assert_eq!(
             context.stdout().history(),
-            vec!["Name:                test_bucket                    Quota Type:         NONE", "Entries:             1                              Quota Size:         0 B", "Size:                99 B                           Max. Block Size:    64.0 MB", "Oldest Record (UTC): 1970-01-01T00:00:00.000Z       Max. Block Records: 256", "Latest Record (UTC): 1970-01-01T00:00:00.001Z      \n", "| Name | Records | Blocks | Size | Oldest Record (UTC)      | Latest Record (UTC)      |\n|------|---------|--------|------|--------------------------|--------------------------|\n| test | 2       | 1      | 99 B | 1970-01-01T00:00:00.000Z | 1970-01-01T00:00:00.001Z |"]
+            vec!["Name:                test_bucket                    Quota Type:         NONE",
+                 "Entries:             1                              Quota Size:         0 B", "Size:                99 B                           Max. Block Size:    64.0 MB", "Oldest Record (UTC): 1970-01-01T00:00:00.000Z       Max. Block Records: 256", "Latest Record (UTC): 1970-01-01T00:00:00.001Z      \n",
+                 "| Name | Records | Blocks | Size | Oldest Record (UTC)      | Latest Record (UTC)      |\n\
+                 |------|---------|--------|------|--------------------------|--------------------------|\n\
+                 | test | 2       | 1      | 99 B | 1970-01-01T00:00:00.000Z | 1970-01-01T00:00:00.001Z |"]
 
         );
     }

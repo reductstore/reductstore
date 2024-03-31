@@ -8,6 +8,7 @@ mod ls;
 mod show;
 
 use crate::cmd::replica::ls::{ls_replica, ls_replica_cmd};
+use crate::cmd::replica::show::{show_replica_cmd, show_replica_handler};
 use clap::Command;
 use create::{create_replica, create_replica_cmd};
 
@@ -17,6 +18,7 @@ pub(crate) fn replication_cmd() -> Command {
         .arg_required_else_help(true)
         .subcommand(create_replica_cmd())
         .subcommand(ls_replica_cmd())
+        .subcommand(show_replica_cmd())
 }
 
 pub(crate) async fn replication_handler(
@@ -26,6 +28,7 @@ pub(crate) async fn replication_handler(
     match matches {
         Some(("create", args)) => create_replica(_ctx, args).await?,
         Some(("ls", args)) => ls_replica(_ctx, args).await?,
+        Some(("show", args)) => show_replica_handler(_ctx, args).await?,
         _ => (),
     }
     Ok(())
