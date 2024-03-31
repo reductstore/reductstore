@@ -5,6 +5,7 @@
 
 mod create;
 mod ls;
+mod show;
 
 use crate::cmd::replica::ls::{ls_replica, ls_replica_cmd};
 use clap::Command;

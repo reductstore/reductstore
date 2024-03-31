@@ -8,7 +8,8 @@ use crate::io::std::output;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, Command};
 use colored::Colorize;
-use reduct_rs::{ReplicationInfo, ReplicationList};
+use reduct_rs::ReplicationInfo;
+use tabled::{settings::Style, Table, Tabled};
 
 pub(super) fn ls_replica_cmd() -> Command {
     Command::new("ls")
@@ -28,6 +29,33 @@ pub(super) fn ls_replica_cmd() -> Command {
         )
 }
 
+#[derive(Tabled)]
+struct ReplicationTable {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "State")]
+    state: String,
+    #[tabled(rename = "Pending Records")]
+    pending_records: u64,
+    #[tabled(rename = "Provisioned")]
+    is_provisioned: bool,
+}
+
+impl From<ReplicationInfo> for ReplicationTable {
+    fn from(replication: ReplicationInfo) -> Self {
+        Self {
+            name: replication.name,
+            state: if replication.is_active {
+                "Active".to_string()
+            } else {
+                "Inactive".to_string()
+            },
+            pending_records: replication.pending_records,
+            is_provisioned: replication.is_provisioned,
+        }
+    }
+}
+
 pub(super) async fn ls_replica(
     _ctx: &crate::context::CliContext,
     args: &clap::ArgMatches,
@@ -43,35 +71,10 @@ pub(super) async fn ls_replica(
 
     let print_full_list = |ctx: &crate::context::CliContext,
                            replication_list: Vec<ReplicationInfo>| {
-        macro_rules! print_table {
-            ($($x:expr),*) => {
-                output!(ctx, "{:20}| {:10}| {:20} | {:15} |", $($x),*);
-            };
-        }
-        print_table!(
-            "Name".bold(),
-            "State".bold(),
-            "Pending Records".bold(),
-            "Provisioned".bold()
-        );
-        print_table!(
-            "--------------------",
-            "----------",
-            "--------------------",
-            "---------------"
-        );
-        for replication in replication_list {
-            print_table!(
-                replication.name,
-                if replication.is_active {
-                    "Active"
-                } else {
-                    "Inactive"
-                },
-                replication.pending_records,
-                replication.is_provisioned
-            );
-        }
+        let table = Table::new(replication_list.into_iter().map(ReplicationTable::from))
+            .with(Style::markdown())
+            .to_string();
+        output!(ctx, "{}", table);
     };
 
     if args.get_flag("full") {
@@ -140,11 +143,8 @@ mod tests {
         ls_replica(&context, &args).await.unwrap();
         assert_eq!(
             context.stdout().history(),
-            vec![
-                "Name                | State     | Pending Records      | Provisioned     |",
-                "--------------------| ----------| -------------------- | --------------- |",
-                "test_replica        | Inactive  |                    0 | false           |",
-            ]
+            vec!["| Name         | State    | Pending Records | Provisioned |\n|--------------|----------|-----------------|-------------|\n| test_replica | Inactive | 0               | false       |"]
+
         );
     }
 

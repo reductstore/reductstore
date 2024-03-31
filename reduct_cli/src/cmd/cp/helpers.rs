@@ -405,7 +405,7 @@ mod tests {
                     "cp",
                     "serv/buck1",
                     "serv/buck2",
-                    "--entry",
+                    "--entries",
                     "entry-1",
                     "entry-2",
                 ])

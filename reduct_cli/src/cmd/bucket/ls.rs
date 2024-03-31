@@ -13,7 +13,9 @@ use bytesize::ByteSize;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
 use colored::Colorize;
-use reduct_rs::BucketInfoList;
+use reduct_rs::{BucketInfo, BucketInfoList};
+use tabled::settings::Style;
+use tabled::{Table, Tabled};
 
 pub(super) fn ls_bucket_cmd() -> Command {
     Command::new("ls")
@@ -52,36 +54,37 @@ fn print_list(ctx: &CliContext, bucket_list: BucketInfoList) {
     }
 }
 
-fn print_full_list(ctx: &CliContext, bucket_list: BucketInfoList) {
-    macro_rules! print_table {
-        ($($x:expr),*) => {
-            output!(ctx, "{:30}| {:10}| {:10} | {:30} | {:30}|", $($x),*);
-        };
-    }
+#[derive(Tabled)]
+struct BucketTable {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Entries")]
+    entry_count: u64,
+    #[tabled(rename = "Size")]
+    size: ByteSize,
+    #[tabled(rename = "Oldest record (UTC)")]
+    oldest_record: String,
+    #[tabled(rename = "Latest record (UTC)")]
+    latest_record: String,
+}
 
-    print_table!(
-        "Name".bold(),
-        "Entries".bold(),
-        "Size".bold(),
-        "Oldest record (UTC)".bold(),
-        "Latest record (UTC)".bold()
-    );
-    print_table!(
-        "-----------------------------",
-        "----------",
-        "----------",
-        "------------------------------",
-        "------------------------------"
-    );
-    for bucket in bucket_list.buckets {
-        print_table!(
-            bucket.name,
-            bucket.entry_count,
-            ByteSize(bucket.size).to_string(),
-            timestamp_to_iso(bucket.oldest_record, bucket.entry_count == 0),
-            timestamp_to_iso(bucket.latest_record, bucket.entry_count == 0)
-        );
+impl From<BucketInfo> for BucketTable {
+    fn from(bucket: BucketInfo) -> Self {
+        Self {
+            name: bucket.name,
+            entry_count: bucket.entry_count,
+            size: ByteSize(bucket.size),
+            oldest_record: timestamp_to_iso(bucket.oldest_record, bucket.entry_count == 0),
+            latest_record: timestamp_to_iso(bucket.latest_record, bucket.entry_count == 0),
+        }
     }
+}
+
+fn print_full_list(ctx: &CliContext, bucket_list: BucketInfoList) {
+    let table = Table::new(bucket_list.buckets.into_iter().map(BucketTable::from))
+        .with(Style::markdown())
+        .to_string();
+    output!(ctx, "{}", table);
 }
 
 #[cfg(test)]
@@ -140,9 +143,7 @@ mod tests {
         assert_eq!(context
                        .stdout()
                        .history(),
-                   vec!["Name                          | Entries   | Size       | Oldest record (UTC)            | Latest record (UTC)           |",
-                        "----------------------------- | ----------| ---------- | ------------------------------ | ------------------------------|",
-                        "test_bucket                   |          1| 90 B       | 1970-01-01T00:00:00.000Z       | 1970-01-01T00:00:00.001Z      |"]
+                   vec!["| Name          | Entries | Size | Oldest record (UTC)      | Latest record (UTC)      |\n|---------------|---------|------|--------------------------|--------------------------|\n| test_bucket   | 1       | 90 B | 1970-01-01T00:00:00.000Z | 1970-01-01T00:00:00.001Z |\n| test_bucket_2 | 0       | 0 B  | ---                      | ---                      |"]
         );
     }
 }
