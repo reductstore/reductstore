@@ -92,6 +92,7 @@ mod tests {
 
     use crate::context::tests::{bucket, bucket2, context, replica};
 
+    use crate::cmd::replica::tests::prepare_replication;
     use crate::context::CliContext;
     use crate::io::reduct::build_client;
     use rstest::rstest;
@@ -149,26 +150,5 @@ mod tests {
             | test_replica | Inactive | 0               | false       |"
             ]
         );
-    }
-
-    async fn prepare_replication(
-        context: &CliContext,
-        replica: &str,
-        bucket: &str,
-        bucket2: &str,
-    ) -> anyhow::Result<()> {
-        let client = build_client(&context, "local").await?;
-        client.create_bucket(bucket).send().await?;
-        client.create_bucket(bucket2).send().await?;
-
-        client
-            .create_replication(replica)
-            .dst_host("http://localhost:8383")
-            .src_bucket(bucket)
-            .dst_bucket(bucket2)
-            .send()
-            .await?;
-
-        Ok(())
     }
 }

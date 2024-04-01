@@ -95,3 +95,53 @@ pub(super) async fn show_replica_handler(
     output!(ctx, "{}", table);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::replica::tests::prepare_replication;
+    use crate::context::tests::{bucket, bucket2, context, replica};
+    use crate::context::CliContext;
+    use rstest::rstest;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_show_replica(
+        context: CliContext,
+        #[future] replica: String,
+        #[future] bucket: String,
+        #[future] bucket2: String,
+    ) {
+        let replica = replica.await;
+        let bucket = bucket.await;
+        let bucket2 = bucket2.await;
+
+        prepare_replication(&context, &replica, &bucket, &bucket2)
+            .await
+            .unwrap();
+
+        let args = show_replica_cmd()
+            .get_matches_from(vec!["show", format!("local/{}", replica).as_str()]);
+        build_client(&context, "local").await.unwrap();
+
+        assert_eq!(show_replica_handler(&context, &args).await.unwrap(), ());
+        assert_eq!(context.stdout().history(), vec!["Name:                test_replica         Source Bucket:         test_bucket",
+                                                    "Active:              false                Destination Bucket:    test_bucket_2",
+                                                    "Provisioned:         false                Destination Server:    http://localhost:8383",
+                                                    "Pending Records:     0                    Entries:               []",
+                                                    "Ok Records (hourly): 0                    Include:               {}",
+                                                    "Errors (hourly):     0                    Exclude:               {}\n",
+                                                    "| Error Code | Count | Last Message |\n|------------|-------|--------------|"]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_show_replica_invalid_path() {
+        let args = show_replica_cmd().try_get_matches_from(vec!["show", "local"]);
+
+        assert_eq!(
+            args.err().unwrap().to_string(),
+            "error: invalid value 'local' for '<REPLICATION_PATH>'\n\nFor more information, try '--help'.\n"
+        );
+    }
+}

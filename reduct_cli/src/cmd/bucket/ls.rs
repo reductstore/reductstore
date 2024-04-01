@@ -143,11 +143,11 @@ mod tests {
         assert_eq!(context
                        .stdout()
                        .history(),
-                   vec![
-                       "| Name          | Entries | Size | Oldest record (UTC)      | Latest record (UTC)      |\n\
+                   vec!["| Name          | Entries | Size | Oldest record (UTC)      | Latest record (UTC)      |\n\
                    |---------------|---------|------|--------------------------|--------------------------|\n\
                    | test_bucket   | 1       | 90 B | 1970-01-01T00:00:00.000Z | 1970-01-01T00:00:00.001Z |\n\
                    | test_bucket_2 | 0       | 0 B  | ---                      | ---                      |"]
+
         );
     }
 }
