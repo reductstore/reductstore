@@ -12,7 +12,6 @@ use crate::parse::ResourcePathParser;
 use bytesize::ByteSize;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
-use colored::*;
 use reduct_rs::{BucketInfo, EntryInfo, FullBucketInfo, ReductClient};
 use tabled::{settings::Style, Table, Tabled};
 

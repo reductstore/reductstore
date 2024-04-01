@@ -7,12 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::context::CliContext;
+use crate::parse::widely_used_args::parse_label_args;
 use bytesize::ByteSize;
 use chrono::DateTime;
 use clap::ArgMatches;
 use futures_util::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use reduct_rs::{Bucket, EntryInfo, ErrorCode, QueryBuilder, Record, ReductError};
+use reduct_rs::{Bucket, EntryInfo, ErrorCode, Labels, QueryBuilder, Record, ReductError};
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tokio::time::{sleep, Instant};
@@ -20,8 +21,8 @@ use tokio::time::{sleep, Instant};
 pub(super) struct QueryParams {
     start: Option<i64>,
     stop: Option<i64>,
-    include_labels: Vec<String>,
-    exclude_labels: Vec<String>,
+    include_labels: Labels,
+    exclude_labels: Labels,
     limit: Option<u64>,
     entries_filter: Vec<String>,
     parallel: usize,
@@ -33,8 +34,8 @@ impl Default for QueryParams {
         Self {
             start: None,
             stop: None,
-            include_labels: Vec::new(),
-            exclude_labels: Vec::new(),
+            include_labels: Labels::new(),
+            exclude_labels: Labels::new(),
             limit: None,
             entries_filter: Vec::new(),
             parallel: 1,
@@ -101,17 +102,9 @@ pub(super) fn parse_query_params(
 ) -> anyhow::Result<QueryParams> {
     let start = parse_time(args.get_one::<String>("start"))?;
     let stop = parse_time(args.get_one::<String>("stop"))?;
-    let include_labels = args
-        .get_many::<String>("include")
-        .unwrap_or_default()
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>();
+    let include_labels = parse_label_args(args.get_many::<String>("include"))?.unwrap_or_default();
 
-    let exclude_labels = args
-        .get_many::<String>("exclude")
-        .unwrap_or_default()
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>();
+    let exclude_labels = parse_label_args(args.get_many::<String>("exclude"))?.unwrap_or_default();
 
     let limit = args.get_one::<u64>("limit").map(|limit| *limit);
 
@@ -187,27 +180,8 @@ fn build_query(src_bucket: &Bucket, entry: &EntryInfo, query_params: &QueryParam
         query_builder = query_builder.stop_us(stop as u64);
     }
 
-    let parse_label = |label: &str| -> (String, String) {
-        let mut label = label.splitn(2, '=');
-        (
-            label.next().unwrap().to_string(),
-            label.next().unwrap().to_string(),
-        )
-    };
-
-    if !query_params.include_labels.is_empty() {
-        for label in &query_params.include_labels {
-            let (key, value) = parse_label(label);
-            query_builder = query_builder.add_include(&key, &value);
-        }
-    }
-
-    if !query_params.exclude_labels.is_empty() {
-        for label in &query_params.exclude_labels {
-            let (key, value) = parse_label(label);
-            query_builder = query_builder.add_exclude(&key, &value);
-        }
-    }
+    query_builder = query_builder.include(query_params.include_labels.clone());
+    query_builder = query_builder.exclude(query_params.exclude_labels.clone());
 
     if let Some(limit) = query_params.limit {
         query_builder = query_builder.limit(limit);
@@ -380,11 +354,17 @@ mod tests {
 
             assert_eq!(
                 query_params.include_labels,
-                vec!["key1=value1", "key2=value2"]
+                Labels::from_iter(vec![
+                    ("key1".to_string(), "value1".to_string()),
+                    ("key2".to_string(), "value2".to_string()),
+                ])
             );
             assert_eq!(
                 query_params.exclude_labels,
-                vec!["key3=value3", "key4=value4"]
+                Labels::from_iter(vec![
+                    ("key3".to_string(), "value3".to_string()),
+                    ("key4".to_string(), "value4".to_string()),
+                ])
             );
         }
 
@@ -634,7 +614,7 @@ mod tests {
                 .unwrap();
 
             let params = QueryParams {
-                include_labels: vec!["key1=value1".to_string()],
+                include_labels: Labels::from_iter(vec![("key1".to_string(), "value1".to_string())]),
                 ..Default::default()
             };
 
@@ -667,7 +647,7 @@ mod tests {
                 .unwrap();
 
             let params = QueryParams {
-                exclude_labels: vec!["key1=value1".to_string()],
+                exclude_labels: Labels::from_iter(vec![("key1".to_string(), "value1".to_string())]),
                 ..Default::default()
             };
 

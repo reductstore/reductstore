@@ -5,9 +5,11 @@
 
 use crate::cmd::RESOURCE_PATH_HELP;
 use crate::io::reduct::{build_client, parse_url_and_token};
-use crate::parse::widely_used_args::{make_entries_arg, make_exclude_arg, make_include_arg};
+use crate::parse::widely_used_args::{
+    make_entries_arg, make_exclude_arg, make_include_arg, parse_label_args,
+};
 use crate::parse::ResourcePathParser;
-use clap::{Arg, Command};
+use clap::{arg, Arg, Command};
 use reduct_rs::Labels;
 
 pub(super) fn create_replica_cmd() -> Command {
@@ -53,25 +55,8 @@ pub(super) async fn create_replica(
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
 
-    let parse_label = |label: &str| -> (String, String) {
-        let mut label = label.splitn(2, '=');
-        (
-            label.next().unwrap().to_string(),
-            label.next().unwrap().to_string(),
-        )
-    };
-
-    let include = args
-        .get_many::<String>("include")
-        .unwrap_or_default()
-        .map(|s| parse_label(&s))
-        .collect::<Vec<(String, String)>>();
-
-    let exclude = args
-        .get_many::<String>("exclude")
-        .unwrap_or_default()
-        .map(|s| parse_label(&s))
-        .collect::<Vec<(String, String)>>();
+    let include = parse_label_args(args.get_many::<String>("include"))?.unwrap_or_default();
+    let exclude = parse_label_args(args.get_many::<String>("exclude"))?.unwrap_or_default();
 
     let client = build_client(ctx, &alias_or_url).await?;
     let (dest_url, token) = parse_url_and_token(ctx, &dest_alias_or_url)?;
