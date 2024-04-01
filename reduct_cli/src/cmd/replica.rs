@@ -5,9 +5,11 @@
 
 mod create;
 mod ls;
+mod rm;
 mod show;
 
 use crate::cmd::replica::ls::{ls_replica, ls_replica_cmd};
+use crate::cmd::replica::rm::{rm_replica_cmd, rm_replica_handler};
 use crate::cmd::replica::show::{show_replica_cmd, show_replica_handler};
 use clap::Command;
 use create::{create_replica, create_replica_cmd};
@@ -19,6 +21,7 @@ pub(crate) fn replication_cmd() -> Command {
         .subcommand(create_replica_cmd())
         .subcommand(ls_replica_cmd())
         .subcommand(show_replica_cmd())
+        .subcommand(rm_replica_cmd())
 }
 
 pub(crate) async fn replication_handler(
@@ -29,6 +32,7 @@ pub(crate) async fn replication_handler(
         Some(("create", args)) => create_replica(_ctx, args).await?,
         Some(("ls", args)) => ls_replica(_ctx, args).await?,
         Some(("show", args)) => show_replica_handler(_ctx, args).await?,
+        Some(("rm", args)) => rm_replica_handler(_ctx, args).await?,
         _ => (),
     }
     Ok(())
@@ -38,13 +42,14 @@ pub(crate) async fn replication_handler(
 mod tests {
     use crate::context::CliContext;
     use crate::io::reduct::build_client;
+    use reduct_rs::ReductClient;
 
     pub(crate) async fn prepare_replication(
         context: &CliContext,
         replica: &str,
         bucket: &str,
         bucket2: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ReductClient> {
         let client = build_client(&context, "local").await?;
         client.create_bucket(bucket).send().await?;
         client.create_bucket(bucket2).send().await?;
@@ -57,6 +62,6 @@ mod tests {
             .send()
             .await?;
 
-        Ok(())
+        Ok(client)
     }
 }
