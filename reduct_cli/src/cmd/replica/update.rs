@@ -7,13 +7,12 @@ use crate::cmd::RESOURCE_PATH_HELP;
 use crate::context::CliContext;
 use crate::io::reduct::{build_client, parse_url_and_token};
 use crate::parse::widely_used_args::{
-    make_entries_arg, make_exclude_arg, make_include_arg, parse_label, parse_label_args,
+    make_entries_arg, make_exclude_arg, make_include_arg, parse_label_args,
 };
 use crate::parse::ResourcePathParser;
-use clap::parser::ValuesRef;
+
 use clap::{Arg, ArgMatches, Command};
-use reduct_rs::{Labels, ReplicationSettings};
-use url::form_urlencoded::parse;
+use reduct_rs::ReplicationSettings;
 
 pub(super) fn update_replica_cmd() -> Command {
     Command::new("update")
@@ -106,6 +105,7 @@ mod tests {
     use super::*;
     use crate::cmd::replica::tests::prepare_replication;
     use crate::context::tests::{bucket, bucket2, context, replica};
+    use reduct_rs::Labels;
     use rstest::rstest;
 
     #[rstest]

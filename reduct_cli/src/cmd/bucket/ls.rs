@@ -12,7 +12,7 @@ use crate::io::std::output;
 use bytesize::ByteSize;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
-use colored::Colorize;
+
 use reduct_rs::{BucketInfo, BucketInfoList};
 use tabled::settings::Style;
 use tabled::{Table, Tabled};

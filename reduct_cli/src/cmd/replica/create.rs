@@ -9,7 +9,7 @@ use crate::parse::widely_used_args::{
     make_entries_arg, make_exclude_arg, make_include_arg, parse_label_args,
 };
 use crate::parse::ResourcePathParser;
-use clap::{arg, Arg, Command};
+use clap::{Arg, Command};
 use reduct_rs::Labels;
 
 pub(super) fn create_replica_cmd() -> Command {

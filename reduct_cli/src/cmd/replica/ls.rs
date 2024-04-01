@@ -7,7 +7,7 @@ use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::io::std::output;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, Command};
-use colored::Colorize;
+
 use reduct_rs::ReplicationInfo;
 use tabled::{settings::Style, Table, Tabled};
 
@@ -94,7 +94,7 @@ mod tests {
 
     use crate::cmd::replica::tests::prepare_replication;
     use crate::context::CliContext;
-    use crate::io::reduct::build_client;
+
     use rstest::rstest;
 
     #[rstest]
