@@ -11,7 +11,8 @@ use crate::cmd::cp::b2b::cp_bucket_to_bucket;
 use crate::cmd::cp::b2f::cp_bucket_to_folder;
 use crate::cmd::ALIAS_OR_URL_HELP;
 use crate::context::CliContext;
-use crate::parsers::ResourcePathParser;
+use crate::parse::widely_used_args::{make_entries_arg, make_exclude_arg, make_include_arg};
+use crate::parse::ResourcePathParser;
 use clap::ArgAction::SetTrue;
 use clap::{value_parser, Arg, Command};
 
@@ -45,37 +46,14 @@ pub(crate) fn cp_cmd() -> Command {
                 .help("Export records with timestamps newer than this time point in ISO format or Unix timestamp in microseconds.\nIf not specified, the export will end at the last record in an entry.")
                 .required(false)
         )
-        .arg(
-            Arg::new("include")
-                .long("include")
-                .short('I')
-                .value_name("KEY=VALUE")
-                .help("Only these records which have this key-value pair will be exported.\nThe format is key=value. This option can be used multiple times to include multiple key-value pairs.")
-                .num_args(1..)
-                .required(false)
-        )
-        .arg(
-            Arg::new("exclude")
-                .long("exclude")
-                .short('E')
-                .value_name("KEY=VALUE")
-                .help("These records which have this key-value pair will not be exported.\nThe format is key=value. This option can be used multiple times to exclude multiple key-value pairs.")
-                .num_args(1..)
-                .required(false)
-        )
-        .arg(Arg::new("entry")
-            .long("entry")
-            .short('n')
-            .value_name("ENTRY_NAME")
-            .help("List of entries to export.\nIf not specified, all entries will be exported. Wildcards are supported.")
-            .num_args(1..)
-            .required(false)
-        )
+        .arg(make_include_arg())
+        .arg(make_exclude_arg())
+        .arg(make_entries_arg())
         .arg(
             Arg::new("limit")
                 .long("limit")
                 .short('l')
-                .help("The maximum number of records to export.\nIf not specified, all recordswill be exported.")
+                .help("The maximum number of records to export.\nIf not specified, all records will be exported.")
                 .value_name("NUMBER")
                 .value_parser(value_parser!(u64))
                 .required(false)

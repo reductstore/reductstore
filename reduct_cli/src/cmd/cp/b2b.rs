@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use clap::ArgMatches;
-use futures_util::StreamExt;
 use reduct_rs::{Bucket, ErrorCode, Record, ReductError};
 use tokio::sync::RwLock;
 

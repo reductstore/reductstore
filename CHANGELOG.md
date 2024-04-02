@@ -11,9 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-18: implement token management commands in `reduct-cli`, [PR-413](https://github.com/reductstore/reductstore/pull/413)
 - RS-19: implement `reduct-cli cp` command to copy export or replicate data, [PR-420](https://github.com/reductstore/reductstore/pull/420)
+- RS-48: add replication commands to reduct-cli, [PR-423](https://github.com/reductstore/reductstore/pull/423)
 - RS-181: add support for commercial license in `reduct-cli`, [PR-414](https://github.com/reductstore/reductstore/pull/414)
 - RS-212: add --ignore-ssl flag to `reduct-cli`, [PR-415](https://github.com/reductstore/reductstore/pull/415)
-
 
 ## [1.9.4] - 2024-03-29
 

@@ -8,7 +8,7 @@ mod config;
 mod context;
 mod helpers;
 mod io;
-mod parsers;
+mod parse;
 
 use crate::cmd::alias::{alias_cmd, alias_handler};
 use crate::context::ContextBuilder;
@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::cmd::bucket::{bucket_cmd, bucket_handler};
 use crate::cmd::cp::{cp_cmd, cp_handler};
+use crate::cmd::replica::{replication_cmd, replication_handler};
 use crate::cmd::server::{server_cmd, server_handler};
 use crate::cmd::token::{token_cmd, token_handler};
 use clap::ArgAction::SetTrue;
@@ -63,6 +64,7 @@ fn cli() -> Command {
         .subcommand(bucket_cmd())
         .subcommand(token_cmd())
         .subcommand(cp_cmd())
+        .subcommand(replication_cmd())
 }
 
 #[tokio::main]
@@ -82,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
         Some(("bucket", args)) => bucket_handler(&ctx, args.subcommand()).await,
         Some(("token", args)) => token_handler(&ctx, args.subcommand()).await,
         Some(("cp", args)) => cp_handler(&ctx, args).await,
+        Some(("replica", args)) => replication_handler(&ctx, args.subcommand()).await,
         _ => Ok(()),
     };
 

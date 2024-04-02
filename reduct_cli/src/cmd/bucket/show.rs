@@ -8,12 +8,12 @@ use crate::context::CliContext;
 use crate::helpers::timestamp_to_iso;
 use crate::io::reduct::build_client;
 use crate::io::std::output;
-use crate::parsers::ResourcePathParser;
+use crate::parse::ResourcePathParser;
 use bytesize::ByteSize;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
-use colored::*;
-use reduct_rs::{BucketInfo, FullBucketInfo, ReductClient};
+use reduct_rs::{BucketInfo, EntryInfo, FullBucketInfo, ReductClient};
+use tabled::{settings::Style, Table, Tabled};
 
 pub(super) fn show_bucket_cmd() -> Command {
     Command::new("show")
@@ -32,6 +32,36 @@ pub(super) fn show_bucket_cmd() -> Command {
                 .help("Show full bucket information with entries")
                 .required(false),
         )
+}
+
+#[derive(Tabled)]
+struct EntryTable {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Records")]
+    record_count: u64,
+    #[tabled(rename = "Blocks")]
+    block_count: u64,
+
+    #[tabled(rename = "Size")]
+    size: ByteSize,
+    #[tabled(rename = "Oldest Record (UTC)")]
+    oldest_record: String,
+    #[tabled(rename = "Latest Record (UTC)")]
+    latest_record: String,
+}
+
+impl From<EntryInfo> for EntryTable {
+    fn from(entry: EntryInfo) -> Self {
+        Self {
+            name: entry.name,
+            record_count: entry.record_count,
+            block_count: entry.block_count,
+            size: ByteSize(entry.size),
+            oldest_record: timestamp_to_iso(entry.oldest_record, entry.record_count == 0),
+            latest_record: timestamp_to_iso(entry.latest_record, entry.record_count == 0),
+        }
+    }
 }
 
 pub(super) async fn show_bucket(ctx: &CliContext, args: &ArgMatches) -> anyhow::Result<()> {
@@ -95,50 +125,14 @@ fn print_full_bucket(ctx: &CliContext, bucket: FullBucketInfo) -> anyhow::Result
     );
     output!(
         ctx,
-        "Latest Record (UTC): {:30}",
+        "Latest Record (UTC): {:30}\n",
         timestamp_to_iso(info.latest_record, info.entry_count == 0)
     );
-    macro_rules! print_table {
-        ($($x:expr),*) => {
-            output!(ctx, "{:30}| {:10}| {:10}| {:10} | {:30} | {:30}|", $($x),*);
-        };
-    }
 
-    print_table!(
-        "-----------------------------",
-        "----------",
-        "----------",
-        "----------",
-        "------------------------------",
-        "------------------------------"
-    );
+    let entries = bucket.entries.into_iter().map(EntryTable::from);
+    let table = Table::new(entries).with(Style::markdown()).to_string();
+    output!(ctx, "{}", table);
 
-    print_table!(
-        "Name".bold(),
-        "Blocks".bold(),
-        "Records".bold(),
-        "Size".bold(),
-        "Oldest record (UTC)".bold(),
-        "Latest record (UTC)".bold()
-    );
-    print_table!(
-        "-----------------------------",
-        "----------",
-        "----------",
-        "----------",
-        "------------------------------",
-        "------------------------------"
-    );
-    for entry in bucket.entries {
-        print_table!(
-            entry.name,
-            entry.block_count,
-            entry.record_count,
-            ByteSize(entry.size).to_string(),
-            timestamp_to_iso(entry.oldest_record, entry.record_count == 0),
-            timestamp_to_iso(entry.latest_record, entry.record_count == 0)
-        );
-    }
     Ok(())
 }
 
@@ -202,14 +196,11 @@ mod tests {
         assert_eq!(
             context.stdout().history(),
             vec!["Name:                test_bucket                    Quota Type:         NONE",
-                 "Entries:             1                              Quota Size:         0 B",
-                 "Size:                99 B                           Max. Block Size:    64.0 MB",
-                 "Oldest Record (UTC): 1970-01-01T00:00:00.000Z       Max. Block Records: 256",
-                 "Latest Record (UTC): 1970-01-01T00:00:00.001Z      ",
-                 "----------------------------- | ----------| ----------| ---------- | ------------------------------ | ------------------------------|",
-                 "Name                          | Blocks    | Records   | Size       | Oldest record (UTC)            | Latest record (UTC)           |",
-                 "----------------------------- | ----------| ----------| ---------- | ------------------------------ | ------------------------------|",
-                 "test                          |          1|          2| 99 B       | 1970-01-01T00:00:00.000Z       | 1970-01-01T00:00:00.001Z      |"]
+                 "Entries:             1                              Quota Size:         0 B", "Size:                99 B                           Max. Block Size:    64.0 MB", "Oldest Record (UTC): 1970-01-01T00:00:00.000Z       Max. Block Records: 256", "Latest Record (UTC): 1970-01-01T00:00:00.001Z      \n",
+                 "| Name | Records | Blocks | Size | Oldest Record (UTC)      | Latest Record (UTC)      |\n\
+                 |------|---------|--------|------|--------------------------|--------------------------|\n\
+                 | test | 2       | 1      | 99 B | 1970-01-01T00:00:00.000Z | 1970-01-01T00:00:00.001Z |"]
+
         );
     }
 }

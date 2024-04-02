@@ -72,7 +72,7 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
 }
 
 pub fn sort_headers_by_time(headers: &HeaderMap) -> Result<Vec<(u64, HeaderValue)>, ReductError> {
-    let mut sorted_headers: Vec<_> = headers
+    let sorted_headers: Vec<_> = headers
         .clone()
         .into_iter()
         .filter(|(name, _)| name.is_some())

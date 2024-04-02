@@ -7,7 +7,7 @@ use crate::cmd::RESOURCE_PATH_HELP;
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
 use crate::io::std::output;
-use crate::parsers::ResourcePathParser;
+use crate::parse::ResourcePathParser;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches, Command};
 use reduct_rs::{Permissions, ReductClient};

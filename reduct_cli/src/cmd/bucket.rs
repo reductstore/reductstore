@@ -10,7 +10,7 @@ mod update;
 
 use crate::cmd::RESOURCE_PATH_HELP;
 use crate::context::CliContext;
-use crate::parsers::{ByteSizeParser, QuotaTypeParser, ResourcePathParser};
+use crate::parse::{ByteSizeParser, QuotaTypeParser, ResourcePathParser};
 use bytesize::ByteSize;
 use clap::builder::RangedU64ValueParser;
 use clap::{Arg, ArgMatches, Command};
