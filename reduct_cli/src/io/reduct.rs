@@ -24,7 +24,7 @@ pub(crate) async fn build_client(
         .url(url.as_str())
         .api_token(token.as_str())
         .verify_ssl(!ctx.ignore_ssl())
-        .http1_only()
+        .http1_only() // can't use http2 to stream data between two servers
         .timeout(ctx.timeout())
         .try_build()?;
 

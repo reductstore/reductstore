@@ -121,8 +121,7 @@ pub(crate) async fn cp_bucket_to_folder(ctx: &CliContext, args: &ArgMatches) -> 
         with_meta: args.get_one::<bool>("with-meta").unwrap().clone(),
     };
 
-    let visitor = Arc::new(RwLock::new(visitor));
-    start_loading(&src_bucket, &query_params, visitor).await?;
+    start_loading(src_bucket, query_params, visitor).await?;
 
     Ok(())
 }
