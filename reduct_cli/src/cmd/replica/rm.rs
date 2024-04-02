@@ -12,7 +12,7 @@ use clap::{Arg, ArgMatches, Command};
 
 pub(super) fn rm_replica_cmd() -> Command {
     Command::new("rm")
-        .about("Remove replica")
+        .about("Remove a replication")
         .arg(
             Arg::new("REPLICATION_PATH")
                 .help(RESOURCE_PATH_HELP)

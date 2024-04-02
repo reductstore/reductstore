@@ -11,7 +11,7 @@ use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
 pub(super) fn show_replica_cmd() -> Command {
-    Command::new("show").about("Show replica details").arg(
+    Command::new("show").about("Show replication details").arg(
         Arg::new("REPLICATION_PATH")
             .help(RESOURCE_PATH_HELP)
             .value_parser(crate::parse::ResourcePathParser::new())
