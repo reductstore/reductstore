@@ -90,7 +90,7 @@ fn print_full_list(ctx: &CliContext, bucket_list: BucketInfoList) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::tests::{bucket, context};
+    use crate::context::tests::{bucket, bucket2, context};
     use rstest::rstest;
 
     #[rstest]
@@ -114,15 +114,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_ls_bucket_full(context: CliContext, #[future] bucket: String) {
+    async fn test_ls_bucket_full(
+        context: CliContext,
+        #[future] bucket: String,
+        #[future] bucket2: String,
+    ) {
         let args = ls_bucket_cmd().get_matches_from(vec!["ls", "local", "--full"]);
-        let bucket = build_client(&context, "local")
-            .await
-            .unwrap()
-            .create_bucket(&bucket.await)
-            .send()
-            .await
-            .unwrap();
+        let client = build_client(&context, "local").await.unwrap();
+        let bucket = client.create_bucket(&bucket.await).send().await.unwrap();
         bucket
             .write_record("test")
             .data("data".into())
@@ -137,6 +136,7 @@ mod tests {
             .send()
             .await
             .unwrap();
+        client.create_bucket(&bucket2.await).send().await.unwrap();
 
         ls_bucket(&context, &args).await.unwrap();
 
@@ -147,7 +147,6 @@ mod tests {
                    |---------------|---------|------|--------------------------|--------------------------|\n\
                    | test_bucket   | 1       | 90 B | 1970-01-01T00:00:00.000Z | 1970-01-01T00:00:00.001Z |\n\
                    | test_bucket_2 | 0       | 0 B  | ---                      | ---                      |"]
-
         );
     }
 }
