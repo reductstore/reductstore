@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-48: add replication commands to reduct-cli, [PR-423](https://github.com/reductstore/reductstore/pull/423)
 - RS-181: add support for commercial license in `reduct-cli`, [PR-414](https://github.com/reductstore/reductstore/pull/414)
 - RS-212: add --ignore-ssl flag to `reduct-cli`, [PR-415](https://github.com/reductstore/reductstore/pull/415)
+- Optimise `reduct-cl cp` command, [PR-424](https://github.com/reductstore/reductstore/pull/424)
 
 ## [1.9.4] - 2024-03-29
 
