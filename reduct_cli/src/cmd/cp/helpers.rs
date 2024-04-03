@@ -14,7 +14,7 @@ use clap::ArgMatches;
 use futures_util::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reduct_rs::{Bucket, EntryInfo, ErrorCode, Labels, QueryBuilder, Record, ReductError};
-use tokio::sync::RwLock;
+
 use tokio::task::JoinSet;
 use tokio::time::{sleep, Instant};
 
