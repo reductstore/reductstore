@@ -419,7 +419,6 @@ mod tests {
                 async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError>;
             }
         }
-
         #[fixture]
         fn visitor() -> MockVisitor {
             MockVisitor::new()
@@ -451,13 +450,9 @@ mod tests {
             let src_bucket = src_bucket.await;
             visitor.expect_visit().times(2).return_const(Ok(()));
 
-            start_loading(
-                &src_bucket,
-                &QueryParams::default(),
-                Arc::new(RwLock::new(visitor)),
-            )
-            .await
-            .unwrap();
+            start_loading(src_bucket, QueryParams::default(), visitor)
+                .await
+                .unwrap();
         }
 
         #[rstest]
@@ -495,13 +490,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            start_loading(
-                &src_bucket,
-                &QueryParams::default(),
-                Arc::new(RwLock::new(visitor)),
-            )
-            .await
-            .unwrap();
+            start_loading(src_bucket, QueryParams::default(), visitor)
+                .await
+                .unwrap();
         }
 
         #[rstest]
@@ -522,8 +513,7 @@ mod tests {
                 .times(1)
                 .return_const(Ok(()));
 
-            let visitor = Arc::new(RwLock::new(visitor));
-            let result = start_loading(&src_bucket, &QueryParams::default(), visitor).await;
+            let result = start_loading(src_bucket, QueryParams::default(), visitor).await;
             assert!(result.is_ok());
         }
 
@@ -541,9 +531,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -564,9 +552,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -593,9 +579,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -621,9 +605,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -654,9 +636,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
     }
 }

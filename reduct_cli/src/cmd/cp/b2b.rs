@@ -7,8 +7,6 @@ use crate::cmd::cp::helpers::{parse_query_params, start_loading, CopyVisitor};
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
 use clap::ArgMatches;
-use colored::Colorize;
-use futures_util::StreamExt;
 use reduct_rs::{Bucket, ErrorCode, Record, ReductError};
 use std::sync::Arc;
 
