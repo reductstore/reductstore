@@ -3,26 +3,21 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::sync::Arc;
-
-use clap::ArgMatches;
-use reduct_rs::{Bucket, ErrorCode, Record, ReductError};
-use tokio::sync::RwLock;
-
 use crate::cmd::cp::helpers::{parse_query_params, start_loading, CopyVisitor};
 use crate::context::CliContext;
 use crate::io::reduct::build_client;
+use clap::ArgMatches;
+use reduct_rs::{Bucket, ErrorCode, Record, ReductError};
+use std::sync::Arc;
 
 struct CopyToBucketVisitor {
-    dst_bucket: Arc<RwLock<Bucket>>,
+    dst_bucket: Arc<Bucket>,
 }
 
 #[async_trait::async_trait]
 impl CopyVisitor for CopyToBucketVisitor {
     async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError> {
         self.dst_bucket
-            .write()
-            .await
             .write_record(entry_name)
             .timestamp_us(record.timestamp_us())
             .labels(record.labels().clone())
@@ -68,13 +63,11 @@ pub(crate) async fn cp_bucket_to_bucket(ctx: &CliContext, args: &ArgMatches) -> 
         }
     };
 
-    let dst_bucket = Arc::new(RwLock::new(dst_bucket));
+    let visitor = CopyToBucketVisitor {
+        dst_bucket: Arc::new(dst_bucket),
+    };
 
-    let visitor = Arc::new(RwLock::new(CopyToBucketVisitor {
-        dst_bucket: dst_bucket.clone(),
-    }));
-
-    start_loading(&src_bucket, &query_params, visitor).await
+    start_loading(src_bucket, query_params, visitor).await
 }
 
 #[cfg(test)]
@@ -82,12 +75,10 @@ mod tests {
     use std::sync::Arc;
 
     use crate::cmd::cp::cp_cmd;
+    use crate::context::tests::{bucket, bucket2, context};
     use bytes::Bytes;
     use reduct_rs::{QuotaType, RecordBuilder};
     use rstest::{fixture, rstest};
-    use tokio::sync::RwLock;
-
-    use crate::context::tests::{bucket, bucket2, context};
 
     use super::*;
 
@@ -105,7 +96,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let dst_bucket = Arc::new(RwLock::new(dst_bucket));
+            let dst_bucket = Arc::new(dst_bucket);
             let visitor = CopyToBucketVisitor {
                 dst_bucket: Arc::clone(&dst_bucket),
             };
@@ -114,8 +105,6 @@ mod tests {
             visitor.visit("test", record).await.unwrap();
 
             let record = dst_bucket
-                .read()
-                .await
                 .read_record("test")
                 .timestamp_us(123456)
                 .send()

@@ -14,7 +14,7 @@ use clap::ArgMatches;
 use futures_util::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reduct_rs::{Bucket, EntryInfo, ErrorCode, Labels, QueryBuilder, Record, ReductError};
-use tokio::sync::RwLock;
+
 use tokio::task::JoinSet;
 use tokio::time::{sleep, Instant};
 
@@ -67,15 +67,17 @@ impl TransferProgress {
         self.transferred_bytes += bytes;
         self.history.push((bytes, Instant::now()));
 
-        self.speed = if self.speed_update.elapsed().as_secs() > 3 && self.history.len() > 10 {
-            let result = self.history.iter().map(|(bytes, _)| bytes).sum::<u64>()
-                / self.history[0].1.elapsed().as_secs();
-            self.history.clear();
-            self.speed_update = Instant::now();
-            result
-        } else {
-            self.speed
-        };
+        let duration = self.history[0].1.elapsed().as_secs();
+        self.speed =
+            if self.speed_update.elapsed().as_secs() > 3 && self.history.len() > 10 && duration > 0
+            {
+                let result = self.history.iter().map(|(bytes, _)| bytes).sum::<u64>() / duration;
+                self.history.clear();
+                self.speed_update = Instant::now();
+                result
+            } else {
+                self.speed
+            };
     }
 
     pub(crate) fn message(&self) -> String {
@@ -205,9 +207,9 @@ pub(super) trait CopyVisitor {
  * `visitor` - The visitor that will receive the records
  */
 pub(super) async fn start_loading<V>(
-    src_bucket: &Bucket,
-    query_params: &QueryParams,
-    visitor: Arc<RwLock<V>>,
+    src_bucket: Bucket,
+    query_params: QueryParams,
+    visitor: V,
 ) -> anyhow::Result<()>
 where
     V: CopyVisitor + Send + Sync + 'static,
@@ -223,6 +225,7 @@ where
     .progress_chars("##-");
     let semaphore = Arc::new(tokio::sync::Semaphore::new(query_params.parallel));
 
+    let visitor = Arc::new(visitor);
     for entry in entries {
         let query_builder = build_query(&src_bucket, &entry, &query_params);
         let local_progress = ProgressBar::new(entry.latest_record - entry.oldest_record);
@@ -245,7 +248,7 @@ where
                 local_progress.set_position(record.timestamp_us() - entry.oldest_record);
 
                 let content_length = record.content_length() as u64;
-                let result = local_visitor.read().await.visit(&entry.name, record).await;
+                let result = local_visitor.visit(&entry.name, record).await;
 
                 if let Err(err) = result {
                     // ignore conflict errors
@@ -416,7 +419,6 @@ mod tests {
                 async fn visit(&self, entry_name: &str, record: Record) -> Result<(), ReductError>;
             }
         }
-
         #[fixture]
         fn visitor() -> MockVisitor {
             MockVisitor::new()
@@ -448,13 +450,9 @@ mod tests {
             let src_bucket = src_bucket.await;
             visitor.expect_visit().times(2).return_const(Ok(()));
 
-            start_loading(
-                &src_bucket,
-                &QueryParams::default(),
-                Arc::new(RwLock::new(visitor)),
-            )
-            .await
-            .unwrap();
+            start_loading(src_bucket, QueryParams::default(), visitor)
+                .await
+                .unwrap();
         }
 
         #[rstest]
@@ -492,13 +490,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            start_loading(
-                &src_bucket,
-                &QueryParams::default(),
-                Arc::new(RwLock::new(visitor)),
-            )
-            .await
-            .unwrap();
+            start_loading(src_bucket, QueryParams::default(), visitor)
+                .await
+                .unwrap();
         }
 
         #[rstest]
@@ -519,8 +513,7 @@ mod tests {
                 .times(1)
                 .return_const(Ok(()));
 
-            let visitor = Arc::new(RwLock::new(visitor));
-            let result = start_loading(&src_bucket, &QueryParams::default(), visitor).await;
+            let result = start_loading(src_bucket, QueryParams::default(), visitor).await;
             assert!(result.is_ok());
         }
 
@@ -538,9 +531,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -561,9 +552,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -590,9 +579,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -618,9 +605,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
 
         #[rstest]
@@ -651,9 +636,7 @@ mod tests {
                 ..Default::default()
             };
 
-            start_loading(&src_bucket, &params, Arc::new(RwLock::new(visitor)))
-                .await
-                .unwrap();
+            start_loading(src_bucket, params, visitor).await.unwrap();
         }
     }
 }

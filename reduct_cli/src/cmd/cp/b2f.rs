@@ -12,9 +12,9 @@ use mime_guess::get_extensions;
 use reduct_rs::{ErrorCode, Labels, Record, ReductError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
+
 use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
+
 use tokio::{fs, pin};
 
 struct CopyToFolderVisitor {
@@ -121,8 +121,7 @@ pub(crate) async fn cp_bucket_to_folder(ctx: &CliContext, args: &ArgMatches) -> 
         with_meta: args.get_one::<bool>("with-meta").unwrap().clone(),
     };
 
-    let visitor = Arc::new(RwLock::new(visitor));
-    start_loading(&src_bucket, &query_params, visitor).await?;
+    start_loading(src_bucket, query_params, visitor).await?;
 
     Ok(())
 }
