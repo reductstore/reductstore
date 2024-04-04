@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-212: add --ignore-ssl flag to `reduct-cli`, [PR-415](https://github.com/reductstore/reductstore/pull/415)
 - Optimise `reduct-cl cp` command, [PR-424](https://github.com/reductstore/reductstore/pull/424)
 
+### Removed
+
+- RS-213: `reduct-cli` and dependency from `reduct-rs`, [PR-426](https://github.com/reductstore/reductstore/pull/426)
+
 ## [1.9.4] - 2024-03-29
 
 ### Fixed
