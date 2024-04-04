@@ -3,16 +3,13 @@
 
 use crate::storage::bucket::RecordRx;
 use async_trait::async_trait;
-use bytes::Bytes;
-use futures_util::Stream;
+
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::Labels;
 use reqwest::header::HeaderValue;
 use reqwest::{Body, Client, Response};
-use std::pin::Pin;
-use std::task::Poll;
+
 use tokio_stream::wrappers::ReceiverStream;
-use url::Url;
 
 // A wrapper around the Reduct client API to make it easier to mock.
 #[async_trait]
@@ -159,10 +156,6 @@ impl ReductBucketApi for BucketWrapper {
         content_length: u64,
         rx: RecordRx,
     ) -> Result<(), ReductError> {
-        struct RxWrapper {
-            rx: RecordRx,
-        }
-
         let stream = ReceiverStream::new(rx);
 
         let mut request = self
