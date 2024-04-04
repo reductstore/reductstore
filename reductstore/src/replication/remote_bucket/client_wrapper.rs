@@ -7,9 +7,12 @@ use bytes::Bytes;
 use futures_util::Stream;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::Labels;
-use reduct_rs::{Bucket, ReductClient};
+use reqwest::header::HeaderValue;
+use reqwest::{Body, Client, Response};
 use std::pin::Pin;
 use std::task::Poll;
+use tokio_stream::wrappers::ReceiverStream;
+use url::Url;
 
 // A wrapper around the Reduct client API to make it easier to mock.
 #[async_trait]
@@ -41,47 +44,107 @@ pub(super) trait ReductBucketApi {
 
 pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 
-struct ReductClientWrapper {
-    client: ReductClient,
+struct ReductClient {
+    client: Client,
+    server_url: String,
 }
 
-impl ReductClientWrapper {
-    fn new(url: &str, api_token: &str) -> Self {
-        let client = ReductClient::builder()
-            .url(url)
-            .api_token(api_token)
-            .timeout(std::time::Duration::from_secs(1))
-            .http1_only()
-            .build();
+static API_PATH: &str = "api/v1";
 
-        Self { client }
+impl ReductClient {
+    fn new(url: &str, api_token: &str) -> Self {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if !api_token.is_empty() {
+            let mut value = HeaderValue::from_str(&format!("Bearer {}", api_token)).unwrap();
+            value.set_sensitive(true);
+            headers.insert(reqwest::header::AUTHORIZATION, value);
+        }
+
+        let client = Client::builder()
+            .default_headers(headers)
+            .timeout(std::time::Duration::from_secs(10))
+            .danger_accept_invalid_certs(true)
+            .http1_only()
+            .build()
+            .unwrap(); // TODO: Handle error
+
+        Self {
+            client,
+            server_url: url.to_string(),
+        }
     }
 }
 
 struct BucketWrapper {
-    bucket: Bucket,
+    server_url: String,
+    bucket_name: String,
+    client: Client,
 }
 
 impl BucketWrapper {
-    fn new(bucket: Bucket) -> Self {
-        Self { bucket }
+    fn new(server_url: String, bucket_name: String, client: Client) -> Self {
+        Self {
+            server_url,
+            bucket_name,
+            client,
+        }
     }
 }
 
+fn check_response(response: Result<Response, reqwest::Error>) -> Result<(), ReductError> {
+    let map_error = |error: reqwest::Error| -> ReductError {
+        let status = if error.is_connect() {
+            ErrorCode::ConnectionError
+        } else if error.is_timeout() {
+            ErrorCode::Timeout
+        } else {
+            ErrorCode::Unknown
+        };
+
+        ReductError::new(status, &error.to_string())
+    };
+
+    let response = response.map_err(map_error)?;
+    if response.status().is_success() {
+        return Ok(());
+    }
+
+    let status =
+        ErrorCode::from_int(response.status().as_u16() as i16).unwrap_or(ErrorCode::Unknown);
+
+    let error_msg = response
+        .headers()
+        .get("x-reduct-error")
+        .unwrap_or(&HeaderValue::from_str("Unknown").unwrap())
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    Err(ReductError::new(status, &error_msg))
+}
+
 #[async_trait]
-impl ReductClientApi for ReductClientWrapper {
+impl ReductClientApi for ReductClient {
     async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
-        let bucket = self.client.get_bucket(bucket_name).await.map_err(|e| {
-            ReductError::new(
-                ErrorCode::from_int(e.status.int_value()).unwrap(),
-                &e.message,
-            )
-        })?;
-        Ok(Box::new(BucketWrapper::new(bucket)))
+        let resp = self
+            .client
+            .head(&format!(
+                "{}{}/b/{}",
+                self.server_url, API_PATH, bucket_name
+            ))
+            .send()
+            .await;
+        check_response(resp)?;
+
+        Ok(Box::new(BucketWrapper::new(
+            self.server_url.clone(),
+            bucket_name.to_string(),
+            self.client.clone(),
+        )))
     }
 
     fn url(&self) -> &str {
-        self.client.url()
+        self.server_url.as_str()
     }
 }
 
@@ -92,7 +155,7 @@ impl ReductBucketApi for BucketWrapper {
         entry: &str,
         timestamp: u64,
         labels: Labels,
-        content_type: &str,
+        mut content_type: &str,
         content_length: u64,
         rx: RecordRx,
     ) -> Result<(), ReductError> {
@@ -100,46 +163,47 @@ impl ReductBucketApi for BucketWrapper {
             rx: RecordRx,
         }
 
-        impl Stream for RxWrapper {
-            type Item = Result<Bytes, ReductError>;
+        let stream = ReceiverStream::new(rx);
 
-            fn poll_next(
-                mut self: Pin<&mut Self>,
-                cx: &mut std::task::Context<'_>,
-            ) -> Poll<Option<Self::Item>> {
-                self.rx.poll_recv(cx)
-            }
+        let mut request = self
+            .client
+            .request(
+                reqwest::Method::POST,
+                &format!(
+                    "{}{}/b/{}/{}",
+                    self.server_url, API_PATH, self.bucket_name, entry
+                ),
+            )
+            .query(&[("ts", timestamp.to_string())]);
+
+        for (key, value) in labels {
+            request = request.header(&format!("x-reduct-label-{}", key), value);
         }
 
-        self.bucket
-            .write_record(entry)
-            .timestamp_us(timestamp)
-            .labels(labels)
-            .content_type(content_type)
-            .content_length(content_length)
-            .stream(RxWrapper { rx: rx })
-            .send()
-            .await
-            .map_err(|e| {
-                ReductError::new(
-                    ErrorCode::from_int(e.status.int_value()).unwrap(),
-                    &e.message,
-                )
-            })?;
+        if content_type.is_empty() {
+            content_type = "application/octet-stream";
+        }
 
-        Ok(())
+        let response = request
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .header(reqwest::header::CONTENT_LENGTH, content_length.to_string())
+            .body(Body::wrap_stream(stream))
+            .send()
+            .await;
+
+        check_response(response)
     }
 
     fn server_url(&self) -> &str {
-        self.bucket.server_url()
+        &self.server_url
     }
 
     fn name(&self) -> &str {
-        self.bucket.name()
+        &self.bucket_name
     }
 }
 
 /// Create a new Reduct client wrapper.
 pub(super) fn create_client(url: &str, api_token: &str) -> BoxedClientApi {
-    Box::new(ReductClientWrapper::new(url, api_token))
+    Box::new(ReductClient::new(url, api_token))
 }
