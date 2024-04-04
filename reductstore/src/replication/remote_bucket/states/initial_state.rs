@@ -51,7 +51,7 @@ impl RemoteBucketState for InitialState {
             Err(err) => {
                 // Bucket is unavailable, transition to the unavailable state.
                 error!(
-                    "Failed to get remote bucket {}/{}: {}",
+                    "Failed to get remote bucket {}{}: {}",
                     self.client.url(),
                     self.bucket_name,
                     err
