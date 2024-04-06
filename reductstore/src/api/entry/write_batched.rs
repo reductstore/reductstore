@@ -394,12 +394,14 @@ mod tests {
         let components = components.await;
         {
             let mut storage = components.storage.write().await;
-            storage
+            let tx = storage
                 .get_mut_bucket("bucket-1")
                 .unwrap()
                 .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await
                 .unwrap();
+            tx.send(Ok(Some(Bytes::from(vec![0; 20])))).await.unwrap();
+            tx.closed().await;
         }
 
         headers.insert("content-length", "48".parse().unwrap());
