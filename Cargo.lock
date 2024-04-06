@@ -1703,13 +1703,12 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd48afb3ef32fa64464ea40251be274b05f43bec366fa3bf30f35b92cae31fe0"
+version = "1.9.4"
 dependencies = [
  "chrono",
  "http 1.1.0",
  "int-enum",
+ "rstest",
  "serde",
  "serde_json",
  "url",
@@ -1718,11 +1717,12 @@ dependencies = [
 [[package]]
 name = "reduct-base"
 version = "1.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef7bce6118a32caea83f08d762d13d958bfa41dad310a4c64e99c1ce9215f51d"
 dependencies = [
  "chrono",
  "http 1.1.0",
  "int-enum",
- "rstest",
  "serde",
  "serde_json",
  "url",
@@ -1760,9 +1760,9 @@ dependencies = [
 
 [[package]]
 name = "reduct-rs"
-version = "1.9.2"
+version = "1.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a056038572689131de8b571a29dea6fa3478a0d2995f4aea6f668466300d885a"
+checksum = "104a9c4002ed78139aa06837a107b77fc036b7d573e5c75c63a0638872a096f8"
 dependencies = [
  "async-channel",
  "async-stream",
@@ -1771,7 +1771,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http 1.1.0",
- "reduct-base 1.9.0",
+ "reduct-base 1.9.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "reqwest",
  "rustls",
  "serde",
