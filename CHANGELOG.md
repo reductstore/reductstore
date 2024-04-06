@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-239: Override errored records if they have the same size, [PR-428](https://github.com/reductstore/reductstore/pull/428)
 
+### Security
+
+- Vulnerable to degradation of service with CONTINUATION Flood, [PR-430](https://github.com/reductstore/reductstore/pull/430)
+
 ## [1.9.4] - 2024-03-29
 
 ### Fixed

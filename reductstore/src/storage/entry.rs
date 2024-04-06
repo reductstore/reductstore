@@ -19,7 +19,6 @@ use reduct_base::Labels;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::Write;
-use std::ops::Index;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
