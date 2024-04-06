@@ -35,6 +35,13 @@ pub struct Entry {
     queries: HashMap<u64, Box<dyn Query + Send + Sync>>,
 }
 
+#[derive(PartialEq)]
+enum RecordType {
+    Latest,
+    Belated,
+    BelatedFirst,
+}
+
 /// EntryOptions is the options for creating a new entry.
 #[derive(PartialEq, Debug, Clone)]
 pub struct EntrySettings {
@@ -165,13 +172,6 @@ impl Entry {
         content_type: String,
         labels: Labels,
     ) -> Result<RecordTx, ReductError> {
-        #[derive(PartialEq)]
-        enum RecordType {
-            Latest,
-            Belated,
-            BelatedFirst,
-        }
-
         // When we write, the likely case is that we are writing the latest record
         // in the entry. In this case, we can just append to the latest block.
         let block = if self.block_index.is_empty() {
@@ -193,19 +193,46 @@ impl Entry {
                 (self.start_new_block(time).await?, RecordType::BelatedFirst)
             } else {
                 let block_id = find_first_block(&self.block_index, &time);
-                let bm = self.block_manager.read().await;
-                let block = bm.load(block_id)?;
+                let mut block = async {
+                    let bm = self.block_manager.read().await;
+                    bm.load(block_id)
+                }
+                .await?;
+
                 // check if the record already exists
                 let proto_time = Some(us_to_ts(&time));
-                if block
+                if let Some(record) = block
                     .records
-                    .iter()
-                    .any(|record| record.timestamp == proto_time)
+                    .iter_mut()
+                    .filter(|record| record.timestamp == proto_time)
+                    .last()
                 {
-                    return Err(ReductError::conflict(&format!(
-                        "A record with timestamp {} already exists",
-                        time
-                    )));
+                    // We overwrite the record if it is errored and the size is the same.
+                    return if record.state != record::State::Errored as i32
+                        || record.end - record.begin != content_size as u64
+                    {
+                        Err(ReductError::conflict(&format!(
+                            "A record with timestamp {} already exists",
+                            time
+                        )))
+                    } else {
+                        record.labels = labels
+                            .into_iter()
+                            .map(|(name, value)| record::Label { name, value })
+                            .collect();
+                        record.state = record::State::Started as i32;
+                        record.content_type = content_type;
+
+                        let record_index = block
+                            .records
+                            .iter()
+                            .position(|r| r.timestamp == proto_time)
+                            .unwrap();
+                        let tx =
+                            spawn_write_task(Arc::clone(&self.block_manager), block, record_index)
+                                .await?;
+                        Ok(tx)
+                    };
                 }
                 (block, RecordType::Belated)
             }
@@ -214,7 +241,24 @@ impl Entry {
             (block, RecordType::Latest)
         };
 
-        let content_size = content_size;
+        let block = self
+            .prepare_block_for_writing(time, content_size, content_type, labels, block, record_type)
+            .await?;
+        let record_index = block.records.len() - 1;
+
+        let tx = spawn_write_task(Arc::clone(&self.block_manager), block, record_index).await?;
+        Ok(tx)
+    }
+
+    async fn prepare_block_for_writing(
+        &mut self,
+        time: u64,
+        content_size: usize,
+        content_type: String,
+        labels: Labels,
+        block: Block,
+        record_type: RecordType,
+    ) -> Result<Block, ReductError> {
         let has_no_space = block.size + content_size as u64 > self.settings.max_block_size;
         let has_too_many_records =
             block.records.len() + 1 > self.settings.max_block_records as usize;
@@ -261,10 +305,7 @@ impl Entry {
         if record_type != RecordType::Belated {
             block.latest_record_time = Some(us_to_ts(&time));
         }
-
-        let record_index = block.records.len() - 1;
-        let tx = spawn_write_task(Arc::clone(&self.block_manager), block, record_index).await?;
-        Ok(tx)
+        Ok(block)
     }
 
     /// Starts a new record read.
@@ -483,9 +524,9 @@ mod tests {
     use std::fs::File;
 
     use rstest::{fixture, rstest};
-    use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
+    use tokio::time::sleep;
 
     mod restore {
         use super::*;
@@ -718,6 +759,73 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_begin_override_errored(mut entry: Entry) {
+        let sender = entry
+            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+
+        sender.send(Ok(None)).await.unwrap();
+        sender.closed().await;
+
+        let sender = entry
+            .begin_write(
+                1000000,
+                10,
+                "text/html".to_string(),
+                Labels::from_iter(vec![("a".to_string(), "b".to_string())]),
+            )
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(Bytes::from(vec![0; 10]))))
+            .await
+            .unwrap();
+
+        let record = entry
+            .block_manager
+            .read()
+            .await
+            .load(1000000)
+            .unwrap()
+            .records[0]
+            .clone();
+        assert_eq!(record.content_type, "text/html");
+        assert_eq!(record.labels.len(), 1);
+        assert_eq!(record.labels[0].name, "a");
+        assert_eq!(record.labels[0].value, "b");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_begin_not_override_if_different_size(mut entry: Entry) {
+        let sender = entry
+            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+
+        sender.send(Ok(None)).await.unwrap();
+        sender.closed().await;
+
+        let err = entry
+            .begin_write(
+                1000000,
+                5,
+                "text/html".to_string(),
+                Labels::from_iter(vec![("a".to_string(), "b".to_string())]),
+            )
+            .await
+            .err();
+        assert_eq!(
+            err,
+            Some(ReductError::conflict(
+                "A record with timestamp 1000000 already exists"
+            ))
+        );
+    }
+
     // Test begin_read
     #[rstest]
     #[tokio::test]
@@ -898,7 +1006,7 @@ mod tests {
             assert_eq!(reader.timestamp(), 2000000);
         }
 
-        sleep(Duration::from_millis(600));
+        sleep(Duration::from_millis(600)).await;
         assert_eq!(
             entry.next(id).await.err(),
             Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
