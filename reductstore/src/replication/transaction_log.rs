@@ -5,8 +5,11 @@ use crate::replication::Transaction;
 use reduct_base::error::ReductError;
 use std::io::SeekFrom;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::spawn;
+use tokio::sync::RwLock;
 
 /// Transaction log for replication.
 ///
@@ -18,7 +21,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// | byte - transaction type n | 8 byte - timestamp n |
 ///
 pub(super) struct TransactionLog {
-    file: File,
+    file: Arc<RwLock<File>>,
     capacity_in_bytes: usize,
     write_pos: usize,
     read_pos: usize,
@@ -26,6 +29,19 @@ pub(super) struct TransactionLog {
 
 const HEADER_SIZE: usize = 16;
 const ENTRY_SIZE: usize = 9;
+
+impl Drop for TransactionLog {
+    fn drop(&mut self) {
+        // Flush and sync the file in a separate thread.
+        let mut file = Arc::clone(&self.file);
+        let _ = spawn(async move {
+            let mut file = file.write().await;
+            file.flush().await?;
+            file.sync_all().await?;
+            Ok::<(), ReductError>(())
+        });
+    }
+}
 
 impl TransactionLog {
     /// Create a new transaction log or load an existing one.
@@ -40,7 +56,7 @@ impl TransactionLog {
     /// A new transaction log instance or an error.
     pub async fn try_load_or_create(path: PathBuf, capacity: usize) -> Result<Self, ReductError> {
         let instance = if !path.exists() {
-            let file = OpenOptions::new()
+            let mut file = OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
@@ -49,8 +65,12 @@ impl TransactionLog {
 
             let capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
             file.set_len(capacity_in_bytes as u64).await?;
+            file.seek(SeekFrom::Start(0)).await?;
+            file.write_all(&[0u8; HEADER_SIZE]).await?;
+            file.sync_all().await?;
+
             Self {
-                file,
+                file: Arc::new(RwLock::from(file)),
                 capacity_in_bytes,
                 write_pos: HEADER_SIZE,
                 read_pos: HEADER_SIZE,
@@ -65,7 +85,7 @@ impl TransactionLog {
             let read_pos = u64::from_be_bytes(buf[8..16].try_into().unwrap()) as usize;
             let capacity_in_bytes = file.metadata().await?.len() as usize;
             Self {
-                file,
+                file: Arc::new(RwLock::from(file)),
                 capacity_in_bytes,
                 write_pos,
                 read_pos,
@@ -88,22 +108,25 @@ impl TransactionLog {
         &mut self,
         transaction: Transaction,
     ) -> Result<Option<Transaction>, ReductError> {
-        self.file
-            .seek(SeekFrom::Start(self.write_pos as u64))
-            .await?;
+        {
+            let mut file = self.file.write().await;
 
-        let mut buf = [0u8; ENTRY_SIZE];
-        buf[0] = transaction.clone().into();
-        buf[1..9].copy_from_slice(&transaction.timestamp().to_be_bytes());
-        self.file.write_all(&buf).await?;
-        self.write_pos += ENTRY_SIZE;
+            file.seek(SeekFrom::Start(self.write_pos as u64)).await?;
 
-        if self.write_pos >= self.capacity_in_bytes {
-            self.write_pos = HEADER_SIZE;
+            let mut buf = [0u8; ENTRY_SIZE];
+            buf[0] = transaction.clone().into();
+            buf[1..9].copy_from_slice(&transaction.timestamp().to_be_bytes());
+
+            file.write_all(&buf).await?;
+            self.write_pos += ENTRY_SIZE;
+
+            if self.write_pos >= self.capacity_in_bytes {
+                self.write_pos = HEADER_SIZE;
+            }
+
+            file.seek(SeekFrom::Start(0)).await?;
+            file.write_all(&self.write_pos.to_be_bytes()).await?;
         }
-
-        self.file.seek(SeekFrom::Start(0)).await?;
-        self.file.write_all(&self.write_pos.to_be_bytes()).await?;
 
         if self.write_pos == self.read_pos {
             let transaction = self.unsafe_head().await?;
@@ -148,11 +171,12 @@ impl TransactionLog {
     }
 
     async fn unsafe_head(&mut self) -> Result<Option<Transaction>, ReductError> {
-        self.file
-            .seek(SeekFrom::Start(self.read_pos as u64))
-            .await?;
         let mut buf = [0u8; ENTRY_SIZE];
-        self.file.read_exact(&mut buf).await?;
+        {
+            let mut file = self.file.write().await;
+            file.seek(SeekFrom::Start(self.read_pos as u64)).await?;
+            file.read_exact(&mut buf).await?;
+        }
         let transaction_type = buf[0];
         let timestamp = u64::from_be_bytes(buf[1..9].try_into().unwrap());
 
@@ -171,8 +195,11 @@ impl TransactionLog {
             self.read_pos = HEADER_SIZE;
         }
 
-        self.file.seek(SeekFrom::Start(8)).await?;
-        self.file.write_all(&self.read_pos.to_be_bytes()).await?;
+        {
+            let mut file = self.file.write().await;
+            file.seek(SeekFrom::Start(8)).await?;
+            file.write_all(&self.read_pos.to_be_bytes()).await?;
+        }
 
         Ok(())
     }
@@ -291,6 +318,16 @@ mod tests {
         );
         transaction_log.pop_front().await.unwrap();
 
+        assert_eq!(transaction_log.is_empty(), true);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_recovery_no_use(path: PathBuf) {
+        let _ = TransactionLog::try_load_or_create(path.clone(), 3)
+            .await
+            .unwrap();
+        let transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
         assert_eq!(transaction_log.is_empty(), true);
     }
 
