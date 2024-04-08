@@ -38,6 +38,7 @@ impl Drop for TransactionLog {
             let mut file = file.write().await;
             file.flush().await?;
             file.sync_all().await?;
+
             Ok::<(), ReductError>(())
         });
     }
@@ -66,7 +67,8 @@ impl TransactionLog {
             let capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
             file.set_len(capacity_in_bytes as u64).await?;
             file.seek(SeekFrom::Start(0)).await?;
-            file.write_all(&[0u8; HEADER_SIZE]).await?;
+            file.write_all(HEADER_SIZE.to_be_bytes().as_ref()).await?;
+            file.write_all(HEADER_SIZE.to_be_bytes().as_ref()).await?;
             file.sync_all().await?;
 
             Self {
