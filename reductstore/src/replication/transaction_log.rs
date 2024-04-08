@@ -33,7 +33,7 @@ const ENTRY_SIZE: usize = 9;
 impl Drop for TransactionLog {
     fn drop(&mut self) {
         // Flush and sync the file in a separate thread.
-        let mut file = Arc::clone(&self.file);
+        let file = Arc::clone(&self.file);
         let _ = spawn(async move {
             let mut file = file.write().await;
             file.flush().await?;
@@ -325,12 +325,19 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_recovery_no_use(path: PathBuf) {
-        let _ = TransactionLog::try_load_or_create(path.clone(), 3)
+    async fn test_recovery_init(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3)
             .await
             .unwrap();
+        transaction_log
+            .push_back(Transaction::WriteRecord(1))
+            .await
+            .unwrap();
+        drop(transaction_log);
+
         let transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
-        assert_eq!(transaction_log.is_empty(), true);
+        assert_eq!(transaction_log.write_pos, HEADER_SIZE + ENTRY_SIZE);
+        assert_eq!(transaction_log.read_pos, HEADER_SIZE);
     }
 
     #[fixture]
