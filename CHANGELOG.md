@@ -20,7 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-213: `reduct-cli` and dependency from `reduct-rs`, [PR-426](https://github.com/reductstore/reductstore/pull/426)
 
-## [1.9.x]
+## [1.9.5] - 2024-04-08
+
+### Fixed
+
+- RS-241: Fix replication and transaction log initialization, [PR-431](https://github.com/reductstore/reductstore/pull/431)
 
 ### Changed
 
@@ -677,7 +681,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.5...HEAD
+
+[1.9.5]: https://github.com/reductstore/reductstore/compare/v1.9.4...v1.9.5
+
+[1.9.4]: https://github.com/reductstore/reductstore/compare/v1.9.3...v1.9.4
 
 [1.9.3]: https://github.com/reductstore/reductstore/compare/v1.9.2...v1.9.3
 

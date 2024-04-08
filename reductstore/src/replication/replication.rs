@@ -69,6 +69,7 @@ impl Replication {
         storage: Arc<RwLock<Storage>>,
     ) -> Self {
         let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
+
         let hourly_diagnostics = Arc::new(RwLock::new(DiagnosticsCounter::new(
             Duration::from_secs(3600),
         )));
@@ -81,6 +82,35 @@ impl Replication {
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
 
         tokio::spawn(async move {
+            let init_transaction_logs = async {
+                let mut logs = thr_log_map.write().await;
+                for entry in thr_storage
+                    .read()
+                    .await
+                    .get_bucket(&config.src_bucket)?
+                    .info()
+                    .await?
+                    .entries
+                {
+                    let path = Self::build_path_to_transaction_log(
+                        thr_storage.read().await.data_path(),
+                        &config.src_bucket,
+                        &entry.name,
+                        &replication_name,
+                    );
+                    let log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
+                        .await
+                        .unwrap();
+                    logs.insert(entry.name, RwLock::new(log));
+                }
+
+                Ok::<(), ReductError>(())
+            };
+
+            if let Err(err) = init_transaction_logs.await {
+                error!("Failed to initialize transaction logs: {:?}", err);
+            }
+
             loop {
                 let mut no_transactions = true;
                 for (entry_name, log) in thr_log_map.read().await.iter() {
@@ -149,9 +179,9 @@ impl Replication {
                             }
 
                             if bucket.is_active() {
-                                // We keep transactions if the destination bucket is not available
                                 log.write().await.pop_front().await.unwrap();
                             } else {
+                                // We keep transactions if the destination bucket is not available
                                 drop(bucket); // drop lock
                                 sleep(Duration::from_secs(5)).await;
                             }
@@ -300,6 +330,7 @@ mod tests {
     use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
+
     use mockall::mock;
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -321,6 +352,17 @@ mod tests {
             fn is_active(&self) -> bool;
         }
 
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_transaction_log_init(remote_bucket: MockRmBucket) {
+        let replication = build_replication(remote_bucket).await;
+        assert_eq!(replication.log_map.read().await.len(), 1);
+        assert!(
+            replication.log_map.read().await.contains_key("test"),
+            "Transaction log is initialized"
+        );
     }
 
     #[rstest]
@@ -580,16 +622,19 @@ mod tests {
                 .await
                 .unwrap();
             tx.send(Ok(Some(Bytes::from("test")))).await.unwrap();
-            tx.send(Ok(None)).await.unwrap();
+            tx.send(Ok(None)).await.unwrap_or(());
         }
 
-        Replication::build(
+        let repl = Replication::build(
             "test".to_string(),
             settings,
             Arc::new(RwLock::new(remote_bucket)),
             filter,
             storage,
-        )
+        );
+
+        sleep(Duration::from_millis(5)).await; // wait for the transaction log to be initialized in worker
+        repl
     }
 
     async fn transaction_log_is_empty(replication: &Replication) -> bool {
