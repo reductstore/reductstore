@@ -330,7 +330,7 @@ mod tests {
     use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
-    use futures_util::future::Remote;
+
     use mockall::mock;
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::bucket_api::BucketSettings;
