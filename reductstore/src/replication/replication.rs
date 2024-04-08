@@ -330,6 +330,7 @@ mod tests {
     use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
+    use futures_util::future::Remote;
     use mockall::mock;
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -351,6 +352,18 @@ mod tests {
             fn is_active(&self) -> bool;
         }
 
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_transaction_log_init(remote_bucket: MockRmBucket) {
+        let replication = build_replication(remote_bucket).await;
+        sleep(Duration::from_millis(5)).await; // wait for the transaction log to be initialized in worker
+        assert_eq!(replication.log_map.read().await.len(), 1);
+        assert!(
+            replication.log_map.read().await.contains_key("test"),
+            "Transaction log is initialized"
+        );
     }
 
     #[rstest]
