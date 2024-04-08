@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-241: Fix replication and transaction log initialization, [PR-431](https://github.com/reductstore/reductstore/pull/431)
+
 ### Changed
 
 - RS-239: Override errored records if they have the same size, [PR-428](https://github.com/reductstore/reductstore/pull/428)
