@@ -358,7 +358,6 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_log_init(remote_bucket: MockRmBucket) {
         let replication = build_replication(remote_bucket).await;
-        sleep(Duration::from_millis(5)).await; // wait for the transaction log to be initialized in worker
         assert_eq!(replication.log_map.read().await.len(), 1);
         assert!(
             replication.log_map.read().await.contains_key("test"),
@@ -623,16 +622,19 @@ mod tests {
                 .await
                 .unwrap();
             tx.send(Ok(Some(Bytes::from("test")))).await.unwrap();
-            tx.send(Ok(None)).await.unwrap();
+            tx.send(Ok(None)).await.unwrap_or(());
         }
 
-        Replication::build(
+        let repl = Replication::build(
             "test".to_string(),
             settings,
             Arc::new(RwLock::new(remote_bucket)),
             filter,
             storage,
-        )
+        );
+
+        sleep(Duration::from_millis(5)).await; // wait for the transaction log to be initialized in worker
+        repl
     }
 
     async fn transaction_log_is_empty(replication: &Replication) -> bool {
