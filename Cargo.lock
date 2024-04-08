@@ -1704,19 +1704,6 @@ dependencies = [
 [[package]]
 name = "reduct-base"
 version = "1.9.4"
-dependencies = [
- "chrono",
- "http 1.1.0",
- "int-enum",
- "rstest",
- "serde",
- "serde_json",
- "url",
-]
-
-[[package]]
-name = "reduct-base"
-version = "1.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef7bce6118a32caea83f08d762d13d958bfa41dad310a4c64e99c1ce9215f51d"
 dependencies = [
@@ -1729,8 +1716,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reduct-base"
+version = "1.9.5"
+dependencies = [
+ "chrono",
+ "http 1.1.0",
+ "int-enum",
+ "rstest",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "reduct-cli"
-version = "1.9.4"
+version = "1.9.5"
 dependencies = [
  "anyhow",
  "bytesize",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.9.4"
+version = "1.9.5"
 dependencies = [
  "quote",
  "syn 2.0.52",
@@ -1771,7 +1771,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http 1.1.0",
- "reduct-base 1.9.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "reduct-base 1.9.4",
  "reqwest",
  "rustls",
  "serde",
@@ -1781,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.9.4"
+version = "1.9.5"
 dependencies = [
  "async-trait",
  "axum",
@@ -1805,7 +1805,7 @@ dependencies = [
  "prost-wkt-build",
  "prost-wkt-types",
  "rand",
- "reduct-base 1.9.4",
+ "reduct-base 1.9.5",
  "reduct-macros",
  "reduct-rs",
  "regex",
