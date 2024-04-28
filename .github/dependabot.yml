@@ -10,8 +10,3 @@ updates:
     target-branch: "main"
     schedule:
       interval: "weekly"
-  - package-ecosystem: "cargo"
-    directory: "/"
-    target-branch: "stable"
-    schedule:
-      interval: "weekly"
