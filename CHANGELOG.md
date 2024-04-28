@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-213: `reduct-cli` and dependency from `reduct-rs`, [PR-426](https://github.com/reductstore/reductstore/pull/426)
 
+### Security
+
+- Bump `rustls` from 0.21.10 to 0.21.12, [PR-432](https://github.com/reductstore/reductstore/pull/432)
+
 ## [1.9.5] - 2024-04-08
 
 ### Fixed
