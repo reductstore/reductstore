@@ -23,6 +23,6 @@ colored = "2.1.0"
 chrono = "0.4.34"
 
 [dev-dependencies]
-rstest = "0.18.2"
+rstest = "0.19.0"
 tempfile = "3.10.0"
 mockall = "0.12.1"
