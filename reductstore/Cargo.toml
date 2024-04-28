@@ -33,7 +33,7 @@ reduct-rs = "1.9.4"
 log = "0.4.20"
 chrono = { version = "0.4.34", features = ["serde"] }
 thread-id = "4.2.1"
-zip = "0.6.6"
+zip = "1.1.1"
 tempfile = "3.10.0"
 hermit-abi = "0.3.6"
 hex = "0.4.3"
