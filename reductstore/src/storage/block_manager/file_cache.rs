@@ -1,6 +1,5 @@
-use log::debug;
 use reduct_base::error::ReductError;
-use std::cell::RefCell;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,7 +7,6 @@ use std::time::Duration;
 use tokio::fs::File;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
-use zip::write::FileOptions;
 
 pub(crate) type FileRef = Arc<RwLock<File>>;
 

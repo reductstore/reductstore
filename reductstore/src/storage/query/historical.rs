@@ -42,7 +42,7 @@ impl Query for HistoricalQuery {
     async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        mut block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         self.last_update = Instant::now();
 

@@ -78,7 +78,7 @@ impl Replication {
         let replication_name = name.clone();
         let thr_log_map = Arc::clone(&log_map);
         let thr_bucket = Arc::clone(&remote_bucket);
-        let mut thr_storage = Arc::clone(&storage);
+        let thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
 
         tokio::spawn(async move {

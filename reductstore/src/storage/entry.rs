@@ -177,7 +177,7 @@ impl Entry {
         let block = if self.block_index.is_empty() {
             self.start_new_block(time).await?
         } else {
-            let mut bm = self.block_manager.write().await;
+            let bm = self.block_manager.write().await;
             bm.load(*self.block_index.last().unwrap()).await?
         };
 
@@ -194,7 +194,7 @@ impl Entry {
             } else {
                 let block_id = find_first_block(&self.block_index, &time);
                 let mut block = async {
-                    let mut bm = self.block_manager.write().await;
+                    let bm = self.block_manager.write().await;
                     bm.load(block_id).await
                 }
                 .await?;
@@ -335,7 +335,7 @@ impl Entry {
 
         let block_id = find_first_block(&self.block_index, &time);
         let block = {
-            let mut bm = self.block_manager.write().await;
+            let bm = self.block_manager.write().await;
             bm.load(block_id).await?
         };
 
@@ -353,7 +353,7 @@ impl Entry {
 
         if record.state == record::State::Started as i32 {
             let block = {
-                let mut bm = self.block_manager.write().await;
+                let bm = self.block_manager.write().await;
                 bm.load(block_id).await?
             };
 

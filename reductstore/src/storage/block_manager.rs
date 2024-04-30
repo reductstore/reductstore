@@ -10,13 +10,13 @@ use prost_wkt_types::Timestamp;
 use std::cmp::min;
 
 use log::{debug, error};
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap};
+
+use std::collections::BTreeSet;
 use std::io::{SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::fs::File;
+use std::time::Duration;
+
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
@@ -100,7 +100,7 @@ impl BlockManager {
         self.use_counter.increment(ts_to_us(&ts));
 
         let path = self.path_to_data(&ts);
-        let mut file = self.file_cache.read(&path).await?;
+        let file = self.file_cache.read(&path).await?;
         let offset = block.records[record_index].begin;
         Ok((file, offset as usize))
     }
@@ -273,7 +273,7 @@ impl ManageBlock for BlockManager {
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
         let file = self.file_cache.write_or_create(&path).await?;
-        let mut data_block = file.write().await;
+        let data_block = file.write().await;
         data_block.set_len(block.size).await?;
         data_block.sync_all().await?;
 
@@ -281,7 +281,7 @@ impl ManageBlock for BlockManager {
             .file_cache
             .write_or_create(&self.path_to_desc(block.begin_time.as_ref().unwrap()))
             .await?;
-        let mut descr_block = file.write().await;
+        let descr_block = file.write().await;
         descr_block.sync_all().await?;
 
         self.last_block = None;
@@ -739,7 +739,7 @@ mod tests {
         });
         bm.save(block.clone()).await.unwrap();
 
-        let (mut file, _) = bm.begin_write(&block, 0).await.unwrap();
+        let (file, _) = bm.begin_write(&block, 0).await.unwrap();
         file.write().await.write(b"hallo").await.unwrap();
         bm.finish_write_record(block_id, record::State::Finished, 0)
             .await

@@ -153,7 +153,7 @@ pub(crate) mod tests {
 
         macro_rules! write_record {
             ($block:expr, $index:expr, $content:expr) => {{
-                let (mut file, _) = block_manager.begin_write(&$block, $index).await.unwrap();
+                let (file, _) = block_manager.begin_write(&$block, $index).await.unwrap();
                 let mut file = file.write().await;
                 file.write($content).await.unwrap();
                 file.flush().await.unwrap();
