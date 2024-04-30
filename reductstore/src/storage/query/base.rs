@@ -100,7 +100,7 @@ pub(crate) mod tests {
         // the second block has a record: 1000
         let dir = tempdir().unwrap().into_path();
         let mut block_manager = BlockManager::new(dir);
-        let mut block = block_manager.start(0, 10).unwrap();
+        let mut block = block_manager.start(0, 10).await.unwrap();
 
         block.records.push(Record {
             timestamp: Some(Timestamp {
@@ -149,11 +149,12 @@ pub(crate) mod tests {
             nanos: 5000,
         });
         block.size = 20;
-        block_manager.save(block.clone()).unwrap();
+        block_manager.save(block.clone()).await.unwrap();
 
         macro_rules! write_record {
             ($block:expr, $index:expr, $content:expr) => {{
-                let mut file = block_manager.begin_write(&$block, $index).await.unwrap();
+                let (mut file, _) = block_manager.begin_write(&$block, $index).await.unwrap();
+                let mut file = file.write().await;
                 file.write($content).await.unwrap();
                 file.flush().await.unwrap();
             }};
@@ -162,8 +163,8 @@ pub(crate) mod tests {
         write_record!(block, 0, b"0123456789");
         write_record!(block, 1, b"0123456789");
 
-        block_manager.finish(&block).unwrap();
-        let mut block = block_manager.start(1000, 10).unwrap();
+        block_manager.finish(&block).await.unwrap();
+        let mut block = block_manager.start(1000, 10).await.unwrap();
 
         block.records.push(Record {
             timestamp: Some(Timestamp {
@@ -191,11 +192,11 @@ pub(crate) mod tests {
             nanos: 1000_000,
         });
         block.size = 10;
-        block_manager.save(block.clone()).unwrap();
+        block_manager.save(block.clone()).await.unwrap();
 
         write_record!(block, 0, b"0123456789");
 
-        block_manager.finish(&block).unwrap();
+        block_manager.finish(&block).await.unwrap();
         let block_manager = Arc::new(RwLock::new(block_manager));
         (block_manager, BTreeSet::from([0, 1000]))
     }

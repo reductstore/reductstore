@@ -85,9 +85,9 @@ impl Replication {
             let init_transaction_logs = async {
                 let mut logs = thr_log_map.write().await;
                 for entry in thr_storage
-                    .write()
+                    .read()
                     .await
-                    .get_mut_bucket(&config.src_bucket)?
+                    .get_bucket(&config.src_bucket)?
                     .info()
                     .await?
                     .entries

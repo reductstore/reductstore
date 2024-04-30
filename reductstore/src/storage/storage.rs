@@ -72,12 +72,12 @@ impl Storage {
     /// # Returns
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
-    pub async fn info(&mut self) -> Result<ServerInfo, ReductError> {
+    pub async fn info(&self) -> Result<ServerInfo, ReductError> {
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
-        for bucket in self.buckets.values_mut() {
+        for bucket in self.buckets.values() {
             let bucket = bucket.info().await?.info;
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
@@ -191,9 +191,9 @@ impl Storage {
         }
     }
 
-    pub async fn get_bucket_list(&mut self) -> Result<BucketInfoList, ReductError> {
+    pub async fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
         let mut buckets = Vec::new();
-        for bucket in self.buckets.values_mut() {
+        for bucket in self.buckets.values() {
             buckets.push(bucket.info().await?.info);
         }
 
@@ -254,41 +254,28 @@ mod tests {
             .unwrap();
         assert_eq!(bucket.name(), "test");
 
-        {
-            let entry = bucket.get_or_create_entry("entry-1").unwrap();
-            let sender = entry
-                .begin_write(1000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender
-                .send(Ok(Some(Bytes::from("0123456789"))))
-                .await
-                .unwrap();
-        }
-        {
-            let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let sender = entry
-                .begin_write(2000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender
-                .send(Ok(Some(Bytes::from("0123456789"))))
-                .await
-                .unwrap();
-        }
-        {
-            let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let sender = entry
-                .begin_write(5000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender
-                .send(Ok(Some(Bytes::from("0123456789"))))
-                .await
-                .unwrap();
+        macro_rules! write_entry {
+            ($bucket:expr, $entry_name:expr, $record_ts:expr) => {
+                let entry = $bucket.get_or_create_entry($entry_name).unwrap();
+                let sender = entry
+                    .begin_write($record_ts, 10, "text/plain".to_string(), Labels::new())
+                    .await
+                    .unwrap();
+                sender
+                    .send(Ok(Some(Bytes::from("0123456789"))))
+                    .await
+                    .unwrap();
+                sender.closed().await;
+            };
         }
 
-        let storage = Storage::load(storage.data_path, None).await;
+        write_entry!(bucket, "entry-1", 1000);
+        write_entry!(bucket, "entry-2", 2000);
+        write_entry!(bucket, "entry-2", 5000);
+
+        // tokio::time::sleep(Duration::from_secs(1)).await; // uptime is 1 second
+        let path = storage.data_path.clone();
+        let storage = Storage::load(path, None).await;
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
@@ -411,7 +398,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_with_non_existing_name(#[future] storage: Storage) {
+    async fn test_remove_bucket_with_non_existing_name(#[future] mut storage: Storage) {
         let result = storage.await.remove_bucket("test");
         assert_eq!(
             result,

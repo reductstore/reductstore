@@ -273,12 +273,12 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub async fn info(&mut self) -> Result<FullBucketInfo, ReductError> {
+    pub async fn info(&self) -> Result<FullBucketInfo, ReductError> {
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
         let mut entries: Vec<EntryInfo> = vec![];
-        for entry in self.entries.values_mut() {
+        for entry in self.entries.values() {
             let info = entry.info().await?;
             entries.push(info.clone());
             size += info.size;

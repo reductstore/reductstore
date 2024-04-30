@@ -403,9 +403,10 @@ mod tests {
             .read()
             .await
             .load(*index.get(&0u64).unwrap())
+            .await
             .unwrap();
         block.records[0].state = record::State::Errored as i32;
-        block_manager.write().await.save(block).unwrap();
+        block_manager.write().await.save(block).await.unwrap();
 
         assert_eq!(
             query.next(&index, block_manager.clone()).await.err(),

@@ -333,9 +333,7 @@ impl Entry {
             return not_found_err;
         }
 
-        let _block_id = self.block_index.range(time..).next();
         let block_id = find_first_block(&self.block_index, &time);
-
         let block = {
             let mut bm = self.block_manager.write().await;
             bm.load(block_id).await?
@@ -430,13 +428,13 @@ impl Entry {
     }
 
     /// Returns stats about the entry.
-    pub async fn info(&mut self) -> Result<EntryInfo, ReductError> {
+    pub async fn info(&self) -> Result<EntryInfo, ReductError> {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
             (0, 0)
         } else {
             let latest_block = self
                 .block_manager
-                .write()
+                .read()
                 .await
                 .load(*self.block_index.last().unwrap())
                 .await?;
@@ -546,7 +544,7 @@ mod tests {
             write_stub_record(&mut entry, 2000010).await.unwrap();
 
             let bm = entry.block_manager.read().await;
-            let records = bm.load(1).unwrap().records.clone();
+            let records = bm.load(1).await.unwrap().records.clone();
             assert_eq!(records.len(), 2);
             assert_eq!(
                 records[0],
@@ -604,7 +602,7 @@ mod tests {
             let path = path.join("entry");
             fs::create_dir_all(path.clone()).unwrap();
             let mut block_manager = BlockManager::new(path.clone());
-            let mut block_v18 = block_manager.start(1, 100).unwrap();
+            let mut block_v18 = block_manager.start(1, 100).await.unwrap();
             block_v18.records.push(Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -623,7 +621,7 @@ mod tests {
             });
             block_v18.size = 10;
             block_v18.begin_time = Some(us_to_ts(&1));
-            block_manager.save(block_v18).unwrap();
+            block_manager.save(block_v18).await.unwrap();
 
             // repack the block
             let entry = Entry::restore(path.clone(), entry_settings).unwrap();
@@ -636,7 +634,7 @@ mod tests {
             assert_eq!(info.latest_record, 2);
 
             let block_manager = BlockManager::new(path); // reload the block manager
-            let block_v19 = block_manager.load(1).unwrap();
+            let block_v19 = block_manager.load(1).await.unwrap();
             assert_eq!(block_v19.record_count, 2);
             assert_eq!(block_v19.size, 10);
             assert_eq!(block_v19.metadata_size, 55);
@@ -660,7 +658,7 @@ mod tests {
         let bm = entry.block_manager.read().await;
 
         assert_eq!(
-            bm.load(1).unwrap().records[0],
+            bm.load(1).await.unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -672,7 +670,7 @@ mod tests {
         );
 
         assert_eq!(
-            bm.load(2000010).unwrap().records[0],
+            bm.load(2000010).await.unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 0,
@@ -701,7 +699,7 @@ mod tests {
 
         let bm = entry.block_manager.read().await;
         assert_eq!(
-            bm.load(1).unwrap().records[0],
+            bm.load(1).await.unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -713,7 +711,7 @@ mod tests {
         );
 
         assert_eq!(
-            bm.load(2000010).unwrap().records[0],
+            bm.load(2000010).await.unwrap().records[0],
             Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 0,
@@ -733,7 +731,7 @@ mod tests {
         write_stub_record(&mut entry, 2000000).await.unwrap();
 
         let bm = entry.block_manager.read().await;
-        let records = bm.load(1000000).unwrap().records.clone();
+        let records = bm.load(1000000).await.unwrap().records.clone();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
         assert_eq!(records[1].timestamp, Some(us_to_ts(&3000000)));
@@ -747,7 +745,7 @@ mod tests {
         write_stub_record(&mut entry, 1000000).await.unwrap();
 
         let bm = entry.block_manager.read().await;
-        let records = bm.load(1000000).unwrap().records.clone();
+        let records = bm.load(1000000).await.unwrap().records.clone();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
     }
@@ -796,6 +794,7 @@ mod tests {
             .read()
             .await
             .load(1000000)
+            .await
             .unwrap()
             .records[0]
             .clone();

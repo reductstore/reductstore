@@ -29,6 +29,7 @@ use reduct_base::error::{ErrorCode, ReductError};
 
 pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
+const MAX_FILE_CACHE_SIZE: usize = 64;
 
 /// Helper class for basic operations on blocks.
 ///
@@ -75,7 +76,7 @@ impl BlockManager {
         Self {
             path,
             use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
-            file_cache: FileCache::new(10),
+            file_cache: FileCache::new(MAX_FILE_CACHE_SIZE),
             last_block: None,
         }
     }
@@ -96,13 +97,11 @@ impl BlockManager {
         record_index: usize,
     ) -> Result<(FileRef, usize), ReductError> {
         let ts = block.begin_time.clone().unwrap();
-        let path = self.path_to_data(&ts);
-
         self.use_counter.increment(ts_to_us(&ts));
 
-        let mut file = self.file_cache.get_or_create(&path).await?;
+        let path = self.path_to_data(&ts);
+        let mut file = self.file_cache.read(&path).await?;
         let offset = block.records[record_index].begin;
-
         Ok((file, offset as usize))
     }
 
@@ -135,11 +134,11 @@ impl BlockManager {
         record_index: usize,
     ) -> Result<(FileRef, usize), ReductError> {
         let ts = block.begin_time.clone().unwrap();
-        let path = self.path_to_data(&ts);
 
         self.use_counter.increment(ts_to_us(&ts));
 
-        let mut file = self.file_cache.get_or_create(&path).await?;
+        let path = self.path_to_data(&ts);
+        let file = self.file_cache.write_or_create(&path).await?;
         let offset = block.records[record_index].begin;
         Ok((file, offset as usize))
     }
@@ -169,7 +168,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was loaded successfully.
-    async fn load(&mut self, block_id: u64) -> Result<Block, ReductError>;
+    async fn load(&self, block_id: u64) -> Result<Block, ReductError>;
 
     /// Save block descriptor to disk.
     ///
@@ -210,7 +209,7 @@ pub trait ManageBlock {
 }
 
 impl ManageBlock for BlockManager {
-    async fn load(&mut self, block_id: u64) -> Result<Block, ReductError> {
+    async fn load(&self, block_id: u64) -> Result<Block, ReductError> {
         if let Some(block) = self.last_block.as_ref() {
             if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
                 return Ok(block.clone());
@@ -218,9 +217,9 @@ impl ManageBlock for BlockManager {
         }
 
         let proto_ts = us_to_ts(&block_id);
-        let mut file = self
+        let file = self
             .file_cache
-            .get_or_create(&self.path_to_desc(&proto_ts))
+            .write_or_create(&self.path_to_desc(&proto_ts))
             .await?;
         let mut buf = vec![];
 
@@ -243,11 +242,12 @@ impl ManageBlock for BlockManager {
         })?;
 
         // overwrite the file
-        let mut file = self.file_cache.get_or_create(&path).await?;
+        let file = self.file_cache.write_or_create(&path).await?;
         let mut lock = file.write().await;
         lock.set_len(buf.len() as u64).await?;
         lock.seek(SeekFrom::Start(0)).await?;
         lock.write_all(&buf).await?;
+        lock.flush().await?;
 
         self.last_block = Some(block);
         Ok(())
@@ -260,9 +260,9 @@ impl ManageBlock for BlockManager {
         // create a block with data
         let file = self
             .file_cache
-            .get_or_create(&self.path_to_data(block.begin_time.as_ref().unwrap()))
+            .write_or_create(&self.path_to_data(block.begin_time.as_ref().unwrap()))
             .await?;
-        let mut file = file.write().await;
+        let file = file.write().await;
         file.set_len(max_block_size).await?;
         self.save(block.clone()).await?;
 
@@ -272,14 +272,14 @@ impl ManageBlock for BlockManager {
     async fn finish(&mut self, block: &Block) -> Result<(), ReductError> {
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
-        let file = self.file_cache.get_or_create(&path).await?;
+        let file = self.file_cache.write_or_create(&path).await?;
         let mut data_block = file.write().await;
         data_block.set_len(block.size).await?;
         data_block.sync_all().await?;
 
         let file = self
             .file_cache
-            .get_or_create(&self.path_to_desc(block.begin_time.as_ref().unwrap()))
+            .write_or_create(&self.path_to_desc(block.begin_time.as_ref().unwrap()))
             .await?;
         let mut descr_block = file.write().await;
         descr_block.sync_all().await?;
@@ -419,7 +419,7 @@ pub async fn spawn_write_task(
     block: Block,
     record_index: usize,
 ) -> Result<RecordTx, ReductError> {
-    let (mut file, offset) = {
+    let (file, offset) = {
         let mut bm = block_manager.write().await;
         bm.save(block.clone()).await?;
         bm.begin_write(&block, record_index).await?
@@ -446,10 +446,14 @@ pub async fn spawn_write_task(
                             ));
                         }
 
-                        let mut lock = file.write().await;
-                        lock.seek(SeekFrom::Start((offset + written_bytes) as u64))
+                        {
+                            let mut lock = file.write().await;
+                            lock.seek(SeekFrom::Start(
+                                (offset + written_bytes - chunk.len()) as u64,
+                            ))
                             .await?;
-                        lock.write_all(chunk.as_ref()).await?;
+                            lock.write_all(chunk.as_ref()).await?;
+                        }
                     }
                     None => {
                         break;
@@ -510,7 +514,7 @@ mod tests {
     async fn test_starting_block(#[future] block_manager: BlockManager) {
         let mut block_manager = block_manager.await;
 
-        let block = block_manager.start(1_000_005, 1024).unwrap();
+        let block = block_manager.start(1_000_005, 1024).await.unwrap();
         let ts = block.begin_time.clone().unwrap();
         assert_eq!(
             ts,
@@ -546,11 +550,11 @@ mod tests {
     async fn test_loading_block(#[future] block_manager: BlockManager, block_id: u64) {
         let mut block_manager = block_manager.await;
 
-        block_manager.start(block_id, 1024).unwrap();
-        let block = block_manager.start(20000005, 1024).unwrap();
+        block_manager.start(block_id, 1024).await.unwrap();
+        let block = block_manager.start(20000005, 1024).await.unwrap();
 
         let ts = block.begin_time.clone().unwrap();
-        let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
+        let loaded_block = block_manager.load(ts_to_us(&ts)).await.unwrap();
         assert_eq!(loaded_block, block);
     }
 
@@ -558,9 +562,9 @@ mod tests {
     #[tokio::test]
     async fn test_start_reading(#[future] block_manager: BlockManager, block_id: u64) {
         let mut block_manager = block_manager.await;
-        let block = block_manager.start(block_id, 1024).unwrap();
+        let block = block_manager.start(block_id, 1024).await.unwrap();
         let ts = block.begin_time.clone().unwrap();
-        let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
+        let loaded_block = block_manager.load(ts_to_us(&ts)).await.unwrap();
         assert_eq!(loaded_block, block);
     }
 
@@ -568,12 +572,12 @@ mod tests {
     #[tokio::test]
     async fn test_finish_block(#[future] block_manager: BlockManager, block_id: u64) {
         let mut block_manager = block_manager.await;
-        let block = block_manager.start(block_id + 1, 1024).unwrap();
+        let block = block_manager.start(block_id + 1, 1024).await.unwrap();
         let ts = block.begin_time.clone().unwrap();
-        let loaded_block = block_manager.load(ts_to_us(&ts)).unwrap();
+        let loaded_block = block_manager.load(ts_to_us(&ts)).await.unwrap();
         assert_eq!(loaded_block, block);
 
-        block_manager.finish(&loaded_block).unwrap();
+        block_manager.finish(&loaded_block).await.unwrap();
 
         let file = std::fs::File::open(block_manager.path.join(format!(
             "{}{}",
@@ -601,7 +605,14 @@ mod tests {
         drop(tx);
         sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
         assert_eq!(
-            block_manager.read().await.load(block_id).unwrap().records[0].state,
+            block_manager
+                .read()
+                .await
+                .load(block_id)
+                .await
+                .unwrap()
+                .records[0]
+                .state,
             2
         );
     }
@@ -707,14 +718,14 @@ mod tests {
 
     #[fixture]
     async fn block(#[future] block_manager: BlockManager, block_id: u64) -> Block {
-        block_manager.await.load(block_id).unwrap()
+        block_manager.await.load(block_id).await.unwrap()
     }
 
     #[fixture]
     async fn block_manager(block_id: u64) -> BlockManager {
         let path = tempdir();
         let mut bm = BlockManager::new(path.unwrap().into_path());
-        let mut block = bm.start(block_id, 1024).unwrap().clone();
+        let mut block = bm.start(block_id, 1024).await.unwrap().clone();
         block.records.push(Record {
             timestamp: Some(Timestamp {
                 seconds: 1,
@@ -726,10 +737,10 @@ mod tests {
             labels: vec![],
             content_type: "".to_string(),
         });
-        bm.save(block.clone()).unwrap();
+        bm.save(block.clone()).await.unwrap();
 
-        let mut file = bm.begin_write(&block, 0).await.unwrap();
-        file.write(b"hallo").await.unwrap();
+        let (mut file, _) = bm.begin_write(&block, 0).await.unwrap();
+        file.write().await.write(b"hallo").await.unwrap();
         bm.finish_write_record(block_id, record::State::Finished, 0)
             .await
             .unwrap();
