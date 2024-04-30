@@ -177,8 +177,8 @@ impl Entry {
         let block = if self.block_index.is_empty() {
             self.start_new_block(time).await?
         } else {
-            let bm = self.block_manager.read().await;
-            bm.load(*self.block_index.last().unwrap())?
+            let mut bm = self.block_manager.write().await;
+            bm.load(*self.block_index.last().unwrap()).await?
         };
 
         let (block, record_type) = if block.latest_record_time.is_some()
@@ -194,8 +194,8 @@ impl Entry {
             } else {
                 let block_id = find_first_block(&self.block_index, &time);
                 let mut block = async {
-                    let bm = self.block_manager.read().await;
-                    bm.load(block_id)
+                    let mut bm = self.block_manager.write().await;
+                    bm.load(block_id).await
                 }
                 .await?;
 
@@ -268,7 +268,7 @@ impl Entry {
         {
             // We need to create a new block.
             debug!("Creating a new block");
-            self.block_manager.write().await.finish(&block)?;
+            self.block_manager.write().await.finish(&block).await?;
             self.start_new_block(time).await?
         } else {
             // We can just append to the latest block.
@@ -337,8 +337,8 @@ impl Entry {
         let block_id = find_first_block(&self.block_index, &time);
 
         let block = {
-            let bm = self.block_manager.read().await;
-            bm.load(block_id)?
+            let mut bm = self.block_manager.write().await;
+            bm.load(block_id).await?
         };
 
         let record_index = block
@@ -355,8 +355,8 @@ impl Entry {
 
         if record.state == record::State::Started as i32 {
             let block = {
-                let bm = self.block_manager.read().await;
-                bm.load(block_id)?
+                let mut bm = self.block_manager.write().await;
+                bm.load(block_id).await?
             };
 
             record = block.records[record_index].clone();
@@ -430,15 +430,16 @@ impl Entry {
     }
 
     /// Returns stats about the entry.
-    pub async fn info(&self) -> Result<EntryInfo, ReductError> {
+    pub async fn info(&mut self) -> Result<EntryInfo, ReductError> {
         let (oldest_record, latest_record) = if self.block_index.is_empty() {
             (0, 0)
         } else {
             let latest_block = self
                 .block_manager
-                .read()
+                .write()
                 .await
-                .load(*self.block_index.last().unwrap())?;
+                .load(*self.block_index.last().unwrap())
+                .await?;
             let latest_record = if latest_block.records.is_empty() {
                 0
             } else {
@@ -477,7 +478,12 @@ impl Entry {
         }
 
         let oldest_block_id = *self.block_index.first().unwrap();
-        let block = self.block_manager.read().await.load(oldest_block_id)?;
+        let block = self
+            .block_manager
+            .write()
+            .await
+            .load(oldest_block_id)
+            .await?;
 
         self.block_manager.write().await.remove(oldest_block_id)?;
         self.block_index.remove(&oldest_block_id);
@@ -505,7 +511,8 @@ impl Entry {
             .block_manager
             .write()
             .await
-            .start(time, self.settings.max_block_size)?;
+            .start(time, self.settings.max_block_size)
+            .await?;
         self.block_index
             .insert(ts_to_us(&block.begin_time.as_ref().unwrap()));
         Ok::<Block, ReductError>(block)

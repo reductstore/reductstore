@@ -37,7 +37,7 @@ pub(crate) async fn query(
     let entry_info = {
         let mut storage = components.storage.write().await;
         let bucket = storage.get_mut_bucket(bucket_name)?;
-        bucket.get_entry(entry_name)?.info().await?
+        bucket.get_mut_entry(entry_name)?.info().await?
     };
 
     let start = match params.get("start") {

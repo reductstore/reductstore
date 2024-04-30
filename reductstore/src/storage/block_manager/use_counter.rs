@@ -40,7 +40,7 @@ impl UseCounter {
         }
     }
 
-    pub fn clean_stail_and_check(&mut self, block_id: u64) -> bool {
+    pub fn clean_stale_and_check(&mut self, block_id: u64) -> bool {
         match self.counter.get(&block_id) {
             Some(count) => {
                 if count.0 == 0 || count.1.elapsed() > self.timeout {

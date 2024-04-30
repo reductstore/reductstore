@@ -273,12 +273,12 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub async fn info(&self) -> Result<FullBucketInfo, ReductError> {
+    pub async fn info(&mut self) -> Result<FullBucketInfo, ReductError> {
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
         let mut entries: Vec<EntryInfo> = vec![];
-        for entry in self.entries.values() {
+        for entry in self.entries.values_mut() {
             let info = entry.info().await?;
             entries.push(info.clone());
             size += info.size;
@@ -391,7 +391,7 @@ impl Bucket {
                     );
 
                     let mut candidates: Vec<(u64, &Entry)> = vec![];
-                    for (_, entry) in self.entries.iter() {
+                    for (_, entry) in self.entries.iter_mut() {
                         let info = entry.info().await?;
                         candidates.push((info.oldest_record, entry));
                     }
@@ -436,7 +436,7 @@ impl Bucket {
 
                 // Remove empty entries
                 let mut names_to_remove = vec![];
-                for (name, entry) in &self.entries {
+                for (name, entry) in self.entries.iter_mut() {
                     if entry.info().await?.record_count != 0 {
                         continue;
                     }

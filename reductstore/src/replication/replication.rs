@@ -78,16 +78,16 @@ impl Replication {
         let replication_name = name.clone();
         let thr_log_map = Arc::clone(&log_map);
         let thr_bucket = Arc::clone(&remote_bucket);
-        let thr_storage = Arc::clone(&storage);
+        let mut thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
 
         tokio::spawn(async move {
             let init_transaction_logs = async {
                 let mut logs = thr_log_map.write().await;
                 for entry in thr_storage
-                    .read()
+                    .write()
                     .await
-                    .get_bucket(&config.src_bucket)?
+                    .get_mut_bucket(&config.src_bucket)?
                     .info()
                     .await?
                     .entries

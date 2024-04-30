@@ -42,7 +42,7 @@ pub(crate) async fn read_single_record(
     let mut storage = components.storage.write().await;
 
     let (query_id, ts) =
-        check_and_extract_ts_or_query_id(&storage, params, bucket_name, entry_name).await?;
+        check_and_extract_ts_or_query_id(&mut storage, params, bucket_name, entry_name).await?;
 
     let bucket = storage.get_mut_bucket(bucket_name)?;
     fetch_and_response_single_record(bucket, entry_name, ts, query_id, method.name() == "HEAD")

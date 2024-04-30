@@ -42,7 +42,7 @@ impl Query for HistoricalQuery {
     async fn next(
         &mut self,
         block_indexes: &BTreeSet<u64>,
-        block_manager: Arc<RwLock<BlockManager>>,
+        mut block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         self.last_update = Instant::now();
 
@@ -102,10 +102,10 @@ impl Query for HistoricalQuery {
                 if block.begin_time == Some(us_to_ts(block_id)) {
                     block.clone()
                 } else {
-                    block_manager.read().await.load(*block_id)?
+                    block_manager.write().await.load(*block_id).await?
                 }
             } else {
-                block_manager.read().await.load(*block_id)?
+                block_manager.write().await.load(*block_id).await?
             };
 
             if block.invalid {

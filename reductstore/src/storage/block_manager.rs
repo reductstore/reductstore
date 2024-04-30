@@ -1,6 +1,7 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
+mod file_cache;
 mod use_counter;
 
 use prost::bytes::{Bytes, BytesMut};
@@ -20,11 +21,13 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 
+use crate::storage::block_manager::file_cache::FileCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::proto::*;
+pub(crate) use file_cache::FileRef;
 use reduct_base::error::{ErrorCode, ReductError};
 
-pub const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
+pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Helper class for basic operations on blocks.
@@ -36,6 +39,7 @@ const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 pub struct BlockManager {
     path: PathBuf,
     use_counter: UseCounter,
+    file_cache: FileCache,
     last_block: Option<Block>,
 }
 
@@ -71,6 +75,7 @@ impl BlockManager {
         Self {
             path,
             use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
+            file_cache: FileCache::new(10),
             last_block: None,
         }
     }
@@ -89,17 +94,16 @@ impl BlockManager {
         &mut self,
         block: &Block,
         record_index: usize,
-    ) -> Result<File, ReductError> {
+    ) -> Result<(FileRef, usize), ReductError> {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
 
         self.use_counter.increment(ts_to_us(&ts));
 
-        let mut file = File::options().write(true).create(true).open(path).await?;
+        let mut file = self.file_cache.get_or_create(&path).await?;
         let offset = block.records[record_index].begin;
-        file.seek(SeekFrom::Start(offset)).await?;
 
-        Ok(file)
+        Ok((file, offset as usize))
     }
 
     async fn finish_write_record(
@@ -108,7 +112,7 @@ impl BlockManager {
         state: record::State,
         record_index: usize,
     ) -> Result<(), ReductError> {
-        let mut block = self.load(block_id)?;
+        let mut block = self.load(block_id).await?;
         let record = &mut block.records[record_index];
         let timestamp = ts_to_us(&record.timestamp.as_ref().unwrap());
         record.state = i32::from(state);
@@ -116,7 +120,7 @@ impl BlockManager {
 
         self.use_counter.decrement(block_id);
 
-        self.save(block)?;
+        self.save(block).await?;
         debug!(
             "Finished writing record {} with state {:?}",
             timestamp, state
@@ -129,16 +133,15 @@ impl BlockManager {
         &mut self,
         block: &Block,
         record_index: usize,
-    ) -> Result<File, ReductError> {
+    ) -> Result<(FileRef, usize), ReductError> {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
 
         self.use_counter.increment(ts_to_us(&ts));
 
-        let mut file = File::options().read(true).open(path).await?;
+        let mut file = self.file_cache.get_or_create(&path).await?;
         let offset = block.records[record_index].begin;
-        file.seek(SeekFrom::Start(offset)).await?;
-        Ok(file)
+        Ok((file, offset as usize))
     }
 
     pub fn finish_read_record(&mut self, block_id: u64) {
@@ -166,7 +169,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was loaded successfully.
-    fn load(&self, block_id: u64) -> Result<Block, ReductError>;
+    async fn load(&mut self, block_id: u64) -> Result<Block, ReductError>;
 
     /// Save block descriptor to disk.
     ///
@@ -177,7 +180,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was saved successfully.
-    fn save(&mut self, block: Block) -> Result<(), ReductError>;
+    async fn save(&mut self, block: Block) -> Result<(), ReductError>;
 
     /// Start a new block
     ///
@@ -189,7 +192,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was created successfully.
-    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, ReductError>;
+    async fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, ReductError>;
 
     /// Finish a block by truncating the file to the actual size.
     ///
@@ -200,14 +203,14 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was finished successfully.
-    fn finish(&mut self, block: &Block) -> Result<(), ReductError>;
+    async fn finish(&mut self, block: &Block) -> Result<(), ReductError>;
 
     /// Remove a block from disk if there are no readers or writers.
     fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
 }
 
 impl ManageBlock for BlockManager {
-    fn load(&self, block_id: u64) -> Result<Block, ReductError> {
+    async fn load(&mut self, block_id: u64) -> Result<Block, ReductError> {
         if let Some(block) = self.last_block.as_ref() {
             if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
                 return Ok(block.clone());
@@ -215,7 +218,16 @@ impl ManageBlock for BlockManager {
         }
 
         let proto_ts = us_to_ts(&block_id);
-        let buf = std::fs::read(self.path_to_desc(&proto_ts))?;
+        let mut file = self
+            .file_cache
+            .get_or_create(&self.path_to_desc(&proto_ts))
+            .await?;
+        let mut buf = vec![];
+
+        // parse the block descriptor
+        let mut lock = file.write().await;
+        lock.seek(SeekFrom::Start(0)).await?;
+        lock.read_to_end(&mut buf).await?;
         let block = Block::decode(Bytes::from(buf)).map_err(|e| {
             ReductError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
         })?;
@@ -223,54 +235,61 @@ impl ManageBlock for BlockManager {
         Ok(block)
     }
 
-    fn save(&mut self, block: Block) -> Result<(), ReductError> {
+    async fn save(&mut self, block: Block) -> Result<(), ReductError> {
         let path = self.path_to_desc(block.begin_time.as_ref().unwrap());
         let mut buf = BytesMut::new();
         block.encode(&mut buf).map_err(|e| {
             ReductError::internal_server_error(&format!("Failed to encode block descriptor: {}", e))
         })?;
-        let mut file = std::fs::File::create(path.clone())?;
-        file.write_all(&buf)?;
+
+        // overwrite the file
+        let mut file = self.file_cache.get_or_create(&path).await?;
+        let mut lock = file.write().await;
+        lock.set_len(buf.len() as u64).await?;
+        lock.seek(SeekFrom::Start(0)).await?;
+        lock.write_all(&buf).await?;
 
         self.last_block = Some(block);
         Ok(())
     }
 
-    fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, ReductError> {
+    async fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<Block, ReductError> {
         let mut block = Block::default();
         block.begin_time = Some(us_to_ts(&block_id));
 
         // create a block with data
-        let file = std::fs::File::create(self.path_to_data(block.begin_time.as_ref().unwrap()))?;
-
-        file.set_len(max_block_size)?;
-        self.save(block.clone())?;
+        let file = self
+            .file_cache
+            .get_or_create(&self.path_to_data(block.begin_time.as_ref().unwrap()))
+            .await?;
+        let mut file = file.write().await;
+        file.set_len(max_block_size).await?;
+        self.save(block.clone()).await?;
 
         Ok(block)
     }
 
-    fn finish(&mut self, block: &Block) -> Result<(), ReductError> {
+    async fn finish(&mut self, block: &Block) -> Result<(), ReductError> {
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.begin_time.as_ref().unwrap());
-        let data_block = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)?;
-        data_block.set_len(block.size)?;
-        data_block.sync_all()?;
+        let file = self.file_cache.get_or_create(&path).await?;
+        let mut data_block = file.write().await;
+        data_block.set_len(block.size).await?;
+        data_block.sync_all().await?;
 
-        let descr_block = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(self.path_to_desc(block.begin_time.as_ref().unwrap()))?;
-        descr_block.sync_all()?;
+        let file = self
+            .file_cache
+            .get_or_create(&self.path_to_desc(block.begin_time.as_ref().unwrap()))
+            .await?;
+        let mut descr_block = file.write().await;
+        descr_block.sync_all().await?;
 
         self.last_block = None;
         Ok(())
     }
 
     fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
-        if !self.use_counter.clean_stail_and_check(block_id) {
+        if !self.use_counter.clean_stale_and_check(block_id) {
             return Err(ReductError::internal_server_error(&format!(
                 "Cannot remove block {} because it is still in use",
                 block_id
@@ -317,7 +336,7 @@ pub async fn spawn_read_task(
     block: &Block,
     record_index: usize,
 ) -> Result<RecordRx, ReductError> {
-    let file = block_manager
+    let (file, offset) = block_manager
         .write()
         .await
         .begin_read(&block, record_index)
@@ -329,13 +348,19 @@ pub async fn spawn_read_task(
         (block.records[record_index].end - block.records[record_index].begin) as usize;
     let block_id = ts_to_us(&block.begin_time.clone().unwrap());
     tokio::spawn(async move {
-        let mut file = file;
-        let mut offset = 0;
+        let mut read_bytes = 0;
         loop {
-            let chunk_size = min(content_size - offset, DEFAULT_MAX_READ_CHUNK) as usize;
+            let chunk_size = min(content_size - read_bytes, DEFAULT_MAX_READ_CHUNK) as usize;
             let mut buf = vec![0; chunk_size];
 
-            let read = match file.read(&mut buf).await {
+            let seek_and_read = async {
+                let mut lock = file.write().await;
+                lock.seek(SeekFrom::Start((offset + read_bytes) as u64))
+                    .await?;
+                lock.read(&mut buf).await
+            };
+
+            let read = match seek_and_read.await {
                 Ok(read) => read,
                 Err(e) => {
                     let _ = tx
@@ -361,8 +386,8 @@ pub async fn spawn_read_task(
                 break;
             }
 
-            offset += read;
-            if offset == content_size {
+            read_bytes += read;
+            if read_bytes == content_size {
                 break;
             }
 
@@ -394,9 +419,9 @@ pub async fn spawn_write_task(
     block: Block,
     record_index: usize,
 ) -> Result<RecordTx, ReductError> {
-    let mut file = {
+    let (mut file, offset) = {
         let mut bm = block_manager.write().await;
-        bm.save(block.clone())?;
+        bm.save(block.clone()).await?;
         bm.begin_write(&block, record_index).await?
     };
 
@@ -420,7 +445,11 @@ pub async fn spawn_write_task(
                                 "Content is bigger than in content-length",
                             ));
                         }
-                        file.write_all(chunk.as_ref()).await?;
+
+                        let mut lock = file.write().await;
+                        lock.seek(SeekFrom::Start((offset + written_bytes) as u64))
+                            .await?;
+                        lock.write_all(chunk.as_ref()).await?;
                     }
                     None => {
                         break;
@@ -439,7 +468,7 @@ pub async fn spawn_write_task(
                     "Content is smaller than in content-length",
                 ))
             } else {
-                file.flush().await?;
+                file.write().await.flush().await?;
                 Ok(())
             }
         };
