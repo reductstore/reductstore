@@ -1,5 +1,7 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
+
+mod use_counter;
 
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
@@ -18,10 +20,12 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 
+use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::proto::*;
 use reduct_base::error::{ErrorCode, ReductError};
 
 pub const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
+const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Helper class for basic operations on blocks.
 ///
@@ -31,15 +35,12 @@ pub const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 /// because it does not lock the block descriptor file. Use it with RwLock<BlockManager>
 pub struct BlockManager {
     path: PathBuf,
-    reader_count: HashMap<u64, (usize, Instant)>,
-    writer_count: HashMap<u64, (usize, Instant)>,
+    use_counter: UseCounter,
     last_block: Option<Block>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
-
-const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Find the first block id that contains data for a given timestamp  in indexes
 ///
@@ -69,8 +70,7 @@ impl BlockManager {
     pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
-            reader_count: HashMap::new(),
-            writer_count: HashMap::new(),
+            use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
             last_block: None,
         }
     }
@@ -93,16 +93,7 @@ impl BlockManager {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
 
-        let block_id = ts_to_us(&ts);
-        match self.writer_count.entry(block_id) {
-            Entry::Occupied(mut e) => {
-                e.get_mut().0 += 1;
-                e.get_mut().1 = Instant::now();
-            }
-            Entry::Vacant(e) => {
-                e.insert((1, Instant::now()));
-            }
-        }
+        self.use_counter.increment(ts_to_us(&ts));
 
         let mut file = File::options().write(true).create(true).open(path).await?;
         let offset = block.records[record_index].begin;
@@ -123,12 +114,7 @@ impl BlockManager {
         record.state = i32::from(state);
         block.invalid = state == record::State::Invalid;
 
-        // check if write wasn't removed by timeout
-        if let Some(count) = self.writer_count.get_mut(&block_id) {
-            count.0 -= 1;
-        }
-
-        self.clean_readers_or_writers(block_id);
+        self.use_counter.decrement(block_id);
 
         self.save(block)?;
         debug!(
@@ -147,16 +133,7 @@ impl BlockManager {
         let ts = block.begin_time.clone().unwrap();
         let path = self.path_to_data(&ts);
 
-        let block_id = ts_to_us(&ts);
-        match self.reader_count.entry(block_id) {
-            Entry::Occupied(mut e) => {
-                e.get_mut().0 += 1;
-                e.get_mut().1 = Instant::now();
-            }
-            Entry::Vacant(e) => {
-                e.insert((1, Instant::now()));
-            }
-        }
+        self.use_counter.increment(ts_to_us(&ts));
 
         let mut file = File::options().read(true).open(path).await?;
         let offset = block.records[record_index].begin;
@@ -165,11 +142,7 @@ impl BlockManager {
     }
 
     pub fn finish_read_record(&mut self, block_id: u64) {
-        // check if read wasn't removed by timeout
-        if let Some(count) = self.reader_count.get_mut(&block_id) {
-            count.0 -= 1;
-        }
-        self.clean_readers_or_writers(block_id);
+        self.use_counter.decrement(block_id);
     }
 
     fn path_to_desc(&self, begin_time: &Timestamp) -> PathBuf {
@@ -181,43 +154,6 @@ impl BlockManager {
     fn path_to_data(&self, begin_time: &Timestamp) -> PathBuf {
         let block_id = ts_to_us(&begin_time);
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
-    }
-
-    /// Remove done or expired readers/writers of a block.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_id` - ID of the block to clean.
-    ///
-    /// # Returns
-    ///
-    /// * `true` - If there are no more readers or writers.
-    fn clean_readers_or_writers(&mut self, block_id: u64) -> bool {
-        let readers_empty = match self.reader_count.get_mut(&block_id) {
-            Some(count) => {
-                if count.0 == 0 || count.1.elapsed() > IO_OPERATION_TIMEOUT {
-                    self.reader_count.remove(&block_id);
-                    true
-                } else {
-                    false
-                }
-            }
-            None => true,
-        };
-
-        let writers_empty = match self.writer_count.get_mut(&block_id) {
-            Some(count) => {
-                if count.0 == 0 || count.1.elapsed() > IO_OPERATION_TIMEOUT {
-                    self.writer_count.remove(&block_id);
-                    true
-                } else {
-                    false
-                }
-            }
-            None => true,
-        };
-
-        readers_empty && writers_empty
     }
 }
 
@@ -334,7 +270,7 @@ impl ManageBlock for BlockManager {
     }
 
     fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
-        if !self.clean_readers_or_writers(block_id) {
+        if !self.use_counter.clean_stail_and_check(block_id) {
             return Err(ReductError::internal_server_error(&format!(
                 "Cannot remove block {} because it is still in use",
                 block_id
@@ -430,13 +366,7 @@ pub async fn spawn_read_task(
                 break;
             }
 
-            block_manager
-                .write()
-                .await
-                .reader_count
-                .entry(block_id)
-                .or_insert((0, Instant::now()))
-                .1 = Instant::now();
+            block_manager.write().await.use_counter.update(block_id);
         }
 
         block_manager.write().await.finish_read_record(block_id);
@@ -501,13 +431,7 @@ pub async fn spawn_write_task(
                     break;
                 }
 
-                block_manager
-                    .write()
-                    .await
-                    .writer_count
-                    .entry(block_id)
-                    .or_insert((0, Instant::now()))
-                    .1 = Instant::now();
+                block_manager.write().await.use_counter.update(block_id);
             }
 
             if written_bytes < content_size {
