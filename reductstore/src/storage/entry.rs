@@ -483,7 +483,11 @@ impl Entry {
             .load(oldest_block_id)
             .await?;
 
-        self.block_manager.write().await.remove(oldest_block_id)?;
+        self.block_manager
+            .write()
+            .await
+            .remove(oldest_block_id)
+            .await?;
         self.block_index.remove(&oldest_block_id);
 
         self.size -= block.size + block.metadata_size;

@@ -99,6 +99,12 @@ impl FileCache {
         Ok(file)
     }
 
+    pub async fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+        let mut cache = self.cache.write().await;
+        cache.remove(path);
+        Ok(())
+    }
+
     fn discard_old_descriptors(max_size: usize, cache: &mut HashMap<PathBuf, FileDescriptor>) {
         // remove old descriptors
         cache.retain(|_, desc| desc.used.elapsed() < TIME_TO_LIVE);

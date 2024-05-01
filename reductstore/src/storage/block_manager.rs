@@ -9,7 +9,7 @@ use prost::Message;
 use prost_wkt_types::Timestamp;
 use std::cmp::min;
 
-use log::{debug, error};
+use log::{debug, error, warn};
 
 use std::collections::BTreeSet;
 use std::io::{SeekFrom, Write};
@@ -205,7 +205,7 @@ pub trait ManageBlock {
     async fn finish(&mut self, block: &Block) -> Result<(), ReductError>;
 
     /// Remove a block from disk if there are no readers or writers.
-    fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
+    async fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
 }
 
 impl ManageBlock for BlockManager {
@@ -288,7 +288,7 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
+    async fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
         if !self.use_counter.clean_stale_and_check(block_id) {
             return Err(ReductError::internal_server_error(&format!(
                 "Cannot remove block {} because it is still in use",
@@ -298,9 +298,12 @@ impl ManageBlock for BlockManager {
 
         let proto_ts = us_to_ts(&block_id);
         let path = self.path_to_data(&proto_ts);
-        std::fs::remove_file(path)?;
+        self.file_cache.remove(&path).await?;
+        tokio::fs::remove_file(path).await?;
+
         let path = self.path_to_desc(&proto_ts);
-        std::fs::remove_file(path)?;
+        self.file_cache.remove(&path).await?;
+        tokio::fs::remove_file(path).await?;
 
         if let Some(block) = self.last_block.as_ref() {
             if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
@@ -630,7 +633,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            block_manager.write().await.remove(block_id).err(),
+            block_manager.write().await.remove(block_id).await.err(),
             Some(ReductError::internal_server_error(&format!(
                 "Cannot remove block {} because it is still in use",
                 block_id
@@ -640,7 +643,10 @@ mod tests {
         tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
         drop(tx);
         sleep(Duration::from_millis(10)).await; // wait for thread to finish
-        assert_eq!(block_manager.write().await.remove(block_id).err(), None);
+        assert_eq!(
+            block_manager.write().await.remove(block_id).await.err(),
+            None
+        );
     }
 
     #[rstest]
@@ -654,11 +660,23 @@ mod tests {
         spawn_write_task(Arc::clone(&block_manager), block.await, 0)
             .await
             .unwrap();
-        assert!(block_manager.write().await.remove(block_id).err().is_some());
+        assert!(block_manager
+            .write()
+            .await
+            .remove(block_id)
+            .await
+            .err()
+            .is_some());
 
         sleep(IO_OPERATION_TIMEOUT).await;
         assert!(
-            block_manager.write().await.remove(block_id).err().is_none(),
+            block_manager
+                .write()
+                .await
+                .remove(block_id)
+                .await
+                .err()
+                .is_none(),
             "Timeout should have unlocked the block"
         );
     }
@@ -677,7 +695,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            block_manager.write().await.remove(block_id).err(),
+            block_manager.write().await.remove(block_id).await.err(),
             Some(ReductError::internal_server_error(&format!(
                 "Cannot remove block {} because it is still in use",
                 block_id
@@ -688,7 +706,10 @@ mod tests {
         drop(rx);
         sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
 
-        assert_eq!(block_manager.write().await.remove(block_id).err(), None);
+        assert_eq!(
+            block_manager.write().await.remove(block_id).await.err(),
+            None
+        );
     }
 
     #[rstest]
@@ -702,11 +723,23 @@ mod tests {
         spawn_read_task(Arc::clone(&block_manager), &block.await, 0)
             .await
             .unwrap();
-        assert!(block_manager.write().await.remove(block_id).err().is_some());
+        assert!(block_manager
+            .write()
+            .await
+            .remove(block_id)
+            .await
+            .err()
+            .is_some());
 
         sleep(IO_OPERATION_TIMEOUT).await;
         assert!(
-            block_manager.write().await.remove(block_id).err().is_none(),
+            block_manager
+                .write()
+                .await
+                .remove(block_id)
+                .await
+                .err()
+                .is_none(),
             "Timeout should have unlocked the block"
         );
     }

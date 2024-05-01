@@ -265,7 +265,6 @@ mod tests {
                     .send(Ok(Some(Bytes::from("0123456789"))))
                     .await
                     .unwrap();
-                sender.closed().await;
             };
         }
 
@@ -273,9 +272,8 @@ mod tests {
         write_entry!(bucket, "entry-2", 2000);
         write_entry!(bucket, "entry-2", 5000);
 
-        // tokio::time::sleep(Duration::from_secs(1)).await; // uptime is 1 second
-        let path = storage.data_path.clone();
-        let storage = Storage::load(path, None).await;
+        tokio::time::sleep(Duration::from_micros(1)).await; // to make sure that write tasks are completed
+        let storage = Storage::load(storage.data_path.clone(), None).await;
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
