@@ -539,7 +539,6 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
-    use std::fs::File;
 
     use rstest::{fixture, rstest};
     use std::time::Duration;

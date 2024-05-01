@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use log::debug;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
