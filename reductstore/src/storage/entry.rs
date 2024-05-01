@@ -3,7 +3,7 @@
 
 use crate::storage::block_manager::{
     find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock, RecordTx,
-    DESCRIPTOR_FILE_EXT,
+    DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, MinimalBlock, Record};
@@ -87,8 +87,13 @@ impl Entry {
             macro_rules! remove_bad_block {
                 ($err:expr) => {{
                     error!("Failed to decode block {:?}: {}", path, $err);
-                    warn!("Removing block {:?}", path);
+                    warn!("Removing meta block {:?}", path);
+                    let mut data_path = path.clone();
                     fs::remove_file(path)?;
+
+                    data_path.set_extension(DATA_FILE_EXT[1..].to_string());
+                    warn!("Removing data block {:?}", data_path);
+                    fs::remove_file(data_path)?;
                     continue;
                 }};
             }
@@ -127,6 +132,10 @@ impl Entry {
             } else {
                 remove_bad_block!("begin time mismatch");
             };
+
+            if block.invalid {
+                remove_bad_block!("block is invalid");
+            }
 
             record_count += block.record_count as u64;
             size += block.size + block.metadata_size;
@@ -530,7 +539,6 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
-    use std::fs::File;
 
     use rstest::{fixture, rstest};
     use std::time::Duration;
@@ -588,16 +596,17 @@ mod tests {
 
             write_stub_record(&mut entry, 1).await.unwrap();
 
-            File::options()
-                .write(true)
-                .open(path.join("entry/1.meta"))
-                .unwrap()
-                .set_len(0)
-                .unwrap();
+            let meta_path = path.join("entry/1.meta");
+            fs::write(meta_path.clone(), b"bad data").unwrap();
+            let data_path = path.join("entry/1.blk");
+            fs::write(data_path.clone(), b"bad data").unwrap();
 
             let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
             assert_eq!(entry.name(), "entry");
             assert_eq!(entry.record_count, 0);
+
+            assert!(!meta_path.exists(), "should remove meta block");
+            assert!(!data_path.exists(), "should remove data block");
         }
 
         #[rstest]

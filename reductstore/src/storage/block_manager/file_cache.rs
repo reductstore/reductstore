@@ -1,3 +1,6 @@
+// Copyright 2023-2024 ReductStore
+// Licensed under the Business Source License 1.1
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -70,7 +73,6 @@ impl FileCache {
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
-                // if the file is open in read mode, close it and open in read-write mode
                 let rw_file = File::options().write(true).read(true).open(path).await?;
                 desc.file_ref = Arc::new(RwLock::new(rw_file));
                 desc.mode = AccessMode::ReadWrite;
