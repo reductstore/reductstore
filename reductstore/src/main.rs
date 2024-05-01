@@ -41,7 +41,7 @@ async fn main() {
     let components = cfg.build().await.expect("Failed to build components");
     let info = components
         .storage
-        .write()
+        .read()
         .await
         .info()
         .await
