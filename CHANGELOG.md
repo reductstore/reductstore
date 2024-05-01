@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bump `rustls` from 0.21.10 to 0.21.12, [PR-432](https://github.com/reductstore/reductstore/pull/432)
 
+### Changed
+
+- RS-262: Reduce number of open/close file operations, [PR-453](https://github.com/reductstore/reductstore/pull/453)
+
 ## [1.9.5] - 2024-04-08
 
 ### Fixed

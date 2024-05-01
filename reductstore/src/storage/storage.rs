@@ -254,41 +254,26 @@ mod tests {
             .unwrap();
         assert_eq!(bucket.name(), "test");
 
-        {
-            let entry = bucket.get_or_create_entry("entry-1").unwrap();
-            let sender = entry
-                .begin_write(1000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender
-                .send(Ok(Some(Bytes::from("0123456789"))))
-                .await
-                .unwrap();
-        }
-        {
-            let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let sender = entry
-                .begin_write(2000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender
-                .send(Ok(Some(Bytes::from("0123456789"))))
-                .await
-                .unwrap();
-        }
-        {
-            let entry = bucket.get_or_create_entry("entry-2").unwrap();
-            let sender = entry
-                .begin_write(5000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender
-                .send(Ok(Some(Bytes::from("0123456789"))))
-                .await
-                .unwrap();
+        macro_rules! write_entry {
+            ($bucket:expr, $entry_name:expr, $record_ts:expr) => {
+                let entry = $bucket.get_or_create_entry($entry_name).unwrap();
+                let sender = entry
+                    .begin_write($record_ts, 10, "text/plain".to_string(), Labels::new())
+                    .await
+                    .unwrap();
+                sender
+                    .send(Ok(Some(Bytes::from("0123456789"))))
+                    .await
+                    .unwrap();
+            };
         }
 
-        let storage = Storage::load(storage.data_path, None).await;
+        write_entry!(bucket, "entry-1", 1000);
+        write_entry!(bucket, "entry-2", 2000);
+        write_entry!(bucket, "entry-2", 5000);
+
+        tokio::time::sleep(Duration::from_millis(10)).await; // to make sure that write tasks are completed
+        let storage = Storage::load(storage.data_path.clone(), None).await;
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
@@ -411,7 +396,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_with_non_existing_name(#[future] storage: Storage) {
+    async fn test_remove_bucket_with_non_existing_name(#[future] mut storage: Storage) {
         let result = storage.await.remove_bucket("test");
         assert_eq!(
             result,
