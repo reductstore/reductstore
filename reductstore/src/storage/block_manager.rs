@@ -42,6 +42,8 @@ pub struct BlockManager {
     path: PathBuf,
     use_counter: UseCounter,
     file_cache: FileCache,
+    bucket: String,
+    entry: String,
     last_block: Option<Block>,
 }
 
@@ -74,10 +76,20 @@ pub fn find_first_block(block_index: &BTreeSet<u64>, start: &u64) -> u64 {
 
 impl BlockManager {
     pub(crate) fn new(path: PathBuf) -> Self {
+        let (bucket, entry) = {
+            let mut parts = path.iter().rev();
+            let entry = parts.next().unwrap().to_str().unwrap().to_string();
+            let bucket = parts.next().unwrap().to_str().unwrap().to_string();
+            (bucket, entry)
+        };
+
         Self {
             path,
             use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
             file_cache: FileCache::new(FILE_CACHE_MAX_SIZE, FILE_CACHE_TIME_TO_LIVE),
+            bucket,
+            entry,
+
             last_block: None,
         }
     }
@@ -122,8 +134,8 @@ impl BlockManager {
 
         self.save(block).await?;
         debug!(
-            "Finished writing record {} with state {:?}",
-            timestamp, state
+            "Finished writing record {}/{}/{} with state {:?}",
+            self.bucket, self.entry, timestamp, state
         );
 
         Ok(())
@@ -217,10 +229,10 @@ impl ManageBlock for BlockManager {
             }
         }
 
-        let proto_ts = us_to_ts(&block_id);
+        let path = self.path_to_desc(&us_to_ts(&block_id));
         let file = self
             .file_cache
-            .write_or_create(&self.path_to_desc(&proto_ts))
+            .write_or_create(&path)
             .await?;
         let mut buf = vec![];
 
@@ -228,8 +240,12 @@ impl ManageBlock for BlockManager {
         let mut lock = file.write().await;
         lock.seek(SeekFrom::Start(0)).await?;
         lock.read_to_end(&mut buf).await?;
+
         let block = Block::decode(Bytes::from(buf)).map_err(|e| {
-            ReductError::internal_server_error(&format!("Failed to decode block descriptor: {}", e))
+            ReductError::internal_server_error(&format!(
+                "Failed to decode block descriptor {:?}: {}",
+                path, e
+            ))
         })?;
 
         Ok(block)
@@ -239,7 +255,10 @@ impl ManageBlock for BlockManager {
         let path = self.path_to_desc(block.begin_time.as_ref().unwrap());
         let mut buf = BytesMut::new();
         block.encode(&mut buf).map_err(|e| {
-            ReductError::internal_server_error(&format!("Failed to encode block descriptor: {}", e))
+            ReductError::internal_server_error(&format!(
+                "Failed to encode block descriptor {:?}: {}",
+                path, e
+            ))
         })?;
 
         // overwrite the file
@@ -386,7 +405,11 @@ pub async fn spawn_read_task(
                 break;
             }
             if let Err(e) = tx.send(Ok(Bytes::from(buf))).await {
-                debug!("Failed to send record {} chunk: {}", record_ts, e); // for some reason the receiver is closed
+                let bm = block_manager.read().await;
+                debug!(
+                    "Failed to send record {}/{}/{}: {}",
+                    bm.bucket, bm.entry, record_ts, e
+                ); // for some reason the receiver is closed
                 break;
             }
 
@@ -484,7 +507,11 @@ pub async fn spawn_write_task(
         let state = match recv.await {
             Ok(_) => record::State::Finished,
             Err(err) => {
-                error!("Failed to write record {}: {}", record_ts, err);
+                let bm = bm.read().await;
+                error!(
+                    "Failed to write record {}/{}/{}: {}",
+                    bm.bucket, bm.entry, record_ts, err
+                );
                 if err.status == ErrorCode::InternalServerError {
                     record::State::Invalid
                 } else {
@@ -499,7 +526,11 @@ pub async fn spawn_write_task(
             .finish_write_record(block_id, state, record_index)
             .await
         {
-            error!("Failed to finish writing {} record: {}", record_ts, err);
+            let bm = bm.read().await;
+            error!(
+                "Failed to finish writing {}/{}/{} record: {}",
+                bm.bucket, bm.entry, record_ts, err
+            );
         }
     });
     Ok(tx)
