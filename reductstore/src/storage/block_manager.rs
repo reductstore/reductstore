@@ -9,10 +9,10 @@ use prost::Message;
 use prost_wkt_types::Timestamp;
 use std::cmp::min;
 
-use log::{debug, error, warn};
+use log::{debug, error};
 
 use std::collections::BTreeSet;
-use std::io::{SeekFrom, Write};
+use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +29,8 @@ use reduct_base::error::{ErrorCode, ReductError};
 
 pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
-const MAX_FILE_CACHE_SIZE: usize = 64;
+const FILE_CACHE_MAX_SIZE: usize = 64;
+const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
 /// Helper class for basic operations on blocks.
 ///
@@ -76,7 +77,7 @@ impl BlockManager {
         Self {
             path,
             use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
-            file_cache: FileCache::new(MAX_FILE_CACHE_SIZE),
+            file_cache: FileCache::new(FILE_CACHE_MAX_SIZE, FILE_CACHE_TIME_TO_LIVE),
             last_block: None,
         }
     }

@@ -40,6 +40,8 @@ impl UseCounter {
         }
     }
 
+    /// Clean stale entries and check if the block is still in use.
+    /// Returns `true` if the block is no longer in use.
     pub fn clean_stale_and_check(&mut self, block_id: u64) -> bool {
         match self.counter.get(&block_id) {
             Some(count) => {
@@ -52,5 +54,55 @@ impl UseCounter {
             }
             None => true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::*;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    #[rstest]
+    fn test_use_counter(mut counter: UseCounter) {
+        counter.increment(1);
+        counter.increment(1);
+        counter.increment(2);
+
+        assert_eq!(counter.counter.get(&1).unwrap().0, 2);
+        assert_eq!(counter.counter.get(&2).unwrap().0, 1);
+
+        counter.decrement(1);
+        counter.decrement(1);
+        counter.decrement(2);
+
+        assert_eq!(counter.counter.get(&1).unwrap().0, 0);
+        assert_eq!(counter.counter.get(&2).unwrap().0, 0);
+
+        assert!(counter.clean_stale_and_check(1));
+        assert!(counter.clean_stale_and_check(2));
+
+        assert!(counter.counter.is_empty());
+    }
+
+    #[rstest]
+    fn test_use_counter_timeout(mut counter: UseCounter) {
+        counter.increment(1);
+        counter.increment(2);
+
+        assert_eq!(counter.counter.get(&1).unwrap().0, 1);
+        assert_eq!(counter.counter.get(&2).unwrap().0, 1);
+
+        sleep(Duration::from_millis(200));
+
+        assert!(counter.clean_stale_and_check(1));
+        assert!(counter.clean_stale_and_check(2));
+        assert!(counter.counter.is_empty());
+    }
+
+    #[fixture]
+    fn counter() -> UseCounter {
+        UseCounter::new(Duration::from_millis(100))
     }
 }

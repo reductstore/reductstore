@@ -42,6 +42,7 @@ pub(crate) async fn read_single_record(
     let storage = components.storage.read().await;
     let (query_id, ts) =
         check_and_extract_ts_or_query_id(&storage, params, bucket_name, entry_name).await?;
+    drop(storage); // Release the lock
 
     let mut storage = components.storage.write().await;
     let bucket = storage.get_mut_bucket(bucket_name)?;

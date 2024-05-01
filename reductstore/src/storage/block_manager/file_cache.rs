@@ -1,16 +1,15 @@
-use reduct_base::error::ReductError;
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+
 use tokio::fs::File;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 
-pub(crate) type FileRef = Arc<RwLock<File>>;
+use reduct_base::error::ReductError;
 
-const TIME_TO_LIVE: Duration = Duration::from_secs(60);
+pub(crate) type FileRef = Arc<RwLock<File>>;
 
 #[derive(PartialEq)]
 enum AccessMode {
@@ -28,13 +27,15 @@ struct FileDescriptor {
 pub(super) struct FileCache {
     cache: Arc<RwLock<HashMap<PathBuf, FileDescriptor>>>,
     max_size: usize,
+    ttl: Duration,
 }
 
 impl FileCache {
-    pub fn new(max_size: usize) -> Self {
+    pub fn new(max_size: usize, ttl: Duration) -> Self {
         FileCache {
             cache: Arc::new(RwLock::new(HashMap::new())),
             max_size,
+            ttl,
         }
     }
 
@@ -57,7 +58,7 @@ impl FileCache {
             file
         };
 
-        Self::discard_old_descriptors(self.max_size, &mut cache);
+        Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
         Ok(file)
     }
 
@@ -77,12 +78,12 @@ impl FileCache {
                 Arc::clone(&desc.file_ref)
             }
         } else {
-            // if not found, create
-            if !tokio::fs::try_exists(path).await? {
-                File::create(path).await?;
-            };
-
-            let file = File::options().write(true).read(true).open(path).await?;
+            let file = File::options()
+                .create(true)
+                .write(true)
+                .read(true)
+                .open(path)
+                .await?;
             let file = Arc::new(RwLock::new(file));
             cache.insert(
                 path.clone(),
@@ -95,7 +96,7 @@ impl FileCache {
             file
         };
 
-        Self::discard_old_descriptors(self.max_size, &mut cache);
+        Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
         Ok(file)
     }
 
@@ -105,9 +106,13 @@ impl FileCache {
         Ok(())
     }
 
-    fn discard_old_descriptors(max_size: usize, cache: &mut HashMap<PathBuf, FileDescriptor>) {
+    fn discard_old_descriptors(
+        ttl: Duration,
+        max_size: usize,
+        cache: &mut HashMap<PathBuf, FileDescriptor>,
+    ) {
         // remove old descriptors
-        cache.retain(|_, desc| desc.used.elapsed() < TIME_TO_LIVE);
+        cache.retain(|_, desc| desc.used.elapsed() < ttl);
 
         // check if the cache is full and remove old
         if cache.len() > max_size {
@@ -126,5 +131,100 @@ impl FileCache {
             let path = oldest.unwrap().0.clone();
             cache.remove(&path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::io::Write;
+
+    use rstest::*;
+    use tokio::time::sleep;
+
+    use super::*;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_read(cache: FileCache, tmp_dir: tempfile::TempDir) {
+        let file_path = tmp_dir.path().join("test_read.txt");
+        let mut file = fs::File::create(&file_path).unwrap();
+        file.write_all(b"test").unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+
+        let file_ref = cache.read(&file_path).await.unwrap();
+        let file = file_ref.read().await;
+        assert_eq!(file.metadata().await.unwrap().len(), 4);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_or_create(cache: FileCache, tmp_dir: tempfile::TempDir) {
+        let file_path = tmp_dir.path().join("test_write_or_create.txt");
+
+        let file_ref = cache.write_or_create(&file_path).await.unwrap();
+        let file = file_ref.read().await;
+        assert_eq!(file.metadata().await.unwrap().len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove(cache: FileCache, tmp_dir: tempfile::TempDir) {
+        let file_path = tmp_dir.path().join("test_remove.txt");
+        let mut file = fs::File::create(&file_path).unwrap();
+        file.write_all(b"test").unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+
+        cache.read(&file_path).await.unwrap();
+        cache.remove(&file_path).await.unwrap();
+
+        let file_ref = cache.read(&file_path).await.unwrap();
+        let file = file_ref.read().await;
+        assert_eq!(file.metadata().await.unwrap().len(), 4);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_cache_max_size(cache: FileCache, tmp_dir: tempfile::TempDir) {
+        let file_path1 = tmp_dir.path().join("test_cache_max_size1.txt");
+        let file_path2 = tmp_dir.path().join("test_cache_max_size2.txt");
+        let file_path3 = tmp_dir.path().join("test_cache_max_size3.txt");
+
+        cache.write_or_create(&file_path1).await.unwrap();
+        cache.write_or_create(&file_path2).await.unwrap();
+        cache.write_or_create(&file_path3).await.unwrap();
+
+        let inner_cache = cache.cache.read().await;
+        assert_eq!(inner_cache.len(), 2);
+        assert_eq!(inner_cache.contains_key(&file_path1), false);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_cache_ttl(cache: FileCache, tmp_dir: tempfile::TempDir) {
+        let file_path1 = tmp_dir.path().join("test_cache_max_size1.txt");
+        let file_path2 = tmp_dir.path().join("test_cache_max_size2.txt");
+        cache.write_or_create(&file_path1).await.unwrap();
+        cache.write_or_create(&file_path2).await.unwrap();
+
+        sleep(Duration::from_millis(200)).await;
+
+        cache.read(&file_path2).await.unwrap(); // should remove the file_path1 descriptor
+
+        let inner_cache = cache.cache.read().await;
+        assert_eq!(inner_cache.len(), 1);
+        assert_eq!(inner_cache.contains_key(&file_path1), false);
+    }
+
+    #[fixture]
+    fn cache() -> FileCache {
+        FileCache::new(2, Duration::from_millis(100))
+    }
+
+    #[fixture]
+    fn tmp_dir() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
     }
 }
