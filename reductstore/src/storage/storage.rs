@@ -272,7 +272,7 @@ mod tests {
         write_entry!(bucket, "entry-2", 2000);
         write_entry!(bucket, "entry-2", 5000);
 
-        tokio::time::sleep(Duration::from_micros(1)).await; // to make sure that write tasks are completed
+        tokio::time::sleep(Duration::from_millis(10)).await; // to make sure that write tasks are completed
         let storage = Storage::load(storage.data_path.clone(), None).await;
         assert_eq!(
             storage.info().await.unwrap(),
