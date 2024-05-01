@@ -113,7 +113,7 @@ impl BlockManager {
         self.use_counter.increment(ts_to_us(&ts));
 
         let path = self.path_to_data(&ts);
-        let file = self.file_cache.read(&path).await?;
+        let file = self.file_cache.write_or_create(&path).await?;
         let offset = block.records[record_index].begin;
         Ok((file, offset as usize))
     }
@@ -151,7 +151,7 @@ impl BlockManager {
         self.use_counter.increment(ts_to_us(&ts));
 
         let path = self.path_to_data(&ts);
-        let file = self.file_cache.write_or_create(&path).await?;
+        let file = self.file_cache.read(&path).await?;
         let offset = block.records[record_index].begin;
         Ok((file, offset as usize))
     }
@@ -230,10 +230,7 @@ impl ManageBlock for BlockManager {
         }
 
         let path = self.path_to_desc(&us_to_ts(&block_id));
-        let file = self
-            .file_cache
-            .write_or_create(&path)
-            .await?;
+        let file = self.file_cache.read(&path).await?;
         let mut buf = vec![];
 
         // parse the block descriptor
@@ -267,7 +264,6 @@ impl ManageBlock for BlockManager {
         lock.set_len(buf.len() as u64).await?;
         lock.seek(SeekFrom::Start(0)).await?;
         lock.write_all(&buf).await?;
-        lock.flush().await?;
 
         self.last_block = Some(block);
         Ok(())
@@ -638,7 +634,7 @@ mod tests {
 
         tx.send(Ok(None)).await.unwrap();
         drop(tx);
-        sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
+        sleep(Duration::from_millis(10)).await; // wait for thread to finish
         assert_eq!(
             block_manager
                 .read()
