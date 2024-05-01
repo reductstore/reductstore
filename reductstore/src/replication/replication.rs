@@ -324,7 +324,7 @@ impl Replication {
 }
 
 #[cfg(test)]
-#[cfg(not(macos))] // refactor tests without mutlithreading
+#[cfg(target_os = "linux")] // refactor tests without mutlithreading
 mod tests {
     use super::*;
     use crate::replication::Transaction;
