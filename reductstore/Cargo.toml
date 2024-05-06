@@ -63,7 +63,7 @@ ring = "0.17.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 [build-dependencies]
-prost-build = "0.12.3"
+prost-build = "0.12.4"
 prost-wkt-build = "0.5.1"
 reqwest = { version = "0.12.2", default-features = false, features = ["rustls-tls", "blocking"] }
 chrono = "0.4.34"
