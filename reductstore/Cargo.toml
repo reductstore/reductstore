@@ -30,7 +30,7 @@ reduct-base = { path = "../reduct_base", version = "1.9.4" }
 reduct-macros = { path = "../reduct_macros", version = "1.9.4" }
 
 log = "0.4.20"
-chrono = { version = "0.4.34", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 thread-id = "4.2.1"
 zip = "0.6.6"
 tempfile = "3.10.0"
@@ -66,7 +66,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 prost-build = "0.12.4"
 prost-wkt-build = "0.5.1"
 reqwest = { version = "0.12.2", default-features = false, features = ["rustls-tls", "blocking"] }
-chrono = "0.4.34"
+chrono = "0.4.38"
 
 [dev-dependencies]
 mockall = "0.12.1"
