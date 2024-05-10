@@ -74,8 +74,7 @@ impl Query for HistoricalQuery {
     ) -> Result<RecordReader, ReductError> {
         self.last_update = Instant::now();
 
-        let records = &mut self.records_from_current_block.clone();
-        if records.is_empty() {
+        if self.records_from_current_block.is_empty() {
             let start = if let Some(block) = &self.current_block {
                 ts_to_us(block.records.last().unwrap().timestamp.as_ref().unwrap())
             } else {
@@ -92,19 +91,19 @@ impl Query for HistoricalQuery {
                 self.current_block = Some(block);
                 let mut found_records = self.filter_records_from_current_block();
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
-                records.extend(found_records);
-                if !records.is_empty() {
+                self.records_from_current_block.extend(found_records);
+                if !self.records_from_current_block.is_empty() {
                     break;
                 }
             }
         }
 
-        if records.is_empty() {
+        if self.records_from_current_block.is_empty() {
             self.state = QueryState::Done;
             return Err(ReductError::no_content("No content"));
         }
 
-        let record = records.pop_front().unwrap();
+        let record = self.records_from_current_block.pop_front().unwrap();
         let block = self.current_block.as_ref().unwrap();
         let record_idx = block
             .records
