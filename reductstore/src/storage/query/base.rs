@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
@@ -67,6 +67,8 @@ pub struct QueryOptions {
     pub continuous: bool,
     /// The maximum number of records to return only for non-continuous queries.
     pub limit: Option<usize>,
+    // /// Return each N records
+    // pub each_n: Option<usize>,
 }
 
 impl Default for QueryOptions {
