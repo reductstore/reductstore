@@ -67,8 +67,8 @@ pub struct QueryOptions {
     pub continuous: bool,
     /// The maximum number of records to return only for non-continuous queries.
     pub limit: Option<usize>,
-    // /// Return each N records
-    // pub each_n: Option<usize>,
+    /// Return each N records
+    pub each_n: Option<usize>,
 }
 
 impl Default for QueryOptions {
@@ -79,6 +79,7 @@ impl Default for QueryOptions {
             exclude: HashMap::new(),
             continuous: false,
             limit: None,
+            each_n: None,
         }
     }
 }

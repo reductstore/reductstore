@@ -14,19 +14,44 @@ use crate::storage::block_manager::{find_first_block, spawn_read_task, BlockMana
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
+use crate::storage::query::filters::{
+    ExcludeLabelFilter, IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter,
+};
 
 pub struct HistoricalQuery {
+    /// The start time of the query.
     start_time: u64,
+    /// The stop time of the query.
     stop_time: u64,
+    /// The records from the current block that have not been read yet.
     records_from_current_block: VecDeque<Record>,
+    /// The current block that is being read. Cached to avoid loading the same block multiple times.
     current_block: Option<Block>,
+    /// The time of the last update. We use this to check if the query has expired.
     last_update: Instant,
+    /// The query options.
     options: QueryOptions,
+
+    /// Filters
+    filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
     pub(in crate::storage::query) state: QueryState,
 }
 
 impl HistoricalQuery {
     pub fn new(start_time: u64, stop_time: u64, options: QueryOptions) -> HistoricalQuery {
+        let mut filters: Vec<Box<dyn RecordFilter + Send + Sync>> = vec![
+            Box::new(TimeRangeFilter::new(start_time, stop_time)),
+            Box::new(RecordStateFilter::new(RecordState::Finished)),
+        ];
+
+        if !options.include.is_empty() {
+            filters.push(Box::new(IncludeLabelFilter::new(options.include.clone())));
+        }
+
+        if !options.exclude.is_empty() {
+            filters.push(Box::new(ExcludeLabelFilter::new(options.exclude.clone())));
+        }
+
         HistoricalQuery {
             start_time,
             stop_time,
@@ -34,6 +59,7 @@ impl HistoricalQuery {
             current_block: None,
             last_update: Instant::now(),
             options,
+            filters,
             state: QueryState::Running(0),
         }
     }
@@ -50,16 +76,21 @@ impl Query for HistoricalQuery {
 
         let records = &mut self.records_from_current_block.clone();
         if records.is_empty() {
-            let start = find_first_block(block_indexes, &self.start_time);
-            for block_id in block_indexes.range(start..self.stop_time) {
+            let start = if let Some(block) = &self.current_block {
+                ts_to_us(block.records.last().unwrap().timestamp.as_ref().unwrap())
+            } else {
+                self.start_time
+            };
+            let first_block_id = find_first_block(block_indexes, &start);
+            for block_id in block_indexes.range(first_block_id..self.stop_time) {
                 let block = block_manager.write().await.load(*block_id).await?;
 
                 if block.invalid {
                     continue;
                 }
 
-                self.current_block = Some(block.clone());
-                let mut found_records = self.filter_records(&block);
+                self.current_block = Some(block);
+                let mut found_records = self.filter_records_from_current_block();
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
                 records.extend(found_records);
                 if !records.is_empty() {
@@ -74,7 +105,7 @@ impl Query for HistoricalQuery {
         }
 
         let record = records.pop_front().unwrap();
-        self.start_time = ts_to_us(record.timestamp.as_ref().unwrap()) + 1;
+        self.update_filters(&record);
 
         let block = self.current_block.as_ref().unwrap();
         let record_idx = block
@@ -101,42 +132,21 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    fn filter_records(&self, block: &Block) -> Vec<Record> {
-        block
+    fn filter_records_from_current_block(&self) -> Vec<Record> {
+        self.current_block
+            .as_ref()
+            .unwrap()
             .records
             .iter()
-            .filter(|record| {
-                let ts = ts_to_us(record.timestamp.as_ref().unwrap());
-                ts >= self.start_time
-                    && ts < self.stop_time
-                    && record.state == RecordState::Finished as i32
-            })
-            .filter(|record| {
-                if self.options.include.is_empty() {
-                    true
-                } else {
-                    self.options.include.iter().all(|(key, value)| {
-                        record
-                            .labels
-                            .iter()
-                            .any(|label| label.name == *key && label.value == *value)
-                    })
-                }
-            })
-            .filter(|record| {
-                if self.options.exclude.is_empty() {
-                    true
-                } else {
-                    !self.options.exclude.iter().all(|(key, value)| {
-                        record
-                            .labels
-                            .iter()
-                            .any(|label| label.name == *key && label.value == *value)
-                    })
-                }
-            })
+            .filter(|record| self.filters.iter().all(|filter| filter.filter(record)))
             .map(|record| record.clone())
             .collect()
+    }
+
+    fn update_filters(&mut self, record: &Record) {
+        for filter in &mut self.filters {
+            filter.last_sent(record);
+        }
     }
 }
 

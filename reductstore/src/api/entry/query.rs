@@ -112,6 +112,7 @@ pub(crate) async fn query(
             include,
             exclude,
             ttl: Duration::from_secs(ttl),
+            each_n: None,
             limit,
         },
     )?;
