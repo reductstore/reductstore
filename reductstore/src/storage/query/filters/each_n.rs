@@ -16,11 +16,9 @@ impl EachNFilter {
 }
 
 impl RecordFilter for EachNFilter {
-    fn filter(&self, _: &Record) -> bool {
-        self.count % self.n == 0
-    }
-
-    fn last_sent(&mut self, _: &Record) -> () {
+    fn filter(&mut self, _: &Record) -> bool {
+        let ret = self.count % self.n == 0;
         self.count += 1;
+        ret
     }
 }

@@ -105,8 +105,6 @@ impl Query for HistoricalQuery {
         }
 
         let record = records.pop_front().unwrap();
-        self.update_filters(&record);
-
         let block = self.current_block.as_ref().unwrap();
         let record_idx = block
             .records
@@ -132,21 +130,15 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    fn filter_records_from_current_block(&self) -> Vec<Record> {
+    fn filter_records_from_current_block(&mut self) -> Vec<Record> {
         self.current_block
             .as_ref()
             .unwrap()
             .records
             .iter()
-            .filter(|record| self.filters.iter().all(|filter| filter.filter(record)))
+            .filter(|record| self.filters.iter_mut().all(|filter| filter.filter(record)))
             .map(|record| record.clone())
             .collect()
-    }
-
-    fn update_filters(&mut self, record: &Record) {
-        for filter in &mut self.filters {
-            filter.last_sent(record);
-        }
     }
 }
 

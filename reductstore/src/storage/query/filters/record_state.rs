@@ -16,11 +16,7 @@ impl RecordStateFilter {
 }
 
 impl RecordFilter for RecordStateFilter {
-    fn filter(&self, record: &Record) -> bool {
+    fn filter(&mut self, record: &Record) -> bool {
         record.state == self.state as i32
-    }
-
-    fn last_sent(&mut self, _: &Record) -> () {
-        ()
     }
 }

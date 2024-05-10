@@ -11,11 +11,7 @@ use crate::storage::proto::Record;
 
 pub(super) trait RecordFilter {
     /// Filter the record by condition.
-    fn filter(&self, record: &Record) -> bool;
-
-    /// Notify the filter that a record has been sent.
-    /// This is used to update the filter state.
-    fn last_sent(&mut self, record: &Record) -> ();
+    fn filter(&mut self, record: &Record) -> bool;
 }
 
 pub(super) use each_n::EachNFilter;

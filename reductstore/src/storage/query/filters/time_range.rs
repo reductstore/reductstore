@@ -16,12 +16,13 @@ impl TimeRangeFilter {
 }
 
 impl RecordFilter for TimeRangeFilter {
-    fn filter(&self, record: &Record) -> bool {
+    fn filter(&mut self, record: &Record) -> bool {
         let ts = ts_to_us(record.timestamp.as_ref().unwrap());
-        ts >= self.start && ts < self.stop
-    }
+        let ret = ts >= self.start && ts < self.stop;
+        if ret {
+            self.start = ts + 1;
+        }
 
-    fn last_sent(&mut self, record: &Record) -> () {
-        self.start = ts_to_us(record.timestamp.as_ref().unwrap()) + 1;
+        ret
     }
 }
