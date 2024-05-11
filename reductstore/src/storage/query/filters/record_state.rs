@@ -5,11 +5,21 @@ use crate::storage::proto::record::State;
 use crate::storage::proto::Record;
 use crate::storage::query::filters::RecordFilter;
 
+/// Filter that passes records with a specific state
 pub struct RecordStateFilter {
     state: State,
 }
 
 impl RecordStateFilter {
+    /// Create a new filter that passes records with the specified state
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The state to pass
+    ///
+    /// # Returns
+    ///
+    /// A new `RecordStateFilter` instance
     pub fn new(state: State) -> RecordStateFilter {
         RecordStateFilter { state }
     }

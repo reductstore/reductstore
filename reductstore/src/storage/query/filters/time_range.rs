@@ -4,12 +4,23 @@
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::query::filters::RecordFilter;
 
+/// Filter that passes records with a timestamp within a specific range
 pub struct TimeRangeFilter {
     start: u64,
     stop: u64,
 }
 
 impl TimeRangeFilter {
+    /// Create a new filter that passes records with a timestamp within the specified range
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The start of the range (inclusive)
+    /// * `stop` - The end of the range (exclusive)
+    ///
+    /// # Returns
+    ///
+    /// A new `TimeRangeFilter` instance
     pub fn new(start: u64, stop: u64) -> TimeRangeFilter {
         TimeRangeFilter { start, stop }
     }

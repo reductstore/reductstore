@@ -4,6 +4,7 @@
 use crate::storage::proto::Record;
 use crate::storage::query::filters::RecordFilter;
 
+/// Filter that passes every N-th record
 pub struct EachNFilter {
     n: usize,
     count: usize,

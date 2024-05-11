@@ -9,6 +9,7 @@ mod time_range;
 
 use crate::storage::proto::Record;
 
+/// Trait for record filters in queries.
 pub(super) trait RecordFilter {
     /// Filter the record by condition.
     fn filter(&mut self, record: &Record) -> bool;

@@ -6,11 +6,21 @@ use reduct_base::Labels;
 use crate::storage::proto::Record;
 use crate::storage::query::filters::RecordFilter;
 
+/// Filter that excludes records with specific labels
 pub struct ExcludeLabelFilter {
     labels: Labels,
 }
 
 impl ExcludeLabelFilter {
+    /// Create a new filter that excludes records with the specified labels
+    ///
+    /// # Arguments
+    ///
+    /// * `labels` - The labels to exclude
+    ///
+    /// # Returns
+    ///
+    /// A new `ExcludeLabelFilter` instance
     pub fn new(labels: Labels) -> ExcludeLabelFilter {
         ExcludeLabelFilter { labels }
     }
