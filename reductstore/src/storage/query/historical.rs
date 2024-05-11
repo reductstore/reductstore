@@ -146,7 +146,6 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use bytes::Bytes;
     use rstest::rstest;
 
     use reduct_base::error::ErrorCode;

@@ -15,7 +15,6 @@ pub(super) trait RecordFilter {
     fn filter(&mut self, record: &Record) -> bool;
 }
 
-pub(super) use each_n::EachNFilter;
 pub(super) use exclude::ExcludeLabelFilter;
 pub(super) use include::IncludeLabelFilter;
 pub(super) use record_state::RecordStateFilter;
