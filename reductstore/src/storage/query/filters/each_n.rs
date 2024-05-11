@@ -12,6 +12,9 @@ pub struct EachNFilter {
 
 impl EachNFilter {
     pub fn new(n: usize) -> EachNFilter {
+        if n == 0 {
+            panic!("N must be greater than 0");
+        }
         EachNFilter { n, count: 0 }
     }
 }
