@@ -20,3 +20,33 @@ impl RecordFilter for RecordStateFilter {
         record.state == self.state as i32
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::proto::record::State;
+    use crate::storage::proto::Record;
+    use rstest::*;
+
+    #[rstest]
+    fn test_record_state_filter() {
+        let mut filter = RecordStateFilter::new(State::Finished);
+        let record = Record {
+            state: State::Finished as i32,
+            ..Default::default()
+        };
+
+        assert!(filter.filter(&record), "Record should pass");
+    }
+
+    #[rstest]
+    fn test_record_state_filter_no_records() {
+        let mut filter = RecordStateFilter::new(State::Finished);
+        let record = Record {
+            state: State::Started as i32,
+            ..Default::default()
+        };
+
+        assert!(!filter.filter(&record), "Record should not pass");
+    }
+}

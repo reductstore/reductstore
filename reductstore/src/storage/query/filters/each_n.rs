@@ -22,3 +22,21 @@ impl RecordFilter for EachNFilter {
         ret
     }
 }
+
+#[cfg(test)]
+
+mod tests {
+    use super::*;
+    use rstest::*;
+
+    #[rstest]
+    fn test_each_n_filter() {
+        let mut filter = EachNFilter::new(2);
+        let record = Record::default();
+
+        assert!(filter.filter(&record), "First time should pass");
+        assert!(!filter.filter(&record), "Second time should not pass");
+        assert!(filter.filter(&record), "Third time should pass");
+        assert!(!filter.filter(&record), "Fourth time should not pass");
+    }
+}
