@@ -44,7 +44,7 @@ pub struct BlockManager {
     file_cache: FileCache,
     bucket: String,
     entry: String,
-    last_block: Option<Block>,
+    cached_block: RwLock<Option<Block>>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -90,7 +90,7 @@ impl BlockManager {
             bucket,
             entry,
 
-            last_block: None,
+            cached_block: RwLock::new(None),
         }
     }
 
@@ -223,7 +223,7 @@ pub trait ManageBlock {
 
 impl ManageBlock for BlockManager {
     async fn load(&self, block_id: u64) -> Result<Block, ReductError> {
-        if let Some(block) = self.last_block.as_ref() {
+        if let Some(block) = self.cached_block.read().await.as_ref() {
             if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
                 return Ok(block.clone());
             }
@@ -245,6 +245,8 @@ impl ManageBlock for BlockManager {
             ))
         })?;
 
+        let mut lock = self.cached_block.write().await;
+        let _ = lock.insert(block.clone());
         Ok(block)
     }
 
@@ -264,8 +266,16 @@ impl ManageBlock for BlockManager {
         lock.set_len(buf.len() as u64).await?;
         lock.seek(SeekFrom::Start(0)).await?;
         lock.write_all(&buf).await?;
+        lock.flush().await?;
 
-        self.last_block = Some(block);
+        let mut lock = self.cached_block.write().await;
+        if let Some(last_block) = lock.as_ref() {
+            if ts_to_us(&last_block.begin_time.clone().unwrap())
+                == ts_to_us(&block.begin_time.clone().unwrap())
+            {
+                *lock = Some(block.clone());
+            }
+        }
         Ok(())
     }
 
@@ -274,12 +284,14 @@ impl ManageBlock for BlockManager {
         block.begin_time = Some(us_to_ts(&block_id));
 
         // create a block with data
-        let file = self
-            .file_cache
-            .write_or_create(&self.path_to_data(block.begin_time.as_ref().unwrap()))
-            .await?;
-        let file = file.write().await;
-        file.set_len(max_block_size).await?;
+        {
+            let file = self
+                .file_cache
+                .write_or_create(&self.path_to_data(block.begin_time.as_ref().unwrap()))
+                .await?;
+            let file = file.write().await;
+            file.set_len(max_block_size).await?;
+        }
         self.save(block.clone()).await?;
 
         Ok(block)
@@ -300,7 +312,6 @@ impl ManageBlock for BlockManager {
         let descr_block = file.write().await;
         descr_block.sync_all().await?;
 
-        self.last_block = None;
         Ok(())
     }
 
@@ -321,9 +332,10 @@ impl ManageBlock for BlockManager {
         self.file_cache.remove(&path).await?;
         tokio::fs::remove_file(path).await?;
 
-        if let Some(block) = self.last_block.as_ref() {
+        let mut lock = self.cached_block.write().await;
+        if let Some(block) = lock.as_ref() {
             if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
-                self.last_block = None;
+                *lock = None; // invalidate the last block
             }
         }
 
