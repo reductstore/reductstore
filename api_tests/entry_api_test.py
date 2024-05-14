@@ -286,6 +286,34 @@ def test_query_limit(base_url, session, bucket):
     assert resp.status_code == 204
 
 
+def test_query_each_n(base_url, session, bucket):
+    """Should return each 2d record"""
+    ts = 1000
+    resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts + 1000}", data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts + 2000}", data="some_data")
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/entry/q?each_n=2")
+    assert resp.status_code == 200
+
+    query_id = int(json.loads(resp.content)["id"])
+    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.headers["x-reduct-time"] == "1000"
+
+    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.headers["x-reduct-time"] == "3000"
+
+    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
+    assert resp.status_code == 204
+
+
 def test_query_with_include_and_exclude(base_url, session, bucket):
     """Should handle include and exclude labels"""
     resp = session.post(
