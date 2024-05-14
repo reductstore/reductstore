@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 mod each_n;
+mod each_s;
 mod exclude;
 mod include;
 mod record_state;
@@ -16,6 +17,7 @@ pub(super) trait RecordFilter {
 }
 
 pub(super) use each_n::EachNFilter;
+pub(super) use each_s::EachSecondFilter;
 pub(super) use exclude::ExcludeLabelFilter;
 pub(super) use include::IncludeLabelFilter;
 pub(super) use record_state::RecordStateFilter;

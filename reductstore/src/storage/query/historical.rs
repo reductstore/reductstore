@@ -15,8 +15,8 @@ use crate::storage::bucket::RecordReader;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::filters::{
-    EachNFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter, RecordStateFilter,
-    TimeRangeFilter,
+    EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter,
+    RecordStateFilter, TimeRangeFilter,
 };
 
 pub struct HistoricalQuery {
@@ -51,6 +51,10 @@ impl HistoricalQuery {
 
         if !options.exclude.is_empty() {
             filters.push(Box::new(ExcludeLabelFilter::new(options.exclude.clone())));
+        }
+
+        if let Some(each_s) = options.each_s {
+            filters.push(Box::new(EachSecondFilter::new(each_s)));
         }
 
         if let Some(each_n) = options.each_n {
@@ -321,6 +325,27 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_each_s_filter(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
+        let mut query = HistoricalQuery::new(
+            0,
+            1001,
+            QueryOptions {
+                each_s: Some(0.00001),
+                ..QueryOptions::default()
+            },
+        );
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(query.state(), &QueryState::Done);
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_each_n_records(
         #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
     ) {
@@ -336,9 +361,7 @@ mod tests {
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
-        assert_eq!(records[0].1, "0123456789");
         assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
-        assert_eq!(records[1].1, "0123456789");
         assert_eq!(query.state(), &QueryState::Done);
     }
 

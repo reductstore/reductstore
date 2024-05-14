@@ -47,6 +47,7 @@ pub(crate) async fn query(
     // filter parameters in order of priority
     let (start, stop) = parse_time_range(&params, entry_info)?;
     let (include, exclude) = parse_include_exclude_filters(&params);
+    let each_s = parse_each_s(&params)?;
     let each_n = parse_each_n(&params)?;
     let limit = parse_limit(params)?;
 
@@ -61,6 +62,7 @@ pub(crate) async fn query(
             include,
             exclude,
             ttl,
+            each_s,
             each_n,
             limit,
         },
@@ -128,6 +130,28 @@ fn parse_each_n(params: &HashMap<String, String>) -> Result<Option<usize>, HttpE
         None => None,
     };
     Ok(each_n)
+}
+
+fn parse_each_s(params: &HashMap<String, String>) -> Result<Option<f64>, HttpError> {
+    let each_s = match params.get("each_s") {
+        Some(each_s) => {
+            let value = each_s.parse::<f64>().map_err(|_| {
+                HttpError::new(
+                    ErrorCode::UnprocessableEntity,
+                    "'each_s' must be a float value",
+                )
+            })?;
+            if value <= 0.0 {
+                return Err(HttpError::new(
+                    ErrorCode::UnprocessableEntity,
+                    "Time must be greater than 0 seconds",
+                ));
+            }
+            Some(value)
+        }
+        None => None,
+    };
+    Ok(each_s)
 }
 
 fn parse_include_exclude_filters(
@@ -336,6 +360,44 @@ mod tests {
             let (include, exclude) = parse_include_exclude_filters(&params);
             assert_eq!(include, HashMap::new());
             assert_eq!(exclude, HashMap::new());
+        }
+    }
+
+    mod parse_each_s {
+        use super::*;
+
+        #[rstest]
+        fn test_ok() {
+            let params = HashMap::from_iter(vec![("each_s".to_string(), "1.0".to_string())]);
+            let each_s = parse_each_s(&params).unwrap();
+            assert_eq!(each_s, Some(1.0));
+        }
+
+        #[rstest]
+        fn test_default() {
+            let params = HashMap::new();
+            let each_s = parse_each_s(&params).unwrap();
+            assert_eq!(each_s, None);
+        }
+
+        #[rstest]
+        fn test_bad() {
+            let params = HashMap::from_iter(vec![("each_s".to_string(), "a".to_string())]);
+            let result = parse_each_s(&params);
+            assert_eq!(
+                result.err().unwrap().0.to_string(),
+                "[UnprocessableEntity] 'each_s' must be a float value"
+            );
+        }
+
+        #[rstest]
+        fn test_zero() {
+            let params = HashMap::from_iter(vec![("each_s".to_string(), "0".to_string())]);
+            let result = parse_each_s(&params);
+            assert_eq!(
+                result.err().unwrap().0.to_string(),
+                "[UnprocessableEntity] Time must be greater than 0 seconds"
+            );
         }
     }
 
