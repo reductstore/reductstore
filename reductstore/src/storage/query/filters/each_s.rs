@@ -3,7 +3,6 @@
 
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::query::filters::RecordFilter;
-use prost_wkt_types::Timestamp;
 
 /// Filter that passes every N-th record
 pub struct EachSecondFilter {
