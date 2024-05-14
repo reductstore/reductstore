@@ -269,10 +269,9 @@ impl ManageBlock for BlockManager {
         lock.flush().await?;
 
         let mut lock = self.cached_block.write().await;
-        if let Some(last_block) = lock.as_ref() {
-            if ts_to_us(&last_block.begin_time.clone().unwrap())
-                == ts_to_us(&block.begin_time.clone().unwrap())
-            {
+        if let Some(cached_block) = lock.as_ref() {
+            // update the cached block if we changed it
+            if cached_block.begin_time == block.begin_time {
                 *lock = Some(block.clone());
             }
         }
@@ -333,8 +332,8 @@ impl ManageBlock for BlockManager {
         tokio::fs::remove_file(path).await?;
 
         let mut lock = self.cached_block.write().await;
-        if let Some(block) = lock.as_ref() {
-            if ts_to_us(&block.begin_time.clone().unwrap()) == block_id {
+        if let Some(cached_block) = lock.as_ref() {
+            if ts_to_us(&cached_block.begin_time.as_ref().unwrap()) == block_id {
                 *lock = None; // invalidate the last block
             }
         }
