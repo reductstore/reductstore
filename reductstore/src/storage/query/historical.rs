@@ -1,37 +1,74 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use std::collections::BTreeSet;
-
-use async_trait::async_trait;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
+use async_trait::async_trait;
 use tokio::sync::RwLock;
+
+use reduct_base::error::ReductError;
 
 use crate::storage::block_manager::{find_first_block, spawn_read_task, BlockManager, ManageBlock};
 use crate::storage::bucket::RecordReader;
-use crate::storage::proto::{record::State as RecordState, ts_to_us, us_to_ts, Block, Record};
+use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
-use reduct_base::error::ReductError;
+use crate::storage::query::filters::{
+    EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter,
+    RecordStateFilter, TimeRangeFilter,
+};
 
 pub struct HistoricalQuery {
+    /// The start time of the query.
     start_time: u64,
+    /// The stop time of the query.
     stop_time: u64,
-    block: Option<Block>,
+    /// The records from the current block that have not been read yet.
+    records_from_current_block: VecDeque<Record>,
+    /// The current block that is being read. Cached to avoid loading the same block multiple times.
+    current_block: Option<Block>,
+    /// The time of the last update. We use this to check if the query has expired.
     last_update: Instant,
+    /// The query options.
     options: QueryOptions,
+
+    /// Filters
+    filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
     pub(in crate::storage::query) state: QueryState,
 }
 
 impl HistoricalQuery {
     pub fn new(start_time: u64, stop_time: u64, options: QueryOptions) -> HistoricalQuery {
+        let mut filters: Vec<Box<dyn RecordFilter + Send + Sync>> = vec![
+            Box::new(TimeRangeFilter::new(start_time, stop_time)),
+            Box::new(RecordStateFilter::new(RecordState::Finished)),
+        ];
+
+        if !options.include.is_empty() {
+            filters.push(Box::new(IncludeLabelFilter::new(options.include.clone())));
+        }
+
+        if !options.exclude.is_empty() {
+            filters.push(Box::new(ExcludeLabelFilter::new(options.exclude.clone())));
+        }
+
+        if let Some(each_s) = options.each_s {
+            filters.push(Box::new(EachSecondFilter::new(each_s)));
+        }
+
+        if let Some(each_n) = options.each_n {
+            filters.push(Box::new(EachNFilter::new(each_n)));
+        }
+
         HistoricalQuery {
             start_time,
             stop_time,
-            block: None,
+            records_from_current_block: VecDeque::new(),
+            current_block: None,
             last_update: Instant::now(),
             options,
+            filters,
             state: QueryState::Running(0),
         }
     }
@@ -46,97 +83,37 @@ impl Query for HistoricalQuery {
     ) -> Result<RecordReader, ReductError> {
         self.last_update = Instant::now();
 
-        let check_next_block = |start, stop| -> bool {
-            let start = find_first_block(block_indexes, start);
-            let next_block_id = block_indexes.range(start..stop).next();
-            if let Some(next_block_id) = next_block_id {
-                next_block_id >= &stop
+        if self.records_from_current_block.is_empty() {
+            let start = if let Some(block) = &self.current_block {
+                ts_to_us(block.records.last().unwrap().timestamp.as_ref().unwrap())
             } else {
-                true
-            }
-        };
-
-        let filter_records = |block: &Block| -> Vec<Record> {
-            block
-                .records
-                .iter()
-                .filter(|record| {
-                    let ts = ts_to_us(record.timestamp.as_ref().unwrap());
-                    ts >= self.start_time
-                        && ts < self.stop_time
-                        && record.state == RecordState::Finished as i32
-                })
-                .filter(|record| {
-                    if self.options.include.is_empty() {
-                        true
-                    } else {
-                        self.options.include.iter().all(|(key, value)| {
-                            record
-                                .labels
-                                .iter()
-                                .any(|label| label.name == *key && label.value == *value)
-                        })
-                    }
-                })
-                .filter(|record| {
-                    if self.options.exclude.is_empty() {
-                        true
-                    } else {
-                        !self.options.exclude.iter().all(|(key, value)| {
-                            record
-                                .labels
-                                .iter()
-                                .any(|label| label.name == *key && label.value == *value)
-                        })
-                    }
-                })
-                .map(|record| record.clone())
-                .collect()
-        };
-
-        let mut records: Vec<Record> = Vec::new();
-        let mut block = Block::default();
-        let start = find_first_block(block_indexes, &self.start_time);
-        for block_id in block_indexes.range(start..self.stop_time) {
-            block = if let Some(block) = &self.block {
-                if block.begin_time == Some(us_to_ts(block_id)) {
-                    block.clone()
-                } else {
-                    block_manager.write().await.load(*block_id).await?
-                }
-            } else {
-                block_manager.write().await.load(*block_id).await?
+                self.start_time
             };
+            let first_block_id = find_first_block(block_indexes, &start);
+            for block_id in block_indexes.range(first_block_id..self.stop_time) {
+                let block = block_manager.write().await.load(*block_id).await?;
 
-            if block.invalid {
-                continue;
-            }
+                if block.invalid {
+                    continue;
+                }
 
-            let found_records = filter_records(&block);
-            records.extend(found_records);
-            if !records.is_empty() {
-                break;
+                self.current_block = Some(block);
+                let mut found_records = self.filter_records_from_current_block();
+                found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
+                self.records_from_current_block.extend(found_records);
+                if !self.records_from_current_block.is_empty() {
+                    break;
+                }
             }
         }
 
-        if records.is_empty() {
+        if self.records_from_current_block.is_empty() {
             self.state = QueryState::Done;
             return Err(ReductError::no_content("No content"));
         }
 
-        records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
-        let record = &records[0];
-        self.start_time = ts_to_us(record.timestamp.as_ref().unwrap()) + 1;
-
-        let last = if records.len() > 1 {
-            // Only one record in current block check next one
-            self.block = Some(block.clone());
-            false
-        } else {
-            self.block = None;
-            check_next_block(&self.start_time, self.stop_time)
-        };
-
+        let record = self.records_from_current_block.pop_front().unwrap();
+        let block = self.current_block.as_ref().unwrap();
         let record_idx = block
             .records
             .iter()
@@ -147,8 +124,8 @@ impl Query for HistoricalQuery {
             *idx += 1;
         }
 
-        let rx = spawn_read_task(Arc::clone(&block_manager), &block, record_idx).await?;
-        Ok(RecordReader::new(rx, record.clone(), last))
+        let rx = spawn_read_task(Arc::clone(&block_manager), block, record_idx).await?;
+        Ok(RecordReader::new(rx, record.clone(), false))
     }
 
     fn state(&self) -> &QueryState {
@@ -160,20 +137,33 @@ impl Query for HistoricalQuery {
     }
 }
 
+impl HistoricalQuery {
+    fn filter_records_from_current_block(&mut self) -> Vec<Record> {
+        self.current_block
+            .as_ref()
+            .unwrap()
+            .records
+            .iter()
+            .filter(|record| self.filters.iter_mut().all(|filter| filter.filter(record)))
+            .map(|record| record.clone())
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::storage::proto::record;
-
-    use bytes::Bytes;
-
-    use crate::storage::proto::record::Label;
-    use reduct_base::error::ErrorCode;
-    use rstest::rstest;
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use rstest::rstest;
+
+    use reduct_base::error::ErrorCode;
+
+    use crate::storage::proto::record::Label;
+    use crate::storage::proto::{record, us_to_ts};
     use crate::storage::query::base::tests::block_manager_and_index;
+
+    use super::*;
 
     #[rstest]
     fn test_state() {
@@ -189,22 +179,12 @@ mod tests {
         #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
     ) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
 
-        let (block_manager, index) = block_manager_and_index.await;
-        {
-            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-            assert!(reader.rx().recv().await.is_none())
-        }
-        {
-            let res = query.next(&index, block_manager.clone()).await;
-            assert!(res.is_err());
-            assert_eq!(res.err().unwrap().status, ErrorCode::NoContent);
-            assert_eq!(query.state(), &QueryState::Done);
-        }
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[0].1, "0123456789");
+        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[rstest]
@@ -213,32 +193,13 @@ mod tests {
         #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
     ) {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
 
-        let (block_manager, index) = block_manager_and_index.await;
-        {
-            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-            assert!(reader.rx().recv().await.is_none())
-        }
-        {
-            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-            assert!(reader.rx().recv().await.is_none())
-        }
-
-        assert_eq!(
-            query.next(&index, block_manager.clone()).await.err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
-        );
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[0].1, "0123456789");
+        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&5)));
+        assert_eq!(records[1].1, "0123456789");
         assert_eq!(query.state(), &QueryState::Done);
     }
 
@@ -248,40 +209,15 @@ mod tests {
         #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
     ) {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
 
-        let (block_manager, index) = block_manager_and_index.await;
-        {
-            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
-
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-            assert!(reader.rx().recv().await.is_none())
-        }
-        {
-            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-            assert!(reader.rx().recv().await.is_none())
-        }
-        {
-            let mut reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-            assert!(reader.rx().recv().await.is_none())
-        }
-        assert_eq!(
-            query.next(&index, block_manager.clone()).await.err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
-        );
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[0].1, "0123456789");
+        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&5)));
+        assert_eq!(records[1].1, "0123456789");
+        assert_eq!(records[2].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(records[2].1, "0123456789");
         assert_eq!(query.state(), &QueryState::Done);
     }
 
@@ -301,31 +237,24 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let (block_manager, index) = block_manager_and_index.await;
-        {
-            let reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.labels(),
-                &vec![
-                    Label {
-                        name: "block".to_string(),
-                        value: "2".to_string(),
-                    },
-                    Label {
-                        name: "record".to_string(),
-                        value: "1".to_string(),
-                    },
-                ]
-            );
-        }
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
 
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&1000)));
         assert_eq!(
-            query.next(&index, block_manager.clone()).await.err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
+            records[0].0.labels,
+            vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "2".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "1".to_string(),
+                },
+            ]
         );
+        assert_eq!(records[0].1, "0123456789");
         assert_eq!(query.state(), &QueryState::Done);
     }
 
@@ -346,47 +275,24 @@ mod tests {
             },
         );
 
-        let (block_manager, index) = block_manager_and_index.await;
-        {
-            let reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.labels(),
-                &vec![
-                    Label {
-                        name: "block".to_string(),
-                        value: "1".to_string(),
-                    },
-                    Label {
-                        name: "record".to_string(),
-                        value: "2".to_string(),
-                    },
-                ]
-            );
-        }
-        {
-            let reader = query.next(&index, block_manager.clone()).await.unwrap();
-            assert_eq!(
-                reader.labels(),
-                &vec![
-                    Label {
-                        name: "block".to_string(),
-                        value: "2".to_string(),
-                    },
-                    Label {
-                        name: "record".to_string(),
-                        value: "1".to_string(),
-                    },
-                ]
-            );
-        }
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
 
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&5)));
         assert_eq!(
-            query.next(&index, block_manager.clone()).await.err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
+            records[0].0.labels,
+            vec![
+                Label {
+                    name: "block".to_string(),
+                    value: "1".to_string(),
+                },
+                Label {
+                    name: "record".to_string(),
+                    value: "2".to_string(),
+                },
+            ]
         );
+        assert_eq!(records[0].1, "0123456789");
         assert_eq!(query.state(), &QueryState::Done);
     }
 
@@ -415,5 +321,72 @@ mod tests {
                 message: "No content".to_string(),
             })
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_each_s_filter(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
+        let mut query = HistoricalQuery::new(
+            0,
+            1001,
+            QueryOptions {
+                each_s: Some(0.00001),
+                ..QueryOptions::default()
+            },
+        );
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(query.state(), &QueryState::Done);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_each_n_records(
+        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) {
+        let mut query = HistoricalQuery::new(
+            0,
+            1001,
+            QueryOptions {
+                each_n: Some(2),
+                ..QueryOptions::default()
+            },
+        );
+        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(query.state(), &QueryState::Done);
+    }
+
+    async fn read_to_vector(
+        query: &mut HistoricalQuery,
+        block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
+    ) -> Vec<(Record, String)> {
+        let (block_manager, index) = block_manager_and_index;
+        let mut records = Vec::new();
+        loop {
+            match query.next(&index, block_manager.clone()).await {
+                Ok(mut reader) => {
+                    let mut content = String::new();
+                    while let Some(chunk) = reader.rx().recv().await {
+                        content
+                            .push_str(String::from_utf8(chunk.unwrap().to_vec()).unwrap().as_str())
+                    }
+                    records.push((reader.record().clone(), content));
+                }
+                Err(err) => {
+                    assert_eq!(err.status, ErrorCode::NoContent);
+                    break;
+                }
+            }
+        }
+        records
     }
 }

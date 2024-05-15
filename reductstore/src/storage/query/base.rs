@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
@@ -25,7 +25,6 @@ pub enum QueryState {
 }
 
 /// Query is used to iterate over the records among multiple blocks.
-
 #[async_trait]
 pub trait Query {
     ///  Get next record
@@ -67,6 +66,10 @@ pub struct QueryOptions {
     pub continuous: bool,
     /// The maximum number of records to return only for non-continuous queries.
     pub limit: Option<usize>,
+    /// Return each N records
+    pub each_n: Option<usize>,
+    /// Return a record every S seconds
+    pub each_s: Option<f64>,
 }
 
 impl Default for QueryOptions {
@@ -77,6 +80,8 @@ impl Default for QueryOptions {
             exclude: HashMap::new(),
             continuous: false,
             limit: None,
+            each_n: None,
+            each_s: None,
         }
     }
 }
