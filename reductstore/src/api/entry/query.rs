@@ -194,12 +194,6 @@ fn parse_time_range(
         None => entry_info.latest_record + 1,
     };
 
-    if start > stop {
-        return Err(HttpError::new(
-            ErrorCode::UnprocessableEntity,
-            "Start time must be before stop time",
-        ));
-    }
     Ok((start, stop))
 }
 
@@ -316,20 +310,6 @@ mod tests {
             assert_eq!(
                 result.err().unwrap().0.to_string(),
                 "[UnprocessableEntity] 'stop' must be an unix timestamp in microseconds"
-            );
-        }
-
-        #[rstest]
-        fn test_start_after_stop() {
-            let params = HashMap::from_iter(vec![
-                ("start".to_string(), "10".to_string()),
-                ("stop".to_string(), "5".to_string()),
-            ]);
-            let entry_info = EntryInfo::default();
-            let result = parse_time_range(&params, entry_info);
-            assert_eq!(
-                result.err().unwrap().0.to_string(),
-                "[UnprocessableEntity] Start time must be before stop time"
             );
         }
     }
