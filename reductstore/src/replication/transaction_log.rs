@@ -155,7 +155,7 @@ impl TransactionLog {
         (len_in_bytes / ENTRY_SIZE) as usize
     }
 
-    pub async fn front(&mut self) -> Result<Option<Transaction>, ReductError> {
+    pub async fn front(&self) -> Result<Option<Transaction>, ReductError> {
         if self.is_empty() {
             return Ok(None);
         }
@@ -172,7 +172,7 @@ impl TransactionLog {
         self.unsafe_pop().await
     }
 
-    async fn unsafe_head(&mut self) -> Result<Option<Transaction>, ReductError> {
+    async fn unsafe_head(&self) -> Result<Option<Transaction>, ReductError> {
         let mut buf = [0u8; ENTRY_SIZE];
         {
             let mut file = self.file.write().await;

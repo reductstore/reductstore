@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::replication::Replication;
+use crate::replication::replication_task::ReplicationTask;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
@@ -15,8 +15,8 @@ use tokio::sync::RwLock;
 mod diagnostics;
 pub mod proto;
 mod remote_bucket;
-mod replication;
 mod replication_repository;
+mod replication_task;
 mod transaction_filter;
 mod transaction_log;
 
@@ -95,9 +95,9 @@ pub trait ManageReplications {
 
     async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
-    fn get_replication(&self, name: &str) -> Result<&Replication, ReductError>;
+    fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError>;
 
-    fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError>;
+    fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError>;
 
     fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
 
