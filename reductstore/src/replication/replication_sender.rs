@@ -156,7 +156,7 @@ impl ReplicationSender {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replication::{Transaction, TransactionNotification};
+    use crate::replication::Transaction;
     use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
