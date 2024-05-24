@@ -16,6 +16,7 @@ mod diagnostics;
 pub mod proto;
 mod remote_bucket;
 mod replication_repository;
+mod replication_sender;
 mod replication_task;
 mod transaction_filter;
 mod transaction_log;
