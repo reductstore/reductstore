@@ -156,7 +156,7 @@ impl ReplicationSender {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replication::Transaction;
+    use crate::replication::{Transaction, TransactionNotification};
     use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -489,16 +489,6 @@ mod tests {
     fn remote_bucket() -> MockRmBucket {
         let bucket = MockRmBucket::new();
         bucket
-    }
-
-    #[fixture]
-    fn notification() -> TransactionNotification {
-        TransactionNotification {
-            bucket: "src".to_string(),
-            entry: "test".to_string(),
-            labels: Labels::new(),
-            event: Transaction::WriteRecord(10),
-        }
     }
 
     #[fixture]
