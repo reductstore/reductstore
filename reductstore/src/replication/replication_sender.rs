@@ -1,26 +1,24 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
-use crate::replication::transaction_filter::TransactionFilter;
+use crate::replication::remote_bucket::RemoteBucket;
+
 use crate::replication::transaction_log::TransactionLog;
-use crate::replication::{Transaction, TransactionNotification};
+
 use crate::storage::storage::Storage;
 use std::cmp::PartialEq;
 
-use log::{debug, error, info};
+use log::{debug, error};
 use reduct_base::error::{ErrorCode, ReductError};
 
 use crate::replication::diagnostics::DiagnosticsCounter;
-use crate::replication::replication_task::ReplicationTask;
-use futures_util::stream::Concat;
-use reduct_base::msg::diagnostics::Diagnostics;
-use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+
+use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;
-use std::path::PathBuf;
+
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::fs;
+
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
@@ -185,8 +183,6 @@ mod tests {
         }
 
     }
-
-    use super::*;
 
     #[rstest]
     #[tokio::test]

@@ -1,19 +1,17 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::stream::Concat;
-use log::{debug, error, info};
+use log::{error, info};
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
 use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
 
@@ -22,7 +20,7 @@ use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
-use crate::replication::{Transaction, TransactionNotification};
+use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
 
 pub struct ReplicationTask {
