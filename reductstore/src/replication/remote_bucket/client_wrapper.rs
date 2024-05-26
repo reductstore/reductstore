@@ -1,14 +1,21 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::storage::bucket::RecordRx;
+use crate::storage::bucket::{RecordReader, RecordRx};
+use async_stream::stream;
 use async_trait::async_trait;
+use bytes::Bytes;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::Labels;
-use reqwest::header::HeaderValue;
-use reqwest::{Body, Client, Response};
+use reqwest::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::{Body, Client, Method, Response};
+use tokio_stream::Stream;
 
+use crate::storage::entry::Entry;
+use crate::storage::proto::ts_to_us;
 use tokio_stream::wrappers::ReceiverStream;
 
 // A wrapper around the Reduct client API to make it easier to mock.
@@ -24,15 +31,8 @@ pub(super) type BoxedClientApi = Box<dyn ReductClientApi + Sync + Send>;
 // A wrapper around the Reduct bucket API to make it easier to mock.
 #[async_trait]
 pub(super) trait ReductBucketApi {
-    async fn write_record(
-        &self,
-        entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
-    ) -> Result<(), ReductError>;
+    async fn write_batch(&self, entry: &str, records: Vec<RecordReader>)
+        -> Result<(), ReductError>;
 
     fn server_url(&self) -> &str;
 
@@ -145,44 +145,120 @@ impl ReductClientApi for ReductClient {
     }
 }
 
+/*
+
+
+
+
+
+       let client = Arc::clone(&self.client);
+
+       let stream = stream! {
+            while let Some(record) = self.records.pop_front() {
+                let mut stream = record.stream_bytes();
+                while let Some(bytes) = stream.next().await {
+                    yield bytes;
+                }
+            }
+       };
+
+       let response = client
+           .send_request(request.body(Body::wrap_stream(stream)))
+           .await?;
+
+       let mut failed_records = FailedRecordMap::new();
+       response
+           .headers()
+           .iter()
+           .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
+           .for_each(|(key, value)| {
+               let record_ts = key
+                   .as_str()
+                   .trim_start_matches("x-reduct-error-")
+                   .parse::<u64>()
+                   .unwrap();
+               let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
+               failed_records.insert(
+                   record_ts,
+                   ReductError::new(
+                       ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                       message,
+                   ),
+               );
+           });
+
+       Ok(failed_records)
+
+*/
 #[async_trait]
 impl ReductBucketApi for BucketWrapper {
-    async fn write_record(
+    async fn write_batch(
         &self,
         entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        mut content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
+        mut records: Vec<RecordReader>,
     ) -> Result<(), ReductError> {
-        let stream = ReceiverStream::new(rx);
+        records.sort_by(|a, b| {
+            let a = a.record();
+            let b = b.record();
+            ts_to_us(&a.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&b.timestamp.as_ref().unwrap()))
+        });
+        let request = self.client.request(
+            Method::POST,
+            &format!("/b/{}/{}/batch", self.bucket_name, entry),
+        );
 
-        let mut request = self
-            .client
-            .request(
-                reqwest::Method::POST,
-                &format!(
-                    "{}{}/b/{}/{}",
-                    self.server_url, API_PATH, self.bucket_name, entry
-                ),
+        let content_length: u64 = records
+            .iter()
+            .map(|r| {
+                let rec = r.record();
+                rec.end - rec.begin
+            })
+            .sum();
+
+        let mut request = request
+            .header(
+                CONTENT_TYPE,
+                HeaderValue::from_str("application/octet-stream").unwrap(),
             )
-            .query(&[("ts", timestamp.to_string())]);
+            .header(
+                CONTENT_LENGTH,
+                HeaderValue::from_str(&content_length.to_string()).unwrap(),
+            );
 
-        for (key, value) in labels {
-            request = request.header(&format!("x-reduct-label-{}", key), value);
+        for record in &records {
+            let rec = record.record();
+            let mut header_values = Vec::new();
+            header_values.push(rec.content_type.clone());
+            header_values.push((rec.end - rec.begin).to_string());
+            if !rec.labels.is_empty() {
+                for label in &rec.labels {
+                    if label.value.contains(',') {
+                        header_values.push(format!("{}=\"{}\"", label.name, label.value));
+                    } else {
+                        header_values.push(format!("{}={}", label.name, label.value));
+                    }
+                }
+            }
+
+            request = request.header(
+                &format!(
+                    "x-reduct-time-{}",
+                    ts_to_us(&rec.timestamp.as_ref().unwrap())
+                ),
+                HeaderValue::from_str(&header_values.join(",").to_string()).unwrap(),
+            );
         }
 
-        if content_type.is_empty() {
-            content_type = "application/octet-stream";
-        }
+        let stream = stream! {
+             while let Some(mut record) = records.pop() {
+                let rx = record.rx();
+                 while let Some(chunk) = rx.recv().await {
+                     yield chunk;
+                 }
+             }
+        };
 
-        let response = request
-            .header(reqwest::header::CONTENT_TYPE, content_type)
-            .header(reqwest::header::CONTENT_LENGTH, content_length.to_string())
-            .body(Body::wrap_stream(stream))
-            .send()
-            .await;
+        let response = request.body(Body::wrap_stream(stream)).send().await;
 
         check_response(response)
     }

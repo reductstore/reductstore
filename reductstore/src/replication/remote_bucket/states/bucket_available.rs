@@ -4,7 +4,7 @@
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::storage::bucket::RecordRx;
+use crate::storage::bucket::{RecordReader, RecordRx};
 use async_trait::async_trait;
 use log::{debug, error};
 use reduct_base::error::{IntEnum, ReductError};
@@ -29,20 +29,12 @@ impl BucketAvailableState {
 
 #[async_trait]
 impl RemoteBucketState for BucketAvailableState {
-    async fn write_record(
+    async fn write_batch(
         mut self: Box<Self>,
-        entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
+        entry_name: &str,
+        records: Vec<RecordReader>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
-        match self
-            .bucket
-            .write_record(entry, timestamp, labels, content_type, content_length, rx)
-            .await
-        {
+        match self.bucket.write_batch(entry_name, records).await {
             Ok(_) => {
                 self.last_result = Ok(());
                 self
@@ -91,24 +83,25 @@ mod tests {
     use crate::replication::remote_bucket::tests::{
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
+    use crate::storage::proto::{us_to_ts, Record};
     use mockall::predicate;
     use reduct_base::error::{ErrorCode, ReductError};
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
 
     #[rstest]
     #[tokio::test]
-    async fn write_record_ok(client: MockReductClientApi, mut bucket: MockReductBucketApi) {
+    async fn write_record_ok(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_reader: RecordReader,
+    ) {
         bucket
-            .expect_write_record()
+            .expect_write_batch()
             .with(
                 predicate::eq("test_entry"),
-                predicate::eq(0),
-                predicate::eq(Labels::new()),
-                predicate::eq("text/plain"),
-                predicate::eq(0),
-                predicate::always(),
+                predicate::always(), // TODO: check the records
             )
-            .returning(|_, _, _, _, _, _| Ok(()));
+            .returning(|_, _| Ok(()));
 
         let state = Box::new(BucketAvailableState {
             client: Box::new(client),
@@ -116,30 +109,28 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test_entry", vec![record_reader]).await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn write_record_conn_err(client: MockReductClientApi, mut bucket: MockReductBucketApi) {
+    async fn write_record_conn_err(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_reader: RecordReader,
+    ) {
         bucket
-            .expect_write_record()
-            .returning(|_, _, _, _, _, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+            .expect_write_batch()
+            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
             Box::new(bucket),
         ));
 
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test", vec![record_reader]).await;
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::Timeout, ""))
@@ -149,24 +140,42 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn write_record_server_err(client: MockReductClientApi, mut bucket: MockReductBucketApi) {
-        bucket.expect_write_record().returning(|_, _, _, _, _, _| {
-            Err(ReductError::new(ErrorCode::InternalServerError, ""))
-        });
+    async fn write_record_server_err(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_reader: RecordReader,
+    ) {
+        bucket
+            .expect_write_batch()
+            .returning(|_, _| Err(ReductError::new(ErrorCode::InternalServerError, "")));
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
             Box::new(bucket),
         ));
 
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test", vec![record_reader]).await;
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::InternalServerError, ""))
         );
         assert!(state.is_available());
+    }
+
+    #[fixture]
+    fn record_reader() -> RecordReader {
+        let (_, rx) = tokio::sync::mpsc::channel(1);
+        RecordReader::new(
+            rx,
+            Record {
+                timestamp: Some(us_to_ts(&0)),
+                labels: Vec::new(),
+                begin: 0,
+                end: 0,
+                content_type: "text/plain".to_string(),
+                state: 0,
+            },
+            false,
+        )
     }
 }

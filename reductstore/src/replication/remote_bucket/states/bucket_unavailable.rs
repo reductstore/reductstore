@@ -4,7 +4,7 @@
 use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::storage::bucket::RecordRx;
+use crate::storage::bucket::{RecordReader, RecordRx};
 use async_trait::async_trait;
 
 use log::error;
@@ -23,23 +23,17 @@ pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
 
 #[async_trait]
 impl RemoteBucketState for BucketUnavailableState {
-    async fn write_record(
+    async fn write_batch(
         self: Box<Self>,
         entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
+        records: Vec<RecordReader>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
             let bucket = self.client.get_bucket(&self.bucket_name).await;
             return match bucket {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                    new_state
-                        .write_record(entry, timestamp, labels, content_type, content_length, rx)
-                        .await
+                    new_state.write_batch(entry, records).await
                 }
                 Err(err) => {
                     error!(
@@ -106,10 +100,7 @@ mod tests {
             error.clone(),
         ));
 
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("entry", 1234, Labels::new(), "text/plain", 5, rx)
-            .await;
+        let state = state.write_batch("entry", vec![]).await;
         assert_eq!(state.last_result(), &Ok(()));
         assert!(!state.is_available());
     }
@@ -123,10 +114,7 @@ mod tests {
             .return_once(move |_| Err(ReductError::not_found("")));
 
         let state = state_without_timeout(client);
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test_entry", vec![]).await;
         assert_eq!(state.last_result(), &Err(ReductError::not_found("")));
         assert!(!state.is_available());
     }
@@ -138,26 +126,16 @@ mod tests {
         mut bucket: MockReductBucketApi,
     ) {
         bucket
-            .expect_write_record()
-            .with(
-                predicate::eq("test_entry"),
-                predicate::eq(0),
-                predicate::eq(Labels::new()),
-                predicate::eq("text/plain"),
-                predicate::eq(0),
-                predicate::always(),
-            )
-            .return_once(|_, _, _, _, _, _| Ok(()));
+            .expect_write_batch()
+            .with(predicate::eq("test_entry"), predicate::always())
+            .return_once(|_, _| Ok(()));
         client
             .expect_get_bucket()
             .with(predicate::eq("test_bucket"))
             .return_once(move |_| Ok(Box::new(bucket)));
 
         let state = state_without_timeout(client);
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test_entry", vec![]).await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }

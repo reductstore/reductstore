@@ -280,10 +280,10 @@ mod tests {
 
         #[async_trait]
         impl RemoteBucket for RmBucket {
-            async fn write_record(
+            async fn write_batch(
                 &mut self,
                 entry_name: &str,
-                record: RecordReader,
+                record: Vec<RecordReader>,
             ) -> Result<(), ReductError>;
 
             fn is_active(&self) -> bool;
@@ -351,7 +351,7 @@ mod tests {
         notification: TransactionNotification,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
         remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket, settings).await;
 

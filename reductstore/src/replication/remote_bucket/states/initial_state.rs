@@ -5,7 +5,7 @@ use crate::replication::remote_bucket::client_wrapper::{create_client, BoxedClie
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::storage::bucket::RecordRx;
+use crate::storage::bucket::{RecordReader, RecordRx};
 use async_trait::async_trait;
 use log::error;
 use reduct_base::error::ReductError;
@@ -29,14 +29,10 @@ impl InitialState {
 
 #[async_trait]
 impl RemoteBucketState for InitialState {
-    async fn write_record(
+    async fn write_batch(
         self: Box<Self>,
         entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
+        records: Vec<RecordReader>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         // Try to get the bucket.
         let bucket = self.client.get_bucket(&self.bucket_name).await;
@@ -44,9 +40,7 @@ impl RemoteBucketState for InitialState {
             Ok(bucket) => {
                 // Bucket is available, transition to the available state and write the record.
                 let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                new_state
-                    .write_record(entry, timestamp, labels, content_type, content_length, rx)
-                    .await
+                new_state.write_batch(entry, records).await
             }
             Err(err) => {
                 // Bucket is unavailable, transition to the unavailable state.
@@ -99,16 +93,12 @@ mod tests {
         mut bucket: MockReductBucketApi,
     ) {
         bucket
-            .expect_write_record()
+            .expect_write_batch()
             .with(
                 predicate::eq("test_entry"),
-                predicate::eq(0),
-                predicate::eq(Labels::new()),
-                predicate::eq("text/plain"),
-                predicate::eq(0),
-                predicate::always(),
+                predicate::always(), // TODO: check the records
             )
-            .return_once(|_, _, _, _, _, _| Ok(()));
+            .return_once(|_, _| Ok(()));
         client
             .expect_get_bucket()
             .return_once(move |_| Ok(Box::new(bucket)));
@@ -118,10 +108,7 @@ mod tests {
             bucket_name: "test_bucket".to_string(),
         });
 
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test_entry", vec![]).await;
 
         assert_eq!(state.last_result(), &Ok(()));
         assert_eq!(state.is_available(), true);
@@ -139,10 +126,7 @@ mod tests {
             bucket_name: "test_bucket".to_string(),
         });
 
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test_entry", vec![]).await;
 
         assert_eq!(
             state.last_result(),

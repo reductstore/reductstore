@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 mod client_wrapper;
@@ -21,10 +21,10 @@ struct RemoteBucketImpl {
 
 #[async_trait]
 pub(crate) trait RemoteBucket {
-    async fn write_record(
+    async fn write_batch(
         &mut self,
         entry_name: &str,
-        record: RecordReader,
+        records: Vec<RecordReader>,
     ) -> Result<(), ReductError>;
 
     fn is_active(&self) -> bool;
@@ -41,30 +41,16 @@ impl RemoteBucketImpl {
 
 #[async_trait]
 impl RemoteBucket for RemoteBucketImpl {
-    async fn write_record(
+    async fn write_batch(
         &mut self,
         entry_name: &str,
-        record: RecordReader,
+        records: Vec<RecordReader>,
     ) -> Result<(), ReductError> {
-        let labels = Labels::from_iter(
-            record
-                .labels()
-                .iter()
-                .map(|label| (label.name.clone(), label.value.clone())),
-        );
-        let rc = record.record().clone();
         self.state = Some(
             self.state
                 .take()
                 .unwrap()
-                .write_record(
-                    entry_name,
-                    ts_to_us(&rc.timestamp.unwrap()),
-                    labels,
-                    rc.content_type.as_str(),
-                    rc.end - rc.begin,
-                    record.into_rx(),
-                )
+                .write_batch(entry_name, records)
                 .await,
         );
 
@@ -123,14 +109,10 @@ pub(super) mod tests {
 
         #[async_trait]
         impl ReductBucketApi for ReductBucketApi {
-            async fn write_record(
+            async fn write_batch(
                 &self,
                 entry: &str,
-                timestamp: u64,
-                labels: Labels,
-                content_type: &str,
-                content_length: u64,
-                rx: RecordRx,
+                records: Vec<RecordReader>,
             ) -> Result<(), ReductError>;
 
             fn server_url(&self) -> &str;
@@ -144,14 +126,10 @@ pub(super) mod tests {
 
         #[async_trait]
         impl RemoteBucketState for State {
-            async fn write_record(
+            async fn write_batch(
                 self: Box<Self>,
                 entry: &str,
-                timestamp: u64,
-                labels: Labels,
-                content_type: &str,
-                content_length: u64,
-                rx: RecordRx,
+                records: Vec<RecordReader>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
             fn last_result(&self) -> &Result<(), ReductError>;
@@ -188,16 +166,9 @@ pub(super) mod tests {
         second_state.expect_is_available().return_const(true);
 
         first_state
-            .expect_write_record()
-            .with(
-                predicate::eq("test"),
-                predicate::eq(0),
-                predicate::eq(Labels::default()),
-                predicate::eq(""),
-                predicate::eq(0),
-                predicate::always(),
-            )
-            .return_once(move |_, _, _, _, _, _| Box::new(second_state));
+            .expect_write_batch()
+            .with(predicate::eq("test"), predicate::always())
+            .return_once(move |_, _| Box::new(second_state));
 
         let mut remote_bucket = create_dst_bucket(first_state);
         write_record(&mut remote_bucket).await.unwrap();
@@ -215,8 +186,8 @@ pub(super) mod tests {
         second_state.expect_is_available().return_const(false);
 
         first_state
-            .expect_write_record()
-            .return_once(move |_, _, _, _, _, _| Box::new(second_state));
+            .expect_write_batch()
+            .return_once(move |_, _| Box::new(second_state));
 
         let mut remote_bucket = create_dst_bucket(first_state);
         assert_eq!(
@@ -237,6 +208,6 @@ pub(super) mod tests {
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
         let record = RecordReader::new(rx, rec, false);
-        remote_bucket.write_record("test", record).await
+        remote_bucket.write_batch("test", vec![record]).await
     }
 }

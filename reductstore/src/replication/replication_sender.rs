@@ -116,7 +116,8 @@ impl ReplicationSender {
                         };
 
                         let mut bucket = self.bucket.write().await;
-                        match bucket.write_record(entry_name, record_to_sync).await {
+                        // TODO: organize bathing
+                        match bucket.write_batch(entry_name, vec![record_to_sync]).await {
                             Ok(_) => {
                                 if bucket.is_active() {
                                     self.hourly_diagnostics.write().await.count(Ok(()));
@@ -180,10 +181,10 @@ mod tests {
 
         #[async_trait]
         impl RemoteBucket for RmBucket {
-            async fn write_record(
+            async fn write_batch(
                 &mut self,
                 entry_name: &str,
-                record: RecordReader,
+                record: Vec<RecordReader>,
             ) -> Result<(), ReductError>;
 
             fn is_active(&self) -> bool;
@@ -197,7 +198,7 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
         remote_bucket.expect_is_active().return_const(false);
         let sender = build_sender(remote_bucket, settings).await;
 
@@ -234,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn test_replication_comm_err(mut remote_bucket: MockRmBucket) {
         remote_bucket
-            .expect_write_record()
+            .expect_write_batch()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
         remote_bucket.expect_is_active().return_const(false);
         let sender = build_sender(remote_bucket, settings()).await;
@@ -280,7 +281,7 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
         remote_bucket.expect_is_active().return_const(true);
         let sender = build_sender(remote_bucket, settings).await;
 
@@ -332,7 +333,7 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
         remote_bucket.expect_is_active().return_const(true);
         let sender = build_sender(remote_bucket, settings).await;
 
@@ -385,7 +386,7 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_record().returning(|_, _| Ok(()));
+        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
         remote_bucket.expect_is_active().return_const(true);
         let sender = build_sender(remote_bucket, settings).await;
 
