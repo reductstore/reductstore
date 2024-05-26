@@ -198,16 +198,13 @@ impl ReductBucketApi for BucketWrapper {
         });
         let request = self.client.request(
             Method::POST,
-            &format!("/b/{}/{}/batch", self.bucket_name, entry),
+            &format!(
+                "{}{}/b/{}/{}/batch",
+                self.server_url, API_PATH, self.bucket_name, entry
+            ),
         );
 
-        let content_length: u64 = records
-            .iter()
-            .map(|r| {
-                let rec = r.record();
-                rec.end - rec.begin
-            })
-            .sum();
+        let content_length: u64 = records.iter().map(|r| r.content_length()).sum();
 
         let mut request = request
             .header(
@@ -220,12 +217,11 @@ impl ReductBucketApi for BucketWrapper {
             );
 
         for record in &records {
-            let rec = record.record();
             let mut header_values = Vec::new();
-            header_values.push(rec.content_type.clone());
-            header_values.push((rec.end - rec.begin).to_string());
-            if !rec.labels.is_empty() {
-                for label in &rec.labels {
+            header_values.push(record.content_length().to_string());
+            header_values.push(record.content_type().to_string());
+            if !record.labels().is_empty() {
+                for label in record.labels() {
                     if label.value.contains(',') {
                         header_values.push(format!("{}=\"{}\"", label.name, label.value));
                     } else {
@@ -235,10 +231,7 @@ impl ReductBucketApi for BucketWrapper {
             }
 
             request = request.header(
-                &format!(
-                    "x-reduct-time-{}",
-                    ts_to_us(&rec.timestamp.as_ref().unwrap())
-                ),
+                &format!("x-reduct-time-{}", &record.timestamp()),
                 HeaderValue::from_str(&header_values.join(",").to_string()).unwrap(),
             );
         }
