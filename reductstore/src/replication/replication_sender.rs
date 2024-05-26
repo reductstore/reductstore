@@ -62,74 +62,84 @@ impl ReplicationSender {
     pub async fn run(&self) -> SyncState {
         let mut sync_something = false;
         for (entry_name, log) in self.log_map.read().await.iter() {
-            let tr = log.write().await.front().await;
+            let tr = log.write().await.front(1).await;
             let state = match tr {
-                Ok(None) => SyncState::NoTransactions,
-                Ok(Some(transaction)) => {
-                    sync_something = true;
-                    debug!("Replicating transaction {}/{:?}", entry_name, transaction);
-
-                    let read_record_from_storage = async {
-                        let mut atempts = 3;
-                        loop {
-                            let read_record = async {
-                                self.storage
-                                    .read()
-                                    .await
-                                    .get_bucket(&self.config.src_bucket)?
-                                    .begin_read(&entry_name, *transaction.timestamp())
-                                    .await
-                            };
-                            let record = read_record.await;
-                            match record {
-                                Err(ReductError {
-                                    status: ErrorCode::TooEarly,
-                                    ..
-                                }) => {
-                                    debug!("Transaction is too early, retrying later");
-                                    sleep(Duration::from_millis(10)).await;
-                                    atempts -= 1;
-                                }
-
-                                _ => {
-                                    atempts = 0;
-                                }
-                            }
-
-                            if atempts == 0 {
-                                break record;
-                            }
-                        }
-                    };
-
-                    let record_to_sync = match read_record_from_storage.await {
-                        Ok(record) => record,
-                        Err(err) => {
-                            log.write().await.pop_front().await.unwrap();
-                            error!("Failed to read record: {}", err);
-                            self.hourly_diagnostics.write().await.count(Err(err));
-                            break;
-                        }
-                    };
-
-                    let mut bucket = self.bucket.write().await;
-                    match bucket.write_record(entry_name, record_to_sync).await {
-                        Ok(_) => {
-                            if bucket.is_active() {
-                                self.hourly_diagnostics.write().await.count(Ok(()));
-                            }
-                        }
-                        Err(err) => {
-                            debug!("Failed to replicate transaction: {:?}", err);
-                            self.hourly_diagnostics.write().await.count(Err(err));
-                        }
-                    }
-
-                    if bucket.is_active() {
-                        log.write().await.pop_front().await.unwrap();
-                        SyncState::SyncedOrRemoved
+                Ok(vec) => {
+                    if vec.is_empty() {
+                        SyncState::NoTransactions
                     } else {
-                        SyncState::NotAvailable
+                        sync_something = true;
+                        let transaction = vec.get(0).unwrap();
+                        debug!("Replicating transaction {}/{:?}", entry_name, transaction);
+
+                        let read_record_from_storage = async {
+                            let mut atempts = 3;
+                            loop {
+                                let read_record = async {
+                                    self.storage
+                                        .read()
+                                        .await
+                                        .get_bucket(&self.config.src_bucket)?
+                                        .begin_read(&entry_name, *transaction.timestamp())
+                                        .await
+                                };
+                                let record = read_record.await;
+                                match record {
+                                    Err(ReductError {
+                                        status: ErrorCode::TooEarly,
+                                        ..
+                                    }) => {
+                                        debug!("Transaction is too early, retrying later");
+                                        sleep(Duration::from_millis(10)).await;
+                                        atempts -= 1;
+                                    }
+
+                                    _ => {
+                                        atempts = 0;
+                                    }
+                                }
+
+                                if atempts == 0 {
+                                    break record;
+                                }
+                            }
+                        };
+
+                        let record_to_sync = match read_record_from_storage.await {
+                            Ok(record) => record,
+                            Err(err) => {
+                                if let Err(err) = log.write().await.pop_front(1).await {
+                                    error!("Failed to remove transaction: {:?}", err);
+                                }
+
+                                error!("Failed to read record: {}", err);
+                                self.hourly_diagnostics.write().await.count(Err(err));
+                                break;
+                            }
+                        };
+
+                        let mut bucket = self.bucket.write().await;
+                        match bucket.write_record(entry_name, record_to_sync).await {
+                            Ok(_) => {
+                                if bucket.is_active() {
+                                    self.hourly_diagnostics.write().await.count(Ok(()));
+                                }
+                            }
+                            Err(err) => {
+                                debug!("Failed to replicate transaction: {:?}", err);
+                                self.hourly_diagnostics.write().await.count(Err(err));
+                            }
+                        }
+
+                        if bucket.is_active() {
+                            if let Err(err) = log.write().await.pop_front(1).await {
+                                error!("Failed to remove transaction: {:?}", err);
+                            }
+
+                            SyncState::SyncedOrRemoved
+                        } else {
+                            SyncState::NotAvailable
+                        }
                     }
                 }
 
@@ -207,9 +217,9 @@ mod tests {
                 .unwrap()
                 .read()
                 .await
-                .front()
+                .front(1)
                 .await,
-            Ok(Some(transaction)),
+            Ok(vec![transaction]),
         );
 
         assert_eq!(
@@ -246,9 +256,9 @@ mod tests {
                 .unwrap()
                 .read()
                 .await
-                .front()
+                .front(1)
                 .await,
-            Ok(Some(transaction)),
+            Ok(vec![transaction]),
         );
 
         let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
