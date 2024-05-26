@@ -2,9 +2,8 @@ mod bucket_available;
 mod bucket_unavailable;
 mod initial_state;
 
-use crate::storage::bucket::{RecordReader, RecordRx};
+use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
-use reduct_base::Labels;
 
 pub(super) use initial_state::InitialState;
 use reduct_base::error::ReductError;

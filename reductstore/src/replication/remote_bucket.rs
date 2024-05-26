@@ -6,13 +6,12 @@ mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
 use crate::storage::bucket::RecordReader;
-use crate::storage::proto::ts_to_us;
+
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
-use reduct_base::Labels;
 
 struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
@@ -82,7 +81,7 @@ pub(super) mod tests {
     use crate::replication::remote_bucket::client_wrapper::{
         BoxedBucketApi, ReductBucketApi, ReductClientApi,
     };
-    use crate::storage::bucket::RecordRx;
+
     use crate::storage::proto::Record;
     use async_trait::async_trait;
     use mockall::{mock, predicate};

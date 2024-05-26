@@ -1,22 +1,16 @@
 // Copyright 2023 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::storage::bucket::{RecordReader, RecordRx};
+use crate::storage::bucket::RecordReader;
 use async_stream::stream;
 use async_trait::async_trait;
-use bytes::Bytes;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
-use reduct_base::Labels;
+
 use reqwest::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Method, Response};
-use tokio_stream::Stream;
 
-use crate::storage::entry::Entry;
 use crate::storage::proto::ts_to_us;
-use tokio_stream::wrappers::ReceiverStream;
 
 // A wrapper around the Reduct client API to make it easier to mock.
 #[async_trait]

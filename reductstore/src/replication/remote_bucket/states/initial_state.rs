@@ -5,11 +5,10 @@ use crate::replication::remote_bucket::client_wrapper::{create_client, BoxedClie
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::storage::bucket::{RecordReader, RecordRx};
+use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 use log::error;
 use reduct_base::error::ReductError;
-use reduct_base::Labels;
 
 /// Initial state of the remote bucket.
 pub(in crate::replication::remote_bucket) struct InitialState {
