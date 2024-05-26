@@ -114,7 +114,6 @@ impl ReplicationTask {
             }
 
             let sender = ReplicationSender::new(
-                replication_name.clone(),
                 thr_log_map,
                 thr_storage.clone(),
                 config.clone(),

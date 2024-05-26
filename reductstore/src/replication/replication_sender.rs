@@ -24,7 +24,6 @@ use tokio::time::sleep;
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {
-    replication_name: String,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<RwLock<Storage>>,
     config: ReplicationSettings,
@@ -42,7 +41,6 @@ pub(super) enum SyncState {
 
 impl ReplicationSender {
     pub fn new(
-        replication_name: String,
         log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
         storage: Arc<RwLock<Storage>>,
         config: ReplicationSettings,
@@ -50,7 +48,6 @@ impl ReplicationSender {
         bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
     ) -> Self {
         Self {
-            replication_name,
             log_map,
             storage,
             config,
@@ -484,7 +481,6 @@ mod tests {
         log_map.write().await.insert("test".to_string(), log);
 
         ReplicationSender {
-            replication_name: "test".to_string(),
             log_map,
             storage,
             config: settings,
