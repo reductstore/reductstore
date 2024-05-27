@@ -5,6 +5,7 @@ use crate::replication::remote_bucket::client_wrapper::{create_client, BoxedClie
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
+use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 use log::error;
@@ -14,6 +15,7 @@ use reduct_base::error::ReductError;
 pub(in crate::replication::remote_bucket) struct InitialState {
     client: BoxedClientApi,
     bucket_name: String,
+    last_result: Result<ErrorRecordMap, ReductError>,
 }
 
 impl InitialState {
@@ -22,6 +24,7 @@ impl InitialState {
         Self {
             client,
             bucket_name: bucket.to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
         }
     }
 }
@@ -58,8 +61,8 @@ impl RemoteBucketState for InitialState {
         }
     }
 
-    fn last_result(&self) -> &Result<(), ReductError> {
-        &Ok(())
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
+        &self.last_result
     }
     fn is_available(&self) -> bool {
         false
@@ -82,7 +85,7 @@ mod tests {
         let bucket_name = "test_bucket";
         let api_token = "test_token";
         let state = InitialState::new(url, bucket_name, api_token);
-        assert_eq!(state.last_result(), &Ok(()));
+        assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
     }
 
     #[rstest]
@@ -97,7 +100,7 @@ mod tests {
                 predicate::eq("test_entry"),
                 predicate::always(), // TODO: check the records
             )
-            .return_once(|_, _| Ok(()));
+            .return_once(|_, _| Ok(ErrorRecordMap::new()));
         client
             .expect_get_bucket()
             .return_once(move |_| Ok(Box::new(bucket)));
@@ -105,11 +108,12 @@ mod tests {
         let state = Box::new(InitialState {
             client: Box::new(client),
             bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
         });
 
         let state = state.write_batch("test_entry", vec![]).await;
 
-        assert_eq!(state.last_result(), &Ok(()));
+        assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
         assert_eq!(state.is_available(), true);
     }
 
@@ -123,6 +127,7 @@ mod tests {
         let state = Box::new(InitialState {
             client: Box::new(client),
             bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
         });
 
         let state = state.write_batch("test_entry", vec![]).await;

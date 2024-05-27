@@ -5,6 +5,7 @@ mod initial_state;
 use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 
+use crate::replication::remote_bucket::ErrorRecordMap;
 pub(super) use initial_state::InitialState;
 use reduct_base::error::ReductError;
 
@@ -22,5 +23,5 @@ pub(super) trait RemoteBucketState {
     fn is_available(&self) -> bool;
 
     // Get the last result of the write operation.
-    fn last_result(&self) -> &Result<(), ReductError>;
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
 }

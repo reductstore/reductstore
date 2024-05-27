@@ -19,6 +19,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::replication::Transaction;
+use crate::storage::bucket::RecordReader;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
@@ -38,6 +40,9 @@ pub(super) enum SyncState {
     NoTransactions,
     BrokenLog(String),
 }
+
+const MAX_PAYLOAD_SIZE: u64 = 16_000_000;
+const MAX_BATCH_SIZE: usize = 100;
 
 impl ReplicationSender {
     pub fn new(
@@ -59,78 +64,64 @@ impl ReplicationSender {
     pub async fn run(&self) -> SyncState {
         let mut sync_something = false;
         for (entry_name, log) in self.log_map.read().await.iter() {
-            let tr = log.write().await.front(1).await;
+            let tr = log.write().await.front(MAX_BATCH_SIZE).await;
             let state = match tr {
                 Ok(vec) => {
                     if vec.is_empty() {
                         SyncState::NoTransactions
                     } else {
                         sync_something = true;
-                        let transaction = vec.get(0).unwrap();
-                        debug!("Replicating transaction {}/{:?}", entry_name, transaction);
-
-                        let read_record_from_storage = async {
-                            let mut atempts = 3;
-                            loop {
-                                let read_record = async {
-                                    self.storage
-                                        .read()
-                                        .await
-                                        .get_bucket(&self.config.src_bucket)?
-                                        .begin_read(&entry_name, *transaction.timestamp())
-                                        .await
-                                };
-                                let record = read_record.await;
-                                match record {
-                                    Err(ReductError {
-                                        status: ErrorCode::TooEarly,
-                                        ..
-                                    }) => {
-                                        debug!("Transaction is too early, retrying later");
-                                        sleep(Duration::from_millis(10)).await;
-                                        atempts -= 1;
-                                    }
-
-                                    _ => {
-                                        atempts = 0;
-                                    }
+                        let mut batch = Vec::new();
+                        let mut total_size = 0;
+                        for transaction in vec {
+                            debug!(
+                                "Replicating transaction {}/{}/{:?}",
+                                self.config.src_bucket, entry_name, transaction
+                            );
+                            let record_to_sync = self.read_record(entry_name, &transaction).await;
+                            if let Some(record_to_sync) = record_to_sync {
+                                let record_size = record_to_sync.content_length();
+                                if total_size + record_size > MAX_PAYLOAD_SIZE {
+                                    break;
                                 }
-
-                                if atempts == 0 {
-                                    break record;
-                                }
+                                total_size += record_size;
+                                batch.push(record_to_sync);
                             }
-                        };
-
-                        let record_to_sync = match read_record_from_storage.await {
-                            Ok(record) => record,
-                            Err(err) => {
-                                if let Err(err) = log.write().await.pop_front(1).await {
-                                    error!("Failed to remove transaction: {:?}", err);
-                                }
-
-                                error!("Failed to read record: {}", err);
-                                self.hourly_diagnostics.write().await.count(Err(err));
-                                break;
-                            }
-                        };
+                        }
 
                         let mut bucket = self.bucket.write().await;
-                        // TODO: organize bathing
-                        match bucket.write_batch(entry_name, vec![record_to_sync]).await {
-                            Ok(_) => {
+                        let batch_size = batch.len() as u64;
+                        match bucket.write_batch(entry_name, batch).await {
+                            Ok(map) => {
                                 if bucket.is_active() {
-                                    self.hourly_diagnostics.write().await.count(Ok(()));
+                                    self.hourly_diagnostics
+                                        .write()
+                                        .await
+                                        .count(Ok(()), batch_size - map.len() as u64);
+                                    for (timestamp, err) in map {
+                                        debug!(
+                                            "Failed to replicate record {}/{}/{}: {:?}",
+                                            self.config.src_bucket, entry_name, timestamp, err
+                                        );
+                                        self.hourly_diagnostics.write().await.count(Err(err), 1);
+                                    }
                                 }
                             }
                             Err(err) => {
-                                debug!("Failed to replicate transaction: {:?}", err);
-                                self.hourly_diagnostics.write().await.count(Err(err));
+                                debug!(
+                                    "Failed to replicate batch of records from {}/{} {:?}",
+                                    self.config.src_bucket, entry_name, err
+                                );
+                                self.hourly_diagnostics
+                                    .write()
+                                    .await
+                                    .count(Err(err), batch_size);
                             }
                         }
 
                         if bucket.is_active() {
-                            if let Err(err) = log.write().await.pop_front(1).await {
+                            if let Err(err) = log.write().await.pop_front(batch_size as usize).await
+                            {
                                 error!("Failed to remove transaction: {:?}", err);
                             }
 
@@ -159,16 +150,64 @@ impl ReplicationSender {
             SyncState::NoTransactions
         }
     }
+
+    async fn read_record(
+        &self,
+        entry_name: &str,
+        transaction: &Transaction,
+    ) -> Option<RecordReader> {
+        let read_record_from_storage = async {
+            let mut atempts = 3;
+            loop {
+                let read_record = async {
+                    self.storage
+                        .read()
+                        .await
+                        .get_bucket(&self.config.src_bucket)?
+                        .begin_read(&entry_name, *transaction.timestamp())
+                        .await
+                };
+                let record = read_record.await;
+                match record {
+                    Err(ReductError {
+                        status: ErrorCode::TooEarly,
+                        ..
+                    }) => {
+                        debug!("Transaction is too early, retrying later");
+                        sleep(Duration::from_millis(10)).await;
+                        atempts -= 1;
+                    }
+
+                    _ => {
+                        atempts = 0;
+                    }
+                }
+
+                if atempts == 0 {
+                    break record;
+                }
+            }
+        };
+
+        match read_record_from_storage.await {
+            Ok(record) => Some(record),
+            Err(err) => {
+                error!("Failed to read record: {}", err);
+                self.hourly_diagnostics.write().await.count(Err(err), 1);
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
     use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
-
     use mockall::mock;
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -185,7 +224,7 @@ mod tests {
                 &mut self,
                 entry_name: &str,
                 record: Vec<RecordReader>,
-            ) -> Result<(), ReductError>;
+            ) -> Result<ErrorRecordMap, ReductError>;
 
             fn is_active(&self) -> bool;
         }
@@ -198,7 +237,9 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(false);
         let sender = build_sender(remote_bucket, settings).await;
 
@@ -281,7 +322,9 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let sender = build_sender(remote_bucket, settings).await;
 
@@ -333,7 +376,9 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let sender = build_sender(remote_bucket, settings).await;
 
@@ -386,7 +431,9 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let sender = build_sender(remote_bucket, settings).await;
 

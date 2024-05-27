@@ -4,6 +4,7 @@
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
+use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 use log::{debug, error};
@@ -13,7 +14,7 @@ use reduct_base::error::{IntEnum, ReductError};
 pub(in crate::replication::remote_bucket) struct BucketAvailableState {
     client: BoxedClientApi,
     bucket: BoxedBucketApi,
-    last_result: Result<(), ReductError>,
+    last_result: Result<ErrorRecordMap, ReductError>,
 }
 
 impl BucketAvailableState {
@@ -21,7 +22,7 @@ impl BucketAvailableState {
         Self {
             client,
             bucket,
-            last_result: Ok(()),
+            last_result: Ok(ErrorRecordMap::new()),
         }
     }
 }
@@ -35,7 +36,7 @@ impl RemoteBucketState for BucketAvailableState {
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         match self.bucket.write_batch(entry_name, records).await {
             Ok(_) => {
-                self.last_result = Ok(());
+                self.last_result = Ok(ErrorRecordMap::new());
                 self
             }
             Err(err) => {
@@ -67,7 +68,7 @@ impl RemoteBucketState for BucketAvailableState {
         }
     }
 
-    fn last_result(&self) -> &Result<(), ReductError> {
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
         &self.last_result
     }
 
@@ -100,7 +101,7 @@ mod tests {
                 predicate::eq("test_entry"),
                 predicate::always(), // TODO: check the records
             )
-            .returning(|_, _| Ok(()));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
 
         let state = Box::new(BucketAvailableState {
             client: Box::new(client),

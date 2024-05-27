@@ -129,7 +129,7 @@ impl ReplicationTask {
                     }
                     SyncState::NoTransactions => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
-                        sleep(Duration::from_millis(50)).await;
+                        sleep(Duration::from_millis(250)).await;
                     }
                     SyncState::BrokenLog(entry_name) => {
                         info!("Transaction log is corrupted, dropping the whole log");
@@ -266,6 +266,7 @@ mod tests {
     use mockall::mock;
     use rstest::*;
 
+    use crate::replication::remote_bucket::ErrorRecordMap;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;
@@ -284,7 +285,7 @@ mod tests {
                 &mut self,
                 entry_name: &str,
                 record: Vec<RecordReader>,
-            ) -> Result<(), ReductError>;
+            ) -> Result<ErrorRecordMap, ReductError>;
 
             fn is_active(&self) -> bool;
         }
@@ -351,7 +352,9 @@ mod tests {
         notification: TransactionNotification,
         settings: ReplicationSettings,
     ) {
-        remote_bucket.expect_write_batch().returning(|_, _| Ok(()));
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let replication = build_replication(remote_bucket, settings).await;
 

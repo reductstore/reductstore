@@ -1,12 +1,14 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::RecordReader;
 use async_stream::stream;
 use async_trait::async_trait;
+use std::collections::BTreeMap;
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 
+use crate::replication::remote_bucket::ErrorRecordMap;
 use reqwest::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Method, Response};
 
@@ -25,8 +27,11 @@ pub(super) type BoxedClientApi = Box<dyn ReductClientApi + Sync + Send>;
 // A wrapper around the Reduct bucket API to make it easier to mock.
 #[async_trait]
 pub(super) trait ReductBucketApi {
-    async fn write_batch(&self, entry: &str, records: Vec<RecordReader>)
-        -> Result<(), ReductError>;
+    async fn write_batch(
+        &self,
+        entry: &str,
+        records: Vec<RecordReader>,
+    ) -> Result<ErrorRecordMap, ReductError>;
 
     fn server_url(&self) -> &str;
 
@@ -190,7 +195,7 @@ impl ReductBucketApi for BucketWrapper {
         &self,
         entry: &str,
         mut records: Vec<RecordReader>,
-    ) -> Result<(), ReductError> {
+    ) -> Result<ErrorRecordMap, ReductError> {
         records.sort_by(|a, b| {
             let a = a.record();
             let b = b.record();
@@ -246,8 +251,34 @@ impl ReductBucketApi for BucketWrapper {
         };
 
         let response = request.body(Body::wrap_stream(stream)).send().await;
+        let mut failed_records = BTreeMap::new();
+        if response.is_err() {
+            check_response(response)?;
+        } else {
+            response
+                .ok()
+                .unwrap()
+                .headers()
+                .iter()
+                .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
+                .for_each(|(key, value)| {
+                    let record_ts = key
+                        .as_str()
+                        .trim_start_matches("x-reduct-error-")
+                        .parse::<u64>()
+                        .unwrap();
+                    let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
+                    failed_records.insert(
+                        record_ts,
+                        ReductError::new(
+                            ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                            message,
+                        ),
+                    );
+                });
+        }
 
-        check_response(response)
+        Ok(failed_records)
     }
 
     fn server_url(&self) -> &str {

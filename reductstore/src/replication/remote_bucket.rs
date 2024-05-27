@@ -6,6 +6,7 @@ mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
 use crate::storage::bucket::RecordReader;
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -18,13 +19,15 @@ struct RemoteBucketImpl {
     is_active: bool,
 }
 
+pub(super) type ErrorRecordMap = BTreeMap<u64, ReductError>;
+
 #[async_trait]
 pub(crate) trait RemoteBucket {
     async fn write_batch(
         &mut self,
         entry_name: &str,
         records: Vec<RecordReader>,
-    ) -> Result<(), ReductError>;
+    ) -> Result<ErrorRecordMap, ReductError>;
 
     fn is_active(&self) -> bool;
 }
@@ -44,7 +47,7 @@ impl RemoteBucket for RemoteBucketImpl {
         &mut self,
         entry_name: &str,
         records: Vec<RecordReader>,
-    ) -> Result<(), ReductError> {
+    ) -> Result<ErrorRecordMap, ReductError> {
         self.state = Some(
             self.state
                 .take()
@@ -112,7 +115,7 @@ pub(super) mod tests {
                 &self,
                 entry: &str,
                 records: Vec<RecordReader>,
-            ) -> Result<(), ReductError>;
+            ) -> Result<ErrorRecordMap, ReductError>;
 
             fn server_url(&self) -> &str;
 
@@ -131,7 +134,7 @@ pub(super) mod tests {
                 records: Vec<RecordReader>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
-            fn last_result(&self) -> &Result<(), ReductError>;
+            fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
 
             fn is_available(&self) -> bool;
         }
@@ -161,7 +164,9 @@ pub(super) mod tests {
     async fn test_write_record_ok() {
         let mut first_state = MockState::new();
         let mut second_state = MockState::new();
-        second_state.expect_last_result().return_const(Ok(()));
+        second_state
+            .expect_last_result()
+            .return_const(Ok(ErrorRecordMap::new()));
         second_state.expect_is_available().return_const(true);
 
         first_state
@@ -202,7 +207,9 @@ pub(super) mod tests {
         remote_bucket
     }
 
-    async fn write_record(remote_bucket: &mut RemoteBucketImpl) -> Result<(), ReductError> {
+    async fn write_record(
+        remote_bucket: &mut RemoteBucketImpl,
+    ) -> Result<ErrorRecordMap, ReductError> {
         let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
