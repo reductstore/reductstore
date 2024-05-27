@@ -18,7 +18,7 @@ categories = ["database"]
 crate-type = ["lib"]
 
 [dependencies]
-serde = { version = "1.0.202", features = ["derive"] }
+serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
 int-enum = "0.5.0"
 chrono = { version = "0.4.38", features = ["serde"] }
