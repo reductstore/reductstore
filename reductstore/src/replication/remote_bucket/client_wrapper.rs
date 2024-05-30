@@ -144,51 +144,6 @@ impl ReductClientApi for ReductClient {
     }
 }
 
-/*
-
-
-
-
-
-       let client = Arc::clone(&self.client);
-
-       let stream = stream! {
-            while let Some(record) = self.records.pop_front() {
-                let mut stream = record.stream_bytes();
-                while let Some(bytes) = stream.next().await {
-                    yield bytes;
-                }
-            }
-       };
-
-       let response = client
-           .send_request(request.body(Body::wrap_stream(stream)))
-           .await?;
-
-       let mut failed_records = FailedRecordMap::new();
-       response
-           .headers()
-           .iter()
-           .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
-           .for_each(|(key, value)| {
-               let record_ts = key
-                   .as_str()
-                   .trim_start_matches("x-reduct-error-")
-                   .parse::<u64>()
-                   .unwrap();
-               let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
-               failed_records.insert(
-                   record_ts,
-                   ReductError::new(
-                       ErrorCode::from_int(status.parse().unwrap()).unwrap(),
-                       message,
-                   ),
-               );
-           });
-
-       Ok(failed_records)
-
-*/
 #[async_trait]
 impl ReductBucketApi for BucketWrapper {
     async fn write_batch(
@@ -199,7 +154,7 @@ impl ReductBucketApi for BucketWrapper {
         records.sort_by(|a, b| {
             let a = a.record();
             let b = b.record();
-            ts_to_us(&a.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&b.timestamp.as_ref().unwrap()))
+            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
         });
         let request = self.client.request(
             Method::POST,
