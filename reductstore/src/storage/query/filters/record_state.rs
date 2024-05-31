@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::record::State;
-use crate::storage::proto::Record;
+
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that passes records with a specific state

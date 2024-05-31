@@ -3,7 +3,6 @@
 
 use reduct_base::Labels;
 
-use crate::storage::proto::Record;
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that excludes records with specific labels

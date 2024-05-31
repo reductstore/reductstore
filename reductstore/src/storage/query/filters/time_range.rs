@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that passes records with a timestamp within a specific range
@@ -45,7 +44,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::us_to_ts;
+    use crate::storage::proto::{us_to_ts, Record};
     use rstest::*;
 
     #[rstest]

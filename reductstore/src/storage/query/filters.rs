@@ -9,7 +9,6 @@ mod record_state;
 mod time_range;
 
 use crate::storage::proto::record::Label;
-use crate::storage::proto::Record;
 
 /// Trait for record filters in queries.
 pub(super) trait RecordFilter<P>

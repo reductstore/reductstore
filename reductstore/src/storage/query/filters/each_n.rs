@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::storage::proto::Record;
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that passes every N-th record
@@ -34,6 +33,7 @@ where
 
 mod tests {
     use super::*;
+    use crate::storage::proto::Record;
     use rstest::*;
 
     #[rstest]
