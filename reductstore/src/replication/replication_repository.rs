@@ -1,4 +1,4 @@
-// Copyright 2023-204 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::replication::proto::replication_repo::Item;
@@ -6,7 +6,7 @@ use crate::replication::proto::{
     Label as ProtoLabel, ReplicationRepo as ProtoReplicationRepo,
     ReplicationSettings as ProtoReplicationSettings,
 };
-use crate::replication::replication::Replication;
+use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::storage::Storage;
 use async_trait::async_trait;
@@ -69,8 +69,10 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
     }
 }
 
+/// A repository for managing replications from HTTP API
+
 pub(crate) struct ReplicationRepository {
-    replications: HashMap<String, Replication>,
+    replications: HashMap<String, ReplicationTask>,
     storage: Arc<RwLock<Storage>>,
     config_path: PathBuf,
 }
@@ -138,13 +140,13 @@ impl ManageReplications for ReplicationRepository {
         Ok(info)
     }
 
-    fn get_replication(&self, name: &str) -> Result<&Replication, ReductError> {
+    fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError> {
         self.replications.get(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
         })
     }
 
-    fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError> {
+    fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError> {
         self.replications.get_mut(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
         })
@@ -260,7 +262,8 @@ impl ReplicationRepository {
                 settings.src_bucket, name
             )));
         }
-        let replication = Replication::new(name.to_string(), settings, Arc::clone(&self.storage));
+        let replication =
+            ReplicationTask::new(name.to_string(), settings, Arc::clone(&self.storage));
         self.replications.insert(name.to_string(), replication);
         self.save_repo()
     }

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - RS-262: Reduce number of open/close file operations, [PR-453](https://github.com/reductstore/reductstore/pull/453)
+- RS-88: Batch records before replicating them, [PR-478](https://github.com/reductstore/reductstore/pull/478)
 
 ### Fixed
 

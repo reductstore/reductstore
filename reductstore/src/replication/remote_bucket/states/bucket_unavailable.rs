@@ -4,12 +4,12 @@
 use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::storage::bucket::RecordRx;
+use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 
 use log::error;
-use reduct_base::Labels;
 
+use crate::replication::remote_bucket::ErrorRecordMap;
 use reduct_base::error::ReductError;
 use tokio::time::{Duration, Instant};
 
@@ -18,28 +18,22 @@ pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     bucket_name: String,
     init_time: Instant,
     timeout: Duration,
-    last_result: Result<(), ReductError>,
+    last_result: Result<ErrorRecordMap, ReductError>,
 }
 
 #[async_trait]
 impl RemoteBucketState for BucketUnavailableState {
-    async fn write_record(
+    async fn write_batch(
         self: Box<Self>,
         entry: &str,
-        timestamp: u64,
-        labels: Labels,
-        content_type: &str,
-        content_length: u64,
-        rx: RecordRx,
+        records: Vec<RecordReader>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
             let bucket = self.client.get_bucket(&self.bucket_name).await;
             return match bucket {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                    new_state
-                        .write_record(entry, timestamp, labels, content_type, content_length, rx)
-                        .await
+                    new_state.write_batch(entry, records).await
                 }
                 Err(err) => {
                     error!(
@@ -57,11 +51,11 @@ impl RemoteBucketState for BucketUnavailableState {
         }
 
         let mut me = *self;
-        me.last_result = Ok(());
+        me.last_result = Ok(ErrorRecordMap::new());
         Box::new(me)
     }
 
-    fn last_result(&self) -> &Result<(), ReductError> {
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
         &self.last_result
     }
 
@@ -106,11 +100,8 @@ mod tests {
             error.clone(),
         ));
 
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("entry", 1234, Labels::new(), "text/plain", 5, rx)
-            .await;
-        assert_eq!(state.last_result(), &Ok(()));
+        let state = state.write_batch("entry", vec![]).await;
+        assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
         assert!(!state.is_available());
     }
 
@@ -123,10 +114,7 @@ mod tests {
             .return_once(move |_| Err(ReductError::not_found("")));
 
         let state = state_without_timeout(client);
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test_entry", vec![]).await;
         assert_eq!(state.last_result(), &Err(ReductError::not_found("")));
         assert!(!state.is_available());
     }
@@ -138,26 +126,16 @@ mod tests {
         mut bucket: MockReductBucketApi,
     ) {
         bucket
-            .expect_write_record()
-            .with(
-                predicate::eq("test_entry"),
-                predicate::eq(0),
-                predicate::eq(Labels::new()),
-                predicate::eq("text/plain"),
-                predicate::eq(0),
-                predicate::always(),
-            )
-            .return_once(|_, _, _, _, _, _| Ok(()));
+            .expect_write_batch()
+            .with(predicate::eq("test_entry"), predicate::always())
+            .return_once(|_, _| Ok(ErrorRecordMap::new()));
         client
             .expect_get_bucket()
             .with(predicate::eq("test_bucket"))
             .return_once(move |_| Ok(Box::new(bucket)));
 
         let state = state_without_timeout(client);
-        let (_, rx) = tokio::sync::mpsc::channel(1);
-        let state = state
-            .write_record("test_entry", 0, Labels::new(), "text/plain", 0, rx)
-            .await;
+        let state = state.write_batch("test_entry", vec![]).await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -168,7 +146,7 @@ mod tests {
             bucket_name: "test_bucket".to_string(),
             init_time: Instant::now() - Duration::new(61, 0),
             timeout: Duration::new(0, 0),
-            last_result: Ok(()),
+            last_result: Ok(ErrorRecordMap::new()),
         })
     }
 }

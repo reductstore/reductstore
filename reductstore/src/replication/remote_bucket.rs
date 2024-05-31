@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 mod client_wrapper;
@@ -6,26 +6,28 @@ mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
 use crate::storage::bucket::RecordReader;
-use crate::storage::proto::ts_to_us;
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
-use reduct_base::Labels;
 
 struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
     is_active: bool,
 }
 
+pub(super) type ErrorRecordMap = BTreeMap<u64, ReductError>;
+
 #[async_trait]
 pub(crate) trait RemoteBucket {
-    async fn write_record(
+    async fn write_batch(
         &mut self,
         entry_name: &str,
-        record: RecordReader,
-    ) -> Result<(), ReductError>;
+        records: Vec<RecordReader>,
+    ) -> Result<ErrorRecordMap, ReductError>;
 
     fn is_active(&self) -> bool;
 }
@@ -41,30 +43,16 @@ impl RemoteBucketImpl {
 
 #[async_trait]
 impl RemoteBucket for RemoteBucketImpl {
-    async fn write_record(
+    async fn write_batch(
         &mut self,
         entry_name: &str,
-        record: RecordReader,
-    ) -> Result<(), ReductError> {
-        let labels = Labels::from_iter(
-            record
-                .labels()
-                .iter()
-                .map(|label| (label.name.clone(), label.value.clone())),
-        );
-        let rc = record.record().clone();
+        records: Vec<RecordReader>,
+    ) -> Result<ErrorRecordMap, ReductError> {
         self.state = Some(
             self.state
                 .take()
                 .unwrap()
-                .write_record(
-                    entry_name,
-                    ts_to_us(&rc.timestamp.unwrap()),
-                    labels,
-                    rc.content_type.as_str(),
-                    rc.end - rc.begin,
-                    record.into_rx(),
-                )
+                .write_batch(entry_name, records)
                 .await,
         );
 
@@ -96,7 +84,7 @@ pub(super) mod tests {
     use crate::replication::remote_bucket::client_wrapper::{
         BoxedBucketApi, ReductBucketApi, ReductClientApi,
     };
-    use crate::storage::bucket::RecordRx;
+
     use crate::storage::proto::Record;
     use async_trait::async_trait;
     use mockall::{mock, predicate};
@@ -123,15 +111,11 @@ pub(super) mod tests {
 
         #[async_trait]
         impl ReductBucketApi for ReductBucketApi {
-            async fn write_record(
+            async fn write_batch(
                 &self,
                 entry: &str,
-                timestamp: u64,
-                labels: Labels,
-                content_type: &str,
-                content_length: u64,
-                rx: RecordRx,
-            ) -> Result<(), ReductError>;
+                records: Vec<RecordReader>,
+            ) -> Result<ErrorRecordMap, ReductError>;
 
             fn server_url(&self) -> &str;
 
@@ -144,17 +128,13 @@ pub(super) mod tests {
 
         #[async_trait]
         impl RemoteBucketState for State {
-            async fn write_record(
+            async fn write_batch(
                 self: Box<Self>,
                 entry: &str,
-                timestamp: u64,
-                labels: Labels,
-                content_type: &str,
-                content_length: u64,
-                rx: RecordRx,
+                records: Vec<RecordReader>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
-            fn last_result(&self) -> &Result<(), ReductError>;
+            fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
 
             fn is_available(&self) -> bool;
         }
@@ -184,20 +164,15 @@ pub(super) mod tests {
     async fn test_write_record_ok() {
         let mut first_state = MockState::new();
         let mut second_state = MockState::new();
-        second_state.expect_last_result().return_const(Ok(()));
+        second_state
+            .expect_last_result()
+            .return_const(Ok(ErrorRecordMap::new()));
         second_state.expect_is_available().return_const(true);
 
         first_state
-            .expect_write_record()
-            .with(
-                predicate::eq("test"),
-                predicate::eq(0),
-                predicate::eq(Labels::default()),
-                predicate::eq(""),
-                predicate::eq(0),
-                predicate::always(),
-            )
-            .return_once(move |_, _, _, _, _, _| Box::new(second_state));
+            .expect_write_batch()
+            .with(predicate::eq("test"), predicate::always())
+            .return_once(move |_, _| Box::new(second_state));
 
         let mut remote_bucket = create_dst_bucket(first_state);
         write_record(&mut remote_bucket).await.unwrap();
@@ -215,8 +190,8 @@ pub(super) mod tests {
         second_state.expect_is_available().return_const(false);
 
         first_state
-            .expect_write_record()
-            .return_once(move |_, _, _, _, _, _| Box::new(second_state));
+            .expect_write_batch()
+            .return_once(move |_, _| Box::new(second_state));
 
         let mut remote_bucket = create_dst_bucket(first_state);
         assert_eq!(
@@ -232,11 +207,13 @@ pub(super) mod tests {
         remote_bucket
     }
 
-    async fn write_record(remote_bucket: &mut RemoteBucketImpl) -> Result<(), ReductError> {
+    async fn write_record(
+        remote_bucket: &mut RemoteBucketImpl,
+    ) -> Result<ErrorRecordMap, ReductError> {
         let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
         let record = RecordReader::new(rx, rec, false);
-        remote_bucket.write_record("test", record).await
+        remote_bucket.write_batch("test", vec![record]).await
     }
 }
