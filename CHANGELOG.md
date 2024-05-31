@@ -9,13 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- RS-261: Add `eacn_n` and `each_s` query options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
+- RS-261: Add `each_n` and `each_s` query options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
 
 ### Removed
 
 - RS-213: `reduct-cli` and dependency from `reduct-rs`, [PR-426](https://github.com/reductstore/reductstore/pull/426)
 - Checking "stop before start" in query endpoint, [PR-466](https://github.com/reductstore/reductstore/pull/466)
-- RS-300: mark initial token as provisioned, [PR-479](https://github.com/reductstore/reductstore/pull/479)
 
 ### Security
 
@@ -29,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix removing invalid blocks at start, [PR-454](https://github.com/reductstore/reductstore/pull/454)
+- RS-300: mark initial token as provisioned, [PR-479](https://github.com/reductstore/reductstore/pull/479)
 
 ## [1.9.5] - 2024-04-08
 
