@@ -378,6 +378,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[cfg(target_os = "linux")] // we need precise timing
     async fn test_replication_too_early_ok(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
@@ -433,6 +434,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[cfg(target_os = "linux")] // we need precise timing
     async fn test_replication_too_early_err(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
