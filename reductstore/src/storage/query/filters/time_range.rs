@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::{ts_to_us, Record};
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that passes records with a timestamp within a specific range
 pub struct TimeRangeFilter {
@@ -26,9 +26,12 @@ impl TimeRangeFilter {
     }
 }
 
-impl RecordFilter for TimeRangeFilter {
-    fn filter(&mut self, record: &Record) -> bool {
-        let ts = ts_to_us(record.timestamp.as_ref().unwrap());
+impl<P> RecordFilter<P> for TimeRangeFilter
+where
+    P: FilterPoint,
+{
+    fn filter(&mut self, record: &P) -> bool {
+        let ts = record.timestamp() as u64;
         let ret = ts >= self.start && ts < self.stop;
         if ret {
             // Ensure that we don't return the same record twice

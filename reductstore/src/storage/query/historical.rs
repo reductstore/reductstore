@@ -12,12 +12,27 @@ use reduct_base::error::ReductError;
 
 use crate::storage::block_manager::{find_first_block, spawn_read_task, BlockManager, ManageBlock};
 use crate::storage::bucket::RecordReader;
+use crate::storage::proto::record::Label;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Block, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::filters::{
-    EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter,
-    RecordStateFilter, TimeRangeFilter,
+    EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter,
+    RecordFilter, RecordStateFilter, TimeRangeFilter,
 };
+
+impl FilterPoint for Record {
+    fn timestamp(&self) -> i64 {
+        ts_to_us(self.timestamp.as_ref().unwrap()) as i64
+    }
+
+    fn labels(&self) -> &Vec<Label> {
+        &self.labels
+    }
+
+    fn state(&self) -> &i32 {
+        &self.state
+    }
+}
 
 pub struct HistoricalQuery {
     /// The start time of the query.
@@ -34,13 +49,13 @@ pub struct HistoricalQuery {
     options: QueryOptions,
 
     /// Filters
-    filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
+    filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>>,
     pub(in crate::storage::query) state: QueryState,
 }
 
 impl HistoricalQuery {
     pub fn new(start_time: u64, stop_time: u64, options: QueryOptions) -> HistoricalQuery {
-        let mut filters: Vec<Box<dyn RecordFilter + Send + Sync>> = vec![
+        let mut filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>> = vec![
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
             Box::new(RecordStateFilter::new(RecordState::Finished)),
         ];

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::Record;
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that passes every N-th record
 pub struct EachNFilter {
@@ -19,8 +19,11 @@ impl EachNFilter {
     }
 }
 
-impl RecordFilter for EachNFilter {
-    fn filter(&mut self, _: &Record) -> bool {
+impl<P> RecordFilter<P> for EachNFilter
+where
+    P: FilterPoint,
+{
+    fn filter(&mut self, _: &P) -> bool {
         let ret = self.count % self.n == 0;
         self.count += 1;
         ret

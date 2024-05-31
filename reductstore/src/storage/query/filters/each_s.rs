@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::{ts_to_us, Record};
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that passes every N-th record
 pub struct EachSecondFilter {
@@ -22,12 +22,14 @@ impl EachSecondFilter {
     }
 }
 
-impl RecordFilter for EachSecondFilter {
-    fn filter(&mut self, record: &Record) -> bool {
-        let ts = ts_to_us(record.timestamp.as_ref().unwrap()) as i64;
-        let ret = ts - self.last_time >= (self.s * 1_000_000.0) as i64;
+impl<P> RecordFilter<P> for EachSecondFilter
+where
+    P: FilterPoint,
+{
+    fn filter(&mut self, point: &P) -> bool {
+        let ret = point.timestamp() - self.last_time >= (self.s * 1_000_000.0) as i64;
         if ret {
-            self.last_time = ts;
+            self.last_time = point.timestamp().clone();
         }
 
         ret
