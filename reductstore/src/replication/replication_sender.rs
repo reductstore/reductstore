@@ -73,11 +73,13 @@ impl ReplicationSender {
                         sync_something = true;
                         let mut batch = Vec::new();
                         let mut total_size = 0;
+                        let mut processed_transactions = 0;
                         for transaction in vec {
                             debug!(
                                 "Replicating transaction {}/{}/{:?}",
                                 self.config.src_bucket, entry_name, transaction
                             );
+
                             let record_to_sync = self.read_record(entry_name, &transaction).await;
                             if let Some(record_to_sync) = record_to_sync {
                                 let record_size = record_to_sync.content_length();
@@ -86,6 +88,9 @@ impl ReplicationSender {
                                 }
                                 total_size += record_size;
                                 batch.push(record_to_sync);
+                                processed_transactions += 1;
+                            } else {
+                                processed_transactions += 1; // we count to remove errored transactions from log
                             }
                         }
 
@@ -120,7 +125,8 @@ impl ReplicationSender {
                         }
 
                         if bucket.is_active() {
-                            if let Err(err) = log.write().await.pop_front(batch_size as usize).await
+                            if let Err(err) =
+                                log.write().await.pop_front(processed_transactions).await
                             {
                                 error!("Failed to remove transaction: {:?}", err);
                             }
@@ -478,6 +484,58 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_not_all_records_ok(
+        mut remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+    ) {
+        remote_bucket.expect_write_batch().returning(|_, _| {
+            Ok(ErrorRecordMap::from_iter(vec![(
+                10,
+                ReductError::new(ErrorCode::Conflict, "AlreadyExists"),
+            )]))
+        });
+        remote_bucket.expect_is_active().return_const(true);
+        let sender = build_sender(remote_bucket, settings).await;
+
+        let transaction = Transaction::WriteRecord(10);
+        imitate_write_record(&sender, &transaction).await;
+
+        let transaction = Transaction::WriteRecord(20);
+        imitate_write_record(&sender, &transaction).await;
+
+        assert_eq!(sender.run().await, SyncState::SyncedOrRemoved);
+        assert!(
+            sender
+                .log_map
+                .read()
+                .await
+                .get("test")
+                .unwrap()
+                .read()
+                .await
+                .is_empty(),
+            "We remove all errored transactions"
+        );
+
+        let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
+        assert_eq!(
+            diagnostics,
+            DiagnosticsItem {
+                ok: 60,
+                errored: 60,
+                errors: HashMap::from_iter(vec![(
+                    409,
+                    DiagnosticsError {
+                        count: 1,
+                        last_message: "AlreadyExists".to_string(),
+                    }
+                )]),
+            }
+        );
+    }
+
     async fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction) {
         sender
             .log_map
@@ -490,12 +548,14 @@ mod tests {
             .push_back(transaction.clone())
             .await
             .unwrap();
-        let tx = sender
-            .storage
-            .write()
-            .await
-            .create_bucket("src", BucketSettings::default())
-            .unwrap()
+
+        let mut storage = sender.storage.write().await;
+        let mut bucket = match storage.create_bucket("src", BucketSettings::default()) {
+            Ok(bucket) => bucket,
+            Err(err) => storage.get_mut_bucket("src").unwrap(),
+        };
+
+        let tx = bucket
             .write_record(
                 "test",
                 transaction.timestamp().clone(),

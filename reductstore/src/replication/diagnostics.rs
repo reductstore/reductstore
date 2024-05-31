@@ -7,6 +7,7 @@ use std::collections::hash_map::Entry;
 
 use std::time::{Duration, Instant};
 
+/// A counter for diagnostics.
 pub(super) struct DiagnosticsCounter {
     frames: Vec<DiagnosticsItem>,
     frame_interval: Duration,
@@ -17,6 +18,11 @@ pub(super) struct DiagnosticsCounter {
 const DEFAULT_FRAME_COUNT: u32 = 60;
 
 impl DiagnosticsCounter {
+    /// Create a new diagnostics counter.
+    ///
+    /// # Arguments
+    ///
+    /// * `count_interval` - The interval to count diagnostics.
     pub(super) fn new(count_interval: Duration) -> Self {
         Self {
             frames: vec![DiagnosticsItem::default()],
@@ -26,6 +32,11 @@ impl DiagnosticsCounter {
         }
     }
 
+    /// Count a result.
+    ///
+    /// # Arguments
+    ///
+    /// * `result` - The result to count. Errors are counted by status code.
     pub(super) fn count(&mut self, result: Result<(), ReductError>, n: u64) {
         self.check_and_create_new_frame();
         let frame = self.frames.last_mut().unwrap();
@@ -53,6 +64,11 @@ impl DiagnosticsCounter {
         }
     }
 
+    /// Get the diagnostics.
+    ///
+    /// # Returns
+    ///
+    /// The diagnostics for the last DEFAULT_FRAME_COUNT frames.
     pub(super) fn diagnostics(&self) -> DiagnosticsItem {
         let mut diagnostics = self
             .frames

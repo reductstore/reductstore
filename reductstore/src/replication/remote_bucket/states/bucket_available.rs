@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
@@ -35,8 +35,9 @@ impl RemoteBucketState for BucketAvailableState {
         records: Vec<RecordReader>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         match self.bucket.write_batch(entry_name, records).await {
-            Ok(_) => {
-                self.last_result = Ok(ErrorRecordMap::new());
+            Ok(error_map) => {
+                // all good keep the state
+                self.last_result = Ok(error_map);
                 self
             }
             Err(err) => {
@@ -85,6 +86,7 @@ mod tests {
     };
     use crate::storage::proto::{us_to_ts, Record};
     use mockall::predicate;
+    use reduct_base::error::ErrorCode::OK;
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::{fixture, rstest};
 
@@ -160,6 +162,33 @@ mod tests {
             &Err(ReductError::new(ErrorCode::InternalServerError, ""))
         );
         assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn write_record_record_errors(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_reader: RecordReader,
+    ) {
+        bucket.expect_write_batch().returning(|_, _| {
+            Ok(ErrorRecordMap::from_iter(vec![(
+                1u64,
+                ReductError::new(ErrorCode::Conflict, "AlreadyExists"),
+            )]))
+        });
+
+        let state = Box::new(BucketAvailableState::new(
+            Box::new(client),
+            Box::new(bucket),
+        ));
+
+        let state = state.write_batch("test", vec![record_reader]).await;
+        let error_map = state.last_result().as_ref().unwrap();
+
+        assert_eq!(error_map.len(), 1);
+        assert_eq!(error_map.get(&1).unwrap().status, ErrorCode::Conflict);
+        assert_eq!(error_map.get(&1).unwrap().message, "AlreadyExists");
     }
 
     #[fixture]

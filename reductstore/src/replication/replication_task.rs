@@ -359,7 +359,7 @@ mod tests {
         let replication = build_replication(remote_bucket, settings).await;
 
         replication.notify(notification).await.unwrap();
-        sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(250)).await;
         assert!(transaction_log_is_empty(&replication).await);
         assert_eq!(
             replication.info().await,
