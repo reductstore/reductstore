@@ -224,13 +224,13 @@ impl TokenRepository {
         let init_token = Token {
             name: INIT_TOKEN_NAME.to_string(),
             value: api_token.to_string(),
-            created_at: DateTime::<chrono::Utc>::from(SystemTime::now()),
+            created_at: DateTime::<Utc>::from(SystemTime::now()),
             permissions: Some(Permissions {
                 full_access: true,
                 read: vec![],
                 write: vec![],
             }),
-            is_provisioned: false,
+            is_provisioned: true,
         };
 
         token_repository
@@ -377,10 +377,6 @@ impl ManageTokens for TokenRepository {
     }
 
     fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
-        if name == INIT_TOKEN_NAME {
-            return Err(ReductError::bad_request("Cannot remove init token"));
-        }
-
         if let Some(token) = self.repo.get(name) {
             if token.is_provisioned {
                 return Err(ReductError::conflict(
@@ -493,6 +489,7 @@ mod tests {
         let token = repo.validate_token(Some("Bearer init-token")).unwrap();
         assert_eq!(token.name, "init-token");
         assert_eq!(token.value, "");
+        assert!(token.is_provisioned);
 
         let token_list = repo.get_token_list().unwrap();
         assert_eq!(token_list.len(), 2);
@@ -819,7 +816,9 @@ mod tests {
         let token = repo.remove_token("init-token");
         assert_eq!(
             token,
-            Err(ReductError::bad_request("Cannot remove init token"))
+            Err(ReductError::conflict(
+                "Can't remove provisioned token 'init-token'"
+            ))
         );
     }
 
