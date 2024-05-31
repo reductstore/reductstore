@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-213: `reduct-cli` and dependency from `reduct-rs`, [PR-426](https://github.com/reductstore/reductstore/pull/426)
 - Checking "stop before start" in query endpoint, [PR-466](https://github.com/reductstore/reductstore/pull/466)
+- RS-300: mark initial token as provisioned, [PR-479](https://github.com/reductstore/reductstore/pull/479)
 
 ### Security
 
