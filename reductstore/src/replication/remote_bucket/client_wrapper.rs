@@ -2,21 +2,21 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::RecordReader;
-use async_stream::__private::AsyncStream;
+
 use async_stream::stream;
 use async_trait::async_trait;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
 use std::collections::BTreeMap;
-use std::future::Future;
+
 use std::str::FromStr;
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Client, Error, Method, RequestBuilder, Response};
+use reqwest::{Body, Client, Error, Method, Response};
 
 use crate::storage::proto::ts_to_us;
 
@@ -244,7 +244,7 @@ impl ReductBucketApi for BucketWrapper {
     async fn write_batch(
         &self,
         entry: &str,
-        mut records: Vec<RecordReader>,
+        records: Vec<RecordReader>,
     ) -> Result<ErrorRecordMap, ReductError> {
         let (headers, stream) = Self::prepare_batch(records);
         let request = self.client.request(
