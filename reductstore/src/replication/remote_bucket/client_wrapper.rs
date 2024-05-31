@@ -2,15 +2,21 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::RecordReader;
+use async_stream::__private::AsyncStream;
 use async_stream::stream;
 use async_trait::async_trait;
+use axum::http::HeaderName;
+use bytes::Bytes;
+use futures_util::Stream;
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::str::FromStr;
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 
 use crate::replication::remote_bucket::ErrorRecordMap;
-use reqwest::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Client, Method, Response};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::{Body, Client, Error, Method, RequestBuilder, Response};
 
 use crate::storage::proto::ts_to_us;
 
@@ -85,6 +91,95 @@ impl BucketWrapper {
             client,
         }
     }
+
+    fn build_headers(records: &mut Vec<RecordReader>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        let content_length: u64 = records.iter().map(|r| r.content_length()).sum();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_str("application/octet-stream").unwrap(),
+        );
+        headers.insert(
+            CONTENT_LENGTH,
+            HeaderValue::from_str(&content_length.to_string()).unwrap(),
+        );
+
+        for record in records {
+            let mut header_values = Vec::new();
+            header_values.push(record.content_length().to_string());
+            header_values.push(record.content_type().to_string());
+            if !record.labels().is_empty() {
+                for label in record.labels() {
+                    if label.value.contains(',') {
+                        header_values.push(format!("{}=\"{}\"", label.name, label.value));
+                    } else {
+                        header_values.push(format!("{}={}", label.name, label.value));
+                    }
+                }
+            }
+
+            headers.insert(
+                HeaderName::from_str(&format!("x-reduct-time-{}", record.timestamp())).unwrap(),
+                HeaderValue::from_str(&header_values.join(",").to_string()).unwrap(),
+            );
+        }
+
+        headers
+    }
+
+    fn prepare_batch(
+        mut records: Vec<RecordReader>,
+    ) -> (HeaderMap, impl Stream<Item = Result<Bytes, ReductError>>) {
+        records.sort_by(|a, b| {
+            let a = a.record();
+            let b = b.record();
+            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
+        });
+
+        let headers = Self::build_headers(&mut records);
+
+        let stream = stream! {
+             while let Some(mut record) = records.pop() {
+                let rx = record.rx();
+                 while let Some(chunk) = rx.recv().await {
+                     yield chunk;
+                 }
+             }
+        };
+        (headers, stream)
+    }
+
+    fn parse_record_errors(
+        response: Result<Response, Error>,
+    ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
+        let mut failed_records = BTreeMap::new();
+        if response.is_err() {
+            check_response(response)?;
+        } else {
+            response
+                .ok()
+                .unwrap()
+                .headers()
+                .iter()
+                .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
+                .for_each(|(key, value)| {
+                    let record_ts = key
+                        .as_str()
+                        .trim_start_matches("x-reduct-error-")
+                        .parse::<u64>()
+                        .unwrap();
+                    let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
+                    failed_records.insert(
+                        record_ts,
+                        ReductError::new(
+                            ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                            message,
+                        ),
+                    );
+                });
+        }
+        Ok(failed_records)
+    }
 }
 
 fn check_response(response: Result<Response, reqwest::Error>) -> Result<(), ReductError> {
@@ -151,11 +246,7 @@ impl ReductBucketApi for BucketWrapper {
         entry: &str,
         mut records: Vec<RecordReader>,
     ) -> Result<ErrorRecordMap, ReductError> {
-        records.sort_by(|a, b| {
-            let a = a.record();
-            let b = b.record();
-            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
-        });
+        let (headers, stream) = Self::prepare_batch(records);
         let request = self.client.request(
             Method::POST,
             &format!(
@@ -163,75 +254,12 @@ impl ReductBucketApi for BucketWrapper {
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
         );
-
-        let content_length: u64 = records.iter().map(|r| r.content_length()).sum();
-
-        let mut request = request
-            .header(
-                CONTENT_TYPE,
-                HeaderValue::from_str("application/octet-stream").unwrap(),
-            )
-            .header(
-                CONTENT_LENGTH,
-                HeaderValue::from_str(&content_length.to_string()).unwrap(),
-            );
-
-        for record in &records {
-            let mut header_values = Vec::new();
-            header_values.push(record.content_length().to_string());
-            header_values.push(record.content_type().to_string());
-            if !record.labels().is_empty() {
-                for label in record.labels() {
-                    if label.value.contains(',') {
-                        header_values.push(format!("{}=\"{}\"", label.name, label.value));
-                    } else {
-                        header_values.push(format!("{}={}", label.name, label.value));
-                    }
-                }
-            }
-
-            request = request.header(
-                &format!("x-reduct-time-{}", &record.timestamp()),
-                HeaderValue::from_str(&header_values.join(",").to_string()).unwrap(),
-            );
-        }
-
-        let stream = stream! {
-             while let Some(mut record) = records.pop() {
-                let rx = record.rx();
-                 while let Some(chunk) = rx.recv().await {
-                     yield chunk;
-                 }
-             }
-        };
-
-        let response = request.body(Body::wrap_stream(stream)).send().await;
-        let mut failed_records = BTreeMap::new();
-        if response.is_err() {
-            check_response(response)?;
-        } else {
-            response
-                .ok()
-                .unwrap()
-                .headers()
-                .iter()
-                .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
-                .for_each(|(key, value)| {
-                    let record_ts = key
-                        .as_str()
-                        .trim_start_matches("x-reduct-error-")
-                        .parse::<u64>()
-                        .unwrap();
-                    let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
-                    failed_records.insert(
-                        record_ts,
-                        ReductError::new(
-                            ErrorCode::from_int(status.parse().unwrap()).unwrap(),
-                            message,
-                        ),
-                    );
-                });
-        }
+        let response = request
+            .headers(headers)
+            .body(Body::wrap_stream(stream))
+            .send()
+            .await;
+        let failed_records = Self::parse_record_errors(response)?;
 
         Ok(failed_records)
     }
@@ -248,4 +276,103 @@ impl ReductBucketApi for BucketWrapper {
 /// Create a new Reduct client wrapper.
 pub(super) fn create_client(url: &str, api_token: &str) -> BoxedClientApi {
     Box::new(ReductClient::new(url, api_token))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::proto::record::Label;
+    use crate::storage::proto::{us_to_ts, Record};
+    use futures_util::StreamExt;
+    use hyper::http;
+    use rstest::*;
+    use std::pin::pin;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_prepare_batch() {
+        let (tx1, rx1) = tokio::sync::mpsc::channel(1);
+        let rec1 = Record {
+            timestamp: Some(us_to_ts(&1)),
+            labels: vec![
+                Label {
+                    name: "label1".to_string(),
+                    value: "value1".to_string(),
+                },
+                Label {
+                    name: "with_comma".to_string(),
+                    value: "[x,y]".to_string(),
+                },
+            ],
+
+            content_type: "text/plain".to_string(),
+            begin: 0,
+            end: 10,
+            state: 0,
+        };
+
+        let (tx2, rx2) = tokio::sync::mpsc::channel(1);
+        let rec2 = Record {
+            timestamp: Some(us_to_ts(&2)),
+            labels: vec![Label {
+                name: "label2".to_string(),
+                value: "value2".to_string(),
+            }],
+            content_type: "image/jpg".to_string(),
+            begin: 0,
+            end: 10,
+            state: 0,
+        };
+
+        let records = vec![
+            RecordReader::new(rx1, rec1, false),
+            RecordReader::new(rx2, rec2, false),
+        ];
+
+        let (headers, stream) = BucketWrapper::prepare_batch(records);
+
+        assert_eq!(headers.len(), 4);
+        assert_eq!(
+            headers.get(CONTENT_TYPE).unwrap(),
+            "application/octet-stream"
+        );
+        assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "20");
+        assert_eq!(
+            headers.get("x-reduct-time-1").unwrap(),
+            "10,text/plain,label1=value1,with_comma=\"[x,y]\""
+        );
+        assert_eq!(
+            headers.get("x-reduct-time-2").unwrap(),
+            "10,image/jpg,label2=value2"
+        );
+
+        let mut stream = pin!(stream);
+
+        tx1.send(Ok(Bytes::from("record1"))).await.unwrap();
+        drop(tx1);
+
+        tx2.send(Ok(Bytes::from("record2"))).await.unwrap();
+        drop(tx2);
+
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk, Bytes::from("record1"));
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk, Bytes::from("record2"));
+    }
+
+    #[rstest]
+    fn test_error_parsing() {
+        let response = http::Response::builder()
+            .header("x-reduct-error-1", "404,Not Found")
+            .body(Bytes::new())
+            .unwrap();
+        let response = Ok(response).map(|r| r.into());
+        let failed_records = BucketWrapper::parse_record_errors(response).unwrap();
+        assert_eq!(failed_records.len(), 1);
+        assert_eq!(
+            failed_records.get(&1).unwrap().status(),
+            ErrorCode::NotFound
+        );
+        assert_eq!(failed_records.get(&1).unwrap().message(), "Not Found");
+    }
 }
