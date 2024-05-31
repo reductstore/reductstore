@@ -566,6 +566,8 @@ mod tests {
             .await
             .unwrap();
         tx.send(Ok(Some(Bytes::from("xxxx")))).await.unwrap();
+        tx.send(Ok(None)).await.unwrap();
+        tx.closed().await;
     }
 
     async fn build_sender(
