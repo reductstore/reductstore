@@ -86,7 +86,7 @@ mod tests {
     };
     use crate::storage::proto::{us_to_ts, Record};
     use mockall::predicate;
-    use reduct_base::error::ErrorCode::OK;
+
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::{fixture, rstest};
 
