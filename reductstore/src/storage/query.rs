@@ -3,7 +3,7 @@
 
 pub mod base;
 mod continuous;
-mod filters;
+pub mod filters;
 mod historical;
 mod limited;
 

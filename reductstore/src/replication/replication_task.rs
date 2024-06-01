@@ -164,7 +164,10 @@ impl ReplicationTask {
         }
     }
 
-    pub async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
+    pub async fn notify(
+        &mut self,
+        notification: TransactionNotification,
+    ) -> Result<(), ReductError> {
         if !self.filter.filter(&notification) {
             return Ok(());
         }
@@ -356,7 +359,7 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let replication = build_replication(remote_bucket, settings).await;
+        let mut replication = build_replication(remote_bucket, settings).await;
 
         replication.notify(notification).await.unwrap();
         sleep(Duration::from_millis(250)).await;
@@ -393,7 +396,7 @@ mod tests {
         TransactionNotification {
             bucket: "src".to_string(),
             entry: "test".to_string(),
-            labels: Labels::new(),
+            labels: Vec::new(),
             event: Transaction::WriteRecord(10),
         }
     }

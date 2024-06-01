@@ -1,15 +1,33 @@
-// Copyright 2023 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::TransactionNotification;
 use reduct_base::Labels;
+
+use crate::replication::TransactionNotification;
+use crate::storage::proto::record::Label;
+use crate::storage::query::filters::{
+    ExcludeLabelFilter, FilterPoint, IncludeLabelFilter, RecordFilter,
+};
 
 /// Filter for transaction notifications.
 pub(super) struct TransactionFilter {
     bucket: String,
     entries: Vec<String>,
-    include: Labels,
-    exclude: Labels,
+    query_filters: Vec<Box<dyn RecordFilter<TransactionNotification> + Send + Sync>>,
+}
+
+impl FilterPoint for TransactionNotification {
+    fn timestamp(&self) -> i64 {
+        0
+    }
+
+    fn labels(&self) -> &Vec<Label> {
+        &self.labels
+    }
+
+    fn state(&self) -> &i32 {
+        &0
+    }
 }
 
 impl TransactionFilter {
@@ -27,11 +45,20 @@ impl TransactionFilter {
         include: Labels,
         exclude: Labels,
     ) -> Self {
+        let mut query_filters: Vec<Box<dyn RecordFilter<TransactionNotification> + Send + Sync>> =
+            vec![];
+        if !include.is_empty() {
+            query_filters.push(Box::new(IncludeLabelFilter::new(include)));
+        }
+
+        if !exclude.is_empty() {
+            query_filters.push(Box::new(ExcludeLabelFilter::new(exclude)));
+        }
+
         Self {
             bucket,
             entries,
-            include,
-            exclude,
+            query_filters,
         }
     }
 
@@ -44,7 +71,7 @@ impl TransactionFilter {
     /// # Returns
     ///
     /// `true` if the notification matches the filter, `false` otherwise.
-    pub(super) fn filter(&self, notification: &TransactionNotification) -> bool {
+    pub(super) fn filter(&mut self, notification: &TransactionNotification) -> bool {
         if notification.bucket != self.bucket {
             return false;
         }
@@ -68,30 +95,9 @@ impl TransactionFilter {
             }
         }
 
-        // filter out notifications that match does not match the include labels (all must match)
-        if !self.include.is_empty() {
-            let found = self.include.iter().all(|(key, value)| {
-                notification
-                    .labels
-                    .iter()
-                    .any(|label| label.0 == key && label.1 == value)
-            });
-
-            if !found {
-                return false;
-            }
-        }
-
-        // filter out notifications that match the exclude labels (any must match)
-        if !self.exclude.is_empty() {
-            let found = self.exclude.iter().any(|(key, value)| {
-                notification
-                    .labels
-                    .iter()
-                    .any(|label| label.0 == key && label.1 == value)
-            });
-
-            if found {
+        // filter out notifications
+        for filter in self.query_filters.iter_mut() {
+            if !filter.filter(notification) {
                 return false;
             }
         }
@@ -102,22 +108,22 @@ impl TransactionFilter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::collections::HashMap;
+    use rstest::*;
 
     use crate::replication::Transaction;
-    use rstest::*;
+
+    use super::*;
 
     #[rstest]
     fn test_transaction_filter(notification: TransactionNotification) {
-        let filter =
+        let mut filter =
             TransactionFilter::new("bucket".to_string(), vec![], Labels::new(), Labels::new());
         assert!(filter.filter(&notification));
     }
 
     #[rstest]
     fn test_transaction_filter_bucket(notification: TransactionNotification) {
-        let filter =
+        let mut filter =
             TransactionFilter::new("other".to_string(), vec![], Labels::new(), Labels::new());
         assert!(!filter.filter(&notification));
     }
@@ -133,7 +139,7 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let filter =
+        let mut filter =
             TransactionFilter::new("bucket".to_string(), entries, Labels::new(), Labels::new());
         assert_eq!(filter.filter(&notification), expected);
     }
@@ -150,7 +156,7 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::new(
             "bucket".to_string(),
             vec![],
             Labels::from_iter(include),
@@ -170,7 +176,7 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::new(
             "bucket".to_string(),
             vec![],
             Labels::new(),
@@ -181,10 +187,16 @@ mod tests {
 
     #[fixture]
     fn notification() -> TransactionNotification {
-        let labels = HashMap::from_iter(vec![
-            ("x".to_string(), "y".to_string()),
-            ("z".to_string(), "w".to_string()),
-        ]);
+        let labels = vec![
+            Label {
+                name: "x".to_string(),
+                value: "y".to_string(),
+            },
+            Label {
+                name: "z".to_string(),
+                value: "w".to_string(),
+            },
+        ];
         TransactionNotification {
             bucket: "bucket".to_string(),
             entry: "entry".to_string(),

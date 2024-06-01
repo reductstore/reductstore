@@ -164,8 +164,8 @@ impl ManageReplications for ReplicationRepository {
         self.save_repo()
     }
 
-    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
-        for (_, replication) in self.replications.iter() {
+    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+        for (_, replication) in self.replications.iter_mut() {
             let _ = replication.notify(notification.clone()).await?;
         }
         Ok(())
@@ -484,7 +484,7 @@ mod tests {
             repl.notify(TransactionNotification {
                 bucket: "bucket-1".to_string(),
                 entry: "entry-1".to_string(),
-                labels: Labels::default(),
+                labels: Vec::new(),
                 event: WriteRecord(0),
             })
             .await
