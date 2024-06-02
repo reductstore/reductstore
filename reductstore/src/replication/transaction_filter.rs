@@ -7,7 +7,8 @@ use reduct_base::Labels;
 use crate::replication::TransactionNotification;
 use crate::storage::proto::record::Label;
 use crate::storage::query::filters::{
-    EachNFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter, RecordFilter,
+    EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter,
+    RecordFilter,
 };
 
 /// Filter for transaction notifications.
@@ -19,7 +20,7 @@ pub(super) struct TransactionFilter {
 
 impl FilterPoint for TransactionNotification {
     fn timestamp(&self) -> i64 {
-        0
+        self.event.timestamp().clone() as i64
     }
 
     fn labels(&self) -> &Vec<Label> {
@@ -53,6 +54,10 @@ impl TransactionFilter {
 
         if let Some(each_n) = settings.each_n {
             query_filters.push(Box::new(EachNFilter::new(each_n)));
+        }
+
+        if let Some(each_s) = settings.each_s {
+            query_filters.push(Box::new(EachSecondFilter::new(each_s)));
         }
 
         Self {
@@ -188,6 +193,36 @@ mod tests {
             ..ReplicationSettings::default()
         });
         assert_eq!(filter.filter(&notification), expected);
+    }
+
+    #[rstest]
+    fn test_transaction_filter_each_n(notification: TransactionNotification) {
+        let mut filter = TransactionFilter::new(ReplicationSettings {
+            src_bucket: "bucket".to_string(),
+            each_n: Some(2),
+            ..ReplicationSettings::default()
+        });
+
+        assert!(filter.filter(&notification));
+        assert!(!filter.filter(&notification));
+        assert!(filter.filter(&notification));
+    }
+
+    #[rstest]
+    fn test_transaction_filter_each_s(mut notification: TransactionNotification) {
+        let mut filter = TransactionFilter::new(ReplicationSettings {
+            src_bucket: "bucket".to_string(),
+            each_s: Some(1.0),
+            ..ReplicationSettings::default()
+        });
+
+        assert!(filter.filter(&notification));
+        notification.event = Transaction::WriteRecord(1);
+        assert!(!filter.filter(&notification));
+        notification.event = Transaction::WriteRecord(2);
+        assert!(!filter.filter(&notification));
+        notification.event = Transaction::WriteRecord(1000_002);
+        assert!(filter.filter(&notification));
     }
 
     #[fixture]
