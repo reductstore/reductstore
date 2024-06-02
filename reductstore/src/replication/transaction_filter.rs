@@ -112,6 +112,7 @@ impl TransactionFilter {
 
 #[cfg(test)]
 mod tests {
+    use reduct_base::Labels;
     use rstest::*;
 
     use crate::replication::Transaction;
