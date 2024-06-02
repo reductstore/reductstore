@@ -1,17 +1,17 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::storage::proto::Record;
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use log::debug;
 
 /// Filter that passes every N-th record
 pub struct EachNFilter {
-    n: usize,
-    count: usize,
+    n: u64,
+    count: u64,
 }
 
 impl EachNFilter {
-    pub fn new(n: usize) -> EachNFilter {
+    pub fn new(n: u64) -> EachNFilter {
         if n == 0 {
             panic!("N must be greater than 0");
         }
@@ -19,10 +19,18 @@ impl EachNFilter {
     }
 }
 
-impl RecordFilter for EachNFilter {
-    fn filter(&mut self, _: &Record) -> bool {
+impl<P> RecordFilter<P> for EachNFilter
+where
+    P: FilterPoint,
+{
+    fn filter(&mut self, p: &P) -> bool {
         let ret = self.count % self.n == 0;
         self.count += 1;
+        if ret {
+            debug!("Point {:?} passed", p.timestamp());
+        } else {
+            debug!("Point {:?} did not pass", p.timestamp());
+        }
         ret
     }
 }
@@ -31,6 +39,7 @@ impl RecordFilter for EachNFilter {
 
 mod tests {
     use super::*;
+    use crate::storage::proto::Record;
     use rstest::*;
 
     #[rstest]

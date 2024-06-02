@@ -3,8 +3,7 @@
 
 use reduct_base::Labels;
 
-use crate::storage::proto::Record;
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that excludes records with specific labels
 pub struct ExcludeLabelFilter {
@@ -26,11 +25,14 @@ impl ExcludeLabelFilter {
     }
 }
 
-impl RecordFilter for ExcludeLabelFilter {
-    fn filter(&mut self, record: &Record) -> bool {
+impl<P> RecordFilter<P> for ExcludeLabelFilter
+where
+    P: FilterPoint,
+{
+    fn filter(&mut self, record: &P) -> bool {
         !self.labels.iter().all(|(key, value)| {
             record
-                .labels
+                .labels()
                 .iter()
                 .any(|label| label.name == *key && label.value == *value)
         })

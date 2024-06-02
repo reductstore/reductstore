@@ -10,6 +10,7 @@ use axum_extra::headers::{Expect, Header, HeaderMap};
 
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
+use crate::storage::proto::record::Label;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -148,7 +149,10 @@ pub(crate) async fn write_record(
                 .notify(TransactionNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),
-                    labels,
+                    labels: labels
+                        .into_iter()
+                        .map(|(k, v)| Label { name: k, value: v })
+                        .collect(),
                     event: WriteRecord(ts),
                 })
                 .await?;

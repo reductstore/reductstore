@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::record::State;
-use crate::storage::proto::Record;
-use crate::storage::query::filters::RecordFilter;
+
+use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
 /// Filter that passes records with a specific state
 pub struct RecordStateFilter {
@@ -19,15 +19,18 @@ impl RecordStateFilter {
     ///
     /// # Returns
     ///
-    /// A new `RecordStateFilter` instance
+    /// A new `RecordSta()teFilter` instance
     pub fn new(state: State) -> RecordStateFilter {
         RecordStateFilter { state }
     }
 }
 
-impl RecordFilter for RecordStateFilter {
-    fn filter(&mut self, record: &Record) -> bool {
-        record.state == self.state as i32
+impl<P> RecordFilter<P> for RecordStateFilter
+where
+    P: FilterPoint,
+{
+    fn filter(&mut self, record: &P) -> bool {
+        *record.state() == self.state as i32
     }
 }
 

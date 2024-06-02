@@ -110,10 +110,10 @@ fn parse_limit(params: HashMap<String, String>) -> Result<Option<usize>, HttpErr
     Ok(limit)
 }
 
-fn parse_each_n(params: &HashMap<String, String>) -> Result<Option<usize>, HttpError> {
+fn parse_each_n(params: &HashMap<String, String>) -> Result<Option<u64>, HttpError> {
     let each_n = match params.get("each_n") {
         Some(each_n) => {
-            let value = each_n.parse::<usize>().map_err(|_| {
+            let value = each_n.parse::<u64>().map_err(|_| {
                 HttpError::new(
                     ErrorCode::UnprocessableEntity,
                     "'each_n' must unsigned integer",

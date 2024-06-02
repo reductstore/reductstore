@@ -618,6 +618,8 @@ mod tests {
             entries: vec!["test".to_string()],
             include: Labels::new(),
             exclude: Labels::new(),
+            each_n: None,
+            each_s: None,
         }
     }
 }

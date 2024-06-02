@@ -1,24 +1,33 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-mod each_n;
-mod each_s;
-mod exclude;
-mod include;
-mod record_state;
-mod time_range;
+pub mod each_n;
+pub mod each_s;
+pub mod exclude;
+pub mod include;
+pub mod record_state;
+pub mod time_range;
 
-use crate::storage::proto::Record;
+use crate::storage::proto::record::Label;
 
 /// Trait for record filters in queries.
-pub(super) trait RecordFilter {
+pub trait RecordFilter<P>
+where
+    P: FilterPoint,
+{
     /// Filter the record by condition.
-    fn filter(&mut self, record: &Record) -> bool;
+    fn filter(&mut self, record: &P) -> bool;
 }
 
-pub(super) use each_n::EachNFilter;
-pub(super) use each_s::EachSecondFilter;
-pub(super) use exclude::ExcludeLabelFilter;
-pub(super) use include::IncludeLabelFilter;
-pub(super) use record_state::RecordStateFilter;
-pub(super) use time_range::TimeRangeFilter;
+pub trait FilterPoint {
+    fn timestamp(&self) -> i64;
+    fn labels(&self) -> &Vec<Label>;
+    fn state(&self) -> &i32;
+}
+
+pub use each_n::EachNFilter;
+pub use each_s::EachSecondFilter;
+pub use exclude::ExcludeLabelFilter;
+pub use include::IncludeLabelFilter;
+pub use record_state::RecordStateFilter;
+pub use time_range::TimeRangeFilter;

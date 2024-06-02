@@ -7,7 +7,7 @@ use crate::Labels;
 use serde::{Deserialize, Serialize};
 
 /// Replication settings
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct ReplicationSettings {
     /// Source bucket
     pub src_bucket: String,
@@ -27,6 +27,12 @@ pub struct ReplicationSettings {
     /// Labels to exclude
     #[serde(default)]
     pub exclude: Labels,
+    /// Replication each N-th record
+    #[serde(default)]
+    pub each_n: Option<u64>,
+    /// Replication a record every S seconds
+    #[serde(default)]
+    pub each_s: Option<f64>,
 }
 
 /// Replication info

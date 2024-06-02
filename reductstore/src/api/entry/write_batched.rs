@@ -14,6 +14,7 @@ use futures_util::StreamExt;
 
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::RecordTx;
+use crate::storage::proto::record::Label;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
@@ -105,7 +106,15 @@ pub(crate) async fn write_batched_records(
                             .notify(TransactionNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),
-                                labels: timed_headers[index].1.labels.clone(),
+                                labels: timed_headers[index]
+                                    .1
+                                    .labels
+                                    .iter()
+                                    .map(|(k, v)| Label {
+                                        name: k.clone(),
+                                        value: v.clone(),
+                                    })
+                                    .collect::<Vec<Label>>(), // TODO: find a way to avoid cloning
                                 event: Transaction::WriteRecord(timed_headers[index].0),
                             })
                             .await?;
