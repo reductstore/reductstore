@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -180,7 +179,7 @@ impl ReplicationTask {
                 );
             }
 
-            let mut filter = lock.get_mut(&notification.entry).unwrap();
+            let filter = lock.get_mut(&notification.entry).unwrap();
             if !filter.filter(&notification) {
                 return Ok(());
             }

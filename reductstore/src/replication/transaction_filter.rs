@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use reduct_base::msg::replication_api::ReplicationSettings;
-use reduct_base::Labels;
 
 use crate::replication::TransactionNotification;
 use crate::storage::proto::record::Label;
