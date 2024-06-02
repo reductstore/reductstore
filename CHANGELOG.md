@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- RS-261: Add `each_n` and `each_s` query options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
+- RS-261: support downsampling parameters `each_n` and `each_s` query options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
+- RS-311: support downsampling parameters `each_n` and `each_s` in replication tasks, [PR-480](https://github.com/reductstore/reductstore/pull/480)
 
 ### Removed
 
