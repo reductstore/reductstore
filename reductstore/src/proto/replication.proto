@@ -18,6 +18,8 @@ message  ReplicationSettings {
   repeated string entries = 6;// list of entries to replicate, empty means all. Wildcards are allowed.
   repeated Label include = 7; // list of labels to include
   repeated Label exclude = 8; // list of labels to exclude
+  uint64 each_n = 9;          // replicate each Nth record
+  double each_s = 10;      // replicate each record every N seconds
 }
 
 message ReplicationRepo {

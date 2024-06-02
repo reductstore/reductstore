@@ -83,6 +83,8 @@ mod tests {
             entries: vec![],
             include: Labels::default(),
             exclude: Labels::default(),
+            each_n: None,
+            each_s: None,
         }
     }
 }

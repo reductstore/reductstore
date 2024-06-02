@@ -1,4 +1,5 @@
 """Test for WebConsole integration"""
+
 import os
 
 import pytest

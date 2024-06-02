@@ -269,6 +269,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 entries: vec![],
                 include: Labels::default(),
                 exclude: Labels::default(),
+                each_n: None,
+                each_s: None,
             };
             replications.insert(id, (name, replication));
         }
@@ -330,6 +332,16 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
                 replication.exclude.insert(key, value);
+            }
+
+            if let Some(each_n) = env.get_optional::<u64>(&format!("RS_REPLICATION_{}_EACH_N", id))
+            {
+                replication.each_n = Some(each_n);
+            }
+
+            if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
+            {
+                replication.each_s = Some(each_s);
             }
         }
 
@@ -756,6 +768,15 @@ mod tests {
 
             env_with_replications
                 .expect_get()
+                .with(eq("RS_REPLICATION_1_EACH_N"))
+                .return_const(Ok("10".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_EACH_S"))
+                .return_const(Ok("0.5".to_string()));
+
+            env_with_replications
+                .expect_get()
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_replications);
@@ -776,6 +797,8 @@ mod tests {
                 replication.settings().exclude,
                 Labels::from_iter(vec![("key2".to_string(), "value2".to_string())])
             );
+            assert_eq!(replication.settings().each_n, Some(10));
+            assert_eq!(replication.settings().each_s, Some(0.5));
             assert!(replication.is_provisioned());
         }
 

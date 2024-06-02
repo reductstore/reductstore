@@ -1,12 +1,13 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
+use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::Labels;
 
 use crate::replication::TransactionNotification;
 use crate::storage::proto::record::Label;
 use crate::storage::query::filters::{
-    ExcludeLabelFilter, FilterPoint, IncludeLabelFilter, RecordFilter,
+    EachNFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter, RecordFilter,
 };
 
 /// Filter for transaction notifications.
@@ -39,25 +40,24 @@ impl TransactionFilter {
     /// * `entries` - Entries to filter. Supports wildcards. If empty, all entries are matched.
     /// * `include` - Labels to include. All must match. If empty, all labels are matched.
     /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
-    pub(super) fn new(
-        bucket: String,
-        entries: Vec<String>,
-        include: Labels,
-        exclude: Labels,
-    ) -> Self {
+    pub(super) fn new(settings: ReplicationSettings) -> Self {
         let mut query_filters: Vec<Box<dyn RecordFilter<TransactionNotification> + Send + Sync>> =
             vec![];
-        if !include.is_empty() {
-            query_filters.push(Box::new(IncludeLabelFilter::new(include)));
+        if !settings.include.is_empty() {
+            query_filters.push(Box::new(IncludeLabelFilter::new(settings.include)));
         }
 
-        if !exclude.is_empty() {
-            query_filters.push(Box::new(ExcludeLabelFilter::new(exclude)));
+        if !settings.exclude.is_empty() {
+            query_filters.push(Box::new(ExcludeLabelFilter::new(settings.exclude)));
+        }
+
+        if let Some(each_n) = settings.each_n {
+            query_filters.push(Box::new(EachNFilter::new(each_n)));
         }
 
         Self {
-            bucket,
-            entries,
+            bucket: settings.src_bucket,
+            entries: settings.entries,
             query_filters,
         }
     }
@@ -116,15 +116,19 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter(notification: TransactionNotification) {
-        let mut filter =
-            TransactionFilter::new("bucket".to_string(), vec![], Labels::new(), Labels::new());
+        let mut filter = TransactionFilter::new(ReplicationSettings {
+            src_bucket: "bucket".to_string(),
+            ..ReplicationSettings::default()
+        });
         assert!(filter.filter(&notification));
     }
 
     #[rstest]
     fn test_transaction_filter_bucket(notification: TransactionNotification) {
-        let mut filter =
-            TransactionFilter::new("other".to_string(), vec![], Labels::new(), Labels::new());
+        let mut filter = TransactionFilter::new(ReplicationSettings {
+            src_bucket: "other".to_string(),
+            ..ReplicationSettings::default()
+        });
         assert!(!filter.filter(&notification));
     }
 
@@ -139,8 +143,11 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter =
-            TransactionFilter::new("bucket".to_string(), entries, Labels::new(), Labels::new());
+        let mut filter = TransactionFilter::new(ReplicationSettings {
+            src_bucket: "bucket".to_string(),
+            entries,
+            ..ReplicationSettings::default()
+        });
         assert_eq!(filter.filter(&notification), expected);
     }
 
@@ -156,12 +163,11 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(
-            "bucket".to_string(),
-            vec![],
-            Labels::from_iter(include),
-            Labels::new(),
-        );
+        let mut filter = TransactionFilter::new(ReplicationSettings {
+            src_bucket: "bucket".to_string(),
+            include: Labels::from_iter(include),
+            ..ReplicationSettings::default()
+        });
         assert_eq!(filter.filter(&notification), expected);
     }
 
@@ -176,12 +182,11 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(
-            "bucket".to_string(),
-            vec![],
-            Labels::new(),
-            Labels::from_iter(exclude),
-        );
+        let mut filter = TransactionFilter::new(ReplicationSettings {
+            src_bucket: "bucket".to_string(),
+            exclude: Labels::from_iter(exclude),
+            ..ReplicationSettings::default()
+        });
         assert_eq!(filter.filter(&notification), expected);
     }
 

@@ -67,7 +67,7 @@ pub struct QueryOptions {
     /// The maximum number of records to return only for non-continuous queries.
     pub limit: Option<usize>,
     /// Return each N records
-    pub each_n: Option<usize>,
+    pub each_n: Option<u64>,
     /// Return a record every S seconds
     pub each_s: Option<f64>,
 }

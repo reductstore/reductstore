@@ -43,6 +43,8 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
                 .into_iter()
                 .map(|(k, v)| ProtoLabel { name: k, value: v })
                 .collect(),
+            each_s: settings.each_s.unwrap_or(0.0),
+            each_n: settings.each_n.unwrap_or(0),
         }
     }
 }
@@ -65,6 +67,16 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
                 .into_iter()
                 .map(|label| (label.name, label.value))
                 .collect(),
+            each_s: if settings.each_s > 0.0 {
+                Some(settings.each_s)
+            } else {
+                None
+            },
+            each_n: if settings.each_n > 0 {
+                Some(settings.each_n)
+            } else {
+                None
+            },
         }
     }
 }
@@ -509,6 +521,8 @@ mod tests {
             entries: vec!["entry-1".to_string()],
             include: Labels::default(),
             exclude: Labels::default(),
+            each_n: None,
+            each_s: None,
         }
     }
 
