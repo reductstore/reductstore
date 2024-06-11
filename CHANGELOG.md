@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2024-06-11
+
 ### Added
 
 - RS-261: support downsampling parameters `each_n` and `each_s` query options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
@@ -711,7 +713,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.5...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.10.0...HEAD
+
+[1.10.0]: https://github.com/reductstore/reductstore/compare/v1.9.5...v1.10.0
 
 [1.9.5]: https://github.com/reductstore/reductstore/compare/v1.9.4...v1.9.5
 
