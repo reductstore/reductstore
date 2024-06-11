@@ -7,31 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2024-06-11
+
+### Added
+
+- RS-261: support downsampling parameters `each_n` and `each_s` query options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
+- RS-311: support downsampling parameters `each_n` and `each_s` in replication tasks, [PR-480](https://github.com/reductstore/reductstore/pull/480)
+
+### Removed
+
+- RS-213: `reduct-cli` and dependency from `reduct-rs`, [PR-426](https://github.com/reductstore/reductstore/pull/426)
+- Checking "stop before start" in query endpoint, [PR-466](https://github.com/reductstore/reductstore/pull/466)
+
+### Security
+
+- Bump `rustls` from 0.21.10 to 0.21.12, [PR-432](https://github.com/reductstore/reductstore/pull/432)
+
+### Changed
+
+- RS-262: Reduce number of open/close file operations, [PR-453](https://github.com/reductstore/reductstore/pull/453)
+- RS-88: Batch records before replicating them, [PR-478](https://github.com/reductstore/reductstore/pull/478)
+- Update web console up to 1.6.1, [PR-484](https://github.com/reductstore/reductstore/pull/484)
+
+### Fixed
+
+- Fix removing invalid blocks at start, [PR-454](https://github.com/reductstore/reductstore/pull/454)
+- RS-300: mark initial token as provisioned, [PR-479](https://github.com/reductstore/reductstore/pull/479)
+
 ## [1.9.5] - 2024-04-08
 
 ### Fixed
 
-- RS-241: Fix replication and transaction log initialization, [PR-431](https://github.com/reductstore/reductstore/pull/431)
+- RS-241: Fix replication and transaction log
+  initialization, [PR-431](https://github.com/reductstore/reductstore/pull/431)
 
 ### Changed
 
-- RS-239: Override errored records if they have the same size, [PR-428](https://github.com/reductstore/reductstore/pull/428)
+- RS-239: Override errored records if they have the same
+  size, [PR-428](https://github.com/reductstore/reductstore/pull/428)
 
 ### Security
 
-- Vulnerable to degradation of service with CONTINUATION Flood, [PR-430](https://github.com/reductstore/reductstore/pull/430)
+- Vulnerable to degradation of service with CONTINUATION
+  Flood, [PR-430](https://github.com/reductstore/reductstore/pull/430)
 
 ## [1.9.4] - 2024-03-29
 
 ### Fixed
 
-- RS-233: fix wrong order of timestamps in batched write request, [PR-421](https://github.com/reductstore/reductstore/pull/421)
+- RS-233: fix wrong order of timestamps in batched write
+  request, [PR-421](https://github.com/reductstore/reductstore/pull/421)
 
 ## [1.9.3] - 2024-03-16
 
 ### Fixed
 
-- RS-221: fix body draining in write a record and batch edpoints, [PR-418](https://github.com/reductstore/reductstore/pull/418)
+- RS-221: fix body draining in write a record and batch
+  edpoints, [PR-418](https://github.com/reductstore/reductstore/pull/418)
 
 ## [1.9.2] - 2024-03-15
 
@@ -61,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- RS-195: check path and query before unwrap them in middleware, [PR-407](https://github.com/reductstore/reductstore/pull/407)
+- RS-195: check path and query before unwrap them in
+  middleware, [PR-407](https://github.com/reductstore/reductstore/pull/407)
 
 ### Security
 
@@ -84,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- reductstore: Cargo feature `web-console` to build without Web Console, [PR-365](https://github.com/reductstore/reductstore/pull/365)
+- reductstore: Cargo feature `web-console` to build without Web
+  Console, [PR-365](https://github.com/reductstore/reductstore/pull/365)
 - reductstore: Web Console v1.4.0
 - reduct-cli: `bucket` command to manage buckets, [PR-367](https://github.com/reductstore/reductstore/pull/367)
 - reductstore: Data replication, [PR-377](https://github.com/reductstore/reductstore/pull/377)
@@ -93,21 +127,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- reductstore: Stop downloading Web Console at docs.rs build, [PR-366](https://github.com/reductstore/reductstore/pull/366)
-- reductstore: Sync write tasks with HTTP API to avoid unfinished records, [PR-374](https://github.com/reductstore/reductstore/pull/374)
-- reductstore: Re-create a transaction log of replication if it is broken, [PR-379](https://github.com/reductstore/reductstore/pull/379)
+- reductstore: Stop downloading Web Console at docs.rs
+  build, [PR-366](https://github.com/reductstore/reductstore/pull/366)
+- reductstore: Sync write tasks with HTTP API to avoid unfinished
+  records, [PR-374](https://github.com/reductstore/reductstore/pull/374)
+- reductstore: Re-create a transaction log of replication if it is
+  broken, [PR-379](https://github.com/reductstore/reductstore/pull/379)
 - reductstore: Status for unfinished records, [PR-381](https://github.com/reductstore/reductstore/pull/381)
 - reductstore: Discard replication for any storage errors, [PR-382](https://github.com/reductstore/reductstore/pull/382)
 - reductstore: CPU consumption for replication, [PR-383](https://github.com/reductstore/reductstore/pull/383)
-- reductstore: GET /api/v1/replications/:replication_name empty diagnostics, [PR-384](https://github.com/reductstore/reductstore/pull/384)
+- reductstore: GET /api/v1/replications/:replication_name empty
+  diagnostics, [PR-384](https://github.com/reductstore/reductstore/pull/384)
 - reductstore: Error counting in replication diagnostics, [PR-385](https://github.com/reductstore/reductstore/pull/385)
-- reductstore: Discard transaction from replication log if remote bucket is available, [PR-386](https://github.com/reductstore/reductstore/pull/386)
+- reductstore: Discard transaction from replication log if remote bucket is
+  available, [PR-386](https://github.com/reductstore/reductstore/pull/386)
 - reductstore: Use only HTTP1 for replication engine, [PR-388](https://github.com/reductstore/reductstore/pull/388)
-- reductstore: Mask access token for remote instance in replication, [PR-390](https://github.com/reductstore/reductstore/pull/390)
+- reductstore: Mask access token for remote instance in
+  replication, [PR-390](https://github.com/reductstore/reductstore/pull/390)
 
 ### Changed
 
-- reductstore: Refactor read and write operation with tokio channels, [PR-370](https://github.com/reductstore/reductstore/pull/370)
+- reductstore: Refactor read and write operation with tokio
+  channels, [PR-370](https://github.com/reductstore/reductstore/pull/370)
 - docs: update link to new website, [PR-375](https://github.com/reductstore/reductstore/pull/375)
 - reductstore: Update Web Console to v1.4.1, [PR-389](https://github.com/reductstore/reductstore/pull/389)
 
@@ -117,13 +158,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.3] - 2023-11-08
 
-## Fixed
+### Fixed
 
 - reductstore: Fix entry size calculation, [PR-373](https://github.com/reductstore/reductstore/pull/373)
 
 ## [1.7.2] - 2023-11-01
 
-## Fixed
+### Fixed
 
 - reduct-rs: Fix query URL in ReductClient, [PR-372](https://github.com/reductstore/reductstore/pull/372)
 
@@ -131,14 +172,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- reductstore: Wrong size calculation if a block could not be removed, [PR-371](https://github.com/reductstore/reductstore/pull/371)
+- reductstore: Wrong size calculation if a block could not be
+  removed, [PR-371](https://github.com/reductstore/reductstore/pull/371)
 
 ## [1.7.0] - 2023-10-06
 
 ### Added
 
 - reduct-cli: `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
-- reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
+-
+reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
 - reductstore: `healthcheck` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 - reductstore: provisioning with environment variables, [PR-352](https://github.com/reductstore/reductstore/pull/352)
 - reductstore,reduct-rs: batched write API, [PR-355](https://github.com/reductstore/reductstore/pull/355)
@@ -153,13 +196,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- reduct-rs: Normalize instance URL in `ClientBuilder.url`, [PR-343](https://github.com/reductstore/reductstore/pull/343)
+- reduct-rs: Normalize instance URL
+  in `ClientBuilder.url`, [PR-343](https://github.com/reductstore/reductstore/pull/343)
 
-# [1.6.2] - 2023-09-20
+## [1.6.2] - 2023-09-20
 
 ### Fixed
 
-- reductstore: Panic for a bad time interval in `GET /b/:bucket/:entry/q`, [PR-357](https://github.com/reductstore/reductstore/pull/357)
+- reductstore: Panic for a bad time interval
+  in `GET /b/:bucket/:entry/q`, [PR-357](https://github.com/reductstore/reductstore/pull/357)
 
 ## [1.6.1] - 2023-08-28
 
@@ -668,7 +713,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.9.5...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.10.0...HEAD
+
+[1.10.0]: https://github.com/reductstore/reductstore/compare/v1.9.5...v1.10.0
 
 [1.9.5]: https://github.com/reductstore/reductstore/compare/v1.9.4...v1.9.5
 

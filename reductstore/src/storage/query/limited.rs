@@ -35,7 +35,7 @@ impl Query for LimitedQuery {
         block_indexes: &BTreeSet<u64>,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        // TODO: It could be done better, maybe it make sense to move the limit into HistoricalQuery instead of manipulating the state here.
+        // TODO: It could be done better, maybe it make senses to move the limit into HistoricalQuery instead of manipulating the state here.
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
                 self.query.state = QueryState::Done;

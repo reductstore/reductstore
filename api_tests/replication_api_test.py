@@ -1,4 +1,5 @@
 """Replication Tests"""
+
 import pytest
 
 
@@ -19,6 +20,11 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "src_bucket": bucket_name,
             "dst_bucket": "dst_bucket",
             "dst_host": "http://localhost:9000",
+            "entries": ["entry1", "entry2"],
+            "include": {"key1": "value1"},
+            "exclude": {"key2": "value2"},
+            "each_n": 10,
+            "each_s": 0.5,
         },
     )
 
@@ -35,13 +41,15 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "pending_records": 0,
         },
         "settings": {
+            "src_bucket": bucket_name,
             "dst_bucket": "dst_bucket",
             "dst_host": "http://localhost:9000",
             "dst_token": "***",
-            "entries": [],
-            "exclude": {},
-            "include": {},
-            "src_bucket": bucket_name,
+            "entries": ["entry1", "entry2"],
+            "exclude": {"key2": "value2"},
+            "include": {"key1": "value1"},
+            "each_n": 10,
+            "each_s": 0.5,
         },
     }
 
@@ -107,6 +115,8 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
             "entries": [],
             "exclude": {},
             "include": {},
+            "each_n": None,
+            "each_s": None,
             "src_bucket": bucket_name,
         },
     }

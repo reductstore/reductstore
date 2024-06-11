@@ -1,26 +1,28 @@
 // Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
-use crate::replication::replication::Replication;
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use tokio::sync::RwLock;
+
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
-use reduct_base::Labels;
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use crate::replication::replication_task::ReplicationTask;
+use crate::storage::proto::record::Label;
+use crate::storage::storage::Storage;
 
 mod diagnostics;
 pub mod proto;
 mod remote_bucket;
-mod replication;
 mod replication_repository;
+mod replication_sender;
+mod replication_task;
 mod transaction_filter;
 mod transaction_log;
-
-use crate::storage::storage::Storage;
 
 /// Replication event to be synchronized.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,7 +64,7 @@ impl TryFrom<u8> for Transaction {
 pub struct TransactionNotification {
     pub bucket: String,
     pub entry: String,
-    pub labels: Labels,
+    pub labels: Vec<Label>,
     pub event: Transaction,
 }
 
@@ -95,13 +97,13 @@ pub trait ManageReplications {
 
     async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
-    fn get_replication(&self, name: &str) -> Result<&Replication, ReductError>;
+    fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError>;
 
-    fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError>;
+    fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError>;
 
     fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
 
-    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
+    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
 pub(crate) async fn create_replication_engine(

@@ -1,4 +1,4 @@
-// Copyright 2023-204 ReductStore
+// Copyright 2023-2024 ReductStore
 // Licensed under the Business Source License 1.1
 
 use crate::replication::proto::replication_repo::Item;
@@ -6,7 +6,7 @@ use crate::replication::proto::{
     Label as ProtoLabel, ReplicationRepo as ProtoReplicationRepo,
     ReplicationSettings as ProtoReplicationSettings,
 };
-use crate::replication::replication::Replication;
+use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::storage::Storage;
 use async_trait::async_trait;
@@ -43,6 +43,8 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
                 .into_iter()
                 .map(|(k, v)| ProtoLabel { name: k, value: v })
                 .collect(),
+            each_s: settings.each_s.unwrap_or(0.0),
+            each_n: settings.each_n.unwrap_or(0),
         }
     }
 }
@@ -65,12 +67,24 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
                 .into_iter()
                 .map(|label| (label.name, label.value))
                 .collect(),
+            each_s: if settings.each_s > 0.0 {
+                Some(settings.each_s)
+            } else {
+                None
+            },
+            each_n: if settings.each_n > 0 {
+                Some(settings.each_n)
+            } else {
+                None
+            },
         }
     }
 }
 
+/// A repository for managing replications from HTTP API
+
 pub(crate) struct ReplicationRepository {
-    replications: HashMap<String, Replication>,
+    replications: HashMap<String, ReplicationTask>,
     storage: Arc<RwLock<Storage>>,
     config_path: PathBuf,
 }
@@ -138,13 +152,13 @@ impl ManageReplications for ReplicationRepository {
         Ok(info)
     }
 
-    fn get_replication(&self, name: &str) -> Result<&Replication, ReductError> {
+    fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError> {
         self.replications.get(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
         })
     }
 
-    fn get_mut_replication(&mut self, name: &str) -> Result<&mut Replication, ReductError> {
+    fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError> {
         self.replications.get_mut(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
         })
@@ -162,8 +176,8 @@ impl ManageReplications for ReplicationRepository {
         self.save_repo()
     }
 
-    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
-        for (_, replication) in self.replications.iter() {
+    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+        for (_, replication) in self.replications.iter_mut() {
             let _ = replication.notify(notification.clone()).await?;
         }
         Ok(())
@@ -260,7 +274,8 @@ impl ReplicationRepository {
                 settings.src_bucket, name
             )));
         }
-        let replication = Replication::new(name.to_string(), settings, Arc::clone(&self.storage));
+        let replication =
+            ReplicationTask::new(name.to_string(), settings, Arc::clone(&self.storage));
         self.replications.insert(name.to_string(), replication);
         self.save_repo()
     }
@@ -481,7 +496,7 @@ mod tests {
             repl.notify(TransactionNotification {
                 bucket: "bucket-1".to_string(),
                 entry: "entry-1".to_string(),
-                labels: Labels::default(),
+                labels: Vec::new(),
                 event: WriteRecord(0),
             })
             .await
@@ -506,6 +521,8 @@ mod tests {
             entries: vec!["entry-1".to_string()],
             include: Labels::default(),
             exclude: Labels::default(),
+            each_n: None,
+            each_s: None,
         }
     }
 

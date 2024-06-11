@@ -116,7 +116,7 @@ impl Bucket {
     /// * `name` - The name of the bucket
     /// * `path` - The path to folder with buckets
     /// * `settings` - The settings for the bucket
-    /// * `repl_agent_builder` - The replication agent builder
+    /// * `repl_agent_builder` - The replica agent builder
     ///
     /// # Returns
     ///
@@ -147,7 +147,7 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `path` - The path to the bucket
-    /// * `repl_agent_builder` - The replication agent builder
+    /// * `repl_agent_builder` - The replica agent builder
     ///
     /// # Returns
     ///
@@ -391,7 +391,7 @@ impl Bucket {
                     );
 
                     let mut candidates: Vec<(u64, &Entry)> = vec![];
-                    for (_, entry) in self.entries.iter() {
+                    for (_, entry) in self.entries.iter_mut() {
                         let info = entry.info().await?;
                         candidates.push((info.oldest_record, entry));
                     }
@@ -436,7 +436,7 @@ impl Bucket {
 
                 // Remove empty entries
                 let mut names_to_remove = vec![];
-                for (name, entry) in &self.entries {
+                for (name, entry) in self.entries.iter_mut() {
                     if entry.info().await?.record_count != 0 {
                         continue;
                     }

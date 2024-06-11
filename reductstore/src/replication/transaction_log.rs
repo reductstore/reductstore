@@ -131,7 +131,8 @@ impl TransactionLog {
         }
 
         if self.write_pos == self.read_pos {
-            let transaction = self.unsafe_head().await?;
+            let transaction = self.unsafe_head(1).await?.get(0).cloned();
+
             self.unsafe_pop().await?;
             Ok(transaction)
         } else {
@@ -155,39 +156,59 @@ impl TransactionLog {
         (len_in_bytes / ENTRY_SIZE) as usize
     }
 
-    pub async fn front(&mut self) -> Result<Option<Transaction>, ReductError> {
+    pub async fn front(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
         if self.is_empty() {
-            return Ok(None);
+            return Ok(Vec::new());
         }
-        self.unsafe_head().await
+        let transaction = self.unsafe_head(n).await?;
+        Ok(transaction)
     }
 
-    pub async fn pop_front(&mut self) -> Result<(), ReductError> {
-        if self.read_pos == self.write_pos {
-            return Err(ReductError::internal_server_error(
-                "Transaction log is empty",
-            ));
+    pub async fn pop_front(&mut self, n: usize) -> Result<usize, ReductError> {
+        let mut popped = 0usize;
+        for _ in 0..n {
+            if self.read_pos == self.write_pos {
+                break;
+            }
+            self.unsafe_pop().await?;
+            popped += 1;
         }
 
-        self.unsafe_pop().await
+        Ok(popped)
     }
 
-    async fn unsafe_head(&mut self) -> Result<Option<Transaction>, ReductError> {
+    async fn unsafe_head(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
         let mut buf = [0u8; ENTRY_SIZE];
-        {
-            let mut file = self.file.write().await;
-            file.seek(SeekFrom::Start(self.read_pos as u64)).await?;
-            file.read_exact(&mut buf).await?;
-        }
-        let transaction_type = buf[0];
-        let timestamp = u64::from_be_bytes(buf[1..9].try_into().unwrap());
+        let mut read_pos = self.read_pos;
+        let mut transactions = Vec::with_capacity(n);
+        let mut file = self.file.write().await;
 
-        match transaction_type {
-            0 => Ok(Some(Transaction::WriteRecord(timestamp))),
-            _ => Err(ReductError::internal_server_error(
-                "Invalid transaction type",
-            )),
+        for _ in 0..n {
+            file.seek(SeekFrom::Start(read_pos as u64)).await?;
+            file.read_exact(&mut buf).await?;
+            let transaction_type = buf[0];
+            let timestamp = u64::from_be_bytes(buf[1..9].try_into().unwrap());
+
+            match transaction_type {
+                0 => transactions.push(Transaction::WriteRecord(timestamp)),
+                _ => {
+                    return Err(ReductError::internal_server_error(
+                        "Invalid transaction type",
+                    ))
+                }
+            }
+
+            read_pos += ENTRY_SIZE;
+            if read_pos >= self.capacity_in_bytes {
+                read_pos = HEADER_SIZE;
+            }
+
+            if read_pos == self.write_pos {
+                break;
+            }
         }
+
+        Ok(transactions)
     }
 
     async fn unsafe_pop(&mut self) -> Result<(), ReductError> {
@@ -244,27 +265,49 @@ mod tests {
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(transaction_log.is_empty(), false);
         assert_eq!(
-            transaction_log.front().await.unwrap(),
-            Some(Transaction::WriteRecord(1))
+            transaction_log.front(2).await.unwrap(),
+            vec![Transaction::WriteRecord(1), Transaction::WriteRecord(2),]
         );
 
-        transaction_log.pop_front().await.unwrap();
-        assert_eq!(
-            transaction_log.front().await.unwrap(),
-            Some(Transaction::WriteRecord(2))
-        );
-        assert_eq!(transaction_log.len(), 1);
-        assert_eq!(transaction_log.is_empty(), false);
-
-        transaction_log.pop_front().await.unwrap();
-        assert_eq!(transaction_log.len(), 0);
+        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
         assert_eq!(transaction_log.is_empty(), true);
 
-        let err = transaction_log.pop_front().await.err().unwrap();
+        assert_eq!(transaction_log.pop_front(1).await.unwrap(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_out_of_range(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path, 100).await.unwrap();
         assert_eq!(
-            err,
-            ReductError::internal_server_error("Transaction log is empty")
+            transaction_log
+                .push_back(Transaction::WriteRecord(1))
+                .await
+                .unwrap(),
+            None
         );
+        assert_eq!(
+            transaction_log
+                .push_back(Transaction::WriteRecord(2))
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(transaction_log.len(), 2);
+        assert_eq!(transaction_log.is_empty(), false);
+
+        assert_eq!(
+            transaction_log.front(3).await.unwrap(),
+            vec![Transaction::WriteRecord(1), Transaction::WriteRecord(2),],
+            "We return only the available transactions."
+        );
+
+        assert_eq!(
+            transaction_log.pop_front(3).await.unwrap(),
+            2,
+            "We pop only the available transactions."
+        );
+        assert_eq!(transaction_log.is_empty(), true);
     }
 
     #[rstest]
@@ -280,18 +323,9 @@ mod tests {
 
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front().await.unwrap(),
-            Some(Transaction::WriteRecord(3))
+            transaction_log.front(2).await.unwrap(),
+            vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
-        transaction_log.pop_front().await.unwrap();
-
-        assert_eq!(
-            transaction_log.front().await.unwrap(),
-            Some(Transaction::WriteRecord(4))
-        );
-        transaction_log.pop_front().await.unwrap();
-
-        assert_eq!(transaction_log.is_empty(), true);
     }
 
     #[rstest]
@@ -308,18 +342,13 @@ mod tests {
         }
 
         let mut transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
+        assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front().await.unwrap(),
-            Some(Transaction::WriteRecord(3))
+            transaction_log.front(2).await.unwrap(),
+            vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
-        transaction_log.pop_front().await.unwrap();
 
-        assert_eq!(
-            transaction_log.front().await.unwrap(),
-            Some(Transaction::WriteRecord(4))
-        );
-        transaction_log.pop_front().await.unwrap();
-
+        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
         assert_eq!(transaction_log.is_empty(), true);
     }
 

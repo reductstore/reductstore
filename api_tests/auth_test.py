@@ -1,4 +1,5 @@
 """Test authorization"""
+
 from conftest import requires_env, auth_headers
 
 
