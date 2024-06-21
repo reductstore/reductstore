@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- RS-333: Transfer the project to ReductSoftare UG, [PR-488](https://github.com/reductstore/reductstore/pull/488)
+- RS-333: Transfer the project to ReductSoftware UG, [PR-488](https://github.com/reductstore/reductstore/pull/488)
 
 ## [1.10.0] - 2024-06-11
 
