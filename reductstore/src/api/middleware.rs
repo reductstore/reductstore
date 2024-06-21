@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductStore
+// Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use axum::body::Body;
@@ -20,7 +20,7 @@ pub async fn default_headers(
     let version: &str = env!("CARGO_PKG_VERSION");
     response.headers_mut().insert(
         "Server",
-        format!("ReductStore {}", version).parse().unwrap(),
+        format!("ReductSoftware UG {}", version).parse().unwrap(),
     );
 
     let tokens: Vec<&str> = version.splitn(3, ".").collect();
