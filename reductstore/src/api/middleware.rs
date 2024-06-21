@@ -20,7 +20,7 @@ pub async fn default_headers(
     let version: &str = env!("CARGO_PKG_VERSION");
     response.headers_mut().insert(
         "Server",
-        format!("ReductSoftware UG {}", version).parse().unwrap(),
+        format!("ReductStore {}", version).parse().unwrap(),
     );
 
     let tokens: Vec<&str> = version.splitn(3, ".").collect();
