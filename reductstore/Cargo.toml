@@ -29,7 +29,7 @@ crate-type = ["lib"]
 reduct-base = { path = "../reduct_base", version = "1.10.0" }
 reduct-macros = { path = "../reduct_macros", version = "1.10.0" }
 
-log = "0.4.20"
+log = "0.4.22"
 chrono = { version = "0.4.38", features = ["serde"] }
 thread-id = "4.2.1"
 zip = "2.1.2"
