@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductStore
+// Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;

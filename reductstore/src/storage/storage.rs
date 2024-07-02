@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductStore
+// Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use log::info;
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn test_license_info(#[future] storage: Storage) {
         let license = License {
-            licensee: "ReductStore".to_string(),
+            licensee: "ReductSoftware UG".to_string(),
             invoice: "2021-0001".to_string(),
             expiry_date: chrono::Utc::now(),
             plan: "Enterprise".to_string(),

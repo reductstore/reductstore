@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023 ReductSoftware UG
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -39,10 +39,10 @@ impl Display for License {
     }
 }
 
-/// Information about a ReductStore instance
+/// Information about a ReductSoftware UG instance
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct ServerInfo {
-    /// Version of ReductStore instance
+    /// Version of ReductSoftware UG instance
     pub version: String,
     /// Number of buckets
     pub bucket_count: u64,

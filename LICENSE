@@ -1,37 +1,40 @@
 Business Source License 1.1
 ===========================
 
-License text copyright (c) 2023 MariaDB plc, All Rights Reserved. 
+License text copyright (c) 2023 MariaDB plc, All Rights Reserved.
 “Business Source License” is a trademark of MariaDB plc.
 
 ---------------------------------------------------------------------------------
 
-Licensor:             ReductStore, LLC
+Licensor:             ReductSoftware UG (haftungsbeschränkt)
+                      Christoph-Probst-Weg 4
+                      20251 Hamburg
+                      Germany
 
 Licensed Work:        ReductStore
-                      The Licensed Work is (c) 2023 ReductStore, LLC
+                      The Licensed Work is (c) 2024 ReductSoftware UG
 
-Additional Use Grant: You're permitted to implement the Licensed Work in 
-                      a production environment, given that your Aggregate 
-                      Financial Capacity does not surpass $2,000,000 USD 
+Additional Use Grant: You're permitted to implement the Licensed Work in
+                      a production environment, given that your Aggregate
+                      Financial Capacity does not surpass $2,000,000 USD
                       for the most recent 12-month period.
 
                       For clarity:
-                      > "Aggregate Financial Capacity" is defined 
+                      > "Aggregate Financial Capacity" is defined
                       as the highest value among your total gross revenues,
-                      your entire budget, or any funding you've received, 
-                      regardless of its origin. 
-                      > "Production" encapsulates any utilization not confined to 
-                      the development (including assessment of the Licensed Work), 
+                      your entire budget, or any funding you've received,
+                      regardless of its origin.
+                      > "Production" encapsulates any utilization not confined to
+                      the development (including assessment of the Licensed Work),
                       debugging, or testing of your products or services.
-                      > "You" and "your" encompass any individual or entity 
-                      agreeing to these terms, as well as any related entities. 
+                      > "You" and "your" encompass any individual or entity
+                      agreeing to these terms, as well as any related entities.
 
 Change Date:          Three years from the date the Licensed Work is released.
 
 Change License:       Mozilla Public License Version 2.0 (MPL-2.0)
 
-If you have any questions or need information regarding alternative licensing 
+If you have any questions or need information regarding alternative licensing
 for the Licensed Work, please reach out to info@reduct.store.
 
 ---------------------------------------------------------------------------------

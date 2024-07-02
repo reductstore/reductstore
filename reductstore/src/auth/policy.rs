@@ -1,4 +1,4 @@
-// Copyright 2023 ReductStore
+// Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 use reduct_base::error::ReductError;
 
