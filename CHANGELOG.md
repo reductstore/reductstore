@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2024-07-15
+
 ### Fixed
 
 - RS-366: Replication of a record larger than max. batch size, [PR-508](https://github.com/reductstore/reductstore/pull/508)
@@ -725,7 +727,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.10.1...HEAD
+
+[1.10.0]: https://github.com/reductstore/reductstore/compare/v1.10.0...v1.10.1
 
 [1.10.0]: https://github.com/reductstore/reductstore/compare/v1.9.5...v1.10.0
 
