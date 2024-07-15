@@ -147,7 +147,7 @@ jobs:
 
       - name: Run latest stable ReductStore
         run: |
-          docker run --network=host -v /tmp:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:latest
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:latest
           sleep 5
           docker logs latest
 
@@ -173,7 +173,7 @@ jobs:
       - name: Create license
         run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
       - name: Run Database
-        run: docker run --network=host -v /tmp:/data --env RS_API_TOKEN=${RS_API_TOKEN} -d ${{github.repository}}
+        run: docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} -d ${{github.repository}}
       - name: Check data after migraion
         run: python3 ./migration_test/checker.py
 
