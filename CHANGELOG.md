@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- RS-366: Fix for replicating a record larger than max. batch size, [PR-508](https://github.com/reductstore/reductstore/pull/508)
+- RS-366: Replication of a record larger than max. batch size, [PR-508](https://github.com/reductstore/reductstore/pull/508)
 
 ### Infrastructure
 

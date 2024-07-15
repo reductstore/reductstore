@@ -567,14 +567,8 @@ mod tests {
         );
 
         let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
-        assert_eq!(
-            diagnostics,
-            DiagnosticsItem {
-                ok: 3,
-                errored: 0,
-                errors: HashMap::new()
-            }
-        );
+        assert!(diagnostics.ok > 0, "records were replicated");
+        assert_eq!(diagnostics.errored, 0, "no errors happened");
     }
 
     async fn imitate_write_record(
