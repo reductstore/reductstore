@@ -20,15 +20,10 @@ impl Log for Logger {
             let now: DateTime<Utc> = Utc::now();
 
             let file = if let Some(file) = record.file() {
-                if file.starts_with("reductstore/src/") {
-                    // Local path
-                    file
-                } else {
-                    // Absolute path to crate, remove path to registry
-                    match file.split_once("src/") {
-                        Some((_, file)) => file.split_once("/").unwrap().1,
-                        None => file,
-                    }
+                // Absolute path to crate, remove path to registry
+                match file.split_once("src/") {
+                    Some((_, file)) => file,
+                    None => file,
                 }
             } else {
                 "(unknown)"

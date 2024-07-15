@@ -1,0 +1,64 @@
+import asyncio
+import json
+import time
+from hashlib import md5
+
+from reduct import Client, Bucket, ServerInfo
+from os import getenv
+import random
+
+NUMBER_OF_ENTRIES = 10
+NUMBER_OF_RECORDS = 1000
+MAX_BLOB_SIZE = 1024 * 1024
+
+BLOB = random.randbytes(MAX_BLOB_SIZE)
+
+
+async def load():
+    start_at = time.time()
+    async with Client(
+        "http://127.0.0.1:8383", api_token=getenv("RS_API_TOKEN")
+    ) as client:
+        report = {}
+        bucket: Bucket = await client.create_bucket("migration_test", exist_ok=True)
+
+        tasks = []
+
+        async def write_entry(entry_i):
+            for j in range(NUMBER_OF_RECORDS):
+                entry_name = f"entry_{entry_i}"
+                data = BLOB[: random.randint(1, MAX_BLOB_SIZE)]
+                md5_hash = md5(data).hexdigest()
+                ts = time.time()
+                await bucket.write(
+                    entry_name,
+                    data,
+                    timestamp=ts,
+                    labels={
+                        "md5": md5_hash,
+                        "entry": entry_name,
+                        "record": j,
+                        "ts": ts,
+                    },
+                )
+
+                if j % 100 == 0:
+                    print(f"Written {j} records for {entry_name}")
+
+        for i in range(NUMBER_OF_ENTRIES):
+            tasks.append(write_entry(i))
+
+        await asyncio.gather(*tasks)
+
+        report["server"] = (await client.info()).dict()
+        del report["server"]["defaults"]
+        report["bucket"] = (await bucket.get_full_info()).dict()
+        del report["bucket"]["settings"]
+        report["elapsed"] = time.time() - start_at
+        return report
+
+
+if __name__ == "__main__":
+    report = asyncio.run(load())
+    with open("report.json", "w") as f:
+        json.dump(report, f, indent=4)
