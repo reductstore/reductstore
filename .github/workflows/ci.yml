@@ -172,8 +172,11 @@ jobs:
           docker image ls -a
       - name: Create license
         run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
-      - name: Run Database
-        run: docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} -d ${{github.repository}}
+      - name: Run current ReductStore
+        run: |
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
+          sleep 5
+          docker logs current
       - name: Check data after migraion
         run: python3 ./migration_test/checker.py
 
