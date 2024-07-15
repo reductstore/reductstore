@@ -1386,28 +1386,7 @@ dependencies = [
  "petgraph",
  "prettyplease",
  "prost 0.12.6",
- "prost-types 0.12.6",
- "regex",
- "syn 2.0.71",
- "tempfile",
-]
-
-[[package]]
-name = "prost-build"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bb182580f71dd070f88d01ce3de9f4da5021db7115d2e1c3605a754153b77c1"
-dependencies = [
- "bytes",
- "heck",
- "itertools",
- "log",
- "multimap",
- "once_cell",
- "petgraph",
- "prettyplease",
- "prost 0.13.1",
- "prost-types 0.13.1",
+ "prost-types",
  "regex",
  "syn 2.0.71",
  "tempfile",
@@ -1449,15 +1428,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost-types"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cee5168b05f49d4b0ca581206eb14a7b22fafd963efe729ac48eb03266e25cc2"
-dependencies = [
- "prost 0.13.1",
-]
-
-[[package]]
 name = "prost-wkt"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1480,8 +1450,8 @@ checksum = "598b7365952c2ed4e32902de0533653aafbe5ae3da436e8e2335c7d375a1cef3"
 dependencies = [
  "heck",
  "prost 0.12.6",
- "prost-build 0.12.6",
- "prost-types 0.12.6",
+ "prost-build",
+ "prost-types",
  "quote",
 ]
 
@@ -1493,8 +1463,8 @@ checksum = "1a8eadc2381640a49c1fbfb9f4a857794b4e5bf5a2cbc2d858cfdb74f64dcd22"
 dependencies = [
  "chrono",
  "prost 0.12.6",
- "prost-build 0.12.6",
- "prost-types 0.12.6",
+ "prost-build",
+ "prost-types",
  "prost-wkt",
  "prost-wkt-build",
  "regex",
@@ -1640,7 +1610,7 @@ dependencies = [
  "mime_guess",
  "mockall",
  "prost 0.13.1",
- "prost-build 0.13.1",
+ "prost-build",
  "prost-wkt",
  "prost-wkt-build",
  "prost-wkt-types",
