@@ -83,7 +83,7 @@ impl ReplicationSender {
                             let record_to_sync = self.read_record(entry_name, &transaction).await;
                             if let Some(record_to_sync) = record_to_sync {
                                 let record_size = record_to_sync.content_length();
-                                if total_size + record_size > MAX_PAYLOAD_SIZE {
+                                if total_size > 0 && total_size + record_size > MAX_PAYLOAD_SIZE {
                                     break;
                                 }
                                 total_size += record_size;
@@ -251,7 +251,7 @@ mod tests {
         let sender = build_sender(remote_bucket, settings).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction).await;
+        imitate_write_record(&sender, &transaction, 5).await;
 
         assert_eq!(sender.run().await, SyncState::NotAvailable);
         assert_eq!(
@@ -289,7 +289,7 @@ mod tests {
         let sender = build_sender(remote_bucket, settings()).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction).await;
+        imitate_write_record(&sender, &transaction, 5).await;
 
         assert_eq!(sender.run().await, SyncState::NotAvailable);
 
@@ -336,7 +336,7 @@ mod tests {
         let sender = build_sender(remote_bucket, settings).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction).await;
+        imitate_write_record(&sender, &transaction, 5).await;
         sender
             .storage
             .write()
@@ -501,10 +501,10 @@ mod tests {
         let sender = build_sender(remote_bucket, settings).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction).await;
+        imitate_write_record(&sender, &transaction, 5).await;
 
         let transaction = Transaction::WriteRecord(20);
-        imitate_write_record(&sender, &transaction).await;
+        imitate_write_record(&sender, &transaction, 5).await;
 
         assert_eq!(sender.run().await, SyncState::SyncedOrRemoved);
         assert!(
@@ -537,7 +537,51 @@ mod tests {
         );
     }
 
-    async fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction) {
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_record_large_payload(
+        mut remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+        let sender = build_sender(remote_bucket, settings).await;
+
+        let transaction = Transaction::WriteRecord(10);
+        imitate_write_record(&sender, &transaction, (MAX_PAYLOAD_SIZE + 1) as usize).await;
+
+        assert_eq!(sender.run().await, SyncState::SyncedOrRemoved);
+        assert!(
+            sender
+                .log_map
+                .read()
+                .await
+                .get("test")
+                .unwrap()
+                .read()
+                .await
+                .is_empty(),
+            "We remove all errored transactions"
+        );
+
+        let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
+        assert_eq!(
+            diagnostics,
+            DiagnosticsItem {
+                ok: 3,
+                errored: 0,
+                errors: HashMap::new()
+            }
+        );
+    }
+
+    async fn imitate_write_record(
+        sender: &ReplicationSender,
+        transaction: &Transaction,
+        size: usize,
+    ) {
         sender
             .log_map
             .read()
@@ -560,13 +604,17 @@ mod tests {
             .write_record(
                 "test",
                 transaction.timestamp().clone(),
-                4,
+                size,
                 "text/plain".to_string(),
                 Labels::new(),
             )
             .await
             .unwrap();
-        tx.send(Ok(Some(Bytes::from("xxxx")))).await.unwrap();
+        tx.send(Ok(Some(Bytes::from(
+            (0..size).map(|_| 'x').collect::<String>(),
+        ))))
+        .await
+        .unwrap();
         tx.send(Ok(None)).await.unwrap();
         tx.closed().await;
     }
