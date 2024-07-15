@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- RS-231: Migration test to CI, [PR-506](https://github.com/reductstore/reductstore/pull/506)
+- RS-366: Fix for replicating a record larger than max. batch size, [PR-508](https://github.com/reductstore/reductstore/pull/508)
+
+### Infrastructure
+
+- RS-231: Add migration test to CI, [PR-506](https://github.com/reductstore/reductstore/pull/506)
 
 ## [1.10.0] - 2024-06-11
 
