@@ -184,7 +184,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: migration_report
-          path: /migration_test/report.json
+          path: ./migration_test/report.json
 
   build_snap:
     runs-on: ubuntu-latest
