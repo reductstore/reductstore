@@ -729,7 +729,7 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 [Unreleased]: https://github.com/reductstore/reductstore/compare/v1.10.1...HEAD
 
-[1.10.0]: https://github.com/reductstore/reductstore/compare/v1.10.0...v1.10.1
+[1.10.1]: https://github.com/reductstore/reductstore/compare/v1.10.0...v1.10.1
 
 [1.10.0]: https://github.com/reductstore/reductstore/compare/v1.9.5...v1.10.0
 
