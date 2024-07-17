@@ -236,6 +236,9 @@ jobs:
       - name: Check replicated data
         env:
           BUCKET_NAME: dest
+          NUMBER_OF_ENTRIES: 2
+          NUMBER_OF_RECORDS: 128
+          MAX_BLOB_SIZE: 18 # 18 MB bigger than batch size
         run: python3 ./integration_tests/data_check/checker.py
 
       - name: Upload report

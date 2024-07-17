@@ -7,9 +7,9 @@ from reduct import Client, Bucket, ServerInfo
 from os import getenv
 import random
 
-NUMBER_OF_ENTRIES = 4
-NUMBER_OF_RECORDS = 512
-MAX_BLOB_SIZE = 1024 * 1024 * 32
+NUMBER_OF_ENTRIES = getenv("NUMBER_OF_ENTRIES", 16)
+NUMBER_OF_RECORDS = getenv("NUMBER_OF_RECORDS", 512)
+MAX_BLOB_SIZE = 1024 * 1024 * getenv("MAX_BLOB_SIZE", 1)
 
 BLOB = random.randbytes(MAX_BLOB_SIZE)
 BUCKET_NAME = getenv("BUCKET_NAME", "data_check")
