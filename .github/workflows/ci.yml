@@ -131,7 +131,7 @@ jobs:
           --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
 
       - name: Build API tests
-        run: docker build -t api ./integration_tests/api_tests
+        run: docker build -t api ./integration_tests/api
 
       - name: Run API tests
         run: docker run --network=host
