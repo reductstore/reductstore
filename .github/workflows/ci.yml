@@ -273,7 +273,7 @@ jobs:
       - name: Show replication status
         if: always()
         run: |
-          curl -H "Authorization: Bearer ${RS_API_TOKEN}" http://127.0.0.1:8383/api/v1/replications/replication
+          curl -H "Authorization: Bearer ${RS_API_TOKEN}" http://127.0.0.1:8383/api/v1/replications/replication | jq
 
   build_snap:
     runs-on: ubuntu-latest
