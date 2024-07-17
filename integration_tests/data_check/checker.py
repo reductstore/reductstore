@@ -6,7 +6,7 @@ from os import getenv
 
 from reduct import Client, Bucket
 
-BUCKET_NAME = getenv("BUCKET_TO_UPLOAD", "data_check")
+BUCKET_NAME = getenv("BUCKET_NAME", "data_check")
 
 
 async def check():
@@ -42,7 +42,7 @@ async def check():
                 assert int(record.labels["record"]) == count
                 count += 1
 
-                if count % 100 == 0:
+                if count % 32 == 0:
                     print(f"Check {count} records for {entry_name}")
 
             assert (
