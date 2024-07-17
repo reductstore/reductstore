@@ -107,7 +107,7 @@ impl Entry {
             };
 
             // Migration for old blocks without fields to speed up the restore process
-            // todo: remove this migration in the future rel 1.12
+            // todo: remove this data_check in the future rel 1.12
             if block.record_count == 0 {
                 debug!("Record count is 0. Migrate the block");
                 let mut full_block = match Block::decode(Bytes::from(fs::read(path.clone())?)) {

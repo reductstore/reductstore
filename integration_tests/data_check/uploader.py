@@ -7,11 +7,12 @@ from reduct import Client, Bucket, ServerInfo
 from os import getenv
 import random
 
-NUMBER_OF_ENTRIES = 10
-NUMBER_OF_RECORDS = 1000
-MAX_BLOB_SIZE = 1024 * 1024
+NUMBER_OF_ENTRIES = 4
+NUMBER_OF_RECORDS = 512
+MAX_BLOB_SIZE = 1024 * 1024 * 32
 
 BLOB = random.randbytes(MAX_BLOB_SIZE)
+BUCKET_NAME = getenv("BUCKET_TO_UPLOAD", "data_check")
 
 
 async def load():
@@ -20,7 +21,7 @@ async def load():
         "http://127.0.0.1:8383", api_token=getenv("RS_API_TOKEN")
     ) as client:
         report = {}
-        bucket: Bucket = await client.create_bucket("migration_test", exist_ok=True)
+        bucket: Bucket = await client.create_bucket(BUCKET_NAME, exist_ok=True)
 
         tasks = []
 
