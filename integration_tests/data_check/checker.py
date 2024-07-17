@@ -2,10 +2,11 @@ import asyncio
 import json
 import time
 from hashlib import md5
-
-from reduct import Client, Bucket, ServerInfo
 from os import getenv
-import random
+
+from reduct import Client, Bucket
+
+BUCKET_NAME = getenv("BUCKET_NAME", "data_check")
 
 
 async def check():
@@ -16,7 +17,7 @@ async def check():
     async with Client(
         "http://127.0.0.1:8383", api_token=getenv("RS_API_TOKEN")
     ) as client:
-        bucket: Bucket = await client.get_bucket(report["bucket"]["info"]["name"])
+        bucket: Bucket = await client.get_bucket(BUCKET_NAME)
 
         tasks = []
 
@@ -41,7 +42,7 @@ async def check():
                 assert int(record.labels["record"]) == count
                 count += 1
 
-                if count % 100 == 0:
+                if count % 32 == 0:
                     print(f"Check {count} records for {entry_name}")
 
             assert (
