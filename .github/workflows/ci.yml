@@ -229,6 +229,9 @@ jobs:
       - name: Upload data
         env:
           BUCKET_NAME: src
+          NUMBER_OF_ENTRIES: 2
+          NUMBER_OF_RECORDS: 128
+          MAX_BLOB_SIZE: 18 # 18 MB bigger than batch size
         run: |
           pip install -r ./integration_tests/data_check/requirements.txt
           python3 ./integration_tests/data_check/uploader.py
@@ -236,9 +239,6 @@ jobs:
       - name: Check replicated data
         env:
           BUCKET_NAME: dest
-          NUMBER_OF_ENTRIES: 2
-          NUMBER_OF_RECORDS: 128
-          MAX_BLOB_SIZE: 18 # 18 MB bigger than batch size
         run: python3 ./integration_tests/data_check/checker.py
 
       - name: Upload report
