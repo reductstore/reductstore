@@ -189,6 +189,17 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
+    strategy:
+      matrix:
+        include:
+          # Many small blobs
+          - max_blob_size: 1
+            entries: 8
+            records: 1024
+          # Few big blobs (bigger than batch size)
+          - max_blob_size: 18
+            entries: 2
+            records: 128
     env:
       RS_API_TOKEN: XXXX
     steps:
@@ -229,9 +240,9 @@ jobs:
       - name: Upload data
         env:
           BUCKET_NAME: src
-          NUMBER_OF_ENTRIES: 2
-          NUMBER_OF_RECORDS: 128
-          MAX_BLOB_SIZE: 18 # 18 MB bigger than batch size
+          NUMBER_OF_ENTRIES: ${{matrix.entries}}
+          NUMBER_OF_RECORDS: ${{matrix.records}}
+          MAX_BLOB_SIZE: ${{matrix.max_blob_size}}
         run: |
           pip install -r ./integration_tests/data_check/requirements.txt
           python3 ./integration_tests/data_check/uploader.py
