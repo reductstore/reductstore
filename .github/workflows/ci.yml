@@ -152,8 +152,8 @@ jobs:
 
       - name: Upload data
         run: |
-          pip install -r ./migration_test/requirements.txt
-          python3 ./migration_test/uploader.py
+          pip install -r ./integration_tests/data_check/requirements.txt
+          python3 ./integration_tests/data_check/uploader.py
 
       - name: Stop latest stable ReductStore
         run: docker stop latest
@@ -174,8 +174,9 @@ jobs:
           docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
           sleep 5
           docker logs current
+
       - name: Check data after migraion
-        run: python3 ./data_check/checker.py
+        run: python3 ./integration_tests/migration_test/checker.py
 
       - name: Upload report
         uses: actions/upload-artifact@v4
@@ -218,20 +219,20 @@ jobs:
             --env RS_BUCKET_2_NAME=dest \
             --env RS_REPLICATION_1_NAME=replication \
             --env RS_REPLICATION_1_SRC_BUCKET=src \
-            --env RS_REPLICATION_1_DEST_BUCKET=dest \
-            --env RS_REPLICATION_1_DEST_HOST=http://127.0.0.1:8383 \
-            --env RS_REPLICATION_1_DEST_TOKEN=${RS_API_TOKEN} \
+            --env RS_REPLICATION_1_DST_BUCKET=dest \
+            --env RS_REPLICATION_1_DST_HOST=http://127.0.0.1:8383 \
+            --env RS_REPLICATION_1_DST_TOKEN=${RS_API_TOKEN} \
             --name current -d ${{github.repository}}
           sleep 5
           docker logs current
 
       - name: Upload data
         run: |
-          pip install -r ./data_check/requirements.txt
-          python3 ./data_check/uploader.py
+          pip install -r ./integration_tests/data_check/requirements.txt
+          python3 BUCKET_NAME=src ./integration_tests/data_check/uploader.py
 
       - name: Check replicated data
-        run: BUCKET_NAME=src python3 ./data_check/checker.py
+        run: BUCKET_NAME=dst python3 ./integration_tests/data_check/checker.py
 
       - name: Upload report
         uses: actions/upload-artifact@v4
