@@ -184,11 +184,13 @@ jobs:
       - name: Check data after migraion
         run: python3 ./integration_tests/data_check/checker.py
 
-      - name: Upload report
-        uses: actions/upload-artifact@v4
-        with:
-          name: migration_test_report
-          path: ./report.json
+      - name: Print docker logs
+        if: always()
+        run: docker logs current
+
+      - name: Show replication report
+        if: always()
+        run: cat ./report.json
 
   replication_test:
     name: Replication Tests
@@ -260,11 +262,18 @@ jobs:
           BUCKET_NAME: dest
         run: python3 ./integration_tests/data_check/checker.py
 
-      - name: Upload report
-        uses: actions/upload-artifact@v4
-        with:
-          name: replication_test_report_${{matrix.entries}}_${{matrix.records}}_${{matrix.max_blob_size}}
-          path: ./report.json
+      - name: Print docker logs
+        if: always()
+        run: docker logs current
+
+      - name: Show replication report
+        if: always()
+        run: cat ./report.json
+
+      - name: Show replication status
+        if: always()
+        run: |
+          curl -H "Authorization: Bearer ${RS_API_TOKEN}" http://127.0.0.1:8383/api/v1/replication/replication
 
   build_snap:
     runs-on: ubuntu-latest
