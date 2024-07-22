@@ -23,14 +23,9 @@ impl<P> RecordFilter<P> for EachNFilter
 where
     P: FilterPoint,
 {
-    fn filter(&mut self, p: &P) -> bool {
+    fn filter(&mut self, _: &P) -> bool {
         let ret = self.count % self.n == 0;
         self.count += 1;
-        if ret {
-            debug!("Point {:?} passed", p.timestamp());
-        } else {
-            debug!("Point {:?} did not pass", p.timestamp());
-        }
         ret
     }
 }
