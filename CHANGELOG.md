@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- RS-333: Transfer the project to ReductSoftware UG, [PR-488](https://github.com/reductstore/reductstore/pull/488)
+
 ### Infrastructure
 
 - RS-232: Add replication test to CI, [PR-511](https://github.com/reductstore/reductstore/pull/511)
