@@ -7,17 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-
 ### Changed
 
 - RS-333: Transfer the project to ReductSoftware UG, [PR-488](https://github.com/reductstore/reductstore/pull/488)
+
+### Infrastructure
+
+- RS-232: Add replication test to CI, [PR-511](https://github.com/reductstore/reductstore/pull/511)
+
+## [1.10.1] - 2024-07-15
+
+### Fixed
+
+- RS-366: Replication of a record larger than max. batch size, [PR-508](https://github.com/reductstore/reductstore/pull/508)
+
+### Infrastructure
+
+- RS-231: Add migration test to CI, [PR-506](https://github.com/reductstore/reductstore/pull/506)
 
 ## [1.10.0] - 2024-06-11
 
 ### Added
 
-- RS-261: support downsampling parameters `each_n` and `each_s` query options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
-- RS-311: support downsampling parameters `each_n` and `each_s` in replication tasks, [PR-480](https://github.com/reductstore/reductstore/pull/480)
+- RS-261: support downsampling parameters `each_n` and `each_s` query
+  options, [PR-465](https://github.com/reductstore/reductstore/pull/465)
+- RS-311: support downsampling parameters `each_n` and `each_s` in replication
+  tasks, [PR-480](https://github.com/reductstore/reductstore/pull/480)
 
 ### Removed
 
@@ -186,7 +201,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - reduct-cli: `alias` and `server` commands, [PR-343](https://github.com/reductstore/reductstore/pull/343)
 -
+
 reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_build` [PR-350](https://github.com/reductstore/reductstore/pull/350)
+
 - reductstore: `healthcheck` to buildx.Dockerfile, [PR-350](https://github.com/reductstore/reductstore/pull/350)
 - reductstore: provisioning with environment variables, [PR-352](https://github.com/reductstore/reductstore/pull/352)
 - reductstore,reduct-rs: batched write API, [PR-355](https://github.com/reductstore/reductstore/pull/355)
@@ -718,7 +735,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.10.1...HEAD
+
+[1.10.1]: https://github.com/reductstore/reductstore/compare/v1.10.0...v1.10.1
 
 [1.10.0]: https://github.com/reductstore/reductstore/compare/v1.9.5...v1.10.0
 
