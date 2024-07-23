@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
-use log::debug;
 
 /// Filter that passes every N-th record
 pub struct EachNFilter {

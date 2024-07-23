@@ -6,8 +6,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum_extra::headers::{Header, HeaderMap};
-use futures_util::StreamExt;
+use axum_extra::headers::HeaderMap;
 
 use reduct_base::Labels;
 
@@ -15,7 +14,6 @@ use crate::api::entry::common::{parse_content_length_from_header, parse_timestam
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::storage::proto::record::Label;
 
 // PATCH /:bucket/:entry?ts=<number>
 pub(crate) async fn update_record(
