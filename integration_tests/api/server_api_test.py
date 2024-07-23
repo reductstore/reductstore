@@ -1,7 +1,7 @@
 import json
 import re
 
-from conftest import requires_env, auth_headers
+from .conftest import requires_env, auth_headers
 
 
 def test__get_info(base_url, session):

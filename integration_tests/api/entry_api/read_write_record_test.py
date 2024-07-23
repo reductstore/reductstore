@@ -7,13 +7,6 @@ import pytest
 from ..conftest import requires_env, auth_headers
 
 
-@pytest.fixture(name="bucket")
-def _make_bucket_and_return_name(base_url, session, bucket_name) -> str:
-    resp = session.post(f"{base_url}/b/{bucket_name}")
-    assert resp.status_code == 200
-    return bucket_name
-
-
 @pytest.mark.parametrize(
     "data,ts", [(b"some_data_1", 100), (b"some_data_2", 60), (b"some_data_3", 1000)]
 )

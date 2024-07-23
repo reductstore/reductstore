@@ -397,7 +397,7 @@ impl Entry {
         &mut self,
         time: u64,
         mut update: Labels,
-        remove: HashSet<&str>,
+        remove: HashSet<String>,
     ) -> Result<(), ReductError> {
         debug!("Updating labels for ts={}", time);
 
@@ -1131,13 +1131,15 @@ mod tests {
                 .await
                 .unwrap();
 
-            let block = entry
+            let mut block = entry
                 .block_manager
                 .read()
                 .await
                 .load(1000000)
                 .await
                 .unwrap();
+            block.records[0].labels.sort_by(|a, b| a.name.cmp(&b.name));
+
             assert_eq!(block.records[0].labels.len(), 3);
             assert_eq!(block.records[0].labels[0].name, "a");
             assert_eq!(block.records[0].labels[0].value, "x");
@@ -1152,7 +1154,11 @@ mod tests {
         async fn test_update_labels_remove(mut entry: Entry) {
             write_stub_record(&mut entry, 1000000).await.unwrap();
             entry
-                .update_labels(1000000, Labels::new(), HashSet::from_iter(vec!["a"]))
+                .update_labels(
+                    1000000,
+                    Labels::new(),
+                    HashSet::from_iter(vec!["a".to_string()]),
+                )
                 .await
                 .unwrap();
 
