@@ -173,6 +173,40 @@ mod tests {
             HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found")
         );
     }
+    #[rstest]
+    #[tokio::test]
+    async fn test_not_label_to_delete(
+        #[future] components: Arc<Components>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        #[future] empty_body: Body,
+    ) {
+        let components = components.await;
+
+        headers.insert("x-reduct-label-not-exist", "".parse().unwrap());
+
+        let err = update_record(
+            State(Arc::clone(&components)),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "0".to_string(),
+            )])),
+            empty_body.await,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err,
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "content-length header must be 0",
+            )
+        );
+    }
 
     #[rstest]
     #[tokio::test]

@@ -1193,6 +1193,21 @@ mod tests {
             assert_eq!(block.records[0].labels.len(), 2);
         }
 
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_labels_not_found(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            let err = entry
+                .update_labels(
+                    1000000,
+                    Labels::new(),
+                    HashSet::from_iter(vec!["x".to_string()]),
+                )
+                .await;
+
+            assert!(err.is_ok(), "Ignore removing labels that are not found")
+        }
+
         async fn write_stub_record(mut entry: &mut Entry, time: u64) -> Result<(), ReductError> {
             write_record_with_labels(
                 &mut entry,
