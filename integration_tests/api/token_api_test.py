@@ -1,6 +1,6 @@
 import json
 
-from conftest import auth_headers, requires_env
+from .conftest import auth_headers, requires_env
 
 
 @requires_env("API_TOKEN")

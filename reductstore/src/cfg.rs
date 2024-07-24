@@ -7,7 +7,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
 use crate::license::parse_license;
-use crate::replication::{create_replication_engine, ManageReplications};
+use crate::replication::{create_replication_repo, ManageReplications};
 use crate::storage::storage::Storage;
 use bytesize::ByteSize;
 use log::{error, info, warn};
@@ -155,7 +155,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         &self,
         storage: Arc<RwLock<Storage>>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_engine(Arc::clone(&storage)).await;
+        let mut repo = create_replication_repo(Arc::clone(&storage)).await;
         for (name, settings) in &self.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()).await {
                 if e.status() == ErrorCode::Conflict {

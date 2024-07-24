@@ -64,8 +64,8 @@ impl ReplicationSender {
     pub async fn run(&self) -> SyncState {
         let mut sync_something = false;
         for (entry_name, log) in self.log_map.read().await.iter() {
-            let tr = log.write().await.front(MAX_BATCH_SIZE).await;
-            let state = match tr {
+            let transactions = log.write().await.front(MAX_BATCH_SIZE).await;
+            let state = match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
                         SyncState::NoTransactions
@@ -87,7 +87,7 @@ impl ReplicationSender {
                                     break;
                                 }
                                 total_size += record_size;
-                                batch.push(record_to_sync);
+                                batch.push((record_to_sync, transaction));
                                 processed_transactions += 1;
                             } else {
                                 processed_transactions += 1; // we count to remove errored transactions from log
@@ -230,7 +230,7 @@ mod tests {
             async fn write_batch(
                 &mut self,
                 entry_name: &str,
-                record: Vec<RecordReader>,
+                record: Vec<(RecordReader, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn is_active(&self) -> bool;

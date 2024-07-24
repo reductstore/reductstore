@@ -6,6 +6,7 @@ use crate::storage::block_manager::{
     DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::bucket::RecordReader;
+use crate::storage::proto::record::Label;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, MinimalBlock, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
@@ -16,7 +17,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -329,35 +330,8 @@ impl Entry {
     /// * `HTTPError` - The error if any.
     pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
         debug!("Reading record for ts={}", time);
-        let not_found_err = Err(ReductError::not_found(&format!(
-            "No record with timestamp {}",
-            time
-        )));
 
-        if self.block_index.is_empty() {
-            return not_found_err;
-        }
-
-        if &time < self.block_index.first().unwrap() {
-            return not_found_err;
-        }
-
-        let block_id = find_first_block(&self.block_index, &time);
-        let block = {
-            let bm = self.block_manager.write().await;
-            bm.load(block_id).await?
-        };
-
-        let record_index = block
-            .records
-            .iter()
-            .position(|record| ts_to_us(record.timestamp.as_ref().unwrap()) == time);
-
-        if record_index.is_none() {
-            return not_found_err;
-        }
-
-        let record_index = record_index.unwrap();
+        let (block_id, block, record_index) = self.find_record(&time).await?;
         let mut record = block.records[record_index].clone();
 
         if record.state == record::State::Started as i32 {
@@ -384,6 +358,81 @@ impl Entry {
 
         let rx = spawn_read_task(Arc::clone(&self.block_manager), &block, record_index).await?;
         Ok(RecordReader::new(rx, record, true))
+    }
+
+    async fn find_record(&self, time: &u64) -> Result<(u64, Block, usize), ReductError> {
+        let not_found_err = Err(ReductError::not_found(&format!(
+            "No record with timestamp {}",
+            time
+        )));
+
+        if self.block_index.is_empty() {
+            return not_found_err;
+        }
+
+        if time < self.block_index.first().unwrap() {
+            return not_found_err;
+        }
+
+        let block_id = find_first_block(&self.block_index, &time);
+        let block = {
+            let bm = self.block_manager.write().await;
+            bm.load(block_id).await?
+        };
+
+        let record_index = block
+            .records
+            .iter()
+            .position(|record| ts_to_us(record.timestamp.as_ref().unwrap()) == *time);
+
+        if record_index.is_none() {
+            return not_found_err;
+        }
+
+        let record_index = record_index.unwrap();
+        Ok((block_id, block, record_index))
+    }
+
+    pub async fn update_labels(
+        &mut self,
+        time: u64,
+        mut update: Labels,
+        remove: HashSet<String>,
+    ) -> Result<Vec<Label>, ReductError> {
+        debug!("Updating labels for ts={}", time);
+
+        let (_, mut block, record_index) = self.find_record(&time).await?;
+        let record = block.records.get_mut(record_index).unwrap();
+
+        let mut new_labels = Vec::new();
+        for label in &record.labels {
+            // remove labels
+            if remove.contains(label.name.as_str()) {
+                continue;
+            }
+
+            // update existing labels or add new labels
+            match update.remove(label.name.as_str()) {
+                Some(value) => {
+                    new_labels.push(Label {
+                        name: label.name.clone(),
+                        value,
+                    });
+                }
+                None => {
+                    new_labels.push(label.clone());
+                }
+            }
+        }
+
+        // add new labels
+        for (name, value) in update {
+            new_labels.push(Label { name, value });
+        }
+
+        record.labels = new_labels.clone();
+        self.block_manager.write().await.save(block).await?;
+        Ok(new_labels)
     }
 
     /// Query records for a time range.
@@ -654,382 +703,529 @@ mod tests {
         }
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_write_new_block_size(path: PathBuf) {
-        let mut entry = entry(
-            EntrySettings {
-                max_block_size: 10,
-                max_block_records: 10000,
-            },
-            path,
-        );
+    mod begin_write {
+        use super::*;
 
-        write_stub_record(&mut entry, 1).await.unwrap();
-        write_stub_record(&mut entry, 2000010).await.unwrap();
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_write_new_block_size(path: PathBuf) {
+            let mut entry = entry(
+                EntrySettings {
+                    max_block_size: 10,
+                    max_block_records: 10000,
+                },
+                path,
+            );
 
-        let bm = entry.block_manager.read().await;
+            write_stub_record(&mut entry, 1).await.unwrap();
+            write_stub_record(&mut entry, 2000010).await.unwrap();
 
-        assert_eq!(
-            bm.load(1).await.unwrap().records[0],
-            Record {
-                timestamp: Some(us_to_ts(&1)),
-                begin: 0,
-                end: 10,
-                content_type: "text/plain".to_string(),
-                state: record::State::Finished as i32,
-                labels: vec![],
-            }
-        );
+            let bm = entry.block_manager.read().await;
 
-        assert_eq!(
-            bm.load(2000010).await.unwrap().records[0],
-            Record {
-                timestamp: Some(us_to_ts(&2000010)),
-                begin: 0,
-                end: 10,
-                content_type: "text/plain".to_string(),
-                state: record::State::Finished as i32,
-                labels: vec![],
-            }
-        );
-    }
+            assert_eq!(
+                bm.load(1).await.unwrap().records[0],
+                Record {
+                    timestamp: Some(us_to_ts(&1)),
+                    begin: 0,
+                    end: 10,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                }
+            );
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_write_new_block_records(path: PathBuf) {
-        let mut entry = entry(
-            EntrySettings {
-                max_block_size: 10000,
-                max_block_records: 1,
-            },
-            path,
-        );
+            assert_eq!(
+                bm.load(2000010).await.unwrap().records[0],
+                Record {
+                    timestamp: Some(us_to_ts(&2000010)),
+                    begin: 0,
+                    end: 10,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                }
+            );
+        }
 
-        write_stub_record(&mut entry, 1).await.unwrap();
-        write_stub_record(&mut entry, 2).await.unwrap();
-        write_stub_record(&mut entry, 2000010).await.unwrap();
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_write_new_block_records(path: PathBuf) {
+            let mut entry = entry(
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 1,
+                },
+                path,
+            );
 
-        let bm = entry.block_manager.read().await;
-        assert_eq!(
-            bm.load(1).await.unwrap().records[0],
-            Record {
-                timestamp: Some(us_to_ts(&1)),
-                begin: 0,
-                end: 10,
-                content_type: "text/plain".to_string(),
-                state: record::State::Finished as i32,
-                labels: vec![],
-            }
-        );
+            write_stub_record(&mut entry, 1).await.unwrap();
+            write_stub_record(&mut entry, 2).await.unwrap();
+            write_stub_record(&mut entry, 2000010).await.unwrap();
 
-        assert_eq!(
-            bm.load(2000010).await.unwrap().records[0],
-            Record {
-                timestamp: Some(us_to_ts(&2000010)),
-                begin: 0,
-                end: 10,
-                content_type: "text/plain".to_string(),
-                state: record::State::Finished as i32,
-                labels: vec![],
-            }
-        );
-    }
+            let bm = entry.block_manager.read().await;
+            assert_eq!(
+                bm.load(1).await.unwrap().records[0],
+                Record {
+                    timestamp: Some(us_to_ts(&1)),
+                    begin: 0,
+                    end: 10,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                }
+            );
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_write_belated_record(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 3000000).await.unwrap();
-        write_stub_record(&mut entry, 2000000).await.unwrap();
+            assert_eq!(
+                bm.load(2000010).await.unwrap().records[0],
+                Record {
+                    timestamp: Some(us_to_ts(&2000010)),
+                    begin: 0,
+                    end: 10,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                }
+            );
+        }
 
-        let bm = entry.block_manager.read().await;
-        let records = bm.load(1000000).await.unwrap().records.clone();
-        assert_eq!(records.len(), 3);
-        assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
-        assert_eq!(records[1].timestamp, Some(us_to_ts(&3000000)));
-        assert_eq!(records[2].timestamp, Some(us_to_ts(&2000000)));
-    }
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_write_belated_record(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            write_stub_record(&mut entry, 3000000).await.unwrap();
+            write_stub_record(&mut entry, 2000000).await.unwrap();
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_write_belated_first(mut entry: Entry) {
-        write_stub_record(&mut entry, 3000000).await.unwrap();
-        write_stub_record(&mut entry, 1000000).await.unwrap();
+            let bm = entry.block_manager.read().await;
+            let records = bm.load(1000000).await.unwrap().records.clone();
+            assert_eq!(records.len(), 3);
+            assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
+            assert_eq!(records[1].timestamp, Some(us_to_ts(&3000000)));
+            assert_eq!(records[2].timestamp, Some(us_to_ts(&2000000)));
+        }
 
-        let bm = entry.block_manager.read().await;
-        let records = bm.load(1000000).await.unwrap().records.clone();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
-    }
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_write_belated_first(mut entry: Entry) {
+            write_stub_record(&mut entry, 3000000).await.unwrap();
+            write_stub_record(&mut entry, 1000000).await.unwrap();
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_write_existing_record(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 2000000).await.unwrap();
-        let err = write_stub_record(&mut entry, 1000000).await;
-        assert_eq!(
-            err.err(),
-            Some(ReductError::conflict(
-                "A record with timestamp 1000000 already exists"
-            ))
-        );
-    }
+            let bm = entry.block_manager.read().await;
+            let records = bm.load(1000000).await.unwrap().records.clone();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
+        }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_override_errored(mut entry: Entry) {
-        let sender = entry
-            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .await
-            .unwrap();
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_write_existing_record(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            write_stub_record(&mut entry, 2000000).await.unwrap();
+            let err = write_stub_record(&mut entry, 1000000).await;
+            assert_eq!(
+                err.err(),
+                Some(ReductError::conflict(
+                    "A record with timestamp 1000000 already exists"
+                ))
+            );
+        }
 
-        sender.send(Ok(None)).await.unwrap();
-        sender.closed().await;
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_override_errored(mut entry: Entry) {
+            let sender = entry
+                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
 
-        let sender = entry
-            .begin_write(
-                1000000,
-                10,
-                "text/html".to_string(),
-                Labels::from_iter(vec![("a".to_string(), "b".to_string())]),
-            )
-            .await
-            .unwrap();
-        sender
-            .send(Ok(Some(Bytes::from(vec![0; 10]))))
-            .await
-            .unwrap();
+            sender.send(Ok(None)).await.unwrap();
+            sender.closed().await;
 
-        let record = entry
-            .block_manager
-            .read()
-            .await
-            .load(1000000)
-            .await
-            .unwrap()
-            .records[0]
-            .clone();
-        assert_eq!(record.content_type, "text/html");
-        assert_eq!(record.labels.len(), 1);
-        assert_eq!(record.labels[0].name, "a");
-        assert_eq!(record.labels[0].value, "b");
-    }
+            let sender = entry
+                .begin_write(
+                    1000000,
+                    10,
+                    "text/html".to_string(),
+                    Labels::from_iter(vec![("a".to_string(), "b".to_string())]),
+                )
+                .await
+                .unwrap();
+            sender
+                .send(Ok(Some(Bytes::from(vec![0; 10]))))
+                .await
+                .unwrap();
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_not_override_if_different_size(mut entry: Entry) {
-        let sender = entry
-            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .await
-            .unwrap();
+            let record = entry
+                .block_manager
+                .read()
+                .await
+                .load(1000000)
+                .await
+                .unwrap()
+                .records[0]
+                .clone();
+            assert_eq!(record.content_type, "text/html");
+            assert_eq!(record.labels.len(), 1);
+            assert_eq!(record.labels[0].name, "a");
+            assert_eq!(record.labels[0].value, "b");
+        }
 
-        sender.send(Ok(None)).await.unwrap();
-        sender.closed().await;
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_not_override_if_different_size(mut entry: Entry) {
+            let sender = entry
+                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
 
-        let err = entry
-            .begin_write(
-                1000000,
-                5,
-                "text/html".to_string(),
-                Labels::from_iter(vec![("a".to_string(), "b".to_string())]),
-            )
-            .await
-            .err();
-        assert_eq!(
-            err,
-            Some(ReductError::conflict(
-                "A record with timestamp 1000000 already exists"
-            ))
-        );
+            sender.send(Ok(None)).await.unwrap();
+            sender.closed().await;
+
+            let err = entry
+                .begin_write(
+                    1000000,
+                    5,
+                    "text/html".to_string(),
+                    Labels::from_iter(vec![("a".to_string(), "b".to_string())]),
+                )
+                .await
+                .err();
+            assert_eq!(
+                err,
+                Some(ReductError::conflict(
+                    "A record with timestamp 1000000 already exists"
+                ))
+            );
+        }
     }
 
     // Test begin_read
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_empty(entry: Entry) {
-        let writer = entry.begin_read(1000).await;
-        assert_eq!(
-            writer.err(),
-            Some(ReductError::not_found("No record with timestamp 1000"))
-        );
-    }
+    mod begin_read {
+        use super::*;
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_early(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        let writer = entry.begin_read(1000).await;
-        assert_eq!(
-            writer.err(),
-            Some(ReductError::not_found("No record with timestamp 1000"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_late(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        let reader = entry.begin_read(2000000).await;
-        assert_eq!(
-            reader.err(),
-            Some(ReductError::not_found("No record with timestamp 2000000"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_still_written(mut entry: Entry) {
-        let sender = entry
-            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .await
-            .unwrap();
-        sender
-            .send(Ok(Some(Bytes::from(vec![0; 5]))))
-            .await
-            .unwrap();
-
-        let reader = entry.begin_read(1000000).await;
-        assert_eq!(
-            reader.err(),
-            Some(ReductError::too_early(
-                "Record with timestamp 1000000 is still being written"
-            ))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_not_found(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 3000000).await.unwrap();
-
-        let reader = entry.begin_read(2000000).await;
-        assert_eq!(
-            reader.err(),
-            Some(ReductError::not_found("No record with timestamp 2000000"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok1(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        let mut reader = entry.begin_read(1000000).await.unwrap();
-        assert_eq!(
-            reader.rx().recv().await.unwrap(),
-            Ok(Bytes::from("0123456789"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok2(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 1010000).await.unwrap();
-
-        let mut reader = entry.begin_read(1010000).await.unwrap();
-        assert_eq!(
-            reader.rx().recv().await.unwrap(),
-            Ok(Bytes::from("0123456789"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok_in_chunks(mut entry: Entry) {
-        let mut data = vec![0; DEFAULT_MAX_READ_CHUNK as usize + 1];
-        data[0] = 1;
-        data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
-
-        write_record(&mut entry, 1000000, data.clone())
-            .await
-            .unwrap();
-
-        let mut reader = entry.begin_read(1000000).await.unwrap();
-        assert_eq!(
-            reader.rx().recv().await.unwrap().unwrap().to_vec(),
-            data[0..DEFAULT_MAX_READ_CHUNK as usize]
-        );
-        assert_eq!(
-            reader.rx().recv().await.unwrap().unwrap().to_vec(),
-            data[DEFAULT_MAX_READ_CHUNK as usize..]
-        );
-        assert_eq!(reader.rx().recv().await, None);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_historical_query(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 2000000).await.unwrap();
-        write_stub_record(&mut entry, 3000000).await.unwrap();
-
-        let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
-        assert!(id >= 1);
-
-        {
-            let reader = entry.next(id).await.unwrap();
-            assert_eq!(reader.timestamp(), 1000000);
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_empty(entry: Entry) {
+            let writer = entry.begin_read(1000).await;
+            assert_eq!(
+                writer.err(),
+                Some(ReductError::not_found("No record with timestamp 1000"))
+            );
         }
-        {
-            let reader = entry.next(id).await.unwrap();
-            assert_eq!(reader.timestamp(), 2000000);
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_early(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            let writer = entry.begin_read(1000).await;
+            assert_eq!(
+                writer.err(),
+                Some(ReductError::not_found("No record with timestamp 1000"))
+            );
         }
-        {
-            let reader = entry.next(id).await.unwrap();
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_late(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            let reader = entry.begin_read(2000000).await;
+            assert_eq!(
+                reader.err(),
+                Some(ReductError::not_found("No record with timestamp 2000000"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_still_written(mut entry: Entry) {
+            let sender = entry
+                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
+            sender
+                .send(Ok(Some(Bytes::from(vec![0; 5]))))
+                .await
+                .unwrap();
+
+            let reader = entry.begin_read(1000000).await;
+            assert_eq!(
+                reader.err(),
+                Some(ReductError::too_early(
+                    "Record with timestamp 1000000 is still being written"
+                ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_not_found(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            write_stub_record(&mut entry, 3000000).await.unwrap();
+
+            let reader = entry.begin_read(2000000).await;
+            assert_eq!(
+                reader.err(),
+                Some(ReductError::not_found("No record with timestamp 2000000"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_ok1(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            let mut reader = entry.begin_read(1000000).await.unwrap();
+            assert_eq!(
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_ok2(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            write_stub_record(&mut entry, 1010000).await.unwrap();
+
+            let mut reader = entry.begin_read(1010000).await.unwrap();
+            assert_eq!(
+                reader.rx().recv().await.unwrap(),
+                Ok(Bytes::from("0123456789"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_read_ok_in_chunks(mut entry: Entry) {
+            let mut data = vec![0; DEFAULT_MAX_READ_CHUNK + 1];
+            data[0] = 1;
+            data[DEFAULT_MAX_READ_CHUNK] = 2;
+
+            write_record(&mut entry, 1000000, data.clone())
+                .await
+                .unwrap();
+
+            let mut reader = entry.begin_read(1000000).await.unwrap();
+            assert_eq!(
+                reader.rx().recv().await.unwrap().unwrap().to_vec(),
+                data[0..DEFAULT_MAX_READ_CHUNK]
+            );
+            assert_eq!(
+                reader.rx().recv().await.unwrap().unwrap().to_vec(),
+                data[DEFAULT_MAX_READ_CHUNK..]
+            );
+            assert_eq!(reader.rx().recv().await, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_search(path: PathBuf) {
+            let mut entry = entry(
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 5,
+                },
+                path,
+            );
+
+            let step = 100000;
+            for i in 0..100 {
+                write_stub_record(&mut entry, i * step).await.unwrap();
+            }
+
+            let reader = entry.begin_read(30 * step).await.unwrap();
             assert_eq!(reader.timestamp(), 3000000);
         }
-
-        assert_eq!(
-            entry.next(id).await.err(),
-            Some(ReductError::no_content("No content"))
-        );
-        assert_eq!(
-            entry.next(id).await.err(),
-            Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
-        );
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_continuous_query(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
+    mod query {
+        use super::*;
 
-        let id = entry
-            .query(
-                0,
-                4000000,
-                QueryOptions {
-                    ttl: Duration::from_millis(500),
-                    continuous: true,
-                    ..QueryOptions::default()
-                },
+        #[rstest]
+        #[tokio::test]
+        async fn test_historical_query(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            write_stub_record(&mut entry, 2000000).await.unwrap();
+            write_stub_record(&mut entry, 3000000).await.unwrap();
+
+            let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
+            assert!(id >= 1);
+
+            {
+                let reader = entry.next(id).await.unwrap();
+                assert_eq!(reader.timestamp(), 1000000);
+            }
+            {
+                let reader = entry.next(id).await.unwrap();
+                assert_eq!(reader.timestamp(), 2000000);
+            }
+            {
+                let reader = entry.next(id).await.unwrap();
+                assert_eq!(reader.timestamp(), 3000000);
+            }
+
+            assert_eq!(
+                entry.next(id).await.err(),
+                Some(ReductError::no_content("No content"))
+            );
+            assert_eq!(
+                entry.next(id).await.err(),
+                Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_continuous_query(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+
+            let id = entry
+                .query(
+                    0,
+                    4000000,
+                    QueryOptions {
+                        ttl: Duration::from_millis(500),
+                        continuous: true,
+                        ..QueryOptions::default()
+                    },
+                )
+                .unwrap();
+
+            {
+                let reader = entry.next(id).await.unwrap();
+                assert_eq!(reader.timestamp(), 1000000);
+            }
+
+            assert_eq!(
+                entry.next(id).await.err(),
+                Some(ReductError::no_content("No content"))
+            );
+
+            write_stub_record(&mut entry, 2000000).await.unwrap();
+            {
+                let reader = entry.next(id).await.unwrap();
+                assert_eq!(reader.timestamp(), 2000000);
+            }
+
+            sleep(Duration::from_millis(600)).await;
+            assert_eq!(
+                entry.next(id).await.err(),
+                Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
+            );
+        }
+    }
+
+    mod update_labels {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_labels(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            let mut new_labels = entry
+                .update_labels(
+                    1000000,
+                    Labels::from_iter(vec![
+                        ("a".to_string(), "x".to_string()),
+                        ("e".to_string(), "f".to_string()),
+                    ]),
+                    HashSet::new(),
+                )
+                .await
+                .unwrap();
+
+            let mut block = entry
+                .block_manager
+                .read()
+                .await
+                .load(1000000)
+                .await
+                .unwrap();
+            block.records[0].labels.sort_by(|a, b| a.name.cmp(&b.name));
+            new_labels.sort_by(|a, b| a.name.cmp(&b.name));
+
+            assert_eq!(block.records[0].labels.len(), 3);
+            assert_eq!(block.records[0].labels[0].name, "a");
+            assert_eq!(block.records[0].labels[0].value, "x");
+            assert_eq!(block.records[0].labels[1].name, "c");
+            assert_eq!(block.records[0].labels[1].value, "d");
+            assert_eq!(block.records[0].labels[2].name, "e");
+            assert_eq!(block.records[0].labels[2].value, "f");
+            assert_eq!(
+                new_labels, block.records[0].labels,
+                "should return new labels"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_labels_remove(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            entry
+                .update_labels(
+                    1000000,
+                    Labels::new(),
+                    HashSet::from_iter(vec!["a".to_string()]),
+                )
+                .await
+                .unwrap();
+
+            let block = entry
+                .block_manager
+                .read()
+                .await
+                .load(1000000)
+                .await
+                .unwrap();
+            assert_eq!(block.records[0].labels.len(), 1);
+            assert_eq!(block.records[0].labels[0].name, "c");
+            assert_eq!(block.records[0].labels[0].value, "d");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_nothing(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            entry
+                .update_labels(1000000, Labels::new(), HashSet::new())
+                .await
+                .unwrap();
+
+            let block = entry
+                .block_manager
+                .read()
+                .await
+                .load(1000000)
+                .await
+                .unwrap();
+            assert_eq!(block.records[0].labels.len(), 2);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_labels_not_found(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await.unwrap();
+            let err = entry
+                .update_labels(
+                    1000000,
+                    Labels::new(),
+                    HashSet::from_iter(vec!["x".to_string()]),
+                )
+                .await;
+
+            assert!(err.is_ok(), "Ignore removing labels that are not found")
+        }
+
+        async fn write_stub_record(mut entry: &mut Entry, time: u64) -> Result<(), ReductError> {
+            write_record_with_labels(
+                &mut entry,
+                time,
+                vec![],
+                Labels::from_iter(vec![
+                    ("a".to_string(), "b".to_string()),
+                    ("c".to_string(), "d".to_string()),
+                ]),
             )
-            .unwrap();
-
-        {
-            let reader = entry.next(id).await.unwrap();
-            assert_eq!(reader.timestamp(), 1000000);
+            .await
         }
-
-        assert_eq!(
-            entry.next(id).await.err(),
-            Some(ReductError::no_content("No content"))
-        );
-
-        write_stub_record(&mut entry, 2000000).await.unwrap();
-        {
-            let reader = entry.next(id).await.unwrap();
-            assert_eq!(reader.timestamp(), 2000000);
-        }
-
-        sleep(Duration::from_millis(600)).await;
-        assert_eq!(
-            entry.next(id).await.err(),
-            Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
-        );
     }
 
     #[rstest]
@@ -1054,26 +1250,6 @@ mod tests {
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1000000);
         assert_eq!(info.latest_record, 3000000);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_search(path: PathBuf) {
-        let mut entry = entry(
-            EntrySettings {
-                max_block_size: 10000,
-                max_block_records: 5,
-            },
-            path,
-        );
-
-        let step = 100000;
-        for i in 0..100 {
-            write_stub_record(&mut entry, i * step).await.unwrap();
-        }
-
-        let reader = entry.begin_read(30 * step).await.unwrap();
-        assert_eq!(reader.timestamp(), 3000000);
     }
 
     mod try_remove_oldest_block {
@@ -1183,6 +1359,23 @@ mod tests {
     async fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), ReductError> {
         let sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
+            .await?;
+        let x = sender.send(Ok(Some(Bytes::from(data)))).await;
+        sender.closed().await;
+        match x {
+            Ok(_) => Ok(()),
+            Err(_) => Err(ReductError::internal_server_error("Error sending data")),
+        }
+    }
+
+    async fn write_record_with_labels(
+        entry: &mut Entry,
+        time: u64,
+        data: Vec<u8>,
+        labels: Labels,
+    ) -> Result<(), ReductError> {
+        let sender = entry
+            .begin_write(time, data.len(), "text/plain".to_string(), labels)
             .await?;
         let x = sender.send(Ok(Some(Bytes::from(data)))).await;
         sender.closed().await;

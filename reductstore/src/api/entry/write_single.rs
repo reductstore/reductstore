@@ -8,6 +8,7 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::{Expect, Header, HeaderMap};
 
+use crate::api::entry::common::{parse_content_length_from_header, parse_timestamp_from_query};
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
 use crate::storage::proto::record::Label;
@@ -40,38 +41,8 @@ pub(crate) async fn write_record(
     let mut stream = body.into_data_stream();
 
     let check_request_and_get_sender = async {
-        if !params.contains_key("ts") {
-            return Err(HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "'ts' parameter is required",
-            ));
-        }
-
-        let ts = match params.get("ts").unwrap().parse::<u64>() {
-            Ok(ts) => ts,
-            Err(_) => {
-                return Err(HttpError::new(
-                    ErrorCode::UnprocessableEntity,
-                    "'ts' must be an unix timestamp in microseconds",
-                ));
-            }
-        };
-        let content_size = headers
-            .get("content-length")
-            .ok_or(HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "content-length header is required",
-            ))?
-            .to_str()
-            .unwrap()
-            .parse::<usize>()
-            .map_err(|_| {
-                HttpError::new(
-                    ErrorCode::UnprocessableEntity,
-                    "content-length header must be a number",
-                )
-            })?;
-
+        let ts = parse_timestamp_from_query(&params)?;
+        let content_size = parse_content_length_from_header(&headers)?;
         let content_type = headers
             .get("content-type")
             .map_or("application/octet-stream", |v| v.to_str().unwrap())
@@ -218,6 +189,15 @@ mod tests {
                 value: "y".to_string(),
             }
         );
+
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert_eq!(info.info.pending_records, 1);
     }
 
     #[rstest]

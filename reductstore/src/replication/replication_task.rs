@@ -37,6 +37,7 @@ pub struct ReplicationTask {
 const TRANSACTION_LOG_SIZE: usize = 1000_000;
 
 impl ReplicationTask {
+    /// Create a new replication task.
     pub(super) fn new(
         name: String,
         settings: ReplicationSettings,
@@ -87,16 +88,15 @@ impl ReplicationTask {
         tokio::spawn(async move {
             let init_transaction_logs = async {
                 let mut logs = thr_log_map.write().await;
-                for entry in thr_storage
-                    .read()
-                    .await
+                let storage = thr_storage.read().await;
+                for entry in storage
                     .get_bucket(&config.src_bucket)?
                     .info()
                     .await?
                     .entries
                 {
                     let path = Self::build_path_to_transaction_log(
-                        thr_storage.read().await.data_path(),
+                        storage.data_path(),
                         &config.src_bucket,
                         &entry.name,
                         &replication_name,
@@ -301,7 +301,7 @@ mod tests {
             async fn write_batch(
                 &mut self,
                 entry_name: &str,
-                record: Vec<RecordReader>,
+                record: Vec<(RecordReader, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn is_active(&self) -> bool;

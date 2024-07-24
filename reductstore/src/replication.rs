@@ -29,12 +29,16 @@ mod transaction_log;
 pub enum Transaction {
     /// Write a record to a bucket (timestamp)
     WriteRecord(u64),
+
+    /// Update a record in a bucket (timestamp)
+    UpdateRecord(u64),
 }
 
 impl Into<u8> for Transaction {
     fn into(self) -> u8 {
         match self {
             Transaction::WriteRecord(_) => 0,
+            Transaction::UpdateRecord(_) => 1,
         }
     }
 }
@@ -43,6 +47,7 @@ impl Transaction {
     pub fn timestamp(&self) -> &u64 {
         match self {
             Transaction::WriteRecord(ts) => ts,
+            Transaction::UpdateRecord(ts) => ts,
         }
     }
 }
@@ -53,6 +58,7 @@ impl TryFrom<u8> for Transaction {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Transaction::WriteRecord(0)),
+            1 => Ok(Transaction::UpdateRecord(0)),
             _ => Err(ReductError::internal_server_error(
                 "Invalid transaction type",
             )),
@@ -87,26 +93,52 @@ pub trait ManageReplications {
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
 
+    /// Update an existing replication.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Replication name.
+    /// * `settings` - Replication settings.
+    ///
+    /// # Errors
+    ///
+    /// A `ReductError` is returned if the update fails.
     async fn update_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
 
+    /// List all replications.
     async fn replications(&self) -> Vec<ReplicationInfo>;
 
+    /// Get replication information.
     async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
+    /// Get replication task.
     fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError>;
 
+    /// Get mutable replication task.
     fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError>;
 
+    /// Remove a replication task
     fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
 
+    /// Notify replication task about a new transaction.
+    ///
+    /// # Arguments
+    ///
+    /// * `notification` - Transaction notification.
+    ///
+    /// # Errors
+    ///
+    /// A `ReductError` is returned if the notification fails.
     async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
-pub(crate) async fn create_replication_engine(
+/// Create a new replication repository
+/// A fabric method to create a new replication repository and return it as a trait object.
+pub(crate) async fn create_replication_repo(
     storage: Arc<RwLock<Storage>>,
 ) -> Box<dyn ManageReplications + Send + Sync> {
     Box::new(replication_repository::ReplicationRepository::load_or_create(storage).await)

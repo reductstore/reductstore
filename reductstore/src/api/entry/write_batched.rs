@@ -390,6 +390,15 @@ mod tests {
                 Ok(Bytes::from("ef1234567890abcdef"))
             );
         }
+
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert_eq!(info.info.pending_records, 3);
     }
 
     #[rstest]

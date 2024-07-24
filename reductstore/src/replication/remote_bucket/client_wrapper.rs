@@ -39,6 +39,12 @@ pub(super) trait ReductBucketApi {
         records: Vec<RecordReader>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
+    async fn update_batch(
+        &self,
+        entry: &str,
+        records: &Vec<RecordReader>,
+    ) -> Result<ErrorRecordMap, ReductError>;
+
     fn server_url(&self) -> &str;
 
     fn name(&self) -> &str;
@@ -92,9 +98,14 @@ impl BucketWrapper {
         }
     }
 
-    fn build_headers(records: &mut Vec<RecordReader>) -> HeaderMap {
+    fn build_headers(records: &Vec<RecordReader>, update_only: bool) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        let content_length: u64 = records.iter().map(|r| r.content_length()).sum();
+        let content_length: u64 = if update_only {
+            0
+        } else {
+            records.iter().map(|r| r.content_length()).sum()
+        };
+
         headers.insert(
             CONTENT_TYPE,
             HeaderValue::from_str("application/octet-stream").unwrap(),
@@ -106,8 +117,14 @@ impl BucketWrapper {
 
         for record in records {
             let mut header_values = Vec::new();
-            header_values.push(record.content_length().to_string());
-            header_values.push(record.content_type().to_string());
+            if update_only {
+                header_values.push("0".to_string());
+                header_values.push("".to_string());
+            } else {
+                header_values.push(record.content_length().to_string());
+                header_values.push(record.content_type().to_string());
+            }
+
             if !record.labels().is_empty() {
                 for label in record.labels() {
                     if label.value.contains(',') {
@@ -127,16 +144,11 @@ impl BucketWrapper {
         headers
     }
 
-    fn prepare_batch(
+    fn prepare_batch_to_write(
         mut records: Vec<RecordReader>,
     ) -> (HeaderMap, impl Stream<Item = Result<Bytes, ReductError>>) {
-        records.sort_by(|a, b| {
-            let a = a.record();
-            let b = b.record();
-            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
-        });
-
-        let headers = Self::build_headers(&mut records);
+        Self::sort_by_timestamp(&mut records);
+        let headers = Self::build_headers(&mut records, false);
 
         let stream = stream! {
              while let Some(mut record) = records.pop() {
@@ -146,7 +158,13 @@ impl BucketWrapper {
                  }
              }
         };
+
         (headers, stream)
+    }
+
+    fn prepare_batch_to_update(records: &Vec<RecordReader>) -> HeaderMap {
+        let headers = Self::build_headers(&records, true);
+        headers
     }
 
     fn parse_record_errors(
@@ -180,9 +198,17 @@ impl BucketWrapper {
         }
         Ok(failed_records)
     }
+
+    fn sort_by_timestamp(records_to_update: &mut Vec<RecordReader>) {
+        records_to_update.sort_by(|a, b| {
+            let a = a.record();
+            let b = b.record();
+            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
+        });
+    }
 }
 
-fn check_response(response: Result<Response, reqwest::Error>) -> Result<(), ReductError> {
+fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> {
     let map_error = |error: reqwest::Error| -> ReductError {
         let status = if error.is_connect() {
             ErrorCode::ConnectionError
@@ -246,7 +272,7 @@ impl ReductBucketApi for BucketWrapper {
         entry: &str,
         records: Vec<RecordReader>,
     ) -> Result<ErrorRecordMap, ReductError> {
-        let (headers, stream) = Self::prepare_batch(records);
+        let (headers, stream) = Self::prepare_batch_to_write(records);
         let request = self.client.request(
             Method::POST,
             &format!(
@@ -259,6 +285,25 @@ impl ReductBucketApi for BucketWrapper {
             .body(Body::wrap_stream(stream))
             .send()
             .await;
+        let failed_records = Self::parse_record_errors(response)?;
+
+        Ok(failed_records)
+    }
+
+    async fn update_batch(
+        &self,
+        entry: &str,
+        records: &Vec<RecordReader>,
+    ) -> Result<ErrorRecordMap, ReductError> {
+        let headers = Self::prepare_batch_to_update(records);
+        let request = self.client.request(
+            Method::PATCH,
+            &format!(
+                "{}{}/b/{}/{}/batch",
+                self.server_url, API_PATH, self.bucket_name, entry
+            ),
+        );
+        let response = request.headers(headers).send().await;
         let failed_records = Self::parse_record_errors(response)?;
 
         Ok(failed_records)
@@ -287,49 +332,13 @@ mod tests {
     use hyper::http;
     use rstest::*;
     use std::pin::pin;
+    use tokio::sync::mpsc::Sender;
 
     #[rstest]
     #[tokio::test]
-    async fn test_prepare_batch() {
-        let (tx1, rx1) = tokio::sync::mpsc::channel(1);
-        let rec1 = Record {
-            timestamp: Some(us_to_ts(&1)),
-            labels: vec![
-                Label {
-                    name: "label1".to_string(),
-                    value: "value1".to_string(),
-                },
-                Label {
-                    name: "with_comma".to_string(),
-                    value: "[x,y]".to_string(),
-                },
-            ],
-
-            content_type: "text/plain".to_string(),
-            begin: 0,
-            end: 10,
-            state: 0,
-        };
-
-        let (tx2, rx2) = tokio::sync::mpsc::channel(1);
-        let rec2 = Record {
-            timestamp: Some(us_to_ts(&2)),
-            labels: vec![Label {
-                name: "label2".to_string(),
-                value: "value2".to_string(),
-            }],
-            content_type: "image/jpg".to_string(),
-            begin: 0,
-            end: 10,
-            state: 0,
-        };
-
-        let records = vec![
-            RecordReader::new(rx1, rec1, false),
-            RecordReader::new(rx2, rec2, false),
-        ];
-
-        let (headers, stream) = BucketWrapper::prepare_batch(records);
+    async fn test_prepare_batch_to_write(records: (Vec<RecordReader>, Vec<Tx>)) {
+        let (records, mut txs) = records;
+        let (headers, stream) = BucketWrapper::prepare_batch_to_write(records);
 
         assert_eq!(headers.len(), 4);
         assert_eq!(
@@ -348,16 +357,34 @@ mod tests {
 
         let mut stream = pin!(stream);
 
-        tx1.send(Ok(Bytes::from("record1"))).await.unwrap();
-        drop(tx1);
+        txs[0].send(Ok(Bytes::from("record1"))).await.unwrap();
+        drop(txs.remove(0));
 
-        tx2.send(Ok(Bytes::from("record2"))).await.unwrap();
-        drop(tx2);
+        txs[0].send(Ok(Bytes::from("record2"))).await.unwrap();
+        drop(txs.remove(0));
 
         let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(chunk, Bytes::from("record1"));
         let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(chunk, Bytes::from("record2"));
+    }
+
+    #[rstest]
+    fn test_prepare_batch_to_update(records: (Vec<RecordReader>, Vec<Tx>)) {
+        let (records, _) = records;
+        let headers = BucketWrapper::prepare_batch_to_update(&records);
+
+        assert_eq!(headers.len(), 4);
+        assert_eq!(
+            headers.get(CONTENT_TYPE).unwrap(),
+            "application/octet-stream"
+        );
+        assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "0");
+        assert_eq!(
+            headers.get("x-reduct-time-1").unwrap(),
+            "0,,label1=value1,with_comma=\"[x,y]\""
+        );
+        assert_eq!(headers.get("x-reduct-time-2").unwrap(), "0,,label2=value2");
     }
 
     #[rstest]
@@ -374,5 +401,51 @@ mod tests {
             ErrorCode::NotFound
         );
         assert_eq!(failed_records.get(&1).unwrap().message(), "Not Found");
+    }
+
+    type Tx = Sender<Result<Bytes, ReductError>>;
+
+    #[fixture]
+    fn records() -> (Vec<RecordReader>, Vec<Tx>) {
+        let rec1 = Record {
+            timestamp: Some(us_to_ts(&1)),
+            labels: vec![
+                Label {
+                    name: "label1".to_string(),
+                    value: "value1".to_string(),
+                },
+                Label {
+                    name: "with_comma".to_string(),
+                    value: "[x,y]".to_string(),
+                },
+            ],
+            content_type: "text/plain".to_string(),
+            begin: 0,
+            end: 10,
+            state: 0,
+        };
+
+        let rec2 = Record {
+            timestamp: Some(us_to_ts(&2)),
+            labels: vec![Label {
+                name: "label2".to_string(),
+                value: "value2".to_string(),
+            }],
+            content_type: "image/jpg".to_string(),
+            begin: 0,
+            end: 10,
+            state: 0,
+        };
+
+        let (tx1, rx1) = tokio::sync::mpsc::channel(1);
+        let (tx2, rx2) = tokio::sync::mpsc::channel(1);
+
+        (
+            vec![
+                RecordReader::new(rx1, rec1, false),
+                RecordReader::new(rx2, rec2, false),
+            ],
+            vec![tx1, tx2],
+        )
     }
 }

@@ -53,16 +53,12 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(
-            components
-                .replication_repo
-                .read()
-                .await
-                .replications()
-                .await
-                .len(),
-            1
-        );
+        assert!(components
+            .replication_repo
+            .read()
+            .await
+            .get_replication("test")
+            .is_ok());
     }
 
     #[rstest]

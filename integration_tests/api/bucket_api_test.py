@@ -1,6 +1,6 @@
 import json
 
-from conftest import requires_env, auth_headers
+from .conftest import requires_env, auth_headers
 
 
 def test__create_bucket_ok(base_url, session, bucket_name):

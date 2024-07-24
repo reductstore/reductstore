@@ -2,32 +2,32 @@
 // Licensed under the Business Source License 1.1
 //
 
+use std::fmt::{Debug, Display, Formatter};
+use std::sync::Arc;
+
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware::from_fn, Router};
-
 use serde::de::StdError;
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
 use tokio::sync::RwLock;
+
+pub use reduct_base::error::ErrorCode;
+use reduct_base::error::ReductError as BaseHttpError;
+use reduct_macros::Twin;
 
 use crate::api::bucket::create_bucket_api_routes;
 use crate::api::entry::create_entry_api_routes;
 use crate::api::middleware::{default_headers, print_statuses};
+use crate::api::replication::create_replication_api_routes;
 use crate::api::server::create_server_api_routes;
 use crate::api::token::create_token_api_routes;
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
-use crate::storage::storage::Storage;
-use reduct_base::error::ReductError as BaseHttpError;
-use reduct_macros::Twin;
-
-use crate::api::replication::create_replication_api_routes;
 use crate::replication::ManageReplications;
-pub use reduct_base::error::ErrorCode;
+use crate::storage::storage::Storage;
 
 mod bucket;
 mod entry;
@@ -135,20 +135,23 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use axum::body::Body;
     use std::collections::HashMap;
+
+    use axum::body::Body;
+    use axum::extract::Path;
+    use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
+    use bytes::Bytes;
+    use rstest::fixture;
+
+    use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::replication_api::ReplicationSettings;
+    use reduct_base::msg::token_api::Permissions;
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
-    use crate::replication::create_replication_engine;
-    use axum::extract::Path;
+    use crate::replication::create_replication_repo;
 
-    use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
-    use bytes::Bytes;
-    use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::token_api::Permissions;
-    use rstest::fixture;
+    use super::*;
 
     #[fixture]
     pub(crate) async fn components() -> Arc<Components> {
@@ -186,13 +189,32 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let storage = Arc::new(RwLock::new(storage));
+        let mut replication_repo = create_replication_repo(Arc::clone(&storage)).await;
+        replication_repo
+            .create_replication(
+                "api-test",
+                ReplicationSettings {
+                    src_bucket: "bucket-1".to_string(),
+                    dst_bucket: "bucket-2".to_string(),
+                    dst_host: "http://localhost:8080".to_string(),
+                    dst_token: "".to_string(),
+                    entries: vec![],
+                    include: Default::default(),
+                    exclude: Default::default(),
+                    each_n: None,
+                    each_s: None,
+                },
+            )
+            .await
+            .unwrap();
+
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
-            replication_repo: RwLock::new(create_replication_engine(storage).await),
+            replication_repo: RwLock::new(replication_repo),
         };
 
         Arc::new(components)

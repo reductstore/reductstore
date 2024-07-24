@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use log::error;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::Transaction;
 use reduct_base::error::ReductError;
 use tokio::time::{Duration, Instant};
 
@@ -26,7 +27,7 @@ impl RemoteBucketState for BucketUnavailableState {
     async fn write_batch(
         self: Box<Self>,
         entry: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
             let bucket = self.client.get_bucket(&self.bucket_name).await;
@@ -55,12 +56,12 @@ impl RemoteBucketState for BucketUnavailableState {
         Box::new(me)
     }
 
-    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
-        &self.last_result
-    }
-
     fn is_available(&self) -> bool {
         false
+    }
+
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
+        &self.last_result
     }
 }
 

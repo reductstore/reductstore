@@ -1,6 +1,6 @@
 """Test authorization"""
 
-from conftest import requires_env, auth_headers
+from .conftest import requires_env, auth_headers
 
 
 @requires_env("API_TOKEN")

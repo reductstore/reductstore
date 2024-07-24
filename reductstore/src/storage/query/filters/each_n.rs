@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
-use log::debug;
 
 /// Filter that passes every N-th record
 pub struct EachNFilter {
@@ -23,20 +22,14 @@ impl<P> RecordFilter<P> for EachNFilter
 where
     P: FilterPoint,
 {
-    fn filter(&mut self, p: &P) -> bool {
+    fn filter(&mut self, _: &P) -> bool {
         let ret = self.count % self.n == 0;
         self.count += 1;
-        if ret {
-            debug!("Point {:?} passed", p.timestamp());
-        } else {
-            debug!("Point {:?} did not pass", p.timestamp());
-        }
         ret
     }
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
     use crate::storage::proto::Record;
