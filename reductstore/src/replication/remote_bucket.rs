@@ -115,7 +115,13 @@ pub(super) mod tests {
             async fn write_batch(
                 &self,
                 entry: &str,
-                records: Vec<(RecordReader, Transaction)>,
+                records: Vec<RecordReader>,
+            ) -> Result<ErrorRecordMap, ReductError>;
+
+                        async fn update_batch(
+                &self,
+                entry: &str,
+                records: &Vec<RecordReader>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn server_url(&self) -> &str;
