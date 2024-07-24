@@ -10,7 +10,6 @@ use bytes::Bytes;
 use futures_util::Stream;
 use std::collections::BTreeMap;
 
-use futures_util::stream::empty;
 use log::warn;
 use std::str::FromStr;
 
