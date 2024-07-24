@@ -140,12 +140,12 @@ impl RemoteBucketState for BucketAvailableState {
         }
     }
 
-    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
-        &self.last_result
-    }
-
     fn is_available(&self) -> bool {
         true
+    }
+
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
+        &self.last_result
     }
 }
 
@@ -163,13 +163,41 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn write_record_ok(
+    async fn test_write_record_ok(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record: (RecordReader, Transaction),
+        record_to_write: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
+            .with(
+                predicate::eq("test_entry"),
+                predicate::always(), // TODO: check the records
+            )
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        bucket.expect_update_batch().times(0);
+
+        let state = Box::new(BucketAvailableState {
+            client: Box::new(client),
+            bucket: Box::new(bucket),
+            last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
+        });
+
+        let state = state.write_batch("test_entry", vec![record_to_write]).await;
+        assert!(state.last_result().is_ok());
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_record_ok(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_to_update: (RecordReader, Transaction),
+    ) {
+        bucket.expect_write_batch().times(0);
+        bucket
+            .expect_update_batch()
             .with(
                 predicate::eq("test_entry"),
                 predicate::always(), // TODO: check the records
@@ -182,28 +210,31 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record]).await;
+        let state = state
+            .write_batch("test_entry", vec![record_to_update])
+            .await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn write_record_conn_err(
+    async fn test_write_record_conn_err(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record: (RecordReader, Transaction),
+        record_to_write: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+        bucket.expect_update_batch().times(0);
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record]).await;
+        let state = state.write_batch("test", vec![record_to_write]).await;
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::Timeout, ""))
@@ -213,10 +244,35 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn write_record_server_err(
+    async fn test_update_record_conn_err(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record: (RecordReader, Transaction),
+        record_to_update: (RecordReader, Transaction),
+    ) {
+        bucket.expect_write_batch().times(0);
+        bucket
+            .expect_update_batch()
+            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+
+        let state = Box::new(BucketAvailableState::new(
+            Box::new(client),
+            Box::new(bucket),
+        ));
+
+        let state = state.write_batch("test", vec![record_to_update]).await;
+        assert_eq!(
+            state.last_result(),
+            &Err(ReductError::new(ErrorCode::Timeout, ""))
+        );
+        assert!(!state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_record_server_err(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_to_write: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
@@ -227,7 +283,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record]).await;
+        let state = state.write_batch("test", vec![record_to_write]).await;
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::InternalServerError, ""))
@@ -237,10 +293,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn write_record_record_errors(
+    async fn test_write_record_record_errors(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record: (RecordReader, Transaction),
+        record_to_write: (RecordReader, Transaction),
     ) {
         bucket.expect_write_batch().returning(|_, _| {
             Ok(ErrorRecordMap::from_iter(vec![(
@@ -254,7 +310,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record]).await;
+        let state = state.write_batch("test", vec![record_to_write]).await;
         let error_map = state.last_result().as_ref().unwrap();
 
         assert_eq!(error_map.len(), 1);
@@ -262,8 +318,42 @@ mod tests {
         assert_eq!(error_map.get(&1).unwrap().message, "AlreadyExists");
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_record_record_errors(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_to_update: (RecordReader, Transaction),
+    ) {
+        bucket.expect_update_batch().returning(|_, records| {
+            assert_eq!(records.len(), 1);
+            Ok(ErrorRecordMap::from_iter(vec![(
+                0u64,
+                ReductError::new(ErrorCode::NotFound, "Not found"),
+            )]))
+        });
+        bucket.expect_write_batch().returning(|_, records| {
+            assert_eq!(records.len(), 2, "we write the new record and failed one");
+            Ok(ErrorRecordMap::new())
+        });
+
+        let state = Box::new(BucketAvailableState::new(
+            Box::new(client),
+            Box::new(bucket),
+        ));
+
+        let state = state
+            .write_batch("test", vec![record_to_update, record_to_write()])
+            .await;
+        assert!(
+            state.last_result().is_ok(),
+            "we should not have any errors because wrote error records"
+        );
+        assert!(state.is_available());
+    }
+
     #[fixture]
-    fn record() -> (RecordReader, Transaction) {
+    fn record_to_write() -> (RecordReader, Transaction) {
         let (_, rx) = tokio::sync::mpsc::channel(1);
         (
             RecordReader::new(
@@ -279,6 +369,26 @@ mod tests {
                 false,
             ),
             Transaction::WriteRecord(0),
+        )
+    }
+
+    #[fixture]
+    fn record_to_update() -> (RecordReader, Transaction) {
+        let (_, rx) = tokio::sync::mpsc::channel(1);
+        (
+            RecordReader::new(
+                rx,
+                Record {
+                    timestamp: Some(us_to_ts(&0)),
+                    labels: Vec::new(),
+                    begin: 0,
+                    end: 0,
+                    content_type: "text/plain".to_string(),
+                    state: 0,
+                },
+                false,
+            ),
+            Transaction::UpdateRecord(0),
         )
     }
 }

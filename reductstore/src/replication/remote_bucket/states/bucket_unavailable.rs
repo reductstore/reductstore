@@ -56,12 +56,12 @@ impl RemoteBucketState for BucketUnavailableState {
         Box::new(me)
     }
 
-    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
-        &self.last_result
-    }
-
     fn is_available(&self) -> bool {
         false
+    }
+
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
+        &self.last_result
     }
 }
 
