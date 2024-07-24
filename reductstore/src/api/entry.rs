@@ -6,6 +6,7 @@ mod query;
 mod read_batched;
 mod read_single;
 mod remove;
+mod update_batched;
 mod update_single;
 mod write_batched;
 mod write_single;
@@ -24,6 +25,8 @@ use axum::extract::FromRequest;
 
 use axum_extra::headers::HeaderMapExt;
 
+use crate::api::entry::update_batched::update_batched_records;
+use crate::api::entry::update_single::update_record;
 use axum::body::Body;
 use axum::http::Request;
 use axum::routing::{delete, get, head, patch, post};
@@ -107,13 +110,14 @@ pub struct QueryInfoAxum(QueryInfo);
 pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
-        .route(
-            "/:bucket_name/:entry_name",
-            patch(update_single::update_record),
-        )
+        .route("/:bucket_name/:entry_name", patch(update_record))
         .route(
             "/:bucket_name/:entry_name/batch",
             post(write_batched_records),
+        )
+        .route(
+            "/:bucket_name/:entry_name/batch",
+            patch(update_batched_records),
         )
         .route("/:bucket_name/:entry_name", get(read_single_record))
         .route("/:bucket_name/:entry_name", head(read_single_record))
