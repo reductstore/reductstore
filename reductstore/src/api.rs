@@ -141,12 +141,15 @@ mod tests {
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
-    use crate::replication::create_replication_engine;
+    use crate::replication::create_replication_repo;
     use axum::extract::Path;
 
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
+    use rand::distributions::Alphanumeric;
+    use rand::Rng;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::replication_api::ReplicationSettings;
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
 
@@ -186,13 +189,32 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let storage = Arc::new(RwLock::new(storage));
+        let mut replication_repo = create_replication_repo(Arc::clone(&storage)).await;
+        replication_repo
+            .create_replication(
+                "api-test",
+                ReplicationSettings {
+                    src_bucket: "bucket-1".to_string(),
+                    dst_bucket: "bucket-2".to_string(),
+                    dst_host: "http://localhost:8080".to_string(),
+                    dst_token: "".to_string(),
+                    entries: vec![],
+                    include: Default::default(),
+                    exclude: Default::default(),
+                    each_n: None,
+                    each_s: None,
+                },
+            )
+            .await
+            .unwrap();
+
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
-            replication_repo: RwLock::new(create_replication_engine(storage).await),
+            replication_repo: RwLock::new(replication_repo),
         };
 
         Arc::new(components)

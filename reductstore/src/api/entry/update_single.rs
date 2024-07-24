@@ -14,6 +14,8 @@ use crate::api::entry::common::{parse_content_length_from_header, parse_timestam
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
+use crate::replication::{Transaction, TransactionNotification};
+use crate::storage::proto::record::Label;
 
 // PATCH /:bucket/:entry?ts=<number>
 pub(crate) async fn update_record(
@@ -75,7 +77,22 @@ pub(crate) async fn update_record(
         .await
         .get_mut_bucket(bucket)?
         .get_mut_entry(entry_name)?
-        .update_labels(ts, labels_to_update, labels_to_remove)
+        .update_labels(ts, labels_to_update.clone(), labels_to_remove)
+        .await?;
+
+    components
+        .replication_repo
+        .write()
+        .await
+        .notify(TransactionNotification {
+            bucket: bucket.clone(),
+            entry: entry_name.clone(),
+            labels: labels_to_update
+                .into_iter()
+                .map(|(k, v)| Label { name: k, value: v })
+                .collect(),
+            event: Transaction::UpdateRecord(ts),
+        })
         .await?;
 
     Ok(())
@@ -100,6 +117,7 @@ mod tests {
         #[future] empty_body: Body,
     ) {
         let components = components.await;
+
         update_record(
             State(Arc::clone(&components)),
             headers,
@@ -138,6 +156,15 @@ mod tests {
                 value: "2".to_string(),
             }
         );
+
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert_eq!(info.info.pending_records, 1);
     }
 
     #[rstest]
@@ -171,9 +198,10 @@ mod tests {
             HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found")
         );
     }
+
     #[rstest]
     #[tokio::test]
-    async fn test_not_label_to_delete(
+    async fn test_no_label_to_delete(
         #[future] components: Arc<Components>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
@@ -183,7 +211,7 @@ mod tests {
 
         headers.insert("x-reduct-label-not-exist", "".parse().unwrap());
 
-        let err = update_record(
+        let result = update_record(
             State(Arc::clone(&components)),
             headers,
             path_to_entry_1,
@@ -193,17 +221,9 @@ mod tests {
             )])),
             empty_body.await,
         )
-        .await
-        .err()
-        .unwrap();
+        .await;
 
-        assert_eq!(
-            err,
-            HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "content-length header must be 0",
-            )
-        );
+        assert!(result.is_ok(), "we ignore labels that do not exist");
     }
 
     #[rstest]

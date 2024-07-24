@@ -75,10 +75,28 @@ pub(crate) async fn update_batched_records(
             .get_mut_bucket(bucket_name)?
             .get_mut_entry(entry_name)?;
         if let Err(e) = entry
-            .update_labels(time, labels_to_update, labels_to_remove)
+            .update_labels(time, labels_to_update.clone(), labels_to_remove)
             .await
         {
             error_map.insert(time, e);
+        } else {
+            drop(storage); // drop the lock because we may need to wait for the replication
+            let mut replication_repo = components.replication_repo.write().await;
+            replication_repo
+                .notify(TransactionNotification {
+                    bucket: bucket_name.clone(),
+                    entry: entry_name.clone(),
+                    labels: labels_to_update
+                        .iter()
+                        .map(|(k, v)| Label {
+                            name: k.clone(),
+                            value: v.clone(),
+                        })
+                        .collect(),
+                    event: Transaction::UpdateRecord(time),
+                })
+                .await
+                .unwrap();
         }
     }
 
@@ -203,6 +221,14 @@ mod tests {
         }
 
         assert_eq!(err_map.len(), 0);
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert_eq!(info.info.pending_records, 1);
     }
 
     #[rstest]

@@ -42,27 +42,15 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_list_replications_ok(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-        settings: ReplicationSettings,
-    ) {
+    async fn test_list_replications_ok(#[future] components: Arc<Components>, headers: HeaderMap) {
         let components = components.await;
-        components
-            .replication_repo
-            .write()
-            .await
-            .create_replication("test", settings)
-            .await
-            .unwrap();
-
         let list = list_replications(State(Arc::clone(&components)), headers)
             .await
             .unwrap()
             .0;
 
         assert_eq!(list.replications.len(), 1);
-        assert_eq!(list.replications[0].name, "test");
+        assert_eq!(list.replications[0].name, "api-test");
         assert_eq!(list.replications[0].is_active, false);
         assert_eq!(list.replications[0].is_provisioned, false);
     }

@@ -189,6 +189,15 @@ mod tests {
                 value: "y".to_string(),
             }
         );
+
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert_eq!(info.info.pending_records, 1);
     }
 
     #[rstest]
