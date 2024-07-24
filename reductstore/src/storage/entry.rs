@@ -398,7 +398,7 @@ impl Entry {
         time: u64,
         mut update: Labels,
         remove: HashSet<String>,
-    ) -> Result<(), ReductError> {
+    ) -> Result<Vec<Label>, ReductError> {
         debug!("Updating labels for ts={}", time);
 
         let (_, mut block, record_index) = self.find_record(&time).await?;
@@ -430,8 +430,9 @@ impl Entry {
             new_labels.push(Label { name, value });
         }
 
-        record.labels = new_labels;
-        self.block_manager.write().await.save(block).await
+        record.labels = new_labels.clone();
+        self.block_manager.write().await.save(block).await?;
+        Ok(new_labels)
     }
 
     /// Query records for a time range.
@@ -1119,7 +1120,7 @@ mod tests {
         #[tokio::test]
         async fn test_update_labels(mut entry: Entry) {
             write_stub_record(&mut entry, 1000000).await.unwrap();
-            entry
+            let mut new_labels = entry
                 .update_labels(
                     1000000,
                     Labels::from_iter(vec![
@@ -1139,6 +1140,7 @@ mod tests {
                 .await
                 .unwrap();
             block.records[0].labels.sort_by(|a, b| a.name.cmp(&b.name));
+            new_labels.sort_by(|a, b| a.name.cmp(&b.name));
 
             assert_eq!(block.records[0].labels.len(), 3);
             assert_eq!(block.records[0].labels[0].name, "a");
@@ -1147,6 +1149,10 @@ mod tests {
             assert_eq!(block.records[0].labels[1].value, "d");
             assert_eq!(block.records[0].labels[2].name, "e");
             assert_eq!(block.records[0].labels[2].value, "f");
+            assert_eq!(
+                new_labels, block.records[0].labels,
+                "should return new labels"
+            );
         }
 
         #[rstest]

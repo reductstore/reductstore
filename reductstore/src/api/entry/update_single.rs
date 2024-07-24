@@ -71,7 +71,7 @@ pub(crate) async fn update_record(
     }
 
     let entry_name = path.get("entry_name").unwrap();
-    components
+    let new_labels = components
         .storage
         .write()
         .await
@@ -87,10 +87,7 @@ pub(crate) async fn update_record(
         .notify(TransactionNotification {
             bucket: bucket.clone(),
             entry: entry_name.clone(),
-            labels: labels_to_update
-                .into_iter()
-                .map(|(k, v)| Label { name: k, value: v })
-                .collect(),
+            labels: new_labels,
             event: Transaction::UpdateRecord(ts),
         })
         .await?;
