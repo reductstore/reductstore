@@ -30,7 +30,7 @@ pub enum Transaction {
     /// Write a record to a bucket (timestamp)
     WriteRecord(u64),
 
-    // Update a record in a bucket (timestamp)
+    /// Update a record in a bucket (timestamp)
     UpdateRecord(u64),
 }
 

@@ -6,6 +6,7 @@ use crate::replication::remote_bucket::states::bucket_available::BucketAvailable
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::Transaction;
 use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 use log::error;
@@ -34,7 +35,7 @@ impl RemoteBucketState for InitialState {
     async fn write_batch(
         self: Box<Self>,
         entry: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         // Try to get the bucket.
         let bucket = self.client.get_bucket(&self.bucket_name).await;

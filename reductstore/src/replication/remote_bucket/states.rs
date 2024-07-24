@@ -6,6 +6,7 @@ use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::Transaction;
 pub(super) use initial_state::InitialState;
 use reduct_base::error::ReductError;
 
@@ -16,7 +17,7 @@ pub(super) trait RemoteBucketState {
     async fn write_batch(
         self: Box<Self>,
         entry_name: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
     /// Is the bucket available?

@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::replication::Transaction;
 use reduct_base::error::ReductError;
 
 struct RemoteBucketImpl {
@@ -26,7 +27,7 @@ pub(crate) trait RemoteBucket {
     async fn write_batch(
         &mut self,
         entry_name: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
     fn is_active(&self) -> bool;
@@ -46,7 +47,7 @@ impl RemoteBucket for RemoteBucketImpl {
     async fn write_batch(
         &mut self,
         entry_name: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError> {
         self.state = Some(
             self.state
@@ -114,7 +115,7 @@ pub(super) mod tests {
             async fn write_batch(
                 &self,
                 entry: &str,
-                records: Vec<RecordReader>,
+                records: Vec<(RecordReader, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn server_url(&self) -> &str;
@@ -131,7 +132,7 @@ pub(super) mod tests {
             async fn write_batch(
                 self: Box<Self>,
                 entry: &str,
-                records: Vec<RecordReader>,
+                records: Vec<(RecordReader, Transaction)>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
             fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
@@ -214,6 +215,8 @@ pub(super) mod tests {
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
         let record = RecordReader::new(rx, rec, false);
-        remote_bucket.write_batch("test", vec![record]).await
+        remote_bucket
+            .write_batch("test", vec![(record, Transaction::WriteRecord(0))])
+            .await
     }
 }

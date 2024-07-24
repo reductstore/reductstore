@@ -15,6 +15,7 @@ use std::str::FromStr;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::Transaction;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
 
@@ -36,7 +37,7 @@ pub(super) trait ReductBucketApi {
     async fn write_batch(
         &self,
         entry: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
     fn server_url(&self) -> &str;
@@ -92,9 +93,9 @@ impl BucketWrapper {
         }
     }
 
-    fn build_headers(records: &mut Vec<RecordReader>) -> HeaderMap {
+    fn build_headers(records: &mut Vec<(RecordReader, Transaction)>) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        let content_length: u64 = records.iter().map(|r| r.content_length()).sum();
+        let content_length: u64 = records.iter().map(|r| r.0.content_length()).sum();
         headers.insert(
             CONTENT_TYPE,
             HeaderValue::from_str("application/octet-stream").unwrap(),
@@ -104,7 +105,7 @@ impl BucketWrapper {
             HeaderValue::from_str(&content_length.to_string()).unwrap(),
         );
 
-        for record in records {
+        for (record, _) in records {
             let mut header_values = Vec::new();
             header_values.push(record.content_length().to_string());
             header_values.push(record.content_type().to_string());
@@ -128,18 +129,18 @@ impl BucketWrapper {
     }
 
     fn prepare_batch(
-        mut records: Vec<RecordReader>,
+        mut records: Vec<(RecordReader, Transaction)>,
     ) -> (HeaderMap, impl Stream<Item = Result<Bytes, ReductError>>) {
         records.sort_by(|a, b| {
-            let a = a.record();
-            let b = b.record();
+            let a = a.0.record();
+            let b = b.0.record();
             ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
         });
 
         let headers = Self::build_headers(&mut records);
 
         let stream = stream! {
-             while let Some(mut record) = records.pop() {
+             while let Some((mut record, _)) = records.pop() {
                 let rx = record.rx();
                  while let Some(chunk) = rx.recv().await {
                      yield chunk;
@@ -244,7 +245,7 @@ impl ReductBucketApi for BucketWrapper {
     async fn write_batch(
         &self,
         entry: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError> {
         let (headers, stream) = Self::prepare_batch(records);
         let request = self.client.request(
@@ -325,8 +326,14 @@ mod tests {
         };
 
         let records = vec![
-            RecordReader::new(rx1, rec1, false),
-            RecordReader::new(rx2, rec2, false),
+            (
+                RecordReader::new(rx1, rec1, false),
+                Transaction::WriteRecord(1),
+            ),
+            (
+                RecordReader::new(rx2, rec2, false),
+                Transaction::WriteRecord(2),
+            ),
         ];
 
         let (headers, stream) = BucketWrapper::prepare_batch(records);

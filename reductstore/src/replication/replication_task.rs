@@ -301,7 +301,7 @@ mod tests {
             async fn write_batch(
                 &mut self,
                 entry_name: &str,
-                record: Vec<RecordReader>,
+                record: Vec<(RecordReader, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn is_active(&self) -> bool;

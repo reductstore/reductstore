@@ -5,6 +5,7 @@ use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedCli
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::Transaction;
 use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 use log::{debug, error};
@@ -32,7 +33,7 @@ impl RemoteBucketState for BucketAvailableState {
     async fn write_batch(
         mut self: Box<Self>,
         entry_name: &str,
-        records: Vec<RecordReader>,
+        records: Vec<(RecordReader, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         match self.bucket.write_batch(entry_name, records).await {
             Ok(error_map) => {
@@ -95,7 +96,7 @@ mod tests {
     async fn write_record_ok(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_reader: RecordReader,
+        record: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
@@ -111,7 +112,7 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record_reader]).await;
+        let state = state.write_batch("test_entry", vec![record]).await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -121,7 +122,7 @@ mod tests {
     async fn write_record_conn_err(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_reader: RecordReader,
+        record: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
@@ -132,7 +133,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_reader]).await;
+        let state = state.write_batch("test", vec![record]).await;
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::Timeout, ""))
@@ -145,7 +146,7 @@ mod tests {
     async fn write_record_server_err(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_reader: RecordReader,
+        record: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
@@ -156,7 +157,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_reader]).await;
+        let state = state.write_batch("test", vec![record]).await;
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::InternalServerError, ""))
@@ -169,7 +170,7 @@ mod tests {
     async fn write_record_record_errors(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_reader: RecordReader,
+        record: (RecordReader, Transaction),
     ) {
         bucket.expect_write_batch().returning(|_, _| {
             Ok(ErrorRecordMap::from_iter(vec![(
@@ -183,7 +184,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_reader]).await;
+        let state = state.write_batch("test", vec![record]).await;
         let error_map = state.last_result().as_ref().unwrap();
 
         assert_eq!(error_map.len(), 1);
@@ -192,19 +193,22 @@ mod tests {
     }
 
     #[fixture]
-    fn record_reader() -> RecordReader {
+    fn record() -> (RecordReader, Transaction) {
         let (_, rx) = tokio::sync::mpsc::channel(1);
-        RecordReader::new(
-            rx,
-            Record {
-                timestamp: Some(us_to_ts(&0)),
-                labels: Vec::new(),
-                begin: 0,
-                end: 0,
-                content_type: "text/plain".to_string(),
-                state: 0,
-            },
-            false,
+        (
+            RecordReader::new(
+                rx,
+                Record {
+                    timestamp: Some(us_to_ts(&0)),
+                    labels: Vec::new(),
+                    begin: 0,
+                    end: 0,
+                    content_type: "text/plain".to_string(),
+                    state: 0,
+                },
+                false,
+            ),
+            Transaction::WriteRecord(0),
         )
     }
 }

@@ -994,9 +994,9 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_begin_read_ok_in_chunks(mut entry: Entry) {
-            let mut data = vec![0; DEFAULT_MAX_READ_CHUNK as usize + 1];
+            let mut data = vec![0; DEFAULT_MAX_READ_CHUNK + 1];
             data[0] = 1;
-            data[DEFAULT_MAX_READ_CHUNK as usize] = 2;
+            data[DEFAULT_MAX_READ_CHUNK] = 2;
 
             write_record(&mut entry, 1000000, data.clone())
                 .await
@@ -1005,11 +1005,11 @@ mod tests {
             let mut reader = entry.begin_read(1000000).await.unwrap();
             assert_eq!(
                 reader.rx().recv().await.unwrap().unwrap().to_vec(),
-                data[0..DEFAULT_MAX_READ_CHUNK as usize]
+                data[0..DEFAULT_MAX_READ_CHUNK]
             );
             assert_eq!(
                 reader.rx().recv().await.unwrap().unwrap().to_vec(),
-                data[DEFAULT_MAX_READ_CHUNK as usize..]
+                data[DEFAULT_MAX_READ_CHUNK..]
             );
             assert_eq!(reader.rx().recv().await, None);
         }
