@@ -7,24 +7,18 @@ use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::HeaderName;
-use axum::response::IntoResponse;
-use axum_extra::headers::{Expect, Header, HeaderMap, HeaderValue};
-use bytes::Bytes;
+use axum_extra::headers::{HeaderMap, HeaderValue};
 use futures_util::StreamExt;
 
 use crate::api::entry::common::parse_content_length_from_header;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::bucket::RecordTx;
 use crate::storage::proto::record::Label;
-use log::debug;
-use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
-use reduct_base::error::ReductError;
+use axum::response::IntoResponse;
+use reduct_base::batch::{parse_batched_header, sort_headers_by_time};
 use reduct_base::Labels;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::mpsc::Sender;
 
 // PATCH /:bucket/:entry/batch
 pub(crate) async fn update_batched_records(
@@ -71,7 +65,7 @@ pub(crate) async fn update_batched_records(
         }
 
         let mut storage = components.storage.write().await;
-        let mut entry = storage
+        let entry = storage
             .get_mut_bucket(bucket_name)?
             .get_mut_entry(entry_name)?;
         if let Err(e) = entry
