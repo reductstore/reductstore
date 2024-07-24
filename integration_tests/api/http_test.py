@@ -6,4 +6,4 @@ def test_api_version(base_url, session):
     resp = session.get(f"{base_url}/info")
 
     assert resp.status_code == 200
-    assert resp.headers["x-reduct-api"] == "1.10"
+    assert resp.headers["x-reduct-api"] == "1.11"
