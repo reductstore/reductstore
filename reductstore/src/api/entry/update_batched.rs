@@ -1,31 +1,31 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
-use crate::auth::policy::WriteAccessPolicy;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::str::FromStr;
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::HeaderName;
 use axum_extra::headers::{HeaderMap, HeaderValue};
-use futures_util::StreamExt;
 
-use crate::api::entry::common::parse_content_length_from_header;
-use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::proto::record::Label;
-use axum::response::IntoResponse;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time};
 use reduct_base::Labels;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::str::FromStr;
-use std::sync::Arc;
+
+use crate::api::entry::common::parse_content_length_from_header;
+use crate::api::middleware::check_permissions;
+use crate::api::{Components, ErrorCode, HttpError};
+use crate::auth::policy::WriteAccessPolicy;
+use crate::replication::{Transaction, TransactionNotification};
+use crate::storage::proto::record::Label;
 
 // PATCH /:bucket/:entry/batch
 pub(crate) async fn update_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
-    body: Body,
+    _: Body,
 ) -> Result<HeaderMap, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     check_permissions(
@@ -107,12 +107,13 @@ pub(crate) async fn update_batched_records(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
+    use axum::response::IntoResponse;
+    use bytes::Bytes;
+    use rstest::rstest;
 
-    use rstest::{fixture, rstest};
+    use super::*;
 
     #[rstest]
     #[tokio::test]
@@ -196,7 +197,7 @@ mod tests {
         let bucket = storage.get_bucket("bucket-1").unwrap();
 
         {
-            let mut reader = bucket.begin_read("entry-1", 0).await.unwrap();
+            let reader = bucket.begin_read("entry-1", 0).await.unwrap();
             assert_eq!(reader.labels().len(), 2);
             assert_eq!(
                 reader.labels()[0],

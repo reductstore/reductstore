@@ -1,13 +1,15 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use std::sync::Arc;
+
+use axum::extract::State;
+use axum_extra::headers::HeaderMap;
+
 use crate::api::middleware::check_permissions;
 use crate::api::replication::ReplicationListAxum;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
-use axum::extract::State;
-use axum_extra::headers::HeaderMap;
-use std::sync::Arc;
 
 // GET /api/v1/replications/
 pub(crate) async fn list_replications(
@@ -33,12 +35,13 @@ pub(crate) async fn list_replications(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::api::replication::tests::settings;
-    use crate::api::tests::{components, headers};
-    use reduct_base::msg::replication_api::ReplicationSettings;
-    use rstest::rstest;
     use std::sync::Arc;
+
+    use rstest::rstest;
+
+    use crate::api::tests::{components, headers};
+
+    use super::*;
 
     #[rstest]
     #[tokio::test]

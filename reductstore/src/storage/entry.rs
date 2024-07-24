@@ -1211,7 +1211,7 @@ mod tests {
         async fn write_stub_record(mut entry: &mut Entry, time: u64) -> Result<(), ReductError> {
             write_record_with_labels(
                 &mut entry,
-                1000000,
+                time,
                 vec![],
                 Labels::from_iter(vec![
                     ("a".to_string(), "b".to_string()),
