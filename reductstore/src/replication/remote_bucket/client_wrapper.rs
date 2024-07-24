@@ -10,13 +10,11 @@ use bytes::Bytes;
 use futures_util::Stream;
 use std::collections::BTreeMap;
 
-use log::warn;
 use std::str::FromStr;
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 
 use crate::replication::remote_bucket::ErrorRecordMap;
-use crate::replication::Transaction;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
 

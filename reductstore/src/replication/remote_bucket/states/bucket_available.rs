@@ -8,10 +8,9 @@ use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
-use hyper::HeaderMap;
 use log::{debug, error, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
-use reduct_base::error::{ErrorCode, IntEnum, ReductError};
+use reduct_base::error::{IntEnum, ReductError};
 use std::collections::BTreeMap;
 
 /// A state when the remote bucket is available.
