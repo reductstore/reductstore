@@ -10,6 +10,8 @@ use bytes::Bytes;
 use futures_util::Stream;
 use std::collections::BTreeMap;
 
+use futures_util::stream::empty;
+use log::warn;
 use std::str::FromStr;
 
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
@@ -93,9 +95,14 @@ impl BucketWrapper {
         }
     }
 
-    fn build_headers(records: &mut Vec<(RecordReader, Transaction)>) -> HeaderMap {
+    fn build_headers(records: &Vec<RecordReader>, update_only: bool) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        let content_length: u64 = records.iter().map(|r| r.0.content_length()).sum();
+        let content_length: u64 = if update_only {
+            0
+        } else {
+            records.iter().map(|r| r.content_length()).sum()
+        };
+
         headers.insert(
             CONTENT_TYPE,
             HeaderValue::from_str("application/octet-stream").unwrap(),
@@ -105,10 +112,16 @@ impl BucketWrapper {
             HeaderValue::from_str(&content_length.to_string()).unwrap(),
         );
 
-        for (record, _) in records {
+        for record in records {
             let mut header_values = Vec::new();
-            header_values.push(record.content_length().to_string());
-            header_values.push(record.content_type().to_string());
+            if update_only {
+                header_values.push("0".to_string());
+                header_values.push("".to_string());
+            } else {
+                header_values.push(record.content_length().to_string());
+                header_values.push(record.content_type().to_string());
+            }
+
             if !record.labels().is_empty() {
                 for label in record.labels() {
                     if label.value.contains(',') {
@@ -128,26 +141,27 @@ impl BucketWrapper {
         headers
     }
 
-    fn prepare_batch(
-        mut records: Vec<(RecordReader, Transaction)>,
+    fn prepare_batch_to_write(
+        mut records: Vec<RecordReader>,
     ) -> (HeaderMap, impl Stream<Item = Result<Bytes, ReductError>>) {
-        records.sort_by(|a, b| {
-            let a = a.0.record();
-            let b = b.0.record();
-            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
-        });
-
-        let headers = Self::build_headers(&mut records);
+        Self::sort_by_timestamp(&mut records);
+        let headers = Self::build_headers(&mut records, false);
 
         let stream = stream! {
-             while let Some((mut record, _)) = records.pop() {
+             while let Some(mut record) = records.pop() {
                 let rx = record.rx();
                  while let Some(chunk) = rx.recv().await {
                      yield chunk;
                  }
              }
         };
+
         (headers, stream)
+    }
+
+    fn prepare_batch_to_update(records: &Vec<RecordReader>) -> HeaderMap {
+        let headers = Self::build_headers(&records, false);
+        headers
     }
 
     fn parse_record_errors(
@@ -181,9 +195,17 @@ impl BucketWrapper {
         }
         Ok(failed_records)
     }
+
+    fn sort_by_timestamp(records_to_update: &mut Vec<RecordReader>) {
+        records_to_update.sort_by(|a, b| {
+            let a = a.record();
+            let b = b.record();
+            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
+        });
+    }
 }
 
-fn check_response(response: Result<Response, reqwest::Error>) -> Result<(), ReductError> {
+fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> {
     let map_error = |error: reqwest::Error| -> ReductError {
         let status = if error.is_connect() {
             ErrorCode::ConnectionError
@@ -247,7 +269,64 @@ impl ReductBucketApi for BucketWrapper {
         entry: &str,
         records: Vec<(RecordReader, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError> {
-        let (headers, stream) = Self::prepare_batch(records);
+        let mut records_to_update = Vec::new();
+        let mut records_to_write = Vec::new();
+        for (record, transaction) in records {
+            match transaction {
+                Transaction::WriteRecord(_) => {
+                    records_to_write.push(record);
+                }
+                Transaction::UpdateRecord(_) => {
+                    records_to_update.push(record);
+                }
+            }
+        }
+
+        // Try to update the records first.
+        let headers = Self::prepare_batch_to_update(&records_to_update);
+        let response = self
+            .client
+            .request(
+                Method::PATCH,
+                &format!(
+                    "{}{}/b/{}/{}/batch",
+                    self.server_url, API_PATH, self.bucket_name, entry
+                ),
+            )
+            .headers(headers)
+            .send()
+            .await;
+
+        let failed_records = match Self::parse_record_errors(response) {
+            Ok(failed_records) => failed_records,
+            Err(err) => {
+                if err.status() != ErrorCode::MethodNotAllowed {
+                    return Err(err);
+                }
+                warn!(
+                    "Failed to update records. Please update the remote instance up to 1.11: {}",
+                    err
+                );
+
+                let mut failed_records = BTreeMap::new();
+                for record in &records_to_update {
+                    failed_records.insert(
+                        record.timestamp(),
+                        ReductError::new(ErrorCode::MethodNotAllowed, "Method not allowed"),
+                    );
+                }
+                failed_records
+            }
+        };
+
+        // Write the records that failed to update with new records.
+        while let Some(record) = records_to_update.pop() {
+            if failed_records.contains_key(&record.timestamp()) {
+                records_to_write.push(record);
+            }
+        }
+
+        let (headers, stream) = Self::prepare_batch_to_write(records_to_write);
         let request = self.client.request(
             Method::POST,
             &format!(
@@ -326,17 +405,11 @@ mod tests {
         };
 
         let records = vec![
-            (
-                RecordReader::new(rx1, rec1, false),
-                Transaction::WriteRecord(1),
-            ),
-            (
-                RecordReader::new(rx2, rec2, false),
-                Transaction::WriteRecord(2),
-            ),
+            RecordReader::new(rx1, rec1, false),
+            RecordReader::new(rx2, rec2, false),
         ];
 
-        let (headers, stream) = BucketWrapper::prepare_batch(records);
+        let (headers, stream) = BucketWrapper::prepare_batch_to_write(records);
 
         assert_eq!(headers.len(), 4);
         assert_eq!(
