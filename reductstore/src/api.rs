@@ -141,22 +141,17 @@ pub fn create_axum_app(
     app
 }
 
-fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
+fn configure_cors(cors_allow_origin: &[String]) -> CorsLayer {
+    let cors_layer = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+
     if cors_allow_origin.contains(&"*".to_string()) {
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
+        cors_layer.allow_origin(Any)
     } else {
         let parsed_origins: Vec<HeaderValue> = cors_allow_origin
             .iter()
-            .map(|origin| origin.parse::<HeaderValue>().unwrap())
+            .filter_map(|origin| origin.parse().ok())
             .collect();
-
-        CorsLayer::new()
-            .allow_origin(parsed_origins)
-            .allow_methods(Any)
-            .allow_headers(Any)
+        cors_layer.allow_origin(parsed_origins)
     }
 }
 
