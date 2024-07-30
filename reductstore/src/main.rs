@@ -71,7 +71,11 @@ async fn main() {
         cfg.port as u16,
     );
 
-    let app = create_axum_app(&cfg.api_base_path, Arc::new(components));
+    let app = create_axum_app(
+        &cfg.api_base_path,
+        &cfg.cors_allow_origin,
+        Arc::new(components),
+    );
 
     let handle = Handle::new();
     tokio::spawn(shutdown_ctrl_c(handle.clone()));

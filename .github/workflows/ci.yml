@@ -128,7 +128,9 @@ jobs:
         run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}
           --env RS_CERT_PATH=${{matrix.cert_path}}
           --env RS_LICENSE_PATH=${{matrix.license_path}}
-          --env RS_CERT_KEY_PATH=/misc/privateKey.key -d ${{github.repository}}
+          --env RS_CERT_KEY_PATH=/misc/privateKey.key
+          --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"
+          -d ${{github.repository}}
 
       - name: Build API tests
         run: docker build -t api ./integration_tests/api

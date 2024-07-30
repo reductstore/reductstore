@@ -9,8 +9,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware::from_fn, Router};
+use hyper::http::HeaderValue;
 use serde::de::StdError;
 use tokio::sync::RwLock;
+use tower_http::cors::{Any, CorsLayer};
 
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError as BaseHttpError;
@@ -103,8 +105,13 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> Router {
+pub fn create_axum_app(
+    api_base_path: &String,
+    cors_allow_origin: &Vec<String>,
+    components: Arc<Components>,
+) -> Router {
     let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
+    let cors = configure_cors(cors_allow_origin);
 
     let app = Router::new()
         // Server API
@@ -129,8 +136,23 @@ pub fn create_axum_app(api_base_path: &String, components: Arc<Components>) -> R
         .fallback(get(show_ui))
         .layer(from_fn(default_headers))
         .layer(from_fn(print_statuses))
+        .layer(cors)
         .with_state(components);
     app
+}
+
+fn configure_cors(cors_allow_origin: &[String]) -> CorsLayer {
+    let cors_layer = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+
+    if cors_allow_origin.contains(&"*".to_string()) {
+        cors_layer.allow_origin(Any)
+    } else {
+        let parsed_origins: Vec<HeaderValue> = cors_allow_origin
+            .iter()
+            .filter_map(|origin| origin.parse().ok())
+            .collect();
+        cors_layer.allow_origin(parsed_origins)
+    }
 }
 
 #[cfg(test)]

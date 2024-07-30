@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - RS-31: Change labels via HTTP API, [PR-517](https://github.com/reductstore/reductstore/pull/517)
+- RS-385: Add support for CORS configuration, [PR-523](https://github.com/reductstore/reductstore/pull/523)
 
 ### Changed
 

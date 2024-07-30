@@ -33,6 +33,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub cert_path: String,
     pub cert_key_path: String,
     pub license_path: Option<String>,
+    pub cors_allow_origin: Vec<String>,
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ReplicationSettings>,
@@ -53,6 +54,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             cert_path: env.get_masked("RS_CERT_PATH", "".to_string()),
             cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
             license_path: env.get_optional("RS_LICENSE_PATH"),
+            cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications: Self::parse_replications(&mut env),
@@ -176,6 +178,16 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             );
         }
         Ok(repo)
+    }
+
+    fn parse_cors_allow_origin(env: &mut Env<EnvGetter>) -> Vec<String> {
+        let cors_origins_str: String = env.get_optional("RS_CORS_ALLOW_ORIGIN").unwrap_or_default();
+
+        cors_origins_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
     }
 
     fn parse_buckets(env: &mut Env<EnvGetter>) -> HashMap<String, BucketSettings> {
@@ -404,6 +416,7 @@ mod tests {
         assert_eq!(cfg.api_token, "");
         assert_eq!(cfg.cert_path, "");
         assert_eq!(cfg.cert_key_path, "");
+        assert_eq!(cfg.cors_allow_origin.len(), 0);
 
         assert_eq!(cfg.buckets.len(), 0);
         assert_eq!(cfg.tokens.len(), 0);
@@ -519,6 +532,23 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         let cfg = Cfg::from_env(env_getter);
         assert_eq!(cfg.cert_key_path, "/tmp/cert.key");
+    }
+
+    #[rstest]
+    fn test_cors_allow_origin(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_CORS_ALLOW_ORIGIN"))
+            .times(1)
+            .return_const(Ok("http://localhost,http://example.com".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(
+            cfg.cors_allow_origin,
+            vec!["http://localhost", "http://example.com"]
+        );
     }
 
     #[fixture]
