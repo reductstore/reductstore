@@ -65,7 +65,7 @@ tower-http = { version = "0.5.2", features = ["cors"] }
 
 [build-dependencies]
 prost-build = "0.12.6"
-prost-wkt-build = "0.5.1"
+prost-wkt-build = "0.5.2"
 reqwest = { version = "0.12.5", default-features = false, features = ["rustls-tls", "blocking"] }
 chrono = "0.4.38"
 
