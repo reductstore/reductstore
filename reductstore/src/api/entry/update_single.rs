@@ -15,7 +15,6 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::proto::record::Label;
 
 // PATCH /:bucket/:entry?ts=<number>
 pub(crate) async fn update_record(
