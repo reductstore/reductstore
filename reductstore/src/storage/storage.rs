@@ -7,13 +7,17 @@ use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::path::PathBuf;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
+
+pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 32;
+pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
+pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Storage is the main entry point for the storage service.
 pub struct Storage {

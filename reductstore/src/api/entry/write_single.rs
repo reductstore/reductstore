@@ -12,13 +12,14 @@ use crate::api::entry::common::{parse_content_length_from_header, parse_timestam
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
 use crate::storage::proto::record::Label;
+use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use tokio::time::timeout;
 
 // POST /:bucket/:entry?ts=<number>
 pub(crate) async fn write_record(
@@ -85,17 +86,23 @@ pub(crate) async fn write_record(
         Ok((ts, labels, tx)) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
-                    tx.send($chunk).await.map(|_| ()).map_err(|e| {
-                        error!("Error while writing data: {}", e);
-                        HttpError::from(ReductError::bad_request(&format!(
-                            "Error while writing data: {}",
-                            e
-                        )))
-                    })?;
+                    tx.send_timeout($chunk, IO_OPERATION_TIMEOUT)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| {
+                            error!("Error while writing data: {}", e);
+                            HttpError::from(ReductError::bad_request(&format!(
+                                "Error while writing data: {}",
+                                e
+                            )))
+                        })?;
                 };
             }
 
-            while let Some(chunk) = stream.next().await {
+            while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
+                .await
+                .map_err(|_| ReductError::bad_request("Timeout while receiving data"))?
+            {
                 let chunk = match chunk {
                     Ok(chunk) => Ok(Some(chunk)),
                     Err(e) => {
@@ -109,7 +116,7 @@ pub(crate) async fn write_record(
                 send_chunk!(chunk);
             }
 
-            if let Err(_) = tx.send_timeout(Ok(None), Duration::from_millis(1)).await {
+            if let Err(_) = tx.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
                 debug!("Failed to sync the channel - it may be already closed");
             }
             tx.closed().await; //sync with the storage

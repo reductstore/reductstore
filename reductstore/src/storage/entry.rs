@@ -587,8 +587,6 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::block_manager::DEFAULT_MAX_READ_CHUNK;
-
     use rstest::{fixture, rstest};
     use std::time::Duration;
     use tempfile;
@@ -901,6 +899,7 @@ mod tests {
     // Test begin_read
     mod begin_read {
         use super::*;
+        use crate::storage::storage::DEFAULT_MAX_READ_CHUNK;
 
         #[rstest]
         #[tokio::test]
