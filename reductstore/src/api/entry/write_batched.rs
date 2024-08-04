@@ -15,6 +15,7 @@ use futures_util::StreamExt;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::RecordTx;
 use crate::storage::proto::record::Label;
+use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
@@ -23,6 +24,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
+use tokio::time::timeout;
 
 // POST /:bucket/:entry/batch
 pub(crate) async fn write_batched_records(
@@ -73,7 +75,10 @@ pub(crate) async fn write_batched_records(
         let mut index = 0;
         let mut written = 0;
 
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
+            .await
+            .map_err(|_| ReductError::internal_server_error("Timeout while receiving data"))?
+        {
             let mut chunk = chunk?;
 
             while !chunk.is_empty() {
@@ -171,12 +176,15 @@ async fn write_chunk(
         (chuck_to_write, Some(chunk.slice(to_write..)))
     };
 
-    sender.send(Ok(Some(chunk))).await.map_err(|_| {
-        ReductError::new(
-            ErrorCode::InternalServerError,
-            "Failed to write to the storage",
-        )
-    })?;
+    sender
+        .send_timeout(Ok(Some(chunk)), IO_OPERATION_TIMEOUT)
+        .await
+        .map_err(|_| {
+            ReductError::new(
+                ErrorCode::InternalServerError,
+                "Failed to write to the storage",
+            )
+        })?;
     Ok(rest)
 }
 

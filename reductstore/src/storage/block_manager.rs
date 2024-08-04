@@ -17,18 +17,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::RwLock;
-
 use crate::storage::block_manager::file_cache::FileCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::proto::*;
+use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 pub(crate) use file_cache::FileRef;
 use reduct_base::error::{ErrorCode, ReductError};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::RwLock;
+use tokio::time::timeout;
 
-pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
-const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 const FILE_CACHE_MAX_SIZE: usize = 64;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
@@ -373,7 +372,7 @@ pub async fn spawn_read_task(
         .await?;
 
     let record_ts = ts_to_us(&block.records[record_index].timestamp.as_ref().unwrap());
-    let (tx, rx) = channel(1);
+    let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
     let content_size =
         (block.records[record_index].end - block.records[record_index].begin) as usize;
     let block_id = ts_to_us(&block.begin_time.clone().unwrap());
@@ -411,7 +410,7 @@ pub async fn spawn_read_task(
                     .await;
                 break;
             }
-            if let Err(e) = tx.send(Ok(Bytes::from(buf))).await {
+            if let Err(e) = tx.send_timeout(Ok(buf.into()), IO_OPERATION_TIMEOUT).await {
                 let bm = block_manager.read().await;
                 debug!(
                     "Failed to send record {}/{}/{}: {}",
@@ -459,7 +458,7 @@ pub async fn spawn_write_task(
         bm.begin_write(&block, record_index).await?
     };
 
-    let (tx, mut rx) = channel(1);
+    let (tx, mut rx) = channel(CHANNEL_BUFFER_SIZE);
     let bm = Arc::clone(&block_manager);
     let block_id = ts_to_us(block.begin_time.as_ref().unwrap());
     let content_size =
@@ -469,7 +468,10 @@ pub async fn spawn_write_task(
     tokio::spawn(async move {
         let recv = async move {
             let mut written_bytes = 0;
-            while let Some(chunk) = rx.recv().await {
+            while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, rx.recv())
+                .await
+                .map_err(|_| ReductError::internal_server_error("Timeout while reading record"))?
+            {
                 let chunk: Option<Bytes> = chunk?;
                 match chunk {
                     Some(chunk) => {
