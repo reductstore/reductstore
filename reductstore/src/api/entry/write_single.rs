@@ -19,7 +19,6 @@ use reduct_base::error::ReductError;
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::timeout;
 
 // POST /:bucket/:entry?ts=<number>
