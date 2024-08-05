@@ -40,7 +40,7 @@ prost-wkt = "0.6.0"
 prost-wkt-types = "0.6.0"
 rand = "0.8.5"
 serde = { version = "1.0.204", features = ["derive"] }
-serde_json = "1.0.121"
+serde_json = "1.0.122"
 regex = "1.10.3"
 bytes = "1.6.1"
 axum = { version = "0.7.4", features = ["default"] }
