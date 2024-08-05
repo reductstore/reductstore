@@ -142,7 +142,10 @@ pub fn create_axum_app(
 }
 
 fn configure_cors(cors_allow_origin: &[String]) -> CorsLayer {
-    let cors_layer = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+    let cors_layer = CorsLayer::new()
+        .allow_methods(Any)
+        .allow_headers(Any)
+        .expose_headers(Any);
 
     if cors_allow_origin.contains(&"*".to_string()) {
         cors_layer.allow_origin(Any)
