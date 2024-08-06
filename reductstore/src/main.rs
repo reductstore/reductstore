@@ -22,7 +22,7 @@ async fn main() {
 
     Logger::init("INFO");
     info!(
-        "ReductSoftware UG {} [{} at {}]",
+        "ReductStore {} [{} at {}]",
         version,
         env!("COMMIT"),
         env!("BUILD_TIME")
