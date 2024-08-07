@@ -60,7 +60,6 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
     ///
     /// * `key` - The key to get.
     /// * `default_value` - The default value to return if the key is not found.
-    /// * `masked` - Whether or not to mask the value in the log.
     ///
     /// # Returns
     ///
@@ -69,7 +68,7 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
         self.get_impl(key, default_value, false)
     }
 
-    /// Get a value from the environment.
+    /// Get a value from the environment and mask it in the log.
     ///
     /// # Arguments
     ///

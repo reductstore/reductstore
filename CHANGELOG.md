@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-333: Transfer the project to ReductSoftware UG, [PR-488](https://github.com/reductstore/reductstore/pull/488)
 
+### Fixed
+
+- RS-364: Mask replication token in logs, [PR-531](https://github.com/reductstore/reductstore/pull/531)
+
 ### Infrastructure
 
 - RS-232: Add replication test to CI, [PR-511](https://github.com/reductstore/reductstore/pull/511)
