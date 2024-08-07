@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Infrastructure
 
 - RS-232: Add replication test to CI, [PR-511](https://github.com/reductstore/reductstore/pull/511)
+- RS-274: Add test coverage in CI, [PR-532](https://github.com/reductstore/reductstore/pull/532)
 
 ## [1.10.1] - 2024-07-15
 
