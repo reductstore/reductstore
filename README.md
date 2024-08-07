@@ -6,6 +6,7 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
 [![Docker Pulls](https://img.shields.io/docker/pulls/reduct/store)](https://hub.docker.com/r/reduct/store)
 [![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
+[![codecov](https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ)](https://codecov.io/gh/reductstore/reductstore)
 [![Discord](https://img.shields.io/discord/939475547065561088)](https://discord.gg/8wPtPGJYsn)
 
 
