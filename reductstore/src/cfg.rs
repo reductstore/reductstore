@@ -329,8 +329,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 continue;
             }
 
-            replication.dst_token =
-                env.get::<String>(&format!("RS_REPLICATION_{}_DST_TOKEN", id), "".to_string());
+            replication.dst_token = env
+                .get_masked::<String>(&format!("RS_REPLICATION_{}_DST_TOKEN", id), "".to_string());
 
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
