@@ -7,7 +7,8 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/reduct/store)](https://hub.docker.com/r/reduct/store)
 [![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
 [![codecov](https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ)](https://codecov.io/gh/reductstore/reductstore)
-[![Discord](https://img.shields.io/discord/939475547065561088)](https://discord.gg/8wPtPGJYsn)
+[![Community](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.reduct.store
+)](https://community.reduct.store)
 
 
 ReductStore is a time series database that is specifically designed for storing and managing large amounts of blob data. It boasts high performance for both writing and real-time querying, with the added benefit of batching data. This makes it an ideal solution for edge computing, computer vision, and IoT applications where network latency is a concern. For more information, please visit [https://www.reduct.store/](https://www.reduct.store/).
@@ -107,13 +108,12 @@ ReductStore is not just about data storage; it's about simplifying and enhancing
 
 Your input is invaluable to us! 🌟 If you've found a bug, have suggestions for improvements, or want to contribute directly to the codebase, here's how you can help:
 
-- **Discord**: Join our [**Discord community**](https://discord.gg/BWrCncF5EP) to discuss, share ideas, and collaborate with fellow ReductStore users.
-- **Feedback & Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
-- **Contribute**: ReductStore is an open-source project. We encourage and welcome contributions.
+- **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
+- **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
 
 ## **Get Involved**
 
-We believe in the power of community and collaboration. If you've built something amazing with ReductStore, we'd love to hear about it! Share your projects, experiences, and insights on our [Discord community](https://discord.gg/BWrCncF5EP).
+We believe in the power of community and collaboration. If you've built something amazing with ReductStore, we'd love to hear about it! Share your projects, experiences, and insights on our [Discourse community](https://community.reduct.store).
 
 If you find ReductStore beneficial, give us a ⭐ on our GitHub repository.
 
