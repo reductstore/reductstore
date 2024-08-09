@@ -5,5 +5,7 @@ pub mod entry;
 pub mod proto;
 pub mod storage;
 
+mod block_index;
 mod block_manager;
+pub mod file_cache;
 pub mod query;

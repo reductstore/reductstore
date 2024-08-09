@@ -21,7 +21,7 @@ use tokio::task::JoinSet;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
 
-const DEFAULT_MAX_RECORDS: u64 = 256;
+const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
 const SETTINGS_NAME: &str = "bucket.settings";
 
@@ -176,6 +176,7 @@ impl Bucket {
                             max_block_records: settings.max_block_records.unwrap(),
                         },
                     )
+                    .await
                 });
             }
         }

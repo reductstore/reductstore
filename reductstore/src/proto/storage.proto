@@ -77,6 +77,7 @@ message BlockIndex {
     uint64 size = 2;      // size of block in bytes
     uint64 record_count = 3;  // number of records in the block
     uint64 metadata_size = 4;  // size of metadata in bytes
+    google.protobuf.Timestamp latest_record_time = 5;  // the timestamp of the latest record
   }
 
   repeated Block blocks = 1;

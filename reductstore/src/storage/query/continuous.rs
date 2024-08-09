@@ -42,10 +42,9 @@ impl ContinuousQuery {
 impl Query for ContinuousQuery {
     async fn next(
         &mut self,
-        block_indexes: &BTreeSet<u64>,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        match self.query.next(block_indexes, block_manager).await {
+        match self.query.next(block_manager).await {
             Ok(reader) => {
                 self.next_start = reader.timestamp() + 1;
                 self.count += 1;

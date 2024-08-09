@@ -45,7 +45,6 @@ pub trait Query {
     /// * `HTTPError(NoContent)` - If all records have been read.
     async fn next(
         &mut self,
-        block_indexes: &BTreeSet<u64>,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError>;
 

@@ -1,11 +1,12 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::storage::block_index::BlockIndex;
 use crate::storage::block_manager::{
     BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::{Entry, EntrySettings};
-use crate::storage::proto::{block_index, ts_to_us, Block, BlockIndex, MinimalBlock};
+use crate::storage::proto::{block_index, ts_to_us, Block, MinimalBlock};
 use bytes::Bytes;
 use bytesize::ByteSize;
 use crc64fast::Digest;
@@ -25,46 +26,46 @@ pub(super) struct EntryLoader {}
 
 impl EntryLoader {
     // Restore the entry from the given path
-    pub fn restore_entry(path: PathBuf, options: EntrySettings) -> Result<Entry, ReductError> {
+    pub async fn restore_entry(
+        path: PathBuf,
+        options: EntrySettings,
+    ) -> Result<Entry, ReductError> {
         let start_time = Instant::now();
 
-        let entry = match Self::try_restore_entry_from_index(path.clone(), options.clone()) {
+        let entry = match Self::try_restore_entry_from_index(path.clone(), options.clone()).await {
             Ok(entry) => return Ok(entry),
             Err(err) => {
                 error!("{:}", err);
-                Self::restore_entry_from_blocks(path, options)
+                Self::restore_entry_from_blocks(path, options).await
             }
         }?;
 
-        debug!(
-            "Restored entry `{}` in {}ms: size={}, records={}",
-            entry.name,
-            start_time.elapsed().as_millis(),
-            ByteSize::b(entry.size),
-            entry.record_count
-        );
+        {
+            let bm = entry.block_manager.read().await;
+
+            debug!(
+                "Restored entry `{}` in {}ms: size={}, records={}",
+                entry.name,
+                start_time.elapsed().as_millis(),
+                ByteSize::b(bm.index().size()),
+                bm.index().record_count()
+            );
+        }
 
         Ok(entry)
     }
 
     /// Restore the entry from blocks and create a new block index
-    fn restore_entry_from_blocks(
+    async fn restore_entry_from_blocks(
         path: PathBuf,
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
         let mut record_count = 0;
         let mut size = 0;
-        let mut block_index = BTreeSet::new();
 
         warn!("Failed to restore from block index. Trying to rebuild the entry from blocks");
 
-        let block_index_path = path.join(BLOCK_INDEX_FILE);
-        let mut block_index_proto = BlockIndex {
-            blocks: vec![],
-            crc64: 0,
-        };
-
-        let mut crc = Digest::new();
+        let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         for filein in fs::read_dir(path.clone())? {
             let file = filein?;
             let path = file.path();
@@ -130,103 +131,32 @@ impl EntryLoader {
                 remove_bad_block!("block is invalid");
             }
 
-            // Update CRC
-            crc.write(&id.to_be_bytes());
-            crc.write(&block.size.to_be_bytes());
-            crc.write(&block.record_count.to_be_bytes());
-            crc.write(&block.metadata_size.to_be_bytes());
-
-            // Count total numbers
-            record_count += block.record_count;
-            size += block.size + block.metadata_size;
-            block_index.insert(id);
-
-            // Prepare the block index
-            block_index_proto.blocks.push(block_index::Block {
-                block_id: id,
-                size: block.size,
-                record_count: block.record_count,
-                metadata_size: block.metadata_size,
-            });
+            block_index.insert_from_min_block(&block);
         }
 
-        block_index_proto.crc64 = crc.sum64();
-        let mut file = fs::File::create(block_index_path)?;
-        file.write_all(&block_index_proto.encode_to_vec())?;
-
+        block_index.save().await?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
 
         Ok(Entry {
             name,
             settings: options,
-            block_index,
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
-            record_count,
-            size,
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path, block_index))),
             queries: HashMap::new(),
         })
     }
 
     /// Try to restore the entry from the block index
-    fn try_restore_entry_from_index(
+    async fn try_restore_entry_from_index(
         path: PathBuf,
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
-        let mut record_count = 0;
-        let mut size = 0;
-        let mut block_index = BTreeSet::new();
-
-        let block_index_path = path.join(BLOCK_INDEX_FILE);
-        if !block_index_path.exists() {
-            return Err(ReductError::new(
-                InternalServerError,
-                &format!("Block index {:?} not found", block_index_path),
-            ));
-        }
-
-        let buf = fs::read(block_index_path.clone())?;
-        let block_index_proto = BlockIndex::decode(Bytes::from(buf));
-        if let Err(err) = block_index_proto {
-            return Err(ReductError::new(
-                InternalServerError,
-                &format!(
-                    "Failed to decode block index {:?}: {}",
-                    block_index_path, err
-                ),
-            ));
-        }
-
-        let block_index_proto = block_index_proto.unwrap();
-
-        let mut crc = Digest::new();
-        block_index_proto.blocks.into_iter().for_each(|block| {
-            // Count total numbers
-            block_index.insert(block.block_id);
-            record_count += block.record_count;
-            size += block.size + block.metadata_size;
-
-            // Update CRC
-            crc.write(&block.block_id.to_be_bytes());
-            crc.write(&block.size.to_be_bytes());
-            crc.write(&block.record_count.to_be_bytes());
-            crc.write(&block.metadata_size.to_be_bytes());
-        });
-
-        if crc.sum64() != block_index_proto.crc64 {
-            return Err(ReductError::new(
-                InternalServerError,
-                &format!("Block index {:?} is corrupted", block_index_path),
-            ));
-        }
+        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
         Ok(Entry {
             name,
             settings: options,
-            block_index,
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
-            record_count,
-            size,
+            block_manager: Arc::new(RwLock::new(BlockManager::new(path, block_index))),
             queries: HashMap::new(),
         })
     }
@@ -237,7 +167,7 @@ mod tests {
     use super::*;
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
-    use crate::storage::proto::{record, us_to_ts, Record};
+    use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
     use rstest::rstest;
 
     #[rstest]
@@ -247,8 +177,10 @@ mod tests {
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let mut bm = entry.block_manager.write().await;
+        bm.save_cache_on_disk(&mut entry.block_index).await.unwrap();
         let records = bm.load(1).await.unwrap().records.clone();
+
         assert_eq!(records.len(), 2);
         assert_eq!(
             records[0],
@@ -274,11 +206,13 @@ mod tests {
             }
         );
 
-        let entry = EntryLoader::restore_entry(path.join(entry.name), entry_settings).unwrap();
+        let entry = EntryLoader::restore_entry(path.join(entry.name), entry_settings)
+            .await
+            .unwrap();
 
         assert_eq!(entry.name(), "entry");
-        assert_eq!(entry.record_count, 2);
-        assert_eq!(entry.size, 84);
+        assert_eq!(entry.block_index.record_count(), 2);
+        assert_eq!(entry.block_index.size(), 84);
 
         let rec = entry.begin_read(1).await.unwrap();
         assert_eq!(rec.timestamp(), 1);
@@ -315,9 +249,11 @@ mod tests {
         let data_path = path.join("entry/1.blk");
         fs::write(data_path.clone(), b"bad data").unwrap();
 
-        let entry = EntryLoader::restore_entry(path.join(entry.name), entry_settings).unwrap();
+        let entry = EntryLoader::restore_entry(path.join(entry.name), entry_settings)
+            .await
+            .unwrap();
         assert_eq!(entry.name(), "entry");
-        assert_eq!(entry.record_count, 0);
+        assert_eq!(entry.block_index.record_count(), 0);
 
         assert!(!meta_path.exists(), "should remove meta block");
         assert!(!data_path.exists(), "should remove data block");
@@ -348,10 +284,11 @@ mod tests {
         });
         block_v18.size = 10;
         block_v18.begin_time = Some(us_to_ts(&1));
-        block_manager.save(block_v18).await.unwrap();
 
         // repack the block
-        let entry = EntryLoader::restore_entry(path.clone(), entry_settings).unwrap();
+        let entry = EntryLoader::restore_entry(path.clone(), entry_settings)
+            .await
+            .unwrap();
         let info = entry.info().await.unwrap();
 
         assert_eq!(info.size, 65);
@@ -360,7 +297,7 @@ mod tests {
         assert_eq!(info.oldest_record, 1);
         assert_eq!(info.latest_record, 2);
 
-        let block_manager = BlockManager::new(path); // reload the block manager
+        let mut block_manager = BlockManager::new(path); // reload the block manager
         let block_v19 = block_manager.load(1).await.unwrap();
         assert_eq!(block_v19.record_count, 2);
         assert_eq!(block_v19.size, 10);
@@ -375,12 +312,14 @@ mod tests {
         write_stub_record(&mut entry, 2000010).await.unwrap();
         let _ = entry.block_manager.read().await; // let finish the block
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings).unwrap();
+        EntryLoader::restore_entry(path.join(entry.name), entry_settings)
+            .await
+            .unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         assert_eq!(block_index_path.exists(), true, "should create block index");
         let block_index =
-            BlockIndex::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
+            BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
 
         assert_eq!(block_index.blocks.len(), 1);
         assert_eq!(block_index.crc64, 1353523511124718486);
@@ -395,24 +334,34 @@ mod tests {
         let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
-        let _ = entry.block_manager.read().await; // let finish the block
+        let _ = entry
+            .block_manager
+            .write()
+            .await
+            .save_cache_on_disk(&mut entry.block_index)
+            .await;
 
-        EntryLoader::restore_entry(path.join(entry.name.clone()), entry_settings.clone()).unwrap();
+        EntryLoader::restore_entry(path.join(entry.name.clone()), entry_settings.clone())
+            .await
+            .unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         assert_eq!(block_index_path.exists(), true, "should create block index");
         let mut block_index =
-            BlockIndex::decode(Bytes::from(fs::read(block_index_path.clone()).unwrap())).unwrap();
+            BlockIndexProto::decode(Bytes::from(fs::read(block_index_path.clone()).unwrap()))
+                .unwrap();
 
         assert_eq!(block_index.blocks[0].size, 20);
 
         block_index.blocks[0].size = 30;
         fs::write(block_index_path.clone(), block_index.encode_to_vec()).unwrap();
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings).unwrap();
+        EntryLoader::restore_entry(path.join(entry.name), entry_settings)
+            .await
+            .unwrap();
 
         let block_index =
-            BlockIndex::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
+            BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
         assert_eq!(
             block_index.blocks[0].size, 20,
             "should restore the block index from the blocks"

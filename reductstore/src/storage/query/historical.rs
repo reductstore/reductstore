@@ -93,7 +93,6 @@ impl HistoricalQuery {
 impl Query for HistoricalQuery {
     async fn next(
         &mut self,
-        block_indexes: &BTreeSet<u64>,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         self.last_update = Instant::now();
@@ -104,15 +103,18 @@ impl Query for HistoricalQuery {
             } else {
                 self.start_time
             };
+
+            let bm = block_manager.read().await;
+            let block_indexes = bm.index().tree();
             let first_block_id = find_first_block(block_indexes, &start);
             for block_id in block_indexes.range(first_block_id..self.stop_time) {
-                let block = block_manager.write().await.load(*block_id).await?;
-
+                let block_ref = block_manager.write().await.load(*block_id).await?;
+                let block = block_ref.read().await;
                 if block.invalid {
                     continue;
                 }
 
-                self.current_block = Some(block);
+                self.current_block = Some(block.clone());
                 let mut found_records = self.filter_records_from_current_block();
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
                 self.records_from_current_block.extend(found_records);
