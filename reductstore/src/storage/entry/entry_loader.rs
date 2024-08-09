@@ -14,7 +14,6 @@ use prost::Message;
 use reduct_base::error::ErrorCode::InternalServerError;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeSet, HashMap};
-use std::fmt::format;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -239,10 +238,7 @@ mod tests {
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, Record};
-    use rstest::{fixture, rstest};
-    use std::time::Duration;
-    use tempfile;
-    use tokio::time::sleep;
+    use rstest::rstest;
 
     #[rstest]
     #[tokio::test]

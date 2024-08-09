@@ -5,22 +5,16 @@ mod entry_loader;
 
 use crate::storage::block_manager::{
     find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock, RecordTx,
-    BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+    BLOCK_INDEX_FILE,
 };
 use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::record::Label;
-use crate::storage::proto::{
-    block_index, record, ts_to_us, us_to_ts, Block, BlockIndex, MinimalBlock, Record,
-};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, BlockIndex, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
-use bytesize::ByteSize;
-use crc64fast::Digest;
-use log::{debug, error, warn};
-use prost::bytes::Bytes;
+use log::debug;
 use prost::Message;
-use reduct_base::error::ErrorCode::{InternalServerError, OK};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
@@ -30,7 +24,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::RwLock;
 
 /// Entry is a time series in a bucket.
@@ -515,6 +508,7 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
     use rstest::{fixture, rstest};
     use std::time::Duration;
     use tempfile;
