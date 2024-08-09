@@ -69,3 +69,16 @@ message MinimalBlock {
   uint64 record_count = 6;                       // number of records in the block
   uint64 metadata_size = 7;                       // size of metadata in bytes
 }
+
+// Represents a block index for an entry
+message BlockIndex {
+  message Block {
+    uint64 block_id = 1;  // block id
+    uint64 size = 2;      // size of block in bytes
+    uint64 record_count = 3;  // number of records in the block
+    uint64 metadata_size = 4;  // size of metadata in bytes
+  }
+
+  repeated Block blocks = 1;
+  uint64 crc64 = 2;  // integrity check
+}

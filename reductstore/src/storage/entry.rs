@@ -1,19 +1,26 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+mod entry_loader;
+
 use crate::storage::block_manager::{
     find_first_block, spawn_read_task, spawn_write_task, BlockManager, ManageBlock, RecordTx,
-    DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+    BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::bucket::RecordReader;
+use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::record::Label;
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Block, MinimalBlock, Record};
+use crate::storage::proto::{
+    block_index, record, ts_to_us, us_to_ts, Block, BlockIndex, MinimalBlock, Record,
+};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use bytesize::ByteSize;
+use crc64fast::Digest;
 use log::{debug, error, warn};
 use prost::bytes::Bytes;
 use prost::Message;
+use reduct_base::error::ErrorCode::{InternalServerError, OK};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
@@ -23,6 +30,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 /// Entry is a time series in a bucket.
@@ -57,6 +65,16 @@ impl Entry {
         settings: EntrySettings,
     ) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
+
+        // Create the block index file
+        let block_index_path = path.join(BLOCK_INDEX_FILE);
+        let block_index = BlockIndex {
+            blocks: vec![],
+            crc64: 0,
+        };
+        let mut file = fs::File::create(block_index_path)?;
+        file.write_all(&block_index.encode_to_vec())?;
+
         Ok(Self {
             name: name.to_string(),
             settings,
@@ -68,98 +86,8 @@ impl Entry {
         })
     }
 
-    pub(crate) fn restore(path: PathBuf, options: EntrySettings) -> Result<Self, ReductError> {
-        let mut record_count = 0;
-        let mut size = 0;
-        let mut block_index = BTreeSet::new();
-        let start_time = std::time::Instant::now();
-
-        for filein in fs::read_dir(path.clone())? {
-            let file = filein?;
-            let path = file.path();
-            if path.is_dir() {
-                continue;
-            }
-            let name = path.file_name().unwrap().to_str().unwrap();
-            if !name.ends_with(DESCRIPTOR_FILE_EXT) {
-                continue;
-            }
-
-            macro_rules! remove_bad_block {
-                ($err:expr) => {{
-                    error!("Failed to decode block {:?}: {}", path, $err);
-                    warn!("Removing meta block {:?}", path);
-                    let mut data_path = path.clone();
-                    fs::remove_file(path)?;
-
-                    data_path.set_extension(DATA_FILE_EXT[1..].to_string());
-                    warn!("Removing data block {:?}", data_path);
-                    fs::remove_file(data_path)?;
-                    continue;
-                }};
-            }
-
-            let buf = fs::read(path.clone())?;
-            let mut block = match MinimalBlock::decode(Bytes::from(buf)) {
-                Ok(block) => block,
-                Err(err) => {
-                    remove_bad_block!(err);
-                }
-            };
-
-            // Migration for old blocks without fields to speed up the restore process
-            // todo: remove this data_check in the future rel 1.12
-            if block.record_count == 0 {
-                debug!("Record count is 0. Migrate the block");
-                let mut full_block = match Block::decode(Bytes::from(fs::read(path.clone())?)) {
-                    Ok(block) => block,
-                    Err(err) => {
-                        remove_bad_block!(err);
-                    }
-                };
-
-                full_block.record_count = full_block.records.len() as u64;
-                full_block.metadata_size = full_block.encoded_len() as u64;
-
-                block.record_count = full_block.record_count;
-                block.metadata_size = full_block.metadata_size;
-
-                let mut file = fs::File::create(path.clone())?;
-                file.write_all(&full_block.encode_to_vec())?;
-            }
-
-            let id = if let Some(begin_time) = block.begin_time {
-                ts_to_us(&begin_time)
-            } else {
-                remove_bad_block!("begin time mismatch");
-            };
-
-            if block.invalid {
-                remove_bad_block!("block is invalid");
-            }
-
-            record_count += block.record_count as u64;
-            size += block.size + block.metadata_size;
-            block_index.insert(id);
-        }
-
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        debug!(
-            "Restored entry `{}` in {}ms: size={}, records={}",
-            name,
-            start_time.elapsed().as_millis(),
-            ByteSize::b(size),
-            record_count
-        );
-        Ok(Self {
-            name,
-            settings: options,
-            block_index,
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path))),
-            record_count,
-            size,
-            queries: HashMap::new(),
-        })
+    pub(crate) fn restore(path: PathBuf, options: EntrySettings) -> Result<Entry, ReductError> {
+        EntryLoader::restore_entry(path, options)
     }
 
     /// Starts a new record write.
@@ -478,8 +406,8 @@ impl Entry {
             .queries
             .get_mut(&query_id)
             .ok_or_else(||
-                ReductError::not_found(
-                    &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
+            ReductError::not_found(
+                &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
         query
             .next(&self.block_index, Arc::clone(&self.block_manager))
             .await
@@ -634,70 +562,6 @@ mod tests {
             assert_eq!(entry.name(), "entry");
             assert_eq!(entry.record_count, 2);
             assert_eq!(entry.size, 84);
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
-            let mut entry = entry(entry_settings.clone(), path.clone());
-
-            write_stub_record(&mut entry, 1).await.unwrap();
-
-            let meta_path = path.join("entry/1.meta");
-            fs::write(meta_path.clone(), b"bad data").unwrap();
-            let data_path = path.join("entry/1.blk");
-            fs::write(data_path.clone(), b"bad data").unwrap();
-
-            let entry = Entry::restore(path.join(entry.name), entry_settings).unwrap();
-            assert_eq!(entry.name(), "entry");
-            assert_eq!(entry.record_count, 0);
-
-            assert!(!meta_path.exists(), "should remove meta block");
-            assert!(!data_path.exists(), "should remove data block");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
-            let path = path.join("entry");
-            fs::create_dir_all(path.clone()).unwrap();
-            let mut block_manager = BlockManager::new(path.clone());
-            let mut block_v18 = block_manager.start(1, 100).await.unwrap();
-            block_v18.records.push(Record {
-                timestamp: Some(us_to_ts(&1)),
-                begin: 0,
-                end: 10,
-                content_type: "text/plain".to_string(),
-                state: record::State::Finished as i32,
-                labels: vec![],
-            });
-            block_v18.records.push(Record {
-                timestamp: Some(us_to_ts(&2)),
-                begin: 0,
-                end: 10,
-                content_type: "text/plain".to_string(),
-                state: record::State::Finished as i32,
-                labels: vec![],
-            });
-            block_v18.size = 10;
-            block_v18.begin_time = Some(us_to_ts(&1));
-            block_manager.save(block_v18).await.unwrap();
-
-            // repack the block
-            let entry = Entry::restore(path.clone(), entry_settings).unwrap();
-            let info = entry.info().await.unwrap();
-
-            assert_eq!(info.size, 65);
-            assert_eq!(info.record_count, 2);
-            assert_eq!(info.block_count, 1);
-            assert_eq!(info.oldest_record, 1);
-            assert_eq!(info.latest_record, 2);
-
-            let block_manager = BlockManager::new(path); // reload the block manager
-            let block_v19 = block_manager.load(1).await.unwrap();
-            assert_eq!(block_v19.record_count, 2);
-            assert_eq!(block_v19.size, 10);
-            assert_eq!(block_v19.metadata_size, 55);
         }
     }
 
@@ -1338,7 +1202,7 @@ mod tests {
     }
 
     #[fixture]
-    fn entry_settings() -> EntrySettings {
+    pub(super) fn entry_settings() -> EntrySettings {
         EntrySettings {
             max_block_size: 10000,
             max_block_records: 10000,
@@ -1346,12 +1210,12 @@ mod tests {
     }
 
     #[fixture]
-    fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
+    pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
         Entry::new("entry", path.clone(), entry_settings).unwrap()
     }
 
     #[fixture]
-    fn path() -> PathBuf {
+    pub(super) fn path() -> PathBuf {
         tempfile::tempdir().unwrap().into_path()
     }
 
@@ -1384,7 +1248,7 @@ mod tests {
         }
     }
 
-    async fn write_stub_record(entry: &mut Entry, time: u64) -> Result<(), ReductError> {
+    pub(super) async fn write_stub_record(entry: &mut Entry, time: u64) -> Result<(), ReductError> {
         write_record(entry, time, b"0123456789".to_vec()).await
     }
 }

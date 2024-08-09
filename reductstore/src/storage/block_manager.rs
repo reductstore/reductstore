@@ -48,6 +48,7 @@ pub struct BlockManager {
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
+pub const BLOCK_INDEX_FILE: &str = ".block_index";
 
 /// Find the first block id that contains data for a given timestamp  in indexes
 ///
