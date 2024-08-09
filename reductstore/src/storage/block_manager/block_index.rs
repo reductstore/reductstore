@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
-pub(super) struct BlockIndex {
+pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
     index_info: HashMap<u64, BlockEntry>,
     index: BTreeSet<u64>,

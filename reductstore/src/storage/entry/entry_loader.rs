@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::block_index::BlockIndex;
+use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{
     BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };

@@ -3,7 +3,7 @@
 
 mod entry_loader;
 
-use crate::storage::block_index::BlockIndex;
+use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{
     find_first_block, spawn_read_task, spawn_write_task, BlockManager, BlockRef, ManageBlock,
     RecordTx, BLOCK_INDEX_FILE,

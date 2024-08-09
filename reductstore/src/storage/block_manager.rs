@@ -1,6 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+pub mod block_index;
 mod use_counter;
 pub(in crate::storage) mod wal;
 
@@ -21,12 +22,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::storage::block_index::BlockIndex;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{get_global_file_cache, FileCache, FileRef};
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
+use block_index::BlockIndex;
 use reduct_base::error::{ErrorCode, ReductError};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
