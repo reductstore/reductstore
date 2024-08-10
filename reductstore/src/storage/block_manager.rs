@@ -8,12 +8,10 @@ pub(in crate::storage) mod wal;
 
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
-use prost_wkt_types::Timestamp;
 use std::cmp::min;
 
 use log::{debug, error};
 
-use std::collections::BTreeSet;
 use std::io::SeekFrom;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -23,7 +21,7 @@ use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{get_global_file_cache, FileRef};
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto};
+use crate::storage::proto::{record, us_to_ts, Block as BlockProto};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
 use reduct_base::error::{ErrorCode, ReductError};
@@ -119,7 +117,7 @@ impl BlockManager {
             self.load(block_id).await?
         };
 
-        let mut block = block_ref.write().await;
+        let block = block_ref.write().await;
         let record = &mut block.get_record(record_timestamp).unwrap().clone();
         record.state = i32::from(state);
         self.use_counter.decrement(block_id);
@@ -356,7 +354,7 @@ impl ManageBlock for BlockManager {
     }
 
     async fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<BlockRef, ReductError> {
-        let mut block = Block::new(block_id);
+        let block = Block::new(block_id);
 
         // create a block with data
         {

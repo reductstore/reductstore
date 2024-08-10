@@ -243,7 +243,7 @@ impl Entry {
         let mut bm = self.block_manager.write().await;
         let block_ref = bm.find_block(time).await?;
         let block = block_ref.read().await;
-        let mut record = block
+        let record = block
             .get_record(time)
             .ok_or_else(|| ReductError::not_found(&format!("No record with timestamp {}", time)))?;
 
