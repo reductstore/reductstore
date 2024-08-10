@@ -5,7 +5,7 @@ use crate::storage::file_cache::FileCache;
 use crate::storage::proto::Record;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 

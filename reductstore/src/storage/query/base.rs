@@ -4,7 +4,7 @@
 use crate::storage::block_manager::BlockManager;
 use reduct_base::error::ReductError;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use crate::storage::bucket::RecordReader;
 
@@ -92,20 +92,23 @@ pub(crate) mod tests {
     use crate::storage::proto::record::{Label, State as RecordState};
     use crate::storage::proto::Record;
 
+    use crate::storage::block_manager::block_index::BlockIndex;
     use prost_wkt_types::Timestamp;
     use rstest::fixture;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
 
     #[fixture]
-    pub(crate) async fn block_manager_and_index() -> (Arc<RwLock<BlockManager>>, BTreeSet<u64>) {
+    pub(crate) async fn block_manager() -> Arc<RwLock<BlockManager>> {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
         let dir = tempdir().unwrap().into_path();
-        let mut block_manager = BlockManager::new(dir);
-        let mut block = block_manager.start(0, 10).await.unwrap();
-
+        let mut block_manager = BlockManager::new(dir, BlockIndex::new(dir.join("index")))
+            .await
+            .unwrap();
+        let mut block_ref = block_manager.start(0, 10).await.unwrap();
+        let block = block_ref.write().await;
         block.records.push(Record {
             timestamp: Some(Timestamp {
                 seconds: 0,
@@ -202,6 +205,6 @@ pub(crate) mod tests {
 
         block_manager.finish(&block).await.unwrap();
         let block_manager = Arc::new(RwLock::new(block_manager));
-        (block_manager, BTreeSet::from([0, 1000]))
+        block_manager
     }
 }

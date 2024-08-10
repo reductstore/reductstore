@@ -6,15 +6,13 @@ use crate::storage::block_manager::{
     BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::{Entry, EntrySettings};
-use crate::storage::proto::{block_index, ts_to_us, Block, MinimalBlock};
+use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
 use bytes::Bytes;
 use bytesize::ByteSize;
-use crc64fast::Digest;
 use log::{debug, error, warn};
 use prost::Message;
-use reduct_base::error::ErrorCode::InternalServerError;
 use reduct_base::error::ReductError;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -60,9 +58,6 @@ impl EntryLoader {
         path: PathBuf,
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
-        let mut record_count = 0;
-        let mut size = 0;
-
         warn!("Failed to restore from block index. Trying to rebuild the entry from blocks");
 
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
@@ -127,11 +122,7 @@ impl EntryLoader {
                 remove_bad_block!("begin time mismatch");
             };
 
-            if block.invalid {
-                remove_bad_block!("block is invalid");
-            }
-
-            block_index.insert_from_min_block(&block);
+            block_index.insert_from_block(block);
         }
 
         block_index.save().await?;

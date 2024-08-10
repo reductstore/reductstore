@@ -1,13 +1,14 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::entry::Entry;
+use crate::storage::block_manager::block::Block;
 use crate::storage::file_cache::get_global_file_cache;
 use crate::storage::proto::block_index::Block as BlockEntry;
-use crate::storage::proto::{ts_to_us, Block, BlockIndex as BlockIndexProto, MinimalBlock};
+use crate::storage::proto::{
+    ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
+};
 use bytes::Bytes;
 use crc64fast::Digest;
-use hex::decode;
 use prost::Message;
 use reduct_base::error::ErrorCode::InternalServerError;
 use reduct_base::error::ReductError;
@@ -23,6 +24,42 @@ pub(in crate::storage) struct BlockIndex {
     index: BTreeSet<u64>,
     size: u64,
     record_count: u64,
+}
+
+impl Into<BlockEntry> for MinimalBlock {
+    fn into(self) -> BlockEntry {
+        BlockEntry {
+            block_id: ts_to_us(&self.begin_time.unwrap()),
+            size: self.size,
+            record_count: self.record_count,
+            metadata_size: self.metadata_size,
+            latest_record_time: self.latest_record_time,
+        }
+    }
+}
+
+impl Into<BlockEntry> for BlockProto {
+    fn into(self) -> BlockEntry {
+        BlockEntry {
+            block_id: ts_to_us(&self.begin_time.unwrap()),
+            size: self.size,
+            record_count: self.record_count,
+            metadata_size: self.metadata_size,
+            latest_record_time: self.latest_record_time,
+        }
+    }
+}
+
+impl Into<BlockEntry> for Block {
+    fn into(self) -> BlockEntry {
+        BlockEntry {
+            block_id: self.block_id(),
+            size: self.size(),
+            record_count: self.record_count(),
+            metadata_size: self.metadata_size(),
+            latest_record_time: Some(us_to_ts(&self.latest_record_time())),
+        }
+    }
 }
 
 impl BlockIndex {
@@ -46,28 +83,11 @@ impl BlockIndex {
         index
     }
 
-    pub fn insert_from_block(&mut self, block: &Block) {
-        let entry = BlockEntry {
-            block_id: ts_to_us(&block.begin_time.unwrap()),
-            size: block.size,
-            record_count: block.record_count,
-            metadata_size: block.metadata_size,
-            latest_record_time: block.latest_record_time,
-        };
-
-        self.insert(entry);
-    }
-
-    pub fn insert_from_min_block(&mut self, block: &MinimalBlock) {
-        let entry = BlockEntry {
-            block_id: ts_to_us(&block.begin_time.unwrap()),
-            size: block.size,
-            record_count: block.record_count,
-            metadata_size: block.metadata_size,
-            latest_record_time: block.latest_record_time,
-        };
-
-        self.insert(entry);
+    pub fn insert_from_block<T>(&mut self, entry: T)
+    where
+        T: Into<BlockEntry>,
+    {
+        self.insert(entry.into());
     }
 
     pub fn get(&self, block_id: u64) -> Option<&BlockEntry> {
@@ -178,7 +198,7 @@ impl BlockIndex {
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
 
-        let mut file = get_global_file_cache()
+        let file = get_global_file_cache()
             .write_or_create(&self.path_buf)
             .await?;
         let mut lock = file.write().await;

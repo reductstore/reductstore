@@ -9,7 +9,6 @@ use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
 
 use reduct_base::error::{ErrorCode, ReductError};
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -65,7 +64,7 @@ impl Query for LimitedQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::query::base::tests::block_manager_and_index;
+    use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
 

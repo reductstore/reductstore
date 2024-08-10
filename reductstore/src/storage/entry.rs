@@ -5,15 +5,13 @@ mod entry_loader;
 
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{
-    find_first_block, spawn_read_task, spawn_write_task, BlockManager, BlockRef, ManageBlock,
-    RecordTx, BLOCK_INDEX_FILE,
+    spawn_read_task, spawn_write_task, BlockManager, BlockRef, ManageBlock, RecordTx,
+    BLOCK_INDEX_FILE,
 };
 use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::record::Label;
-use crate::storage::proto::{
-    record, ts_to_us, us_to_ts, Block, BlockIndex as BlockIndexProto, Record,
-};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use futures_util::FutureExt;
@@ -22,10 +20,10 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -112,7 +110,7 @@ impl Entry {
         // in the entry. In this case, we can just append to the latest block.
         let mut bm = self.block_manager.write().await;
 
-        let mut block_ref = if bm.index().tree().is_empty() {
+        let block_ref = if bm.index().tree().is_empty() {
             bm.start(time, self.settings.max_block_size).await?
         } else {
             let block_id = *bm.index().tree().last().unwrap();
@@ -120,8 +118,8 @@ impl Entry {
         };
 
         let mut block = block_ref.write().await;
-        let (mut block_ref, record_type) = if block.latest_record_time.is_some()
-            && ts_to_us(block.latest_record_time.as_ref().unwrap()) >= time
+        let (block_ref, record_type) = if block.record_count() > 0
+            && block.latest_record_time() >= time
         {
             debug!("Timestamp {} is belated. Looking for a block", time);
             // The timestamp is belated. We need to find the proper block to write to.
@@ -134,17 +132,11 @@ impl Entry {
                     RecordType::BelatedFirst,
                 )
             } else {
-                let block_id = find_first_block(&index_tree, &time);
-                let mut block_ref = bm.load(block_id).await?;
+                let block_ref = bm.find_block(time).await?;
 
                 // check if the record already exists
                 let proto_time = Some(us_to_ts(&time));
-                if let Some(record) = block
-                    .records
-                    .iter_mut()
-                    .filter(|record| record.timestamp == proto_time)
-                    .last()
-                {
+                if let Some(record) = block.get_record_mut(time) {
                     // We overwrite the record if it is errored and the size is the same.
                     return if record.state != record::State::Errored as i32
                         || record.end - record.begin != content_size as u64
@@ -161,14 +153,8 @@ impl Entry {
                         record.state = record::State::Started as i32;
                         record.content_type = content_type;
 
-                        let record_index = block
-                            .records
-                            .iter()
-                            .position(|r| r.timestamp == proto_time)
-                            .unwrap();
                         let tx =
-                            spawn_write_task(Arc::clone(&self.block_manager), &block, record_index)
-                                .await?;
+                            spawn_write_task(Arc::clone(&self.block_manager), &block, time).await?;
                         Ok(tx)
                     };
                 }
@@ -181,21 +167,19 @@ impl Entry {
 
         let block = block_ref.write().await;
         // Check if the block has enough space for the record.
-        let has_no_space = block.size + content_size as u64 > self.settings.max_block_size;
-        let has_too_many_records =
-            block.records.len() + 1 > self.settings.max_block_records as usize;
+        let has_no_space = block.size() + content_size as u64 > self.settings.max_block_size;
+        let has_too_many_records = block.record_count() + 1 > self.settings.max_block_records;
 
-        let block_ref = if record_type == RecordType::Latest
-            && (has_no_space || has_too_many_records || block.invalid)
-        {
-            // We need to create a new block.
-            debug!("Creating a new block");
-            bm.finish(&block).await?;
-            bm.start(time, self.settings.max_block_size).await?
-        } else {
-            // We can just append to the latest block.
-            block_ref.clone()
-        };
+        let block_ref =
+            if record_type == RecordType::Latest && (has_no_space || has_too_many_records) {
+                // We need to create a new block.
+                debug!("Creating a new block");
+                bm.finish(&block).await?;
+                bm.start(time, self.settings.max_block_size).await?
+            } else {
+                // We can just append to the latest block.
+                block_ref.clone()
+            };
 
         drop(bm);
 
@@ -209,11 +193,8 @@ impl Entry {
         )
         .await?;
 
-        let mut block = block_ref.write().await;
-        let record_index = block.records.len() - 1;
-
-        let tx =
-            spawn_write_task(Arc::clone(&self.block_manager), block.deref(), record_index).await?;
+        let block = block_ref.write().await;
+        let tx = spawn_write_task(Arc::clone(&self.block_manager), block.deref(), time).await?;
         Ok(tx)
     }
 
@@ -229,8 +210,8 @@ impl Entry {
         let mut block = block.write().await;
         let record = Record {
             timestamp: Some(us_to_ts(&time)),
-            begin: block.size,
-            end: block.size + content_size as u64,
+            begin: block.size(),
+            end: block.size() + content_size as u64,
             content_type,
             state: record::State::Started as i32,
             labels: labels
@@ -239,16 +220,9 @@ impl Entry {
                 .collect(),
         };
 
-        block.size += content_size as u64;
-        block.records.push(record);
-        block.record_count = block.records.len() as u64;
-
-        if record_type != RecordType::Belated {
-            block.latest_record_time = Some(us_to_ts(&time));
-        }
-
+        block.insert_record(record)?;
         let mut bm = self.block_manager.write().await;
-        bm.index_mut().insert_from_block(&block);
+        bm.index_mut().insert_from_block(block.to_owned());
 
         Ok(())
     }
@@ -266,20 +240,18 @@ impl Entry {
     pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
         debug!("Reading record for ts={}", time);
 
-        let (block_id, record_index) = self.find_record(&time).await?;
         let mut bm = self.block_manager.write().await;
-        let mut block_ref = bm.load(block_id).await?;
+        let block_ref = bm.find_block(time).await?;
         let block = block_ref.read().await;
-        let mut record = block.records[record_index].clone();
+        let mut record = block
+            .get_record(time)
+            .ok_or_else(|| ReductError::not_found(&format!("No record with timestamp {}", time)))?;
 
         if record.state == record::State::Started as i32 {
-            record = block.records[record_index].clone();
-            if record.state == record::State::Started as i32 {
-                return Err(ReductError::too_early(&format!(
-                    "Record with timestamp {} is still being written",
-                    time
-                )));
-            }
+            return Err(ReductError::too_early(&format!(
+                "Record with timestamp {} is still being written",
+                time
+            )));
         }
 
         if record.state == record::State::Errored as i32 {
@@ -289,43 +261,8 @@ impl Entry {
             )));
         }
 
-        let rx =
-            spawn_read_task(Arc::clone(&self.block_manager), block.deref(), record_index).await?;
-        Ok(RecordReader::new(rx, record, true))
-    }
-
-    async fn find_record(&self, time: &u64) -> Result<(u64, usize), ReductError> {
-        let not_found_err = Err(ReductError::not_found(&format!(
-            "No record with timestamp {}",
-            time
-        )));
-        let mut bm = self.block_manager.write().await;
-        let index_tree = bm.index().tree();
-
-        if index_tree.is_empty() {
-            return not_found_err;
-        }
-
-        if time < index_tree.first().unwrap() {
-            return not_found_err;
-        }
-
-        let block_id = find_first_block(&index_tree, &time);
-        let block = bm.load(block_id).await?;
-
-        let record_index = block
-            .read()
-            .await
-            .records
-            .iter()
-            .position(|record| ts_to_us(record.timestamp.as_ref().unwrap()) == *time);
-
-        if record_index.is_none() {
-            return not_found_err;
-        }
-
-        let record_index = record_index.unwrap();
-        Ok((block_id, record_index))
+        let rx = spawn_read_task(Arc::clone(&self.block_manager), block.deref(), time).await?;
+        Ok(RecordReader::new(rx, record.clone(), true))
     }
 
     pub async fn update_labels(
@@ -336,11 +273,12 @@ impl Entry {
     ) -> Result<Vec<Label>, ReductError> {
         debug!("Updating labels for ts={}", time);
 
-        let (block_id, record_index) = self.find_record(&time).await?;
         let mut bm = self.block_manager.write().await;
-        let mut block_ref = bm.load(block_id).await?;
+        let block_ref = bm.find_block(time).await?;
         let mut block = block_ref.write().await;
-        let record = block.records.get_mut(record_index).unwrap();
+        let record = block
+            .get_record_mut(time)
+            .ok_or_else(|| ReductError::not_found(&format!("No record with timestamp {}", time)))?;
 
         let mut new_labels = Vec::new();
         for label in &record.labels {
