@@ -88,9 +88,10 @@ impl BlockManager {
     /// * `Ok(file)` - File to write to.
     pub async fn begin_write(
         &mut self,
-        block: &Block,
+        block: BlockRef,
         record_timestamp: u64,
     ) -> Result<(FileRef, usize), ReductError> {
+        let block = block.read().await;
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
@@ -117,18 +118,20 @@ impl BlockManager {
             self.load(block_id).await?
         };
 
-        let block = block_ref.write().await;
-        let record = &mut block.get_record(record_timestamp).unwrap().clone();
-        record.state = i32::from(state);
-        self.use_counter.decrement(block_id);
+        {
+            let block = block_ref.write().await;
+            let record = &mut block.get_record(record_timestamp).unwrap().clone();
+            record.state = i32::from(state);
+            self.use_counter.decrement(block_id);
 
-        // write to WAL
-        self.write_wal
-            .write()
-            .await
-            .append(block_id, WalEntry::WriteRecord(record.clone()))
-            .await?;
-        self.save(block.deref()).await?;
+            // write to WAL
+            self.write_wal
+                .write()
+                .await
+                .append(block_id, WalEntry::WriteRecord(record.clone()))
+                .await?;
+        }
+        self.save(block_ref).await?;
 
         debug!(
             "Finished writing record {}/{}/{} with state {:?}",
@@ -245,7 +248,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was saved successfully.
-    async fn save(&mut self, block: &Block) -> Result<(), ReductError>;
+    async fn save(&mut self, block: BlockRef) -> Result<(), ReductError>;
 
     /// Start a new block
     ///
@@ -268,7 +271,7 @@ pub trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(())` - Block was finished successfully.
-    async fn finish(&mut self, block: &Block) -> Result<(), ReductError>;
+    async fn finish(&mut self, block: BlockRef) -> Result<(), ReductError>;
 
     /// Remove a block from disk if there are no readers or writers.
     async fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
@@ -283,10 +286,8 @@ impl ManageBlock for BlockManager {
             if block.read().await.block_id() == block_id {
                 cached_block = Some(block);
             }
-        }
-
-        // then check if we have the block in read cache
-        if let Some(block) = self.cached_block_read.take() {
+        } else if let Some(block) = self.cached_block_read.take() {
+            // then check if we have the block in read cache
             if block.read().await.block_id() == block_id {
                 cached_block = Some(block);
             }
@@ -315,41 +316,24 @@ impl ManageBlock for BlockManager {
         Ok(self.cached_block_read.as_ref().unwrap().clone())
     }
 
-    async fn save(&mut self, block: &Block) -> Result<(), ReductError> {
+    async fn save(&mut self, block: BlockRef) -> Result<(), ReductError> {
         // cache is empty, save the block there first
         if self.cached_block_write.is_none() {
-            let _ = self
-                .cached_block_write
-                .insert(Arc::new(RwLock::new(block.clone())));
+            let _ = self.cached_block_write.insert(block.clone());
             return Ok(());
         }
 
         // update the cached block if we changed it and do nothing
         // we have all needed information in WAL
         {
-            let mut cached_block = self
-                .cached_block_write
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .write()
-                .await;
-            if cached_block.block_id() == block.block_id() {
-                *cached_block = block.clone();
+            if Arc::ptr_eq(self.cached_block_write.as_ref().unwrap(), &block) {
+                let _ = self.cached_block_write.insert(block);
                 return Ok(());
             }
-
-            // we have a new block, let's save the cached one to disk
-            debug!(
-                "Saving block {:?} and update indexes",
-                cached_block.block_id()
-            );
         }
         self.save_cache_on_disk().await?;
         // update cache
-        let _ = self
-            .cached_block_write
-            .insert(Arc::new(RwLock::new(block.clone())));
+        let _ = self.cached_block_write.insert(block);
         Ok(())
     }
 
@@ -364,12 +348,16 @@ impl ManageBlock for BlockManager {
             let file = file.write().await;
             file.set_len(max_block_size).await?;
         }
-        self.save(&block).await?;
-        self.block_index.insert_from_block(block);
+
+        self.block_index.insert_from_block(block.clone());
+
+        let block_ref = Arc::new(RwLock::new(block));
+        self.save(block_ref).await?;
         self.load(block_id).await
     }
 
-    async fn finish(&mut self, block: &Block) -> Result<(), ReductError> {
+    async fn finish(&mut self, block: BlockRef) -> Result<(), ReductError> {
+        let block = block.read().await;
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.block_id());
         let file = get_global_file_cache().write_or_create(&path).await?;
@@ -519,17 +507,18 @@ pub async fn spawn_read_task(
 /// * `ReductError` - If the block is invalid or the record is already finished.
 pub async fn spawn_write_task(
     block_manager: Arc<RwLock<BlockManager>>,
-    block: &Block,
+    block_ref: BlockRef,
     record_timestamp: u64,
 ) -> Result<RecordTx, ReductError> {
     let (file, offset) = {
         let mut bm = block_manager.write().await;
-        bm.save(block).await?;
-        bm.begin_write(block, record_timestamp).await?
+        bm.save(block_ref.clone()).await?;
+        bm.begin_write(block_ref.clone(), record_timestamp).await?
     };
 
     let (tx, mut rx) = channel(CHANNEL_BUFFER_SIZE);
     let bm = Arc::clone(&block_manager);
+    let block = block_ref.read().await;
     let block_id = block.block_id();
     let record_index = block.get_record(record_timestamp).unwrap();
     let content_size = (record_index.end - record_index.begin) as usize;

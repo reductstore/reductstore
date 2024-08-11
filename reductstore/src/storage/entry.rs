@@ -117,69 +117,70 @@ impl Entry {
             bm.load(block_id).await?
         };
 
-        let mut block = block_ref.write().await;
-        let (block_ref, record_type) = if block.record_count() > 0
-            && block.latest_record_time() >= time
-        {
-            debug!("Timestamp {} is belated. Looking for a block", time);
-            // The timestamp is belated. We need to find the proper block to write to.
-            let index_tree = bm.index().tree();
-            if *index_tree.first().unwrap() > time {
-                // The timestamp is the earliest. We need to create a new block.
-                debug!("Timestamp {} is the earliest. Creating a new block", time);
-                (
-                    bm.start(time, self.settings.max_block_size).await?,
-                    RecordType::BelatedFirst,
-                )
-            } else {
-                let block_ref = bm.find_block(time).await?;
+        let (block_ref, record_type) = {
+            let mut block = block_ref.write().await;
+            if block.record_count() > 0 && block.latest_record_time() >= time {
+                debug!("Timestamp {} is belated. Looking for a block", time);
+                // The timestamp is belated. We need to find the proper block to write to.
+                let index_tree = bm.index().tree();
+                if *index_tree.first().unwrap() > time {
+                    // The timestamp is the earliest. We need to create a new block.
+                    debug!("Timestamp {} is the earliest. Creating a new block", time);
+                    (
+                        bm.start(time, self.settings.max_block_size).await?,
+                        RecordType::BelatedFirst,
+                    )
+                } else {
+                    let block_ref = bm.find_block(time).await?;
 
-                // check if the record already exists
-                let proto_time = Some(us_to_ts(&time));
-                if let Some(record) = block.get_record_mut(time) {
-                    // We overwrite the record if it is errored and the size is the same.
-                    return if record.state != record::State::Errored as i32
-                        || record.end - record.begin != content_size as u64
-                    {
-                        Err(ReductError::conflict(&format!(
-                            "A record with timestamp {} already exists",
-                            time
-                        )))
-                    } else {
-                        record.labels = labels
-                            .into_iter()
-                            .map(|(name, value)| record::Label { name, value })
-                            .collect();
-                        record.state = record::State::Started as i32;
-                        record.content_type = content_type;
+                    // check if the record already exists
+                    let proto_time = Some(us_to_ts(&time));
+                    if let Some(record) = block.get_record_mut(time) {
+                        // We overwrite the record if it is errored and the size is the same.
+                        return if record.state != record::State::Errored as i32
+                            || record.end - record.begin != content_size as u64
+                        {
+                            Err(ReductError::conflict(&format!(
+                                "A record with timestamp {} already exists",
+                                time
+                            )))
+                        } else {
+                            record.labels = labels
+                                .into_iter()
+                                .map(|(name, value)| record::Label { name, value })
+                                .collect();
+                            record.state = record::State::Started as i32;
+                            record.content_type = content_type;
 
-                        let tx =
-                            spawn_write_task(Arc::clone(&self.block_manager), &block, time).await?;
-                        Ok(tx)
-                    };
+                            let tx =
+                                spawn_write_task(Arc::clone(&self.block_manager), block_ref, time)
+                                    .await?;
+                            Ok(tx)
+                        };
+                    }
+                    (block_ref.clone(), RecordType::Belated)
                 }
-                (block_ref.clone(), RecordType::Belated)
+            } else {
+                // The timestamp is the latest. We can just append to the latest block.
+                (block_ref.clone(), RecordType::Latest)
             }
-        } else {
-            // The timestamp is the latest. We can just append to the latest block.
-            (block_ref.clone(), RecordType::Latest)
         };
+        let block_ref = {
+            let block = block_ref.read().await;
+            // Check if the block has enough space for the record.
+            let has_no_space = block.size() + content_size as u64 > self.settings.max_block_size;
+            let has_too_many_records = block.record_count() + 1 > self.settings.max_block_records;
 
-        let block = block_ref.write().await;
-        // Check if the block has enough space for the record.
-        let has_no_space = block.size() + content_size as u64 > self.settings.max_block_size;
-        let has_too_many_records = block.record_count() + 1 > self.settings.max_block_records;
-
-        let block_ref =
             if record_type == RecordType::Latest && (has_no_space || has_too_many_records) {
                 // We need to create a new block.
                 debug!("Creating a new block");
-                bm.finish(&block).await?;
+                bm.finish(block_ref.clone()).await?;
                 bm.start(time, self.settings.max_block_size).await?
             } else {
                 // We can just append to the latest block.
                 block_ref.clone()
-            };
+            }
+        };
 
         drop(bm);
 
@@ -193,8 +194,7 @@ impl Entry {
         )
         .await?;
 
-        let block = block_ref.write().await;
-        let tx = spawn_write_task(Arc::clone(&self.block_manager), block.deref(), time).await?;
+        let tx = spawn_write_task(Arc::clone(&self.block_manager), block_ref, time).await?;
         Ok(tx)
     }
 
@@ -275,39 +275,43 @@ impl Entry {
 
         let mut bm = self.block_manager.write().await;
         let block_ref = bm.find_block(time).await?;
-        let mut block = block_ref.write().await;
-        let record = block
-            .get_record_mut(time)
-            .ok_or_else(|| ReductError::not_found(&format!("No record with timestamp {}", time)))?;
+        let new_labels = {
+            let mut block = block_ref.write().await;
+            let record = block.get_record_mut(time).ok_or_else(|| {
+                ReductError::not_found(&format!("No record with timestamp {}", time))
+            })?;
 
-        let mut new_labels = Vec::new();
-        for label in &record.labels {
-            // remove labels
-            if remove.contains(label.name.as_str()) {
-                continue;
+            let mut new_labels = Vec::new();
+            for label in &record.labels {
+                // remove labels
+                if remove.contains(label.name.as_str()) {
+                    continue;
+                }
+
+                // update existing labels or add new labels
+                match update.remove(label.name.as_str()) {
+                    Some(value) => {
+                        new_labels.push(Label {
+                            name: label.name.clone(),
+                            value,
+                        });
+                    }
+                    None => {
+                        new_labels.push(label.clone());
+                    }
+                }
             }
 
-            // update existing labels or add new labels
-            match update.remove(label.name.as_str()) {
-                Some(value) => {
-                    new_labels.push(Label {
-                        name: label.name.clone(),
-                        value,
-                    });
-                }
-                None => {
-                    new_labels.push(label.clone());
-                }
+            // add new labels
+            for (name, value) in update {
+                new_labels.push(Label { name, value });
             }
-        }
 
-        // add new labels
-        for (name, value) in update {
-            new_labels.push(Label { name, value });
-        }
+            record.labels = new_labels.clone();
+            new_labels
+        };
 
-        record.labels = new_labels.clone();
-        self.block_manager.write().await.save(&block).await?;
+        self.block_manager.write().await.save(block_ref).await?;
         Ok(new_labels)
     }
 
