@@ -23,8 +23,6 @@ pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
     index_info: HashMap<u64, BlockEntry>,
     index: BTreeSet<u64>,
-    size: u64,
-    record_count: u64,
 }
 
 impl Into<BlockEntry> for MinimalBlock {
@@ -69,8 +67,6 @@ impl BlockIndex {
             path_buf,
             index_info: HashMap::new(),
             index: BTreeSet::new(),
-            size: 0,
-            record_count: 0,
         };
 
         index
@@ -89,11 +85,6 @@ impl BlockIndex {
 
     pub fn remove(&mut self, block_id: u64) -> Option<BlockEntry> {
         let block = self.index_info.remove(&block_id);
-
-        if let Some(block) = &block {
-            self.size -= block.size + block.metadata_size;
-            self.record_count -= block.record_count;
-        }
         self.index.remove(&block_id);
 
         block
@@ -134,16 +125,12 @@ impl BlockIndex {
             path_buf: path.clone(),
             index_info: HashMap::new(),
             index: BTreeSet::new(),
-            size: 0,
-            record_count: 0,
         };
 
         let mut crc = Digest::new();
         block_index_proto.blocks.into_iter().for_each(|block| {
             // Count total numbers
             block_index.index_info.insert(block.block_id, block);
-            block_index.record_count += block.record_count;
-            block_index.size += block.size + block.metadata_size;
 
             // Update CRC
             crc.write(&block.block_id.to_be_bytes());
@@ -217,11 +204,15 @@ impl BlockIndex {
     }
 
     pub fn size(&self) -> u64 {
-        self.size
+        self.index_info
+            .iter()
+            .fold(0, |acc, (_, block)| acc + block.size + block.metadata_size)
     }
 
     pub fn record_count(&self) -> u64 {
-        self.record_count
+        self.index_info
+            .iter()
+            .fold(0, |acc, (_, block)| acc + block.record_count)
     }
 
     pub fn tree(&self) -> &BTreeSet<u64> {
@@ -229,17 +220,7 @@ impl BlockIndex {
     }
 
     fn insert(&mut self, new_block: BlockEntry) {
-        match self.index_info.insert(new_block.block_id, new_block) {
-            Some(block) => {
-                // Remove old block
-                self.size -= block.size + block.metadata_size;
-                self.record_count -= block.record_count;
-            }
-            None => {}
-        }
-
-        self.size += new_block.size + new_block.metadata_size;
-        self.record_count += new_block.record_count;
+        self.index_info.insert(new_block.block_id, new_block);
         self.index.insert(new_block.block_id);
     }
 }

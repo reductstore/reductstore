@@ -171,7 +171,7 @@ pub(crate) mod tests {
         }
 
         write_record!(block_ref, 0, b"0123456789");
-        write_record!(block_ref, 1, b"0123456789");
+        write_record!(block_ref, 5, b"0123456789");
 
         block_manager.finish(block_ref).await.unwrap();
         let mut block_ref = block_manager.start(1000, 10).await.unwrap();
@@ -203,7 +203,7 @@ pub(crate) mod tests {
         }
         block_manager.save(block_ref.clone()).await.unwrap();
 
-        write_record!(block_ref, 0, b"0123456789");
+        write_record!(block_ref, 1000, b"0123456789");
 
         block_manager.finish(block_ref).await.unwrap();
         let block_manager = Arc::new(RwLock::new(block_manager));

@@ -169,7 +169,6 @@ mod tests {
         write_stub_record(&mut entry, 2000010).await.unwrap();
 
         let mut bm = entry.block_manager.write().await;
-        bm.save_cache_on_disk().await.unwrap();
         let records = bm
             .load(1)
             .await
@@ -204,6 +203,7 @@ mod tests {
             }
         );
 
+        bm.save_cache_on_disk().await.unwrap();
         let entry = EntryLoader::restore_entry(path.join(entry.name), entry_settings)
             .await
             .unwrap();
@@ -211,7 +211,7 @@ mod tests {
         let info = entry.info().await.unwrap();
         assert_eq!(entry.name, "entry");
         assert_eq!(info.record_count, 2);
-        assert_eq!(info.size, 84);
+        assert_eq!(info.size, 88);
 
         let rec = entry.begin_read(1).await.unwrap();
         assert_eq!(rec.timestamp(), 1);
@@ -301,18 +301,18 @@ mod tests {
             .unwrap();
         let info = entry.info().await.unwrap();
 
-        assert_eq!(info.size, 65);
+        assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 2);
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1);
-        assert_eq!(info.latest_record, 2);
+        assert_eq!(info.latest_record, 2000010);
 
         let mut block_manager =
             BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE))); // reload the block manager
         let block_v19 = block_manager.load(1).await.unwrap().read().await.clone();
         assert_eq!(block_v19.record_count(), 2);
-        assert_eq!(block_v19.size(), 10);
-        assert_eq!(block_v19.metadata_size(), 55);
+        assert_eq!(block_v19.size(), 20);
+        assert_eq!(block_v19.metadata_size(), 46);
     }
 
     #[rstest]
@@ -339,7 +339,7 @@ mod tests {
             BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
 
         assert_eq!(block_index.blocks.len(), 1);
-        assert_eq!(block_index.crc64, 10262708021738153112);
+        assert_eq!(block_index.crc64, 5634777224230458447);
         assert_eq!(block_index.blocks[0].block_id, 1);
         assert_eq!(block_index.blocks[0].size, 20);
         assert_eq!(block_index.blocks[0].record_count, 2);

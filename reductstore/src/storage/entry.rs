@@ -462,7 +462,7 @@ mod tests {
                 .clone();
             assert_eq!(records.len(), 2);
             assert_eq!(
-                *records.get(&0).unwrap(),
+                *records.get(&1).unwrap(),
                 Record {
                     timestamp: Some(us_to_ts(&1)),
                     begin: 0,
@@ -485,6 +485,7 @@ mod tests {
                 }
             );
 
+            bm.save_cache_on_disk().await.unwrap();
             let entry = Entry::restore(path.join(entry.name), entry_settings)
                 .await
                 .unwrap();
@@ -492,7 +493,7 @@ mod tests {
             let info = entry.info().await.unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
-            assert_eq!(info.size, 84);
+            assert_eq!(info.size, 88);
         }
     }
 
@@ -1098,7 +1099,7 @@ mod tests {
 
         let info = entry.info().await.unwrap();
         assert_eq!(info.name, "entry");
-        assert_eq!(info.size, 112);
+        assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 3);
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1000000);
@@ -1131,7 +1132,7 @@ mod tests {
             );
             let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
-            assert_eq!(info.size, 38);
+            assert_eq!(info.size, 28);
         }
 
         #[rstest]
@@ -1154,7 +1155,7 @@ mod tests {
             );
             let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
-            assert_eq!(info.size, 38);
+            assert_eq!(info.size, 28);
         }
 
         #[rstest]
@@ -1177,12 +1178,12 @@ mod tests {
 
             assert_eq!(entry.info().await.unwrap().block_count, 2);
             assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 156);
+            assert_eq!(entry.info().await.unwrap().size, 138);
 
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 1);
             assert_eq!(entry.info().await.unwrap().record_count, 2);
-            assert_eq!(entry.info().await.unwrap().size, 78);
+            assert_eq!(entry.info().await.unwrap().size, 80);
 
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 0);

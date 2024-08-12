@@ -188,6 +188,7 @@ impl BlockManager {
         lock.flush().await?;
 
         // update index
+        proto.metadata_size = buf.len() as u64; // update metadata size because it changed
         self.block_index.insert_or_update(proto);
         self.block_index.save().await?;
 

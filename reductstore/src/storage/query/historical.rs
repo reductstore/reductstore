@@ -109,7 +109,13 @@ impl Query for HistoricalQuery {
 
             let block_range = {
                 let mut bm = block_manager.write().await;
-                let first_block = bm.find_block(start).await?.read().await.block_id();
+                let first_block = {
+                    if let Ok(block) = bm.find_block(start).await {
+                        block.read().await.block_id()
+                    } else {
+                        0
+                    }
+                };
                 bm.index()
                     .tree()
                     .range(first_block..self.stop_time)
@@ -314,11 +320,15 @@ mod tests {
     async fn test_ignoring_errored_records(#[future] block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
         let block_manager = block_manager.await;
-        let mut block_ref = block_manager.write().await.load(0).await.unwrap();
-        let mut block = block_ref.write().await;
-        let record = block.get_record_mut(0).unwrap();
-        record.state = record::State::Errored as i32;
-        // block_manager.write().await.save(&block).await.unwrap();
+        {
+            let mut block_ref = block_manager.write().await.load(0).await.unwrap();
+            {
+                let mut block = block_ref.write().await;
+                let record = block.get_record_mut(0).unwrap();
+                record.state = record::State::Errored as i32;
+            }
+            block_manager.write().await.save(block_ref).await.unwrap();
+        }
 
         assert_eq!(
             query.next(block_manager.clone()).await.err(),
