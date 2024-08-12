@@ -80,9 +80,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_query(#[future] block_manager_and_index: Arc<RwLock<BlockManager>>) {
-        let (block_manager, block_indexes) = block_manager_and_index.await;
-
+    async fn test_query(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = ContinuousQuery::new(
             900,
             QueryOptions {
@@ -92,24 +91,18 @@ mod tests {
             },
         );
         {
-            let reader = query
-                .next(&block_indexes, block_manager.clone())
-                .await
-                .unwrap();
+            let reader = query.next(block_manager.clone()).await.unwrap();
             assert_eq!(reader.timestamp(), 1000);
         }
         assert_eq!(
-            query
-                .next(&block_indexes, block_manager.clone())
-                .await
-                .err(),
+            query.next(block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
         assert_eq!(
-            query.next(&block_indexes, block_manager).await.err(),
+            query.next(block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

@@ -119,8 +119,8 @@ impl BlockManager {
         };
 
         {
-            let block = block_ref.write().await;
-            let record = &mut block.get_record(record_timestamp).unwrap().clone();
+            let mut block = block_ref.write().await;
+            let mut record = &mut block.get_record_mut(record_timestamp).unwrap();
             record.state = i32::from(state);
             self.use_counter.decrement(block_id);
 
@@ -143,9 +143,10 @@ impl BlockManager {
 
     pub async fn begin_read(
         &mut self,
-        block: &Block,
+        block_ref: BlockRef,
         record_timestamp: u64,
     ) -> Result<(FileRef, usize), ReductError> {
+        let block = block_ref.read().await;
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
@@ -159,7 +160,11 @@ impl BlockManager {
     }
 
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
-        let block_ref = self.cached_block_write.take().unwrap();
+        if self.cached_block_write.is_none() {
+            return Ok(());
+        }
+
+        let block_ref = self.cached_block_write.as_ref().unwrap().clone();
         let block = block_ref.write().await;
         let block_id = block.block_id();
 
@@ -183,7 +188,7 @@ impl BlockManager {
         lock.flush().await?;
 
         // update index
-        self.block_index.insert_from_block(proto);
+        self.block_index.insert_or_update(proto);
         self.block_index.save().await?;
 
         // clean WAL
@@ -200,7 +205,7 @@ impl BlockManager {
                 block_id.clone()
             } else {
                 return Err(ReductError::not_found(&format!(
-                    "Block with start time {} not found",
+                    "No record with timestamp {}",
                     start
                 )));
             }
@@ -282,14 +287,14 @@ impl ManageBlock for BlockManager {
         // first check if we have the block in write cache
 
         let mut cached_block = None;
-        if let Some(block) = self.cached_block_write.take() {
+        if let Some(block) = self.cached_block_write.as_ref() {
             if block.read().await.block_id() == block_id {
-                cached_block = Some(block);
+                cached_block = Some(block.clone());
             }
-        } else if let Some(block) = self.cached_block_read.take() {
+        } else if let Some(block) = self.cached_block_read.as_ref() {
             // then check if we have the block in read cache
             if block.read().await.block_id() == block_id {
-                cached_block = Some(block);
+                cached_block = Some(block.clone());
             }
         }
 
@@ -312,8 +317,8 @@ impl ManageBlock for BlockManager {
             cached_block = Some(Arc::new(RwLock::new(block_from_disk.into())));
         }
 
-        self.cached_block_read = cached_block;
-        Ok(self.cached_block_read.as_ref().unwrap().clone())
+        self.cached_block_read = cached_block.clone();
+        Ok(cached_block.unwrap())
     }
 
     async fn save(&mut self, block: BlockRef) -> Result<(), ReductError> {
@@ -332,8 +337,10 @@ impl ManageBlock for BlockManager {
             }
         }
         self.save_cache_on_disk().await?;
+
         // update cache
         let _ = self.cached_block_write.insert(block);
+
         Ok(())
     }
 
@@ -349,11 +356,11 @@ impl ManageBlock for BlockManager {
             file.set_len(max_block_size).await?;
         }
 
-        self.block_index.insert_from_block(block.clone());
+        self.block_index.insert_or_update(block.clone());
 
         let block_ref = Arc::new(RwLock::new(block));
-        self.save(block_ref).await?;
-        self.load(block_id).await
+        self.save(block_ref.clone()).await?;
+        Ok(block_ref)
     }
 
     async fn finish(&mut self, block: BlockRef) -> Result<(), ReductError> {
@@ -382,7 +389,10 @@ impl ManageBlock for BlockManager {
             )));
         }
 
-        let proto_ts = us_to_ts(&block_id);
+        // TODO WAL
+
+        self.save_cache_on_disk().await?;
+
         let path = self.path_to_data(block_id);
         get_global_file_cache().remove(&path).await?;
         tokio::fs::remove_file(path).await?;
@@ -391,6 +401,10 @@ impl ManageBlock for BlockManager {
         get_global_file_cache().remove(&path).await?;
         tokio::fs::remove_file(path).await?;
 
+        self.block_index.remove(block_id);
+        self.block_index.save().await?;
+
+        // TODO Clean WAL
         Ok(())
     }
 }
@@ -416,13 +430,13 @@ pub type RecordTx = Sender<Result<Option<Bytes>, ReductError>>;
 /// * `ReductError` - If could not open the block
 pub async fn spawn_read_task(
     block_manager: Arc<RwLock<BlockManager>>,
-    block: &Block,
+    block_ref: BlockRef,
     record_timestamp: u64,
 ) -> Result<RecordRx, ReductError> {
     let (file, offset) = block_manager
         .write()
         .await
-        .begin_read(&block, record_timestamp)
+        .begin_read(block_ref.clone(), record_timestamp)
         .await?;
 
     let (entry, bucket) = {
@@ -430,6 +444,7 @@ pub async fn spawn_read_task(
         (bm.entry.clone(), bm.bucket.clone())
     };
 
+    let block = block_ref.read().await;
     let record = block.get_record(record_timestamp).unwrap();
     let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
     let content_size = (record.end - record.begin) as usize;
@@ -579,11 +594,7 @@ pub async fn spawn_write_task(
                     "Failed to write record {}/{}/{}: {}",
                     bm.bucket, bm.entry, record_timestamp, err
                 );
-                if err.status == ErrorCode::InternalServerError {
-                    record::State::Invalid
-                } else {
-                    record::State::Errored
-                }
+                record::State::Errored
             }
         };
 
@@ -607,8 +618,9 @@ pub async fn spawn_write_task(
 mod tests {
     use super::*;
     use crate::storage::proto::Record;
-    use chrono::Duration;
+    use prost_wkt_types::Timestamp;
     use rstest::{fixture, rstest};
+    use std::time::Duration;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
     use tokio::time::sleep;
@@ -617,36 +629,37 @@ mod tests {
     #[tokio::test]
     async fn test_starting_block(#[future] block_manager: BlockManager) {
         let mut block_manager = block_manager.await;
+        let block_id = 1_000_005;
 
-        let block = block_manager.start(1_000_005, 1024).await.unwrap();
-        let ts = block.begin_time.clone().unwrap();
-        assert_eq!(
-            ts,
-            Timestamp {
-                seconds: 1,
-                nanos: 5000,
-            }
-        );
+        let block = block_manager
+            .start(block_id, 1024)
+            .await
+            .unwrap()
+            .read()
+            .await
+            .clone();
+        assert_eq!(block.block_id(), block_id,);
 
         // Create an empty block
-        let file = std::fs::File::open(block_manager.path.join(format!(
-            "{}{}",
-            ts_to_us(&ts),
-            DATA_FILE_EXT
-        )))
+        block_manager.save_cache_on_disk().await.unwrap();
+        let file = std::fs::File::open(
+            block_manager
+                .path
+                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+        )
         .unwrap();
         assert_eq!(file.metadata().unwrap().len(), 1024);
 
         // Create a block descriptor
-        let buf = std::fs::read(block_manager.path.join(format!(
-            "{}{}",
-            ts_to_us(&ts),
-            DESCRIPTOR_FILE_EXT
-        )))
+        let buf = std::fs::read(
+            block_manager
+                .path
+                .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
+        )
         .unwrap();
-        let block_from_file = Block::decode(Bytes::from(buf)).unwrap();
 
-        assert_eq!(block_from_file, block);
+        let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
+        assert_eq!(block_from_file, block.to_owned());
     }
 
     #[rstest]
@@ -655,11 +668,10 @@ mod tests {
         let mut block_manager = block_manager.await;
 
         block_manager.start(block_id, 1024).await.unwrap();
-        let block = block_manager.start(20000005, 1024).await.unwrap();
-
-        let ts = block.begin_time.clone().unwrap();
-        let loaded_block = block_manager.load(ts_to_us(&ts)).await.unwrap();
-        assert_eq!(loaded_block, block);
+        let block_ref = block_manager.start(20000005, 1024).await.unwrap();
+        let block = block_ref.read().await;
+        let loaded_block = block_manager.load(block.block_id()).await.unwrap();
+        assert_eq!(loaded_block.read().await.block_id(), block.block_id());
     }
 
     #[rstest]
@@ -667,9 +679,9 @@ mod tests {
     async fn test_start_reading(#[future] block_manager: BlockManager, block_id: u64) {
         let mut block_manager = block_manager.await;
         let block = block_manager.start(block_id, 1024).await.unwrap();
-        let ts = block.begin_time.clone().unwrap();
-        let loaded_block = block_manager.load(ts_to_us(&ts)).await.unwrap();
-        assert_eq!(loaded_block, block);
+        let block_id = block.read().await.block_id();
+        let loaded_block = block_manager.load(block_id).await.unwrap();
+        assert_eq!(loaded_block.read().await.block_id(), block_id);
     }
 
     #[rstest]
@@ -677,17 +689,17 @@ mod tests {
     async fn test_finish_block(#[future] block_manager: BlockManager, block_id: u64) {
         let mut block_manager = block_manager.await;
         let block = block_manager.start(block_id + 1, 1024).await.unwrap();
-        let ts = block.begin_time.clone().unwrap();
-        let loaded_block = block_manager.load(ts_to_us(&ts)).await.unwrap();
-        assert_eq!(loaded_block, block);
+        let block_id = block.read().await.block_id();
+        let loaded_block = block_manager.load(block_id).await.unwrap();
+        assert_eq!(loaded_block.read().await.block_id(), block_id);
 
-        block_manager.finish(&loaded_block).await.unwrap();
+        block_manager.finish(loaded_block).await.unwrap();
 
-        let file = std::fs::File::open(block_manager.path.join(format!(
-            "{}{}",
-            ts_to_us(&ts),
-            DATA_FILE_EXT
-        )))
+        let file = std::fs::File::open(
+            block_manager
+                .path
+                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+        )
         .unwrap();
         assert_eq!(file.metadata().unwrap().len(), 0);
     }
@@ -696,36 +708,27 @@ mod tests {
     #[tokio::test]
     async fn test_unfinished_writing(
         #[future] block_manager: BlockManager,
-        #[future] block: Block,
+        #[future] block: BlockRef,
         block_id: u64,
     ) {
         let block_manager = Arc::new(RwLock::new(block_manager.await));
-        let block = block.await;
-        let tx = spawn_write_task(Arc::clone(&block_manager), &block, 0)
+        let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
             .await
             .unwrap();
 
         tx.send(Ok(None)).await.unwrap();
         drop(tx);
         sleep(Duration::from_millis(10)).await; // wait for thread to finish
-        assert_eq!(
-            block_manager
-                .read()
-                .await
-                .load(block_id)
-                .await
-                .unwrap()
-                .records[0]
-                .state,
-            2
-        );
+
+        let block_ref = block_manager.write().await.load(block_id).await.unwrap();
+        assert_eq!(block_ref.read().await.get_record(0).unwrap().state, 2);
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_remove_with_writers(
         #[future] block_manager: BlockManager,
-        #[future] block: Block,
+        #[future] block: BlockRef,
         block_id: u64,
     ) {
         let block_manager = Arc::new(RwLock::new(block_manager.await));
@@ -754,7 +757,7 @@ mod tests {
     #[tokio::test]
     async fn test_remove_block_with_writers_timeout(
         #[future] block_manager: BlockManager,
-        #[future] block: Block,
+        #[future] block: BlockRef,
         block_id: u64,
     ) {
         let block_manager = Arc::new(RwLock::new(block_manager.await));
@@ -786,12 +789,12 @@ mod tests {
     #[tokio::test]
     async fn test_remove_block_with_readers(
         #[future] block_manager: BlockManager,
-        #[future] block: Block,
+        #[future] block: BlockRef,
         block_id: u64,
     ) {
         let block_manager = Arc::new(RwLock::new(block_manager.await));
 
-        let mut rx = spawn_read_task(Arc::clone(&block_manager), &block.await, 0)
+        let mut rx = spawn_read_task(Arc::clone(&block_manager), block.await, 0)
             .await
             .unwrap();
 
@@ -805,7 +808,7 @@ mod tests {
 
         assert_eq!(rx.recv().await.unwrap().unwrap().as_ref(), b"hallo");
         drop(rx);
-        sleep(std::time::Duration::from_millis(10)).await; // wait for thread to finish
+        sleep(Duration::from_millis(10)).await; // wait for thread to finish
 
         assert_eq!(
             block_manager.write().await.remove(block_id).await.err(),
@@ -817,11 +820,11 @@ mod tests {
     #[tokio::test]
     async fn test_remove_block_with_readers_timeout(
         #[future] block_manager: BlockManager,
-        #[future] block: Block,
+        #[future] block: BlockRef,
         block_id: u64,
     ) {
         let block_manager = Arc::new(RwLock::new(block_manager.await));
-        spawn_read_task(Arc::clone(&block_manager), &block.await, 0)
+        spawn_read_task(Arc::clone(&block_manager), block.await, 0)
             .await
             .unwrap();
         assert!(block_manager
@@ -851,33 +854,35 @@ mod tests {
     }
 
     #[fixture]
-    async fn block(#[future] block_manager: BlockManager, block_id: u64) -> Block {
-        block_manager.await.load(block_id).await.unwrap()
+    async fn block(#[future] block_manager: BlockManager, block_id: u64) -> BlockRef {
+        let mut bm = block_manager.await;
+        bm.load(block_id).await.unwrap()
     }
 
     #[fixture]
     async fn block_manager(block_id: u64) -> BlockManager {
-        let path = tempdir();
-        let mut bm = BlockManager::new(path.unwrap().into_path());
+        let path = tempdir().unwrap().into_path();
+
+        let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
         let mut block = bm.start(block_id, 1024).await.unwrap().clone();
-        block.records.push(Record {
-            timestamp: Some(Timestamp {
-                seconds: 1,
-                nanos: 5000,
-            }),
-            begin: 0,
-            end: 5,
-            state: 0,
-            labels: vec![],
-            content_type: "".to_string(),
-        });
+        block
+            .write()
+            .await
+            .insert_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 0,
+                }),
+                begin: 0,
+                end: 5,
+                state: 0,
+                labels: vec![],
+                content_type: "".to_string(),
+            })
+            .unwrap();
         bm.save(block.clone()).await.unwrap();
 
-        let mut block_index = BlockIndex::new(bm.path.join(BLOCK_INDEX_FILE));
-        block_index.insert_from_block(&block);
-        block_index.save().await.unwrap();
-
-        let (file, _) = bm.begin_write(&block, 0).await.unwrap();
+        let (file, _) = bm.begin_write(block, 0).await.unwrap();
         file.write().await.write(b"hallo").await.unwrap();
         bm.finish_write_record(block_id, record::State::Finished, 0)
             .await

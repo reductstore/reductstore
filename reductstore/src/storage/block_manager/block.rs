@@ -7,7 +7,7 @@ use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(in crate::storage) struct Block {
     block_id: u64,
     size: u64,

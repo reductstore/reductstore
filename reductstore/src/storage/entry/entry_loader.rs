@@ -122,7 +122,7 @@ impl EntryLoader {
                 remove_bad_block!("begin time mismatch");
             };
 
-            block_index.insert_from_block(block);
+            block_index.insert_or_update(block);
         }
 
         block_index.save().await?;
@@ -169,12 +169,19 @@ mod tests {
         write_stub_record(&mut entry, 2000010).await.unwrap();
 
         let mut bm = entry.block_manager.write().await;
-        bm.save_cache_on_disk(&mut entry.block_index).await.unwrap();
-        let records = bm.load(1).await.unwrap().records.clone();
+        bm.save_cache_on_disk().await.unwrap();
+        let records = bm
+            .load(1)
+            .await
+            .unwrap()
+            .read()
+            .await
+            .record_index()
+            .clone();
 
         assert_eq!(records.len(), 2);
         assert_eq!(
-            records[0],
+            *records.get(&1).unwrap(),
             Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -186,7 +193,7 @@ mod tests {
         );
 
         assert_eq!(
-            records[1],
+            *records.get(&2000010).unwrap(),
             Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 10,
@@ -201,9 +208,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(entry.name(), "entry");
-        assert_eq!(entry.block_index.record_count(), 2);
-        assert_eq!(entry.block_index.size(), 84);
+        let info = entry.info().await.unwrap();
+        assert_eq!(entry.name, "entry");
+        assert_eq!(info.record_count, 2);
+        assert_eq!(info.size, 84);
 
         let rec = entry.begin_read(1).await.unwrap();
         assert_eq!(rec.timestamp(), 1);
@@ -243,8 +251,9 @@ mod tests {
         let entry = EntryLoader::restore_entry(path.join(entry.name), entry_settings)
             .await
             .unwrap();
-        assert_eq!(entry.name(), "entry");
-        assert_eq!(entry.block_index.record_count(), 0);
+        let info = entry.info().await.unwrap();
+        assert_eq!(info.name, "entry");
+        assert_eq!(info.record_count, 0);
 
         assert!(!meta_path.exists(), "should remove meta block");
         assert!(!data_path.exists(), "should remove data block");
@@ -255,26 +264,36 @@ mod tests {
     async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
         let path = path.join("entry");
         fs::create_dir_all(path.clone()).unwrap();
-        let mut block_manager = BlockManager::new(path.clone());
-        let mut block_v18 = block_manager.start(1, 100).await.unwrap();
-        block_v18.records.push(Record {
-            timestamp: Some(us_to_ts(&1)),
-            begin: 0,
-            end: 10,
-            content_type: "text/plain".to_string(),
-            state: record::State::Finished as i32,
-            labels: vec![],
-        });
-        block_v18.records.push(Record {
-            timestamp: Some(us_to_ts(&2)),
-            begin: 0,
-            end: 10,
-            content_type: "text/plain".to_string(),
-            state: record::State::Finished as i32,
-            labels: vec![],
-        });
-        block_v18.size = 10;
-        block_v18.begin_time = Some(us_to_ts(&1));
+        let mut block_manager = BlockManager::new(
+            path.clone(),
+            BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
+        );
+        {
+            let mut block_v18_ref = block_manager.start(1, 100).await.unwrap();
+            let mut block_v18 = block_v18_ref.write().await;
+            block_v18
+                .insert_record(Record {
+                    timestamp: Some(us_to_ts(&1)),
+                    begin: 0,
+                    end: 10,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                })
+                .unwrap();
+
+            block_v18
+                .insert_record(Record {
+                    timestamp: Some(us_to_ts(&2000010)),
+                    begin: 10,
+                    end: 20,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                })
+                .unwrap();
+        }
+        block_manager.save_cache_on_disk().await.unwrap();
 
         // repack the block
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings)
@@ -288,11 +307,12 @@ mod tests {
         assert_eq!(info.oldest_record, 1);
         assert_eq!(info.latest_record, 2);
 
-        let mut block_manager = BlockManager::new(path); // reload the block manager
-        let block_v19 = block_manager.load(1).await.unwrap();
-        assert_eq!(block_v19.record_count, 2);
-        assert_eq!(block_v19.size, 10);
-        assert_eq!(block_v19.metadata_size, 55);
+        let mut block_manager =
+            BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE))); // reload the block manager
+        let block_v19 = block_manager.load(1).await.unwrap().read().await.clone();
+        assert_eq!(block_v19.record_count(), 2);
+        assert_eq!(block_v19.size(), 10);
+        assert_eq!(block_v19.metadata_size(), 55);
     }
 
     #[rstest]
@@ -301,7 +321,13 @@ mod tests {
         let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
-        let _ = entry.block_manager.read().await; // let finish the block
+        entry
+            .block_manager
+            .write()
+            .await
+            .save_cache_on_disk()
+            .await
+            .unwrap();
 
         EntryLoader::restore_entry(path.join(entry.name), entry_settings)
             .await
@@ -313,7 +339,7 @@ mod tests {
             BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
 
         assert_eq!(block_index.blocks.len(), 1);
-        assert_eq!(block_index.crc64, 1353523511124718486);
+        assert_eq!(block_index.crc64, 10262708021738153112);
         assert_eq!(block_index.blocks[0].block_id, 1);
         assert_eq!(block_index.blocks[0].size, 20);
         assert_eq!(block_index.blocks[0].record_count, 2);
@@ -325,12 +351,7 @@ mod tests {
         let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
-        let _ = entry
-            .block_manager
-            .write()
-            .await
-            .save_cache_on_disk(&mut entry.block_index)
-            .await;
+        let _ = entry.block_manager.write().await.save_cache_on_disk().await;
 
         EntryLoader::restore_entry(path.join(entry.name.clone()), entry_settings.clone())
             .await
@@ -345,7 +366,9 @@ mod tests {
         assert_eq!(block_index.blocks[0].size, 20);
 
         block_index.blocks[0].size = 30;
-        fs::write(block_index_path.clone(), block_index.encode_to_vec()).unwrap();
+        let mut file = fs::File::create(block_index_path.clone()).unwrap();
+        file.write_all(&block_index.encode_to_vec()).unwrap();
+        file.sync_all().unwrap();
 
         EntryLoader::restore_entry(path.join(entry.name), entry_settings)
             .await

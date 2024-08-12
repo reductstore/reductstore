@@ -70,10 +70,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_limit(
-        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
-    ) {
-        let (block_manager, block_indexes) = block_manager_and_index.await;
+    async fn test_limit(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = LimitedQuery::new(
             0,
             u64::MAX,
@@ -83,15 +81,12 @@ mod tests {
             },
         );
 
-        let reader = query
-            .next(&block_indexes, block_manager.clone())
-            .await
-            .unwrap();
+        let reader = query.next(block_manager.clone()).await.unwrap();
         assert_eq!(reader.timestamp(), 0);
         assert!(reader.last());
 
         assert_eq!(
-            query.next(&block_indexes, block_manager).await.err(),
+            query.next(block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

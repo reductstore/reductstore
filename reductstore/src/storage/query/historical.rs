@@ -6,12 +6,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 
 use crate::storage::block_manager::block::Block;
-use crate::storage::block_manager::{spawn_read_task, BlockManager, ManageBlock};
+use crate::storage::block_manager::{spawn_read_task, BlockManager, BlockRef, ManageBlock};
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
@@ -43,7 +44,7 @@ pub struct HistoricalQuery {
     /// The records from the current block that have not been read yet.
     records_from_current_block: VecDeque<Record>,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
-    current_block: Option<Block>,
+    current_block: Option<BlockRef>,
     /// The time of the last update. We use this to check if the query has expired.
     last_update: Instant,
     /// The query options.
@@ -100,21 +101,28 @@ impl Query for HistoricalQuery {
 
         if self.records_from_current_block.is_empty() {
             let start = if let Some(block) = &self.current_block {
+                let block = block.read().await;
                 block.latest_record_time()
             } else {
                 self.start_time
             };
 
-            let bm = block_manager.read().await;
-            let block_indexes = bm.index().tree();
-            let first_block = block_manager.write().await.find_block(start).await?;
-            for block_id in block_indexes.range(first_block.read().await.block_id()..self.stop_time)
-            {
-                let block_ref = block_manager.write().await.load(*block_id).await?;
-                let block = block_ref.read().await;
+            let block_range = {
+                let mut bm = block_manager.write().await;
+                let first_block = bm.find_block(start).await?.read().await.block_id();
+                bm.index()
+                    .tree()
+                    .range(first_block..self.stop_time)
+                    .map(|(k)| *k)
+                    .collect::<Vec<u64>>()
+            };
 
-                self.current_block = Some(block.clone());
-                let mut found_records = self.filter_records_from_current_block();
+            for block_id in block_range {
+                let mut bm = block_manager.write().await;
+                let block_ref = bm.load(block_id).await?;
+
+                self.current_block = Some(block_ref);
+                let mut found_records = self.filter_records_from_current_block().await;
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
                 self.records_from_current_block.extend(found_records);
                 if !self.records_from_current_block.is_empty() {
@@ -137,7 +145,7 @@ impl Query for HistoricalQuery {
 
         let rx = spawn_read_task(
             Arc::clone(&block_manager),
-            block,
+            block.clone(),
             ts_to_us(&record.timestamp.unwrap()),
         )
         .await?;
@@ -154,10 +162,9 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    fn filter_records_from_current_block(&mut self) -> Vec<Record> {
-        self.current_block
-            .as_ref()
-            .unwrap()
+    async fn filter_records_from_current_block(&mut self) -> Vec<Record> {
+        let block = self.current_block.as_ref().unwrap().read().await;
+        block
             .record_index()
             .values()
             .filter(|record| self.filters.iter_mut().all(|filter| filter.filter(record)))
@@ -307,13 +314,14 @@ mod tests {
     async fn test_ignoring_errored_records(#[future] block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
         let block_manager = block_manager.await;
-        let mut block_ref = block_manager.read().await.load(0).await.unwrap();
+        let mut block_ref = block_manager.write().await.load(0).await.unwrap();
         let mut block = block_ref.write().await;
-        block.records[0].state = record::State::Errored as i32;
-        block_manager.write().await.save(&block).await.unwrap();
+        let record = block.get_record_mut(0).unwrap();
+        record.state = record::State::Errored as i32;
+        // block_manager.write().await.save(&block).await.unwrap();
 
         assert_eq!(
-            query.next(&index, block_manager.clone()).await.err(),
+            query.next(block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -323,9 +331,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_each_s_filter(
-        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
-    ) {
+    async fn test_each_s_filter(#[future] block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -334,7 +340,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
+        let records = read_to_vector(&mut query, block_manager.await).await;
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
@@ -344,9 +350,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_each_n_records(
-        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
-    ) {
+    async fn test_each_n_records(#[future] block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -355,7 +359,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let records = read_to_vector(&mut query, block_manager_and_index.await).await;
+        let records = read_to_vector(&mut query, block_manager.await).await;
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));

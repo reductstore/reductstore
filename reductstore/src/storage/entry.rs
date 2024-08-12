@@ -59,15 +59,6 @@ impl Entry {
     ) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
 
-        // Create the block index file
-        let block_index_path = path.join(BLOCK_INDEX_FILE);
-        let block_index = crate::storage::proto::BlockIndex {
-            blocks: vec![],
-            crc64: 0,
-        };
-        let mut file = fs::File::create(block_index_path.clone()).unwrap();
-        let _ = file.write_all(&block_index.encode_to_vec());
-
         Ok(Self {
             name: name.to_string(),
             settings,
@@ -110,32 +101,31 @@ impl Entry {
         // in the entry. In this case, we can just append to the latest block.
         let mut bm = self.block_manager.write().await;
 
-        let block_ref = if bm.index().tree().is_empty() {
+        let mut block_ref = if bm.index().tree().is_empty() {
             bm.start(time, self.settings.max_block_size).await?
         } else {
             let block_id = *bm.index().tree().last().unwrap();
             bm.load(block_id).await?
         };
 
-        let (block_ref, record_type) = {
-            let mut block = block_ref.write().await;
-            if block.record_count() > 0 && block.latest_record_time() >= time {
+        let record_type = {
+            let is_belated = {
+                let mut block = block_ref.write().await;
+                block.record_count() > 0 && block.latest_record_time() >= time
+            };
+            if is_belated {
                 debug!("Timestamp {} is belated. Looking for a block", time);
                 // The timestamp is belated. We need to find the proper block to write to.
                 let index_tree = bm.index().tree();
                 if *index_tree.first().unwrap() > time {
                     // The timestamp is the earliest. We need to create a new block.
                     debug!("Timestamp {} is the earliest. Creating a new block", time);
-                    (
-                        bm.start(time, self.settings.max_block_size).await?,
-                        RecordType::BelatedFirst,
-                    )
+                    block_ref = bm.start(time, self.settings.max_block_size).await?;
+                    RecordType::BelatedFirst
                 } else {
-                    let block_ref = bm.find_block(time).await?;
-
+                    let record = block_ref.read().await.get_record(time).map(|r| r.clone());
                     // check if the record already exists
-                    let proto_time = Some(us_to_ts(&time));
-                    if let Some(record) = block.get_record_mut(time) {
+                    if let Some(record) = record {
                         // We overwrite the record if it is errored and the size is the same.
                         return if record.state != record::State::Errored as i32
                             || record.end - record.begin != content_size as u64
@@ -145,32 +135,39 @@ impl Entry {
                                 time
                             )))
                         } else {
-                            record.labels = labels
-                                .into_iter()
-                                .map(|(name, value)| record::Label { name, value })
-                                .collect();
-                            record.state = record::State::Started as i32;
-                            record.content_type = content_type;
+                            {
+                                let mut block = block_ref.write().await;
+                                let mut record = block.get_record_mut(time).unwrap();
+                                record.labels = labels
+                                    .into_iter()
+                                    .map(|(name, value)| record::Label { name, value })
+                                    .collect();
+                                record.state = record::State::Started as i32;
+                                record.content_type = content_type;
+                            }
 
+                            drop(bm); // drop the lock to avoid deadlock
                             let tx =
                                 spawn_write_task(Arc::clone(&self.block_manager), block_ref, time)
                                     .await?;
                             Ok(tx)
                         };
                     }
-                    (block_ref.clone(), RecordType::Belated)
+                    RecordType::Belated
                 }
             } else {
                 // The timestamp is the latest. We can just append to the latest block.
-                (block_ref.clone(), RecordType::Latest)
+                RecordType::Latest
             }
         };
+
         let block_ref = {
             let block = block_ref.read().await;
             // Check if the block has enough space for the record.
             let has_no_space = block.size() + content_size as u64 > self.settings.max_block_size;
             let has_too_many_records = block.record_count() + 1 > self.settings.max_block_records;
 
+            drop(block);
             if record_type == RecordType::Latest && (has_no_space || has_too_many_records) {
                 // We need to create a new block.
                 debug!("Creating a new block");
@@ -222,7 +219,7 @@ impl Entry {
 
         block.insert_record(record)?;
         let mut bm = self.block_manager.write().await;
-        bm.index_mut().insert_from_block(block.to_owned());
+        bm.index_mut().insert_or_update(block.to_owned());
 
         Ok(())
     }
@@ -240,12 +237,18 @@ impl Entry {
     pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
         debug!("Reading record for ts={}", time);
 
-        let mut bm = self.block_manager.write().await;
-        let block_ref = bm.find_block(time).await?;
-        let block = block_ref.read().await;
-        let record = block
-            .get_record(time)
-            .ok_or_else(|| ReductError::not_found(&format!("No record with timestamp {}", time)))?;
+        let (block_ref, record) = {
+            let mut bm = self.block_manager.write().await;
+            let block_ref = bm.find_block(time).await?;
+            let block = block_ref.read().await;
+            let record = block
+                .get_record(time)
+                .ok_or_else(|| {
+                    ReductError::not_found(&format!("No record with timestamp {}", time))
+                })?
+                .clone();
+            (block_ref.clone(), record)
+        };
 
         if record.state == record::State::Started as i32 {
             return Err(ReductError::too_early(&format!(
@@ -261,7 +264,7 @@ impl Entry {
             )));
         }
 
-        let rx = spawn_read_task(Arc::clone(&self.block_manager), block.deref(), time).await?;
+        let rx = spawn_read_task(self.block_manager.clone(), block_ref, time).await?;
         Ok(RecordReader::new(rx, record.clone(), true))
     }
 
@@ -311,7 +314,7 @@ impl Entry {
             new_labels
         };
 
-        self.block_manager.write().await.save(block_ref).await?;
+        bm.save(block_ref).await?;
         Ok(new_labels)
     }
 
@@ -401,13 +404,8 @@ impl Entry {
         }
 
         let oldest_block_id = *index_tree.first().unwrap();
-        self.block_manager
-            .write()
-            .await
-            .remove(oldest_block_id)
-            .await?;
+        bm.remove(oldest_block_id).await?;
 
-        bm.index_mut().remove(oldest_block_id);
         Ok(())
     }
 
@@ -448,11 +446,18 @@ mod tests {
             write_stub_record(&mut entry, 1).await.unwrap();
             write_stub_record(&mut entry, 2000010).await.unwrap();
 
-            let bm = entry.block_manager.read().await;
-            let records = bm.load(1).await.unwrap().records.clone();
+            let mut bm = entry.block_manager.write().await;
+            let records = bm
+                .load(1)
+                .await
+                .unwrap()
+                .read()
+                .await
+                .record_index()
+                .clone();
             assert_eq!(records.len(), 2);
             assert_eq!(
-                records[0],
+                *records.get(&0).unwrap(),
                 Record {
                     timestamp: Some(us_to_ts(&1)),
                     begin: 0,
@@ -464,7 +469,7 @@ mod tests {
             );
 
             assert_eq!(
-                records[1],
+                *records.get(&2000010).unwrap(),
                 Record {
                     timestamp: Some(us_to_ts(&2000010)),
                     begin: 10,
@@ -479,9 +484,10 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(entry.name(), "entry");
-            assert_eq!(entry.block_index.record_count(), 2);
-            assert_eq!(entry.block_index.size(), 84);
+            let info = entry.info().await.unwrap();
+            assert_eq!(info.name, "entry");
+            assert_eq!(info.record_count, 2);
+            assert_eq!(info.size, 84);
         }
     }
 
@@ -502,10 +508,17 @@ mod tests {
             write_stub_record(&mut entry, 1).await.unwrap();
             write_stub_record(&mut entry, 2000010).await.unwrap();
 
-            let bm = entry.block_manager.read().await;
+            let mut bm = entry.block_manager.write().await;
 
             assert_eq!(
-                bm.load(1).await.unwrap().records[0],
+                bm.load(1)
+                    .await
+                    .unwrap()
+                    .read()
+                    .await
+                    .get_record(1)
+                    .unwrap()
+                    .clone(),
                 Record {
                     timestamp: Some(us_to_ts(&1)),
                     begin: 0,
@@ -517,7 +530,14 @@ mod tests {
             );
 
             assert_eq!(
-                bm.load(2000010).await.unwrap().records[0],
+                bm.load(2000010)
+                    .await
+                    .unwrap()
+                    .read()
+                    .await
+                    .get_record(2000010)
+                    .unwrap()
+                    .clone(),
                 Record {
                     timestamp: Some(us_to_ts(&2000010)),
                     begin: 0,
@@ -544,9 +564,17 @@ mod tests {
             write_stub_record(&mut entry, 2).await.unwrap();
             write_stub_record(&mut entry, 2000010).await.unwrap();
 
-            let bm = entry.block_manager.read().await;
+            let mut bm = entry.block_manager.write().await;
+            let records = bm
+                .load(1)
+                .await
+                .unwrap()
+                .read()
+                .await
+                .record_index()
+                .clone();
             assert_eq!(
-                bm.load(1).await.unwrap().records[0],
+                records.get(&1).unwrap().clone(),
                 Record {
                     timestamp: Some(us_to_ts(&1)),
                     begin: 0,
@@ -557,8 +585,16 @@ mod tests {
                 }
             );
 
+            let records = bm
+                .load(2000010)
+                .await
+                .unwrap()
+                .read()
+                .await
+                .record_index()
+                .clone();
             assert_eq!(
-                bm.load(2000010).await.unwrap().records[0],
+                records.get(&2000010).unwrap().clone(),
                 Record {
                     timestamp: Some(us_to_ts(&2000010)),
                     begin: 0,
@@ -577,12 +613,28 @@ mod tests {
             write_stub_record(&mut entry, 3000000).await.unwrap();
             write_stub_record(&mut entry, 2000000).await.unwrap();
 
-            let bm = entry.block_manager.read().await;
-            let records = bm.load(1000000).await.unwrap().records.clone();
+            let mut bm = entry.block_manager.write().await;
+            let records = bm
+                .load(1000000)
+                .await
+                .unwrap()
+                .read()
+                .await
+                .record_index()
+                .clone();
             assert_eq!(records.len(), 3);
-            assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
-            assert_eq!(records[1].timestamp, Some(us_to_ts(&3000000)));
-            assert_eq!(records[2].timestamp, Some(us_to_ts(&2000000)));
+            assert_eq!(
+                records.get(&1000000).unwrap().timestamp,
+                Some(us_to_ts(&1000000))
+            );
+            assert_eq!(
+                records.get(&2000000).unwrap().timestamp,
+                Some(us_to_ts(&2000000))
+            );
+            assert_eq!(
+                records.get(&3000000).unwrap().timestamp,
+                Some(us_to_ts(&3000000))
+            );
         }
 
         #[rstest]
@@ -591,10 +643,20 @@ mod tests {
             write_stub_record(&mut entry, 3000000).await.unwrap();
             write_stub_record(&mut entry, 1000000).await.unwrap();
 
-            let bm = entry.block_manager.read().await;
-            let records = bm.load(1000000).await.unwrap().records.clone();
+            let mut bm = entry.block_manager.write().await;
+            let records = bm
+                .load(1000000)
+                .await
+                .unwrap()
+                .read()
+                .await
+                .record_index()
+                .clone();
             assert_eq!(records.len(), 1);
-            assert_eq!(records[0].timestamp, Some(us_to_ts(&1000000)));
+            assert_eq!(
+                records.get(&1000000).unwrap().timestamp,
+                Some(us_to_ts(&1000000))
+            );
         }
 
         #[rstest]
@@ -638,12 +700,15 @@ mod tests {
 
             let record = entry
                 .block_manager
-                .read()
+                .write()
                 .await
                 .load(1000000)
                 .await
                 .unwrap()
-                .records[0]
+                .read()
+                .await
+                .get_record(1000000)
+                .unwrap()
                 .clone();
             assert_eq!(record.content_type, "text/html");
             assert_eq!(record.labels.len(), 1);
@@ -915,27 +980,25 @@ mod tests {
                 .await
                 .unwrap();
 
-            let mut block = entry
+            let mut block_ref = entry
                 .block_manager
-                .read()
+                .write()
                 .await
                 .load(1000000)
                 .await
                 .unwrap();
-            block.records[0].labels.sort_by(|a, b| a.name.cmp(&b.name));
+            let mut record = block_ref.read().await.get_record(1000000).unwrap().clone();
+            record.labels.sort_by(|a, b| a.name.cmp(&b.name));
             new_labels.sort_by(|a, b| a.name.cmp(&b.name));
 
-            assert_eq!(block.records[0].labels.len(), 3);
-            assert_eq!(block.records[0].labels[0].name, "a");
-            assert_eq!(block.records[0].labels[0].value, "x");
-            assert_eq!(block.records[0].labels[1].name, "c");
-            assert_eq!(block.records[0].labels[1].value, "d");
-            assert_eq!(block.records[0].labels[2].name, "e");
-            assert_eq!(block.records[0].labels[2].value, "f");
-            assert_eq!(
-                new_labels, block.records[0].labels,
-                "should return new labels"
-            );
+            assert_eq!(record.labels.len(), 3);
+            assert_eq!(record.labels[0].name, "a");
+            assert_eq!(record.labels[0].value, "x");
+            assert_eq!(record.labels[1].name, "c");
+            assert_eq!(record.labels[1].value, "d");
+            assert_eq!(record.labels[2].name, "e");
+            assert_eq!(record.labels[2].value, "f");
+            assert_eq!(new_labels, record.labels, "should return new labels");
         }
 
         #[rstest]
@@ -953,14 +1016,15 @@ mod tests {
 
             let block = entry
                 .block_manager
-                .read()
+                .write()
                 .await
                 .load(1000000)
                 .await
                 .unwrap();
-            assert_eq!(block.records[0].labels.len(), 1);
-            assert_eq!(block.records[0].labels[0].name, "c");
-            assert_eq!(block.records[0].labels[0].value, "d");
+            let record = block.read().await.get_record(1000000).unwrap().clone();
+            assert_eq!(record.labels.len(), 1);
+            assert_eq!(record.labels[0].name, "c");
+            assert_eq!(record.labels[0].value, "d");
         }
 
         #[rstest]
@@ -974,12 +1038,13 @@ mod tests {
 
             let block = entry
                 .block_manager
-                .read()
+                .write()
                 .await
                 .load(1000000)
                 .await
                 .unwrap();
-            assert_eq!(block.records[0].labels.len(), 2);
+            let record = block.read().await.get_record(1000000).unwrap().clone();
+            assert_eq!(record.labels.len(), 2);
         }
 
         #[rstest]

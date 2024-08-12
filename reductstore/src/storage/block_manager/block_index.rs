@@ -14,9 +14,10 @@ use reduct_base::error::ErrorCode::InternalServerError;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
+use std::io::SeekFrom;
 use std::path::PathBuf;
-use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
@@ -72,18 +73,10 @@ impl BlockIndex {
             record_count: 0,
         };
 
-        if !index.path_buf.exists() {
-            let index_proto = BlockIndexProto {
-                blocks: Vec::new(),
-                crc64: 0,
-            };
-            fs::write(index.path_buf.clone(), index_proto.encode_to_vec()).unwrap();
-        }
-
         index
     }
 
-    pub fn insert_from_block<T>(&mut self, entry: T)
+    pub fn insert_or_update<T>(&mut self, entry: T)
     where
         T: Into<BlockEntry>,
     {
@@ -118,6 +111,7 @@ impl BlockIndex {
             let file = get_global_file_cache().read(&path).await?;
             let mut lock = file.write().await;
             let mut buf = Vec::new();
+            lock.seek(SeekFrom::Start(0)).await?;
             lock.read_to_end(&mut buf).await.map_err(|err| {
                 ReductError::new(
                     InternalServerError,
@@ -202,6 +196,7 @@ impl BlockIndex {
             .write_or_create(&self.path_buf)
             .await?;
         let mut lock = file.write().await;
+        lock.seek(SeekFrom::Start(0)).await?;
         lock.write_all(&buf).await.map_err(|err| {
             ReductError::new(
                 InternalServerError,
@@ -209,6 +204,7 @@ impl BlockIndex {
             )
         })?;
 
+        lock.flush().await?;
         lock.sync_all().await?;
 
         Ok(())
