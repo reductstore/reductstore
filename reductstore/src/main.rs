@@ -7,14 +7,15 @@ use axum_server::tls_rustls::RustlsConfig;
 
 use axum_server::Handle;
 use log::info;
-use std::str::FromStr;
-use std::sync::Arc;
-
 use reductstore::cfg::Cfg;
 use reductstore::core::env::StdEnvGetter;
+use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use reductstore::api::create_axum_app;
 use reductstore::core::logger::Logger;
+use reductstore::storage::storage::Storage;
 
 #[tokio::main]
 async fn main() {
@@ -66,6 +67,12 @@ async fn main() {
         scheme, cfg.host, cfg.port, cfg.api_base_path
     );
 
+    let handle = Handle::new();
+    tokio::spawn(shutdown_ctrl_c(handle.clone(), components.storage.clone()));
+    if cfg!(unix) {
+        tokio::spawn(shutdown_signal(handle.clone(), components.storage.clone()));
+    }
+
     let addr = SocketAddr::new(
         IpAddr::from_str(&cfg.host).expect("Invalid host address"),
         cfg.port as u16,
@@ -76,10 +83,6 @@ async fn main() {
         &cfg.cors_allow_origin,
         Arc::new(components),
     );
-
-    let handle = Handle::new();
-    tokio::spawn(shutdown_ctrl_c(handle.clone()));
-    tokio::spawn(shutdown_signal(handle.clone()));
 
     // Ensure that the process exits with a non-zero exit code on panic.
     let default_panic = std::panic::take_hook();
@@ -106,25 +109,31 @@ async fn main() {
     };
 }
 
-async fn shutdown_ctrl_c(handle: Handle) {
+async fn shutdown_ctrl_c(handle: Handle, storage: Arc<RwLock<Storage>>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
+
+    storage
+        .read()
+        .await
+        .sync_fs()
+        .await
+        .expect("Failed to shutdown storage");
     handle.shutdown();
 }
 
 #[cfg(unix)]
-async fn shutdown_signal(handle: Handle) {
+async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
         .await;
     info!("SIGTERM received, shutting down...");
-    handle.shutdown();
-}
-
-#[cfg(not(unix))]
-async fn shutdown_signal(handle: Handle) {
-    tokio::signal::ctrl_c().await.unwrap();
-    info!("Ctrl-C received, shutting down...");
+    storage
+        .read()
+        .await
+        .sync_fs()
+        .await
+        .expect("Failed to shutdown storage");
     handle.shutdown();
 }

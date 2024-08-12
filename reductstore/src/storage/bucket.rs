@@ -452,6 +452,14 @@ impl Bucket {
         }
     }
 
+    /// Sync all entries to the file system
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        for entry in self.entries.values() {
+            entry.sync_fs().await?;
+        }
+        Ok(())
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

@@ -150,6 +150,10 @@ impl BlockIndex {
             crc.write(&block.size.to_be_bytes());
             crc.write(&block.record_count.to_be_bytes());
             crc.write(&block.metadata_size.to_be_bytes());
+            crc.write(&ts_to_us(&block.latest_record_time.unwrap()).to_be_bytes());
+
+            block_index.index.insert(block.block_id);
+            block_index.index_info.insert(block.block_id, block);
         });
 
         if crc.sum64() != block_index_proto.crc64 {
@@ -177,6 +181,7 @@ impl BlockIndex {
                 block_entry.size = block.size;
                 block_entry.record_count = block.record_count;
                 block_entry.metadata_size = block.metadata_size;
+                block_entry.latest_record_time = block.latest_record_time;
                 block_entry
             })
             .collect();
@@ -187,6 +192,7 @@ impl BlockIndex {
             crc.write(&block.size.to_be_bytes());
             crc.write(&block.record_count.to_be_bytes());
             crc.write(&block.metadata_size.to_be_bytes());
+            crc.write(&ts_to_us(&block.latest_record_time.unwrap()).to_be_bytes());
         });
 
         block_index_proto.crc64 = crc.sum64();

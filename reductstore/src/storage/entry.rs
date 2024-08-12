@@ -409,6 +409,11 @@ impl Entry {
         Ok(())
     }
 
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        let mut bm = self.block_manager.write().await;
+        bm.save_cache_on_disk().await
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

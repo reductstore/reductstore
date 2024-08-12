@@ -204,6 +204,14 @@ impl Storage {
         Ok(BucketInfoList { buckets })
     }
 
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        for bucket in self.buckets.values() {
+            bucket.sync_fs().await?;
+        }
+
+        Ok(())
+    }
+
     pub fn data_path(&self) -> &PathBuf {
         &self.data_path
     }

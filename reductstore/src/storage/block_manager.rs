@@ -171,7 +171,7 @@ impl BlockManager {
         let path = self.path_to_desc(block.block_id());
         let mut buf = BytesMut::new();
 
-        let proto = BlockProto::from(block.to_owned());
+        let mut proto = BlockProto::from(block.to_owned());
         proto.encode(&mut buf).map_err(|e| {
             ReductError::internal_server_error(&format!(
                 "Failed to encode block descriptor {:?}: {}",
