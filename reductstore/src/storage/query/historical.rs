@@ -11,7 +11,6 @@ use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 
-use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::{spawn_read_task, BlockManager, BlockRef, ManageBlock};
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::record::Label;
@@ -119,7 +118,7 @@ impl Query for HistoricalQuery {
                 bm.index()
                     .tree()
                     .range(first_block..self.stop_time)
-                    .map(|(k)| *k)
+                    .map(|k| *k)
                     .collect::<Vec<u64>>()
             };
 
@@ -321,7 +320,7 @@ mod tests {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
         let block_manager = block_manager.await;
         {
-            let mut block_ref = block_manager.write().await.load(0).await.unwrap();
+            let block_ref = block_manager.write().await.load(0).await.unwrap();
             {
                 let mut block = block_ref.write().await;
                 let record = block.get_record_mut(0).unwrap();

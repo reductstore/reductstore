@@ -105,7 +105,7 @@ pub(crate) mod tests {
         // the second block has a record: 1000
         let dir = tempdir().unwrap().into_path();
         let mut block_manager = BlockManager::new(dir.clone(), BlockIndex::new(dir.join("index")));
-        let mut block_ref = block_manager.start(0, 10).await.unwrap();
+        let block_ref = block_manager.start(0, 10).await.unwrap();
 
         {
             let mut block = block_ref.write().await;
@@ -174,7 +174,7 @@ pub(crate) mod tests {
         write_record!(block_ref, 5, b"0123456789");
 
         block_manager.finish(block_ref).await.unwrap();
-        let mut block_ref = block_manager.start(1000, 10).await.unwrap();
+        let block_ref = block_manager.start(1000, 10).await.unwrap();
         {
             let mut block = block_ref.write().await;
 

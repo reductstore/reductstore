@@ -13,7 +13,6 @@ use prost::Message;
 use reduct_base::error::ErrorCode::InternalServerError;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeSet, HashMap};
-use std::fs;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;

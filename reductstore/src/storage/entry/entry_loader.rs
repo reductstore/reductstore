@@ -269,7 +269,7 @@ mod tests {
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
         );
         {
-            let mut block_v18_ref = block_manager.start(1, 100).await.unwrap();
+            let block_v18_ref = block_manager.start(1, 100).await.unwrap();
             let mut block_v18 = block_v18_ref.write().await;
             block_v18
                 .insert_record(Record {

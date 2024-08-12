@@ -189,7 +189,7 @@ mod tests {
         .unwrap();
 
         let storage = components.storage.read().await;
-        let mut bucket = storage.get_bucket("bucket-1").unwrap();
+        let bucket = storage.get_bucket("bucket-1").unwrap();
 
         {
             let reader = bucket.begin_read("entry-1", 0).await.unwrap();

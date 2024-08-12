@@ -16,14 +16,12 @@ use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use futures_util::FutureExt;
 use log::debug;
-use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -110,7 +108,7 @@ impl Entry {
 
         let record_type = {
             let is_belated = {
-                let mut block = block_ref.write().await;
+                let block = block_ref.write().await;
                 block.record_count() > 0 && block.latest_record_time() >= time
             };
             if is_belated {
@@ -137,7 +135,7 @@ impl Entry {
                         } else {
                             {
                                 let mut block = block_ref.write().await;
-                                let mut record = block.get_record_mut(time).unwrap();
+                                let record = block.get_record_mut(time).unwrap();
                                 record.labels = labels
                                     .into_iter()
                                     .map(|(name, value)| record::Label { name, value })
@@ -986,7 +984,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let mut block_ref = entry
+            let block_ref = entry
                 .block_manager
                 .write()
                 .await

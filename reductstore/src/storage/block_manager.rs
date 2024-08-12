@@ -13,7 +13,6 @@ use std::cmp::min;
 use log::{debug, error};
 
 use std::io::SeekFrom;
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -21,10 +20,10 @@ use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{get_global_file_cache, FileRef};
-use crate::storage::proto::{record, us_to_ts, Block as BlockProto};
+use crate::storage::proto::{record, Block as BlockProto};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
@@ -120,7 +119,7 @@ impl BlockManager {
 
         {
             let mut block = block_ref.write().await;
-            let mut record = &mut block.get_record_mut(record_timestamp).unwrap();
+            let record = &mut block.get_record_mut(record_timestamp).unwrap();
             record.state = i32::from(state);
             self.use_counter.decrement(block_id);
 
@@ -865,7 +864,7 @@ mod tests {
         let path = tempdir().unwrap().into_path();
 
         let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
-        let mut block = bm.start(block_id, 1024).await.unwrap().clone();
+        let block = bm.start(block_id, 1024).await.unwrap().clone();
         block
             .write()
             .await
