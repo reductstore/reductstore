@@ -198,7 +198,7 @@ impl BlockManager {
         self.block_index.save().await?;
 
         // clean WAL
-        self.wal.write().await.clean(block_id).await?;
+        self.wal.write().await.remove(block_id).await?;
         Ok(())
     }
 
@@ -424,7 +424,7 @@ impl ManageBlock for BlockManager {
         self.block_index.remove(block_id);
         self.block_index.save().await?;
 
-        self.wal.write().await.clean(block_id).await?;
+        self.wal.write().await.remove(block_id).await?;
         Ok(())
     }
 }

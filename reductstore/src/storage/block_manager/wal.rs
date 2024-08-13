@@ -2,7 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
-use std::io::SeekFrom;
+use std::io::ErrorKind::UnexpectedEof;
+use std::io::{ErrorKind, SeekFrom};
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -16,10 +17,57 @@ use crate::storage::file_cache::get_global_file_cache;
 use crate::storage::proto::Record;
 
 const WAL_FILE_SIZE: u64 = 1_000_000;
+
+#[derive(PartialEq, Debug)]
 pub(super) enum WalEntry {
     WriteRecord(Record),
     UpdateRecord(Record),
     RemoveBlock,
+}
+
+impl WalEntry {
+    pub fn encode(&self) -> Vec<u8> {
+        match self {
+            WalEntry::WriteRecord(record) => {
+                let mut buf = Vec::new();
+                buf.push(0);
+
+                let record = record.encode_to_vec();
+                buf.extend_from_slice(&(record.len() as u64).to_be_bytes());
+                buf.extend_from_slice(&record);
+                buf
+            }
+            WalEntry::UpdateRecord(record) => {
+                let mut buf = Vec::new();
+                buf.push(1);
+
+                let record = record.encode_to_vec();
+                buf.extend_from_slice(&(record.len() as u64).to_be_bytes());
+                buf.extend_from_slice(&record);
+                buf
+            }
+            WalEntry::RemoveBlock => {
+                let mut buf = vec![2];
+                buf.extend_from_slice(&0u64.to_be_bytes());
+                buf
+            }
+        }
+    }
+
+    pub fn decode(type_code: u8, buf: &[u8]) -> Result<Self, ReductError> {
+        match type_code {
+            0 => {
+                let record = Record::decode(buf).unwrap();
+                Ok(WalEntry::WriteRecord(record))
+            }
+            1 => {
+                let record = Record::decode(buf).unwrap();
+                Ok(WalEntry::UpdateRecord(record))
+            }
+            2 => Ok(WalEntry::RemoveBlock),
+            _ => Err(internal_server_error!("Invalid WAL entry")),
+        }
+    }
 }
 
 /// Manage WAL logs per block
@@ -48,8 +96,8 @@ pub(super) trait Wal {
     /// * A vector of WAL entries
     async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError>;
 
-    /// Clean the WAL file for a block
-    async fn clean(&self, block_id: u64) -> Result<(), ReductError>;
+    /// Remove the WAL file for a block
+    async fn remove(&self, block_id: u64) -> Result<(), ReductError>;
 }
 
 struct WalImpl {
@@ -75,33 +123,25 @@ impl WalImpl {
 impl Wal for WalImpl {
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        let file = if !path.exists() {
+        let (file, created) = if !path.exists() {
             let file = get_global_file_cache().write_or_create(&path).await?;
             // preallocate file to speed up writes
             file.write().await.set_len(WAL_FILE_SIZE).await?;
-            file
+            (file, true)
         } else {
-            get_global_file_cache().read(&path).await?
+            (get_global_file_cache().write_or_create(&path).await?, false)
         };
 
-        let mut lock = file.write().await;
-        match entry {
-            WalEntry::WriteRecord(record) => {
-                lock.write_u8(0).await?;
-                let buf = record.encode_to_vec();
-                lock.write_u64(buf.len() as u64).await?;
-                lock.write_all(&buf).await?;
-            }
-            WalEntry::UpdateRecord(record) => {
-                lock.write_u8(1).await?;
-                let buf = record.encode_to_vec();
-                lock.write_u64(buf.len() as u64).await?;
-                lock.write_all(&buf).await?;
-            }
-            WalEntry::RemoveBlock => {
-                lock.write_u8(2).await?;
-            }
+        if !created {
+            // remove stop marker
+            file.write().await.seek(SeekFrom::Current(-1)).await?;
         }
+
+        let mut lock = file.write().await;
+        lock.write_all(&entry.encode()).await?;
+
+        // write stop marker
+        lock.write_u8(255).await?;
         Ok(())
     }
 
@@ -112,37 +152,28 @@ impl Wal for WalImpl {
         lock.seek(SeekFrom::Start(0)).await?;
 
         let mut entries = Vec::new();
-        while lock.seek(SeekFrom::Current(0)).await? < lock.seek(SeekFrom::End(0)).await? {
-            let mut buf = [0u8; 1];
+        loop {
+            let entry_type = match lock.read_u8().await {
+                Ok(t) => t,
+                Err(err) => return Err(err.into()),
+            };
+
+            if entry_type == 255 {
+                break;
+            }
+
+            let len = lock.read_u64().await?;
+            let mut buf = vec![0; len as usize];
             lock.read_exact(&mut buf).await?;
 
-            let entry = match buf[0] {
-                0 => {
-                    let mut len_buf = [0u8; 8];
-                    lock.read_exact(&mut len_buf).await?;
-                    let len = u64::from_le_bytes(len_buf);
-                    let mut buf = vec![0u8; len as usize];
-                    lock.read_exact(&mut buf).await?;
-                    WalEntry::WriteRecord(Record::decode(&buf[..]).unwrap())
-                }
-                1 => {
-                    let mut len_buf = [0u8; 8];
-                    lock.read_exact(&mut len_buf).await?;
-                    let len = u64::from_le_bytes(len_buf);
-                    let mut buf = vec![0u8; len as usize];
-                    lock.read_exact(&mut buf).await?;
-                    WalEntry::UpdateRecord(Record::decode(&buf[..]).unwrap())
-                }
-                2 => WalEntry::RemoveBlock,
-                _ => return Err(internal_server_error!("Invalid WAL entry")),
-            };
+            let entry = WalEntry::decode(entry_type, &buf)?;
             entries.push(entry);
         }
 
         Ok(entries)
     }
 
-    async fn clean(&self, block_id: u64) -> Result<(), ReductError> {
+    async fn remove(&self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
         if path.exists() {
             get_global_file_cache().remove(&path).await?;
@@ -173,4 +204,55 @@ pub(in crate::storage) fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send 
         std::fs::create_dir_all(&wal_folder).expect("Failed to create WAL folder");
     }
     Box::new(WalImpl::new(entry_path.join("wal")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reduct_base::error::ErrorCode;
+    use rstest::*;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_read() {
+        let path = tempfile::tempdir().unwrap();
+        let mut wal = create_wal(path.path().to_path_buf());
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+        wal.append(1, WalEntry::UpdateRecord(Record::default()))
+            .await
+            .unwrap();
+        wal.append(1, WalEntry::RemoveBlock).await.unwrap();
+
+        let mut wal = create_wal(path.path().to_path_buf());
+        let entries = wal.read(1).await.unwrap();
+
+        assert_eq!(
+            entries,
+            vec![
+                WalEntry::WriteRecord(Record::default()),
+                WalEntry::UpdateRecord(Record::default()),
+                WalEntry::RemoveBlock,
+            ]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove() {
+        let path = tempfile::tempdir().unwrap();
+        let mut wal = create_wal(path.path().to_path_buf());
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+
+        let mut wal = create_wal(path.path().to_path_buf());
+        assert_eq!(wal.read(1).await.unwrap().len(), 1);
+        wal.remove(1).await.unwrap();
+
+        let mut wal = create_wal(path.path().to_path_buf());
+        let err = wal.read(1).await.err().unwrap();
+        assert_eq!(&err.status, &ErrorCode::InternalServerError);
+    }
 }
