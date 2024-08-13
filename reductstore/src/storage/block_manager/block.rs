@@ -115,3 +115,84 @@ impl Block {
         self.record_index.keys().next_back().cloned().unwrap_or(0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::{fixture, rstest};
+
+    #[rstest]
+    fn test_into_proto(block: Block, block_proto: BlockProto) {
+        assert_eq!(block_proto, block.into());
+    }
+
+    #[rstest]
+    fn test_from_proto(block: Block, block_proto: BlockProto) {
+        assert_eq!(block, Block::from(block_proto));
+    }
+
+    #[rstest]
+    fn test_insert_record(mut block: Block) {
+        let record = Record {
+            begin: 1,
+            end: 2,
+            timestamp: Some(us_to_ts(&2)),
+            labels: vec![],
+            content_type: "application/json".to_string(),
+            state: 0,
+        };
+        block.insert_record(record.clone()).unwrap();
+        assert_eq!(block.get_record(2), Some(&record));
+        assert_eq!(block.size(), 3);
+        assert_eq!(block.record_count(), 2);
+        assert_eq!(block.metadata_size(), 31);
+        assert_eq!(block.latest_record_time(), 2);
+    }
+
+    #[rstest]
+    fn test_insert_record_conflict(mut block: Block, record: Record) {
+        assert_eq!(
+            block.insert_record(record),
+            Err(ReductError::new(
+                ErrorCode::Conflict,
+                "Record already exists",
+            ))
+        );
+    }
+
+    #[fixture]
+    fn record() -> Record {
+        Record {
+            begin: 1,
+            end: 2,
+            timestamp: Some(us_to_ts(&1)),
+            labels: vec![],
+            content_type: "application/json".to_string(),
+            state: 0,
+        }
+    }
+
+    #[fixture]
+    fn block(record: Record) -> Block {
+        Block {
+            block_id: 1,
+            size: 2,
+            record_count: 1,
+            metadata_size: 4,
+            record_index: BTreeMap::from_iter(vec![(1, record)]),
+        }
+    }
+
+    #[fixture]
+    fn block_proto(record: Record) -> BlockProto {
+        BlockProto {
+            begin_time: Some(us_to_ts(&1)),
+            latest_record_time: Some(us_to_ts(&1)),
+            size: 2,
+            record_count: 1,
+            metadata_size: 4,
+            records: vec![record],
+            invalid: false,
+        }
+    }
+}
