@@ -19,7 +19,7 @@ use log::debug;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{internal_server_error, Labels};
+use reduct_base::{internal_server_error, too_early, Labels};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -250,7 +250,7 @@ impl Entry {
         };
 
         if record.state == record::State::Started as i32 {
-            return Err(internal_server_error!(
+            return Err(too_early!(
                 "Record with timestamp {} is still being written",
                 time
             ));
@@ -277,7 +277,7 @@ impl Entry {
 
         let mut bm = self.block_manager.write().await;
         let block_ref = bm.find_block(time).await?;
-        let new_labels = {
+        let record = {
             let mut block = block_ref.write().await;
             let record = block.get_record_mut(time).ok_or_else(|| {
                 ReductError::not_found(&format!("No record with timestamp {}", time))
@@ -309,12 +309,12 @@ impl Entry {
                 new_labels.push(Label { name, value });
             }
 
-            record.labels = new_labels.clone();
-            new_labels
+            record.labels = new_labels;
+            record.clone()
         };
 
-        bm.save(block_ref).await?;
-        Ok(new_labels)
+        bm.update_record(block_ref, record.clone()).await?;
+        Ok(record.labels)
     }
 
     /// Query records for a time range.

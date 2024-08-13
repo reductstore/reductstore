@@ -21,7 +21,7 @@ use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{get_global_file_cache, FileRef};
-use crate::storage::proto::{record, Block as BlockProto};
+use crate::storage::proto::{record, Block as BlockProto, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
 use reduct_base::error::ReductError;
@@ -47,7 +47,7 @@ pub struct BlockManager {
     cached_block_read: Option<BlockRef>,
     cached_block_write: Option<BlockRef>,
     block_index: BlockIndex,
-    write_wal: Arc<RwLock<Box<dyn Wal + Sync + Send>>>,
+    wal: Arc<RwLock<Box<dyn Wal + Sync + Send>>>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -73,7 +73,7 @@ impl BlockManager {
             cached_block_read: None,
             cached_block_write: None,
             block_index: index,
-            write_wal,
+            wal: write_wal,
         }
     }
 
@@ -126,7 +126,7 @@ impl BlockManager {
             self.use_counter.decrement(block_id);
 
             // write to WAL
-            self.write_wal
+            self.wal
                 .write()
                 .await
                 .append(block_id, WalEntry::WriteRecord(record.clone()))
@@ -166,6 +166,13 @@ impl BlockManager {
         }
 
         let block_ref = self.cached_block_write.as_ref().unwrap().clone();
+        self.save_block_on_disk(block_ref).await
+    }
+
+    async fn save_block_on_disk(
+        &mut self,
+        block_ref: Arc<RwLock<Block>>,
+    ) -> Result<(), ReductError> {
         let block = block_ref.write().await;
         let block_id = block.block_id();
 
@@ -191,7 +198,7 @@ impl BlockManager {
         self.block_index.save().await?;
 
         // clean WAL
-        self.write_wal.write().await.clean(block_id).await?;
+        self.wal.write().await.clean(block_id).await?;
         Ok(())
     }
 
@@ -265,6 +272,9 @@ pub trait ManageBlock {
     ///
     /// * `Ok(block)` - Block was created successfully.
     async fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<BlockRef, ReductError>;
+
+    /// Update a record in a block and save it to disk.
+    async fn update_record(&mut self, block: BlockRef, record: Record) -> Result<(), ReductError>;
 
     /// Finish a block by truncating the file to the actual size.
     ///
@@ -359,6 +369,19 @@ impl ManageBlock for BlockManager {
         Ok(block_ref)
     }
 
+    async fn update_record(&mut self, block: BlockRef, record: Record) -> Result<(), ReductError> {
+        self.wal
+            .write()
+            .await
+            .append(
+                block.read().await.block_id(),
+                WalEntry::UpdateRecord(record),
+            )
+            .await?;
+
+        self.save_block_on_disk(block).await
+    }
+
     async fn finish(&mut self, block: BlockRef) -> Result<(), ReductError> {
         let block = block.read().await;
         /* resize data block then sync descriptor and data */
@@ -385,22 +408,23 @@ impl ManageBlock for BlockManager {
             ));
         }
 
-        // TODO WAL
-
-        self.save_cache_on_disk().await?;
+        self.wal
+            .write()
+            .await
+            .append(block_id, WalEntry::RemoveBlock)
+            .await?;
+        // self.save_cache_on_disk().await?;
 
         let path = self.path_to_data(block_id);
         get_global_file_cache().remove(&path).await?;
-        tokio::fs::remove_file(path).await?;
 
         let path = self.path_to_desc(block_id);
         get_global_file_cache().remove(&path).await?;
-        tokio::fs::remove_file(path).await?;
 
         self.block_index.remove(block_id);
         self.block_index.save().await?;
 
-        // TODO Clean WAL
+        self.wal.write().await.clean(block_id).await?;
         Ok(())
     }
 }

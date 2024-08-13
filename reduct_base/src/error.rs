@@ -218,6 +218,16 @@ impl ReductError {
 }
 
 #[macro_export]
+macro_rules! too_early {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::too_early(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::too_early($msg)
+    };
+}
+
+#[macro_export]
 macro_rules! internal_server_error {
     ($msg:expr, $($arg:tt)*) => {
         ReductError::internal_server_error(&format!($msg, $($arg)*))

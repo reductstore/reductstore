@@ -114,6 +114,7 @@ impl FileCache {
     }
 
     pub async fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+        tokio::fs::remove_file(path).await?;
         let mut cache = self.cache.write().await;
         cache.remove(path);
         Ok(())
