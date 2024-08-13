@@ -82,11 +82,11 @@ impl BlockIndex {
         self.insert(entry.into());
     }
 
-    pub fn get(&self, block_id: u64) -> Option<&BlockEntry> {
+    pub fn get_block(&self, block_id: u64) -> Option<&BlockEntry> {
         self.index_info.get(&block_id)
     }
 
-    pub fn remove(&mut self, block_id: u64) -> Option<BlockEntry> {
+    pub fn remove_block(&mut self, block_id: u64) -> Option<BlockEntry> {
         let block = self.index_info.remove(&block_id);
         self.index.remove(&block_id);
 
@@ -188,6 +188,7 @@ impl BlockIndex {
             .await?;
         let mut lock = file.write().await;
         lock.seek(SeekFrom::Start(0)).await?;
+        lock.set_len(0).await?;
         lock.write_all(&buf).await.map_err(|err| {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)
         })?;

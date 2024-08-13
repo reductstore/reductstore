@@ -374,8 +374,8 @@ mod tests {
             .await
             .unwrap();
 
-        let block_index =
-            BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
+        let buf = fs::read(block_index_path).unwrap();
+        let block_index = BlockIndexProto::decode(Bytes::from(buf)).unwrap();
         assert_eq!(
             block_index.blocks[0].size, 20,
             "should restore the block index from the blocks"

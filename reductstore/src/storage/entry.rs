@@ -160,7 +160,7 @@ impl Entry {
             }
         };
 
-        let block_ref = {
+        let mut block_ref = {
             let block = block_ref.read().await;
             // Check if the block has enough space for the record.
             let has_no_space = block.size() + content_size as u64 > self.settings.max_block_size;
@@ -180,15 +180,8 @@ impl Entry {
 
         drop(bm);
 
-        self.prepare_block_for_writing(
-            block_ref.clone(),
-            time,
-            content_size,
-            content_type,
-            labels,
-            record_type,
-        )
-        .await?;
+        self.prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
+            .await?;
 
         let tx = spawn_write_task(Arc::clone(&self.block_manager), block_ref, time).await?;
         Ok(tx)
@@ -196,12 +189,11 @@ impl Entry {
 
     async fn prepare_block_for_writing(
         &mut self,
-        block: BlockRef,
+        block: &mut BlockRef,
         time: u64,
         content_size: usize,
         content_type: String,
         labels: Labels,
-        record_type: RecordType,
     ) -> Result<(), ReductError> {
         let mut block = block.write().await;
         let record = Record {
@@ -217,8 +209,6 @@ impl Entry {
         };
 
         block.insert_record(record)?;
-        let mut bm = self.block_manager.write().await;
-        bm.index_mut().insert_or_update(block.to_owned());
 
         Ok(())
     }
@@ -373,7 +363,7 @@ impl Entry {
             (0, 0)
         } else {
             let latest_block_id = index_tree.last().unwrap();
-            let latest_record = match bm.index().get(*latest_block_id) {
+            let latest_record = match bm.index().get_block(*latest_block_id) {
                 Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
                 None => 0,
             };
