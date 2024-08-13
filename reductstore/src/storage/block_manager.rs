@@ -413,7 +413,7 @@ impl ManageBlock for BlockManager {
             .await
             .append(block_id, WalEntry::RemoveBlock)
             .await?;
-        // self.save_cache_on_disk().await?;
+        self.save_cache_on_disk().await?;
 
         let path = self.path_to_data(block_id);
         get_global_file_cache().remove(&path).await?;

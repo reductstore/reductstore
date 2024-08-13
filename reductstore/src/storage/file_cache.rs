@@ -191,12 +191,8 @@ mod tests {
         file.sync_all().unwrap();
         drop(file);
 
-        cache.read(&file_path).await.unwrap();
         cache.remove(&file_path).await.unwrap();
-
-        let file_ref = cache.read(&file_path).await.unwrap();
-        let file = file_ref.read().await;
-        assert_eq!(file.metadata().await.unwrap().len(), 4);
+        assert_eq!(file_path.exists(), false);
     }
 
     #[rstest]
