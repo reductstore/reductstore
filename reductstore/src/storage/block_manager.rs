@@ -8,6 +8,7 @@ pub(in crate::storage) mod wal;
 
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
+use reduct_base::error::ErrorCode;
 use std::cmp::min;
 
 use log::{debug, error};
@@ -24,6 +25,7 @@ use crate::storage::proto::{record, Block as BlockProto};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
@@ -172,10 +174,7 @@ impl BlockManager {
 
         let mut proto = BlockProto::from(block.to_owned());
         proto.encode(&mut buf).map_err(|e| {
-            ReductError::internal_server_error(&format!(
-                "Failed to encode block descriptor {:?}: {}",
-                path, e
-            ))
+            internal_server_error!("Failed to encode block descriptor {:?}: {}", path, e)
         })?;
 
         // overwrite the file
@@ -309,10 +308,7 @@ impl ManageBlock for BlockManager {
             lock.read_to_end(&mut buf).await?;
 
             let block_from_disk = BlockProto::decode(Bytes::from(buf)).map_err(|e| {
-                ReductError::internal_server_error(&format!(
-                    "Failed to decode block descriptor {:?}: {}",
-                    path, e
-                ))
+                internal_server_error!("Failed to decode block descriptor {:?}: {}", path, e)
             })?;
             cached_block = Some(Arc::new(RwLock::new(block_from_disk.into())));
         }
@@ -383,10 +379,10 @@ impl ManageBlock for BlockManager {
 
     async fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
         if !self.use_counter.clean_stale_and_check(block_id) {
-            return Err(ReductError::internal_server_error(&format!(
+            return Err(internal_server_error!(
                 "Cannot remove block {} because it is still in use",
                 block_id
-            )));
+            ));
         }
 
         // TODO WAL
@@ -467,10 +463,10 @@ pub async fn spawn_read_task(
                 Ok(read) => read,
                 Err(e) => {
                     let _ = tx
-                        .send(Err(ReductError::internal_server_error(&format!(
+                        .send(Err(internal_server_error!(
                             "Failed to read record chunk: {}",
                             e
-                        ))))
+                        )))
                         .await;
                     break;
                 }
@@ -478,7 +474,7 @@ pub async fn spawn_read_task(
 
             if read == 0 {
                 let _ = tx
-                    .send(Err(ReductError::internal_server_error(
+                    .send(Err(internal_server_error!(
                         "Failed to read record chunk: EOF",
                     )))
                     .await;
@@ -543,7 +539,7 @@ pub async fn spawn_write_task(
             let mut written_bytes = 0;
             while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, rx.recv())
                 .await
-                .map_err(|_| ReductError::internal_server_error("Timeout while reading record"))?
+                .map_err(|_| internal_server_error!("Timeout while reading record"))?
             {
                 let chunk: Option<Bytes> = chunk?;
                 match chunk {
@@ -738,10 +734,10 @@ mod tests {
 
         assert_eq!(
             block_manager.write().await.remove(block_id).await.err(),
-            Some(ReductError::internal_server_error(&format!(
+            Some(internal_server_error!(
                 "Cannot remove block {} because it is still in use",
                 block_id
-            )))
+            ))
         );
 
         tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
@@ -800,10 +796,10 @@ mod tests {
 
         assert_eq!(
             block_manager.write().await.remove(block_id).await.err(),
-            Some(ReductError::internal_server_error(&format!(
+            Some(internal_server_error!(
                 "Cannot remove block {} because it is still in use",
                 block_id
-            )))
+            ))
         );
 
         assert_eq!(rx.recv().await.unwrap().unwrap().as_ref(), b"hallo");

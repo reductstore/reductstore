@@ -216,3 +216,13 @@ impl ReductError {
         }
     }
 }
+
+#[macro_export]
+macro_rules! internal_server_error {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::internal_server_error(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::internal_server_error($msg)
+    };
+}

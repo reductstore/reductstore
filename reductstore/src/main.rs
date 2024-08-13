@@ -69,9 +69,8 @@ async fn main() {
 
     let handle = Handle::new();
     tokio::spawn(shutdown_ctrl_c(handle.clone(), components.storage.clone()));
-    if cfg!(target_family = "unix") {
-        tokio::spawn(shutdown_signal(handle.clone(), components.storage.clone()));
-    }
+    #[cfg(unix)]
+    tokio::spawn(shutdown_signal(handle.clone(), components.storage.clone()));
 
     let addr = SocketAddr::new(
         IpAddr::from_str(&cfg.host).expect("Invalid host address"),

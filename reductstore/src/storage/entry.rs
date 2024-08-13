@@ -16,9 +16,10 @@ use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use futures_util::FutureExt;
 use log::debug;
+use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::Labels;
+use reduct_base::{internal_server_error, Labels};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -249,17 +250,17 @@ impl Entry {
         };
 
         if record.state == record::State::Started as i32 {
-            return Err(ReductError::too_early(&format!(
+            return Err(internal_server_error!(
                 "Record with timestamp {} is still being written",
                 time
-            )));
+            ));
         }
 
         if record.state == record::State::Errored as i32 {
-            return Err(ReductError::internal_server_error(&format!(
+            return Err(internal_server_error!(
                 "Record with timestamp {} is broken",
                 time
-            )));
+            ));
         }
 
         let rx = spawn_read_task(self.block_manager.clone(), block_ref, time).await?;
