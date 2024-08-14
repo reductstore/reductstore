@@ -65,13 +65,13 @@ impl Block {
         }
     }
 
-    pub fn insert_or_update_record(&mut self, mut record: Record) {
+    pub fn insert_or_update_record(&mut self, record: Record) {
         match self
             .record_index
             .entry(ts_to_us(&record.timestamp.unwrap()))
         {
             Entry::Occupied(mut entry) => {
-                let mut existing_record = entry.get_mut();
+                let existing_record = entry.get_mut();
                 self.size -= existing_record.end - existing_record.begin;
                 self.metadata_size -= min(self.metadata_size, existing_record.encoded_len() as u64);
 

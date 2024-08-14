@@ -11,7 +11,6 @@ use tokio::sync::RwLock;
 use tokio::time::Instant;
 
 use reduct_base::error::ReductError;
-use reduct_base::not_found;
 
 pub(super) type FileRef = Arc<RwLock<File>>;
 

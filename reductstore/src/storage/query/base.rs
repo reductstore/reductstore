@@ -26,7 +26,7 @@ pub enum QueryState {
 
 /// Query is used to iterate over the records among multiple blocks.
 #[async_trait]
-pub trait Query {
+pub(in crate::storage) trait Query {
     ///  Get next record
     ///
     /// # Arguments

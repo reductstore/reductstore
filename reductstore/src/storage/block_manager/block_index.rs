@@ -3,21 +3,17 @@
 
 use bytes::Bytes;
 use crc64fast::Digest;
-use log::{info, warn};
 use prost::Message;
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::{BTreeSet, HashMap};
 use std::io::SeekFrom;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::sync::RwLock;
 
 use crate::storage::block_manager::block::Block;
-use crate::storage::block_manager::wal::{create_wal, WalEntry};
-use crate::storage::block_manager::{BlockManager, ManageBlock};
+use crate::storage::block_manager::ManageBlock;
 use crate::storage::file_cache::get_global_file_cache;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
@@ -87,10 +83,6 @@ impl BlockIndex {
 
     pub fn get_block(&self, block_id: u64) -> Option<&BlockEntry> {
         self.index_info.get(&block_id)
-    }
-
-    pub fn get_block_mut(&mut self, block_id: u64) -> Option<&mut BlockEntry> {
-        self.index_info.get_mut(&block_id)
     }
 
     pub fn remove_block(&mut self, block_id: u64) -> Option<BlockEntry> {

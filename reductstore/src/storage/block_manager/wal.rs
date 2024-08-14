@@ -1,9 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::collections::HashMap;
-use std::io::ErrorKind::UnexpectedEof;
-use std::io::{ErrorKind, SeekFrom};
+use std::io::SeekFrom;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -99,16 +97,12 @@ pub(in crate::storage) trait Wal {
     /// Remove the WAL file for a block
     async fn remove(&self, block_id: u64) -> Result<(), ReductError>;
 
-    /// Clear all WALs
-    async fn clear(&self) -> Result<(), ReductError>;
-
     /// List all WALs
     async fn list(&self) -> Result<Vec<u64>, ReductError>;
 }
 
 struct WalImpl {
     root_path: PathBuf,
-    path_map: HashMap<u64, PathBuf>,
 }
 
 impl WalImpl {
@@ -116,7 +110,6 @@ impl WalImpl {
         // preallocate file
         WalImpl {
             root_path: path_buf,
-            path_map: HashMap::new(),
         }
     }
 
@@ -185,13 +178,6 @@ impl Wal for WalImpl {
         Ok(())
     }
 
-    async fn clear(&self) -> Result<(), ReductError> {
-        for block_id in self.list().await? {
-            self.remove(block_id).await?;
-        }
-        Ok(())
-    }
-
     async fn list(&self) -> Result<Vec<u64>, ReductError> {
         let mut blocks = Vec::new();
         for entry in std::fs::read_dir(&self.root_path)? {
@@ -255,7 +241,7 @@ mod tests {
             .unwrap();
         wal.append(1, WalEntry::RemoveBlock).await.unwrap();
 
-        let mut wal = create_wal(path.path().to_path_buf());
+        let wal = create_wal(path.path().to_path_buf());
         let entries = wal.read(1).await.unwrap();
 
         assert_eq!(
@@ -277,11 +263,11 @@ mod tests {
             .await
             .unwrap();
 
-        let mut wal = create_wal(path.path().to_path_buf());
+        let wal = create_wal(path.path().to_path_buf());
         assert_eq!(wal.read(1).await.unwrap().len(), 1);
         wal.remove(1).await.unwrap();
 
-        let mut wal = create_wal(path.path().to_path_buf());
+        let wal = create_wal(path.path().to_path_buf());
         let err = wal.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }

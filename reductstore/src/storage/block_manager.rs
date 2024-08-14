@@ -8,7 +8,6 @@ pub(in crate::storage) mod wal;
 
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
-use reduct_base::error::ErrorCode;
 use std::cmp::min;
 
 use log::{debug, error};
@@ -39,7 +38,7 @@ pub(crate) type BlockRef = Arc<RwLock<Block>>;
 ///
 /// It is not thread safe and may cause data corruption if used from multiple threads,
 /// because it does not lock the block descriptor file. Use it with RwLock<BlockManager>
-pub struct BlockManager {
+pub(in crate::storage) struct BlockManager {
     path: PathBuf,
     use_counter: UseCounter,
     bucket: String,
@@ -240,7 +239,7 @@ impl BlockManager {
     }
 }
 
-pub trait ManageBlock {
+pub(in crate::storage) trait ManageBlock {
     /// Load block descriptor from disk.
     ///
     /// # Arguments
@@ -662,8 +661,9 @@ mod tests {
     use crate::storage::proto::BlockIndex as BlockIndexProto;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
+    use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
-    use std::fs;
+
     use std::time::Duration;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
@@ -877,9 +877,9 @@ mod tests {
             "index not updated"
         );
 
-        let mut block = block.await;
+        let block = block.await;
         let record = {
-            let mut lock = block.write().await;
+            let lock = block.write().await;
             let mut record = lock.get_record(0).unwrap().clone();
             record.labels = vec![Label {
                 name: "key".to_string(),

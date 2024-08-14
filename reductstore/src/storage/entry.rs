@@ -16,7 +16,6 @@ use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use futures_util::FutureExt;
 use log::debug;
-use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{internal_server_error, too_early, Labels};
@@ -267,7 +266,7 @@ impl Entry {
         let mut bm = self.block_manager.write().await;
         let block_ref = bm.find_block(time).await?;
         let record = {
-            let mut block = block_ref.write().await;
+            let block = block_ref.write().await;
             let mut record = block
                 .get_record(time)
                 .ok_or_else(|| {

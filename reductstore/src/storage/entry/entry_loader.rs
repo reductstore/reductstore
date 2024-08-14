@@ -221,7 +221,7 @@ mod tests {
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
-    use reduct_base::internal_server_error;
+
     use rstest::{fixture, rstest};
 
     use super::*;
@@ -448,7 +448,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_new_block(#[future] entry_fix: (Entry, PathBuf), mut record1: Record) {
+        async fn test_new_block(#[future] entry_fix: (Entry, PathBuf), record1: Record) {
             let (entry, path) = entry_fix.await;
             let mut wal = create_wal(path.clone());
             // Block #3 was created
@@ -543,7 +543,7 @@ mod tests {
 
         #[fixture]
         async fn entry_fix(path: PathBuf, entry_settings: EntrySettings) -> (Entry, PathBuf) {
-            let mut entry = entry(entry_settings.clone(), path.clone());
+            let entry = entry(entry_settings.clone(), path.clone());
             let name = entry.name.clone();
             {
                 let mut block_manager = entry.block_manager.write().await;
