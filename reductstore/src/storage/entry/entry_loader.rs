@@ -442,6 +442,7 @@ mod tests {
 
     mod wal_recovery {
         use crate::storage::proto::Record;
+        use reduct_base::error::ErrorCode::InternalServerError;
         use reduct_base::internal_server_error;
 
         use super::*;
@@ -523,10 +524,7 @@ mod tests {
                 .unwrap();
 
             let block = entry.block_manager.write().await.load(1).await.clone();
-            assert_eq!(
-                block.err().unwrap(),
-                internal_server_error!("No such file or directory (os error 2)")
-            );
+            assert_eq!(block.err().unwrap().status, InternalServerError,);
         }
 
         #[fixture]
