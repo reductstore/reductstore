@@ -233,7 +233,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        cmd: [ "stop", "kill"]
+        cmd: [ "stop", "kill" ]
     needs:
       - unit_tests
       - build
@@ -253,7 +253,7 @@ jobs:
           docker load --input /tmp/image.tar
           docker image ls -a
 
-      - name: Run current ReductStore
+      - name: Run ReductStore
         run: |
           docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
           sleep 5
@@ -267,7 +267,7 @@ jobs:
       - name: Restart ReductStore
         run: |
           docker ${{matrix.cmd}} current
-         docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
           sleep 5
           docker logs current
 
