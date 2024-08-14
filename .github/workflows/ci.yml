@@ -276,7 +276,7 @@ jobs:
 
       - name: Print docker logs
         if: always()
-        run: docker logs current
+        run: docker logs reductstore-1
 
       - name: Show replication report
         if: always()
