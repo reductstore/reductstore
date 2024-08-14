@@ -255,9 +255,9 @@ jobs:
 
       - name: Run ReductStore
         run: |
-          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name reductstore -d ${{github.repository}}
           sleep 5
-          docker logs current
+          docker logs reductstore
 
       - name: Upload data
         run: |
@@ -266,10 +266,10 @@ jobs:
 
       - name: Restart ReductStore
         run: |
-          docker ${{matrix.cmd}} current
-          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
+          docker ${{matrix.cmd}} reductstore
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name reductstore-1 -d ${{github.repository}}
           sleep 5
-          docker logs current
+          docker logs reductstore-1
 
       - name: Check data after migraiton
         run: python3 ./integration_tests/data_check/checker.py
