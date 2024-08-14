@@ -303,15 +303,20 @@ impl ManageBlock for BlockManager {
         if let Some(block) = self.cached_block_write.as_ref() {
             if block.read().await.block_id() == block_id {
                 cached_block = Some(block.clone());
-            }
-        } else if let Some(block) = self.cached_block_read.as_ref() {
-            // then check if we have the block in read cache
-            if block.read().await.block_id() == block_id {
-                cached_block = Some(block.clone());
+            } else if let Some(block) = self.cached_block_read.as_ref() {
+                // then check if we have the block in read cache
+                if block.read().await.block_id() == block_id {
+                    cached_block = Some(block.clone());
+                }
             }
         }
 
         if cached_block.is_none() {
+            if self.wal.read().await.exists(block_id) {
+                // we have a WAL for the block, sync it
+                self.save_cache_on_disk().await?;
+            }
+
             let path = self.path_to_desc(block_id);
             let file = get_global_file_cache().read(&path).await?;
             let mut buf = vec![];
