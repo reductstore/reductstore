@@ -46,7 +46,7 @@ pub(in crate::storage) struct BlockManager {
     cached_block_read: Option<BlockRef>,
     cached_block_write: Option<BlockRef>,
     block_index: BlockIndex,
-    wal: Arc<RwLock<Box<dyn Wal + Sync + Send>>>,
+    wal: Box<dyn Wal + Sync + Send>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -62,17 +62,15 @@ impl BlockManager {
             (bucket, entry)
         };
 
-        let write_wal = Arc::new(RwLock::new(wal::create_wal(path.clone())));
-
         Self {
-            path,
+            path: path.clone(),
             use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
             bucket,
             entry,
             cached_block_read: None,
             cached_block_write: None,
             block_index: index,
-            wal: write_wal,
+            wal: wal::create_wal(path.clone()),
         }
     }
 
@@ -125,8 +123,6 @@ impl BlockManager {
 
             // write to WAL
             self.wal
-                .write()
-                .await
                 .append(
                     block_id,
                     WalEntry::WriteRecord(block.get_record(record_timestamp).unwrap().clone()),
@@ -199,7 +195,7 @@ impl BlockManager {
         self.block_index.save().await?;
 
         // clean WAL
-        self.wal.write().await.remove(block_id).await?;
+        self.wal.remove(block_id).await?;
         Ok(())
     }
 
@@ -312,7 +308,7 @@ impl ManageBlock for BlockManager {
         }
 
         if cached_block.is_none() {
-            if self.wal.read().await.exists(block_id) {
+            if self.wal.exists(block_id) {
                 // we have a WAL for the block, sync it
                 self.save_cache_on_disk().await?;
             }
@@ -380,8 +376,6 @@ impl ManageBlock for BlockManager {
 
     async fn update_record(&mut self, block: BlockRef, record: Record) -> Result<(), ReductError> {
         self.wal
-            .write()
-            .await
             .append(
                 block.read().await.block_id(),
                 WalEntry::UpdateRecord(record),
@@ -417,11 +411,7 @@ impl ManageBlock for BlockManager {
             ));
         }
 
-        self.wal
-            .write()
-            .await
-            .append(block_id, WalEntry::RemoveBlock)
-            .await?;
+        self.wal.append(block_id, WalEntry::RemoveBlock).await?;
         self.save_cache_on_disk().await?;
         if let Some(block) = self.cached_block_read.as_ref() {
             if block.read().await.block_id() == block_id {
@@ -438,7 +428,7 @@ impl ManageBlock for BlockManager {
         self.block_index.remove_block(block_id);
         self.block_index.save().await?;
 
-        self.wal.write().await.remove(block_id).await?;
+        self.wal.remove(block_id).await?;
         Ok(())
     }
 
