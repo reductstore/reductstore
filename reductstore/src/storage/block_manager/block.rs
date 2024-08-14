@@ -4,6 +4,7 @@
 use crate::storage::proto::{ts_to_us, us_to_ts, Block as BlockProto, Record};
 use prost::Message;
 use reduct_base::error::{ErrorCode, ReductError};
+use std::cmp::min;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
@@ -64,31 +65,31 @@ impl Block {
         }
     }
 
-    pub fn insert_record(&mut self, record: Record) -> Result<(), ReductError> {
+    pub fn insert_or_update_record(&mut self, mut record: Record) {
         match self
             .record_index
             .entry(ts_to_us(&record.timestamp.unwrap()))
         {
-            Entry::Occupied(_) => Err(ReductError::new(
-                ErrorCode::Conflict,
-                "Record already exists",
-            )),
+            Entry::Occupied(mut entry) => {
+                let mut existing_record = entry.get_mut();
+                self.size -= existing_record.end - existing_record.begin;
+                self.metadata_size -= min(self.metadata_size, existing_record.encoded_len() as u64);
+
+                *existing_record = record;
+                self.size += existing_record.end - existing_record.begin;
+                self.metadata_size += existing_record.encoded_len() as u64;
+            }
             Entry::Vacant(entry) => {
                 self.size += record.end - record.begin;
                 self.record_count += 1;
                 self.metadata_size += record.encoded_len() as u64;
                 entry.insert(record);
-                Ok(())
             }
         }
     }
 
     pub fn get_record(&self, timestamp: u64) -> Option<&Record> {
         self.record_index.get(&timestamp)
-    }
-
-    pub fn get_record_mut(&mut self, timestamp: u64) -> Option<&mut Record> {
-        self.record_index.get_mut(&timestamp)
     }
 
     pub fn record_index(&self) -> &BTreeMap<u64, Record> {
@@ -114,6 +115,16 @@ impl Block {
     pub fn latest_record_time(&self) -> u64 {
         self.record_index.keys().next_back().cloned().unwrap_or(0)
     }
+
+    pub fn change_record_state(&mut self, timestamp: u64, state: i32) -> Result<(), ReductError> {
+        match self.record_index.get_mut(&timestamp) {
+            Some(record) => {
+                record.state = state;
+                Ok(())
+            }
+            None => Err(ReductError::new(ErrorCode::NotFound, "Record not found")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -132,32 +143,35 @@ mod tests {
     }
 
     #[rstest]
-    fn test_insert_record(mut block: Block) {
-        let record = Record {
-            begin: 1,
-            end: 2,
-            timestamp: Some(us_to_ts(&2)),
-            labels: vec![],
-            content_type: "application/json".to_string(),
-            state: 0,
-        };
-        block.insert_record(record.clone()).unwrap();
-        assert_eq!(block.get_record(2), Some(&record));
+    fn test_insert_record(mut block: Block, record: Record) {
+        block.insert_or_update_record(record.clone());
+        let mut record2 = record.clone();
+        record2.timestamp = Some(us_to_ts(&2));
+        block.insert_or_update_record(record2.clone());
+
+        assert_eq!(block.get_record(1), Some(&record));
+        assert_eq!(block.get_record(2), Some(&record2));
+
         assert_eq!(block.size(), 3);
         assert_eq!(block.record_count(), 2);
-        assert_eq!(block.metadata_size(), 31);
+        assert_eq!(block.metadata_size(), 54);
         assert_eq!(block.latest_record_time(), 2);
     }
 
     #[rstest]
-    fn test_insert_record_conflict(mut block: Block, record: Record) {
-        assert_eq!(
-            block.insert_record(record),
-            Err(ReductError::new(
-                ErrorCode::Conflict,
-                "Record already exists",
-            ))
-        );
+    fn test_update_record(mut block: Block, record: Record) {
+        block.insert_or_update_record(record.clone());
+        let mut updated_record = record.clone();
+        updated_record.state = 1;
+        updated_record.end = 100;
+        updated_record.content_type = "application/xml".to_string();
+        block.insert_or_update_record(updated_record.clone());
+
+        assert_eq!(block.get_record(1), Some(&updated_record));
+        assert_eq!(block.size(), 100);
+        assert_eq!(block.record_count(), 1);
+        assert_eq!(block.metadata_size(), 28);
+        assert_eq!(block.latest_record_time(), 1);
     }
 
     #[fixture]

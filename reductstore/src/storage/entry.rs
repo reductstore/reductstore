@@ -124,7 +124,7 @@ impl Entry {
                 } else {
                     let record = block_ref.read().await.get_record(time).map(|r| r.clone());
                     // check if the record already exists
-                    if let Some(record) = record {
+                    if let Some(mut record) = record {
                         // We overwrite the record if it is errored and the size is the same.
                         return if record.state != record::State::Errored as i32
                             || record.end - record.begin != content_size as u64
@@ -136,13 +136,13 @@ impl Entry {
                         } else {
                             {
                                 let mut block = block_ref.write().await;
-                                let record = block.get_record_mut(time).unwrap();
                                 record.labels = labels
                                     .into_iter()
                                     .map(|(name, value)| record::Label { name, value })
                                     .collect();
                                 record.state = record::State::Started as i32;
                                 record.content_type = content_type;
+                                block.insert_or_update_record(record);
                             }
 
                             drop(bm); // drop the lock to avoid deadlock
@@ -208,8 +208,7 @@ impl Entry {
                 .collect(),
         };
 
-        block.insert_record(record)?;
-
+        block.insert_or_update_record(record);
         Ok(())
     }
 
@@ -269,9 +268,12 @@ impl Entry {
         let block_ref = bm.find_block(time).await?;
         let record = {
             let mut block = block_ref.write().await;
-            let record = block.get_record_mut(time).ok_or_else(|| {
-                ReductError::not_found(&format!("No record with timestamp {}", time))
-            })?;
+            let mut record = block
+                .get_record(time)
+                .ok_or_else(|| {
+                    ReductError::not_found(&format!("No record with timestamp {}", time))
+                })?
+                .clone();
 
             let mut new_labels = Vec::new();
             for label in &record.labels {
@@ -300,9 +302,13 @@ impl Entry {
             }
 
             record.labels = new_labels;
-            record.clone()
+            record
         };
 
+        block_ref
+            .write()
+            .await
+            .insert_or_update_record(record.clone());
         bm.update_record(block_ref, record.clone()).await?;
         Ok(record.labels)
     }
@@ -1205,6 +1211,7 @@ mod tests {
             .await?;
         let x = sender.send(Ok(Some(Bytes::from(data)))).await;
         sender.closed().await;
+        drop(sender);
         match x {
             Ok(_) => Ok(()),
             Err(_) => Err(ReductError::internal_server_error("Error sending data")),

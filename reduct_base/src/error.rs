@@ -218,6 +218,16 @@ impl ReductError {
 }
 
 #[macro_export]
+macro_rules! not_found {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::not_found(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::not_found($msg)
+    };
+}
+
+#[macro_export]
 macro_rules! too_early {
     ($msg:expr, $($arg:tt)*) => {
         ReductError::too_early(&format!($msg, $($arg)*))

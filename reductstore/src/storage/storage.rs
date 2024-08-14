@@ -44,7 +44,7 @@ impl Storage {
     ///
     /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
     pub(crate) async fn load(data_path: PathBuf, license: Option<License>) -> Storage {
-        if !data_path.exists() {
+        if !data_path.try_exists().unwrap_or(false) {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
         }

@@ -1,20 +1,23 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use bytes::Bytes;
+use crc64fast::Digest;
+use log::{info, warn};
+use prost::Message;
+use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::internal_server_error;
 use std::collections::{BTreeSet, HashMap};
 use std::io::SeekFrom;
 use std::path::PathBuf;
-
-use bytes::Bytes;
-use crc64fast::Digest;
-use prost::Message;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
-
-use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
+use tokio::sync::RwLock;
 
 use crate::storage::block_manager::block::Block;
+use crate::storage::block_manager::wal::{create_wal, WalEntry};
+use crate::storage::block_manager::{BlockManager, ManageBlock};
 use crate::storage::file_cache::get_global_file_cache;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
@@ -86,6 +89,10 @@ impl BlockIndex {
         self.index_info.get(&block_id)
     }
 
+    pub fn get_block_mut(&mut self, block_id: u64) -> Option<&mut BlockEntry> {
+        self.index_info.get_mut(&block_id)
+    }
+
     pub fn remove_block(&mut self, block_id: u64) -> Option<BlockEntry> {
         let block = self.index_info.remove(&block_id);
         self.index.remove(&block_id);
@@ -94,7 +101,7 @@ impl BlockIndex {
     }
 
     pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
-        if !path.exists() {
+        if !path.try_exists()? {
             return Err(internal_server_error!("Block index {:?} not found", path));
         }
 
@@ -103,9 +110,13 @@ impl BlockIndex {
             let mut lock = file.write().await;
             let mut buf = Vec::new();
             lock.seek(SeekFrom::Start(0)).await?;
-            lock.read_to_end(&mut buf).await.map_err(|err| {
-                internal_server_error!("Failed to read block index {:?}: {}", path, err)
-            })?;
+            if let Err(err) = lock.read_to_end(&mut buf).await {
+                return Err(internal_server_error!(
+                    "Failed to read block index {:?}: {}",
+                    path,
+                    err
+                ));
+            };
 
             BlockIndexProto::decode(Bytes::from(buf))
         };
@@ -118,7 +129,11 @@ impl BlockIndex {
             ));
         }
 
-        let block_index_proto = block_index_proto.unwrap();
+        let block_index: BlockIndex = BlockIndex::from_proto(path, block_index_proto.unwrap())?;
+        Ok(block_index)
+    }
+
+    pub fn from_proto(path: PathBuf, value: BlockIndexProto) -> Result<Self, ReductError> {
         let mut block_index = BlockIndex {
             path_buf: path.clone(),
             index_info: HashMap::new(),
@@ -126,7 +141,7 @@ impl BlockIndex {
         };
 
         let mut crc = Digest::new();
-        block_index_proto.blocks.into_iter().for_each(|block| {
+        value.blocks.into_iter().for_each(|block| {
             // Count total numbers
             block_index.index_info.insert(block.block_id, block);
 
@@ -141,7 +156,7 @@ impl BlockIndex {
             block_index.index_info.insert(block.block_id, block);
         });
 
-        if crc.sum64() != block_index_proto.crc64 {
+        if crc.sum64() != value.crc64 {
             return Err(internal_server_error!(
                 "Block index {:?} is corrupted",
                 path
@@ -258,6 +273,7 @@ mod tests {
             assert_eq!(block_index.size(), 2);
             assert_eq!(block_index.record_count(), 1);
             assert_eq!(block_index.tree().len(), 1);
+            assert_eq!(block_index.path_buf, path);
         }
 
         #[rstest]

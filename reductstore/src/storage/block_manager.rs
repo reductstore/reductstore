@@ -52,7 +52,7 @@ pub struct BlockManager {
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
-pub const BLOCK_INDEX_FILE: &str = ".block_index";
+pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
 
 impl BlockManager {
     pub(crate) fn new(path: PathBuf, index: BlockIndex) -> Self {
@@ -121,15 +121,17 @@ impl BlockManager {
 
         {
             let mut block = block_ref.write().await;
-            let record = &mut block.get_record_mut(record_timestamp).unwrap();
-            record.state = i32::from(state);
+            block.change_record_state(record_timestamp, i32::from(state))?;
             self.use_counter.decrement(block_id);
 
             // write to WAL
             self.wal
                 .write()
                 .await
-                .append(block_id, WalEntry::WriteRecord(record.clone()))
+                .append(
+                    block_id,
+                    WalEntry::WriteRecord(block.get_record(record_timestamp).unwrap().clone()),
+                )
                 .await?;
         }
         self.save(block_ref).await?;
@@ -289,6 +291,9 @@ pub trait ManageBlock {
 
     /// Remove a block from disk if there are no readers or writers.
     async fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
+
+    /// Check if a block exists in the file system.
+    async fn exist(&mut self, block_id: u64) -> Result<bool, ReductError>;
 }
 
 impl ManageBlock for BlockManager {
@@ -414,6 +419,11 @@ impl ManageBlock for BlockManager {
             .append(block_id, WalEntry::RemoveBlock)
             .await?;
         self.save_cache_on_disk().await?;
+        if let Some(block) = self.cached_block_read.as_ref() {
+            if block.read().await.block_id() == block_id {
+                self.cached_block_read = None;
+            }
+        }
 
         let path = self.path_to_data(block_id);
         get_global_file_cache().remove(&path).await?;
@@ -426,6 +436,11 @@ impl ManageBlock for BlockManager {
 
         self.wal.write().await.remove(block_id).await?;
         Ok(())
+    }
+
+    async fn exist(&mut self, block_id: u64) -> Result<bool, ReductError> {
+        let path = self.path_to_desc(block_id);
+        Ok(path.try_exists()?)
     }
 }
 
@@ -644,9 +659,11 @@ pub async fn spawn_write_task(
 mod tests {
     use super::*;
     use crate::storage::proto::record::Label;
+    use crate::storage::proto::BlockIndex as BlockIndexProto;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
     use rstest::{fixture, rstest};
+    use std::fs;
     use std::time::Duration;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
@@ -771,7 +788,7 @@ mod tests {
             content_type: "".to_string(),
         };
         let block = block.await;
-        block.write().await.insert_record(record.clone()).unwrap();
+        block.write().await.insert_or_update_record(record.clone());
 
         let tx = spawn_write_task(Arc::clone(&block_manager), block, 1000_000)
             .await
@@ -794,9 +811,16 @@ mod tests {
             assert_eq!(record, *record_from_wall);
         }
 
-        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
-            .await
-            .unwrap();
+        let index = BlockIndex::from_proto(
+            PathBuf::new(),
+            BlockIndexProto::decode(
+                std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             index.get_block(block_id).unwrap().record_count,
             1,
@@ -812,9 +836,16 @@ mod tests {
             "WAL removed after index updated"
         );
 
-        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
-            .await
-            .unwrap();
+        let index = BlockIndex::from_proto(
+            PathBuf::new(),
+            BlockIndexProto::decode(
+                std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             index.get_block(block_id).unwrap().record_count,
             2,
@@ -849,22 +880,24 @@ mod tests {
         let mut block = block.await;
         let record = {
             let mut lock = block.write().await;
-            let mut record = lock.get_record_mut(0).unwrap();
+            let mut record = lock.get_record(0).unwrap().clone();
             record.labels = vec![Label {
                 name: "key".to_string(),
                 value: "value".to_string(),
             }];
-            record.clone()
+            record
         };
 
+        block.write().await.insert_or_update_record(record.clone());
         bm.update_record(block, record).await.unwrap();
-
-        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
-            .await
-            .unwrap();
+        let block_index_proto = BlockIndexProto::decode(
+            std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
         assert_eq!(
-            index.get_block(block_id).unwrap().metadata_size,
-            35,
+            block_index_proto.blocks[0].metadata_size, 35,
             "index updated"
         );
     }
@@ -1025,21 +1058,18 @@ mod tests {
 
         let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
         let block = bm.start(block_id, 1024).await.unwrap().clone();
-        block
-            .write()
-            .await
-            .insert_record(Record {
-                timestamp: Some(Timestamp {
-                    seconds: 0,
-                    nanos: 0,
-                }),
-                begin: 0,
-                end: 5,
-                state: 0,
-                labels: vec![],
-                content_type: "".to_string(),
-            })
-            .unwrap();
+        block.write().await.insert_or_update_record(Record {
+            timestamp: Some(Timestamp {
+                seconds: 0,
+                nanos: 0,
+            }),
+            begin: 0,
+            end: 5,
+            state: 0,
+            labels: vec![],
+            content_type: "".to_string(),
+        });
+
         bm.save(block.clone()).await.unwrap();
 
         let (file, _) = bm.begin_write(block.clone(), 0).await.unwrap();

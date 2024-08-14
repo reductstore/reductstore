@@ -19,7 +19,7 @@ use crate::storage::proto::Record;
 const WAL_FILE_SIZE: u64 = 1_000_000;
 
 #[derive(PartialEq, Debug)]
-pub(super) enum WalEntry {
+pub(in crate::storage) enum WalEntry {
     WriteRecord(Record),
     UpdateRecord(Record),
     RemoveBlock,
@@ -72,7 +72,7 @@ impl WalEntry {
 
 /// Manage WAL logs per block
 #[async_trait]
-pub(super) trait Wal {
+pub(in crate::storage) trait Wal {
     /// Append a WAL entry to the WAL file
     ///
     /// # Arguments
@@ -98,6 +98,12 @@ pub(super) trait Wal {
 
     /// Remove the WAL file for a block
     async fn remove(&self, block_id: u64) -> Result<(), ReductError>;
+
+    /// Clear all WALs
+    async fn clear(&self) -> Result<(), ReductError>;
+
+    /// List all WALs
+    async fn list(&self) -> Result<Vec<u64>, ReductError>;
 }
 
 struct WalImpl {
@@ -175,10 +181,34 @@ impl Wal for WalImpl {
 
     async fn remove(&self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        if path.exists() {
-            get_global_file_cache().remove(&path).await?;
+        get_global_file_cache().remove(&path).await?;
+        Ok(())
+    }
+
+    async fn clear(&self) -> Result<(), ReductError> {
+        for block_id in self.list().await? {
+            self.remove(block_id).await?;
         }
         Ok(())
+    }
+
+    async fn list(&self) -> Result<Vec<u64>, ReductError> {
+        let mut blocks = Vec::new();
+        for entry in std::fs::read_dir(&self.root_path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().unwrap_or_default() == "wal" {
+                let block_id = path
+                    .file_stem()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap();
+                blocks.push(block_id);
+            }
+        }
+        Ok(blocks)
     }
 }
 
@@ -200,7 +230,7 @@ impl Wal for WalImpl {
 /// This function will panic if it fails to create the WAL directory.
 pub(in crate::storage) fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send + Sync> {
     let wal_folder = entry_path.join("wal");
-    if !wal_folder.exists() {
+    if !wal_folder.try_exists().unwrap() {
         std::fs::create_dir_all(&wal_folder).expect("Failed to create WAL folder");
     }
     Box::new(WalImpl::new(entry_path.join("wal")))

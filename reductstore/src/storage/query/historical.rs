@@ -323,8 +323,9 @@ mod tests {
             let block_ref = block_manager.write().await.load(0).await.unwrap();
             {
                 let mut block = block_ref.write().await;
-                let record = block.get_record_mut(0).unwrap();
+                let mut record = block.get_record(0).unwrap().clone();
                 record.state = record::State::Errored as i32;
+                block.insert_or_update_record(record);
             }
             block_manager.write().await.save(block_ref).await.unwrap();
         }

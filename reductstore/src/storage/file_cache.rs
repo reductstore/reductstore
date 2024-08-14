@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 use tokio::time::Instant;
 
 use reduct_base::error::ReductError;
+use reduct_base::not_found;
 
 pub(super) type FileRef = Arc<RwLock<File>>;
 
@@ -114,7 +115,9 @@ impl FileCache {
     }
 
     pub async fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
-        tokio::fs::remove_file(path).await?;
+        if path.try_exists()? {
+            tokio::fs::remove_file(path).await?;
+        }
         let mut cache = self.cache.write().await;
         cache.remove(path);
         Ok(())
