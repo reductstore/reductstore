@@ -15,7 +15,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 
-pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 32;
+pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
 pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
 

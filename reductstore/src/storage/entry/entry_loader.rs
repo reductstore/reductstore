@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use reduct_base::error::ReductError;
 
 use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::wal::create_wal;
+use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
     BlockManager, ManageBlock, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
@@ -172,7 +172,12 @@ impl EntryLoader {
 
             let mut block_manager = entry.block_manager.write().await;
             for block_id in wal_blocks {
-                let wal_entries = wal.read(block_id).await?;
+                let wal_entries = wal.read(block_id).await;
+                if let Err(err) = wal_entries {
+                    error!("Failed to read WAL for block {}: {}", block_id, err);
+                    wal.remove(block_id).await?;
+                    continue;
+                }
 
                 let block_ref = if block_manager.exist(block_id).await? {
                     block_manager.load(block_id).await?
@@ -185,15 +190,15 @@ impl EntryLoader {
                 let mut block_removed = false;
                 {
                     let mut block = block_ref.write().await;
-                    for entry in wal_entries {
+                    for entry in wal_entries.unwrap() {
                         match entry {
-                            crate::storage::block_manager::wal::WalEntry::WriteRecord(record) => {
+                            WalEntry::WriteRecord(record) => {
                                 block.insert_or_update_record(record);
                             }
-                            crate::storage::block_manager::wal::WalEntry::UpdateRecord(record) => {
+                            WalEntry::UpdateRecord(record) => {
                                 block.insert_or_update_record(record);
                             }
-                            crate::storage::block_manager::wal::WalEntry::RemoveBlock => {
+                            WalEntry::RemoveBlock => {
                                 block_removed = true;
                                 break;
                             }
@@ -508,6 +513,20 @@ mod tests {
                 .unwrap()
                 .clone();
             assert_eq!(block.read().await.get_record(1), Some(&record1));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_corrupted_wal(#[future] entry_fix: (Entry, PathBuf)) {
+            let (entry, path) = entry_fix.await;
+
+            fs::write(path.join("wal/1.wal"), b"bad data").unwrap();
+            let entry = EntryLoader::restore_entry(path.clone(), entry.settings.clone()).await;
+            assert!(entry.is_ok());
+            assert!(
+                !path.join("wal/1.wal").exists(),
+                "should remove corrupted wal"
+            );
         }
 
         #[rstest]
