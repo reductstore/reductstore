@@ -121,7 +121,7 @@ impl EntryLoader {
                 file.write_all(&full_block.encode_to_vec())?;
             }
 
-            let id = if let Some(begin_time) = block.begin_time {
+            if let Some(begin_time) = block.begin_time {
                 ts_to_us(&begin_time)
             } else {
                 remove_bad_block!("begin time mismatch");
@@ -217,7 +217,7 @@ impl EntryLoader {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::block_manager::wal::{Wal, WalEntry};
+    use crate::storage::block_manager::wal::WalEntry;
     use crate::storage::block_manager::ManageBlock;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
