@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{error, info, log};
+use log::{error, info};
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -283,7 +283,7 @@ impl ReplicationTask {
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use axum::routing::patch;
+
     use bytes::Bytes;
 
     use mockall::mock;
