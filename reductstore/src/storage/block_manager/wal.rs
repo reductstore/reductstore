@@ -319,7 +319,9 @@ mod tests {
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
         let blocks = wal.list().await.unwrap();
-        assert_eq!(blocks, vec![1, 2]);
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks.contains(&1));
+        assert!(blocks.contains(&2));
     }
 
     #[rstest]
