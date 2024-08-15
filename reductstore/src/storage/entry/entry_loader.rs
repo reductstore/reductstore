@@ -466,7 +466,6 @@ mod tests {
     mod wal_recovery {
         use crate::storage::proto::Record;
         use reduct_base::error::ErrorCode::InternalServerError;
-        use reduct_base::internal_server_error;
 
         use super::*;
 
