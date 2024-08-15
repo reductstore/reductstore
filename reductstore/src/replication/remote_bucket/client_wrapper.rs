@@ -15,10 +15,10 @@ use std::str::FromStr;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::storage::proto::ts_to_us;
+use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
-
-use crate::storage::proto::ts_to_us;
 
 // A wrapper around the Reduct client API to make it easier to mock.
 #[async_trait]
@@ -76,10 +76,13 @@ impl ReductClient {
             .build()
             .unwrap(); // TODO: Handle error
 
-        Self {
-            client,
-            server_url: url.to_string(),
-        }
+        let server_url = if !url.ends_with('/') {
+            format!("{}/", url)
+        } else {
+            url.to_string()
+        };
+
+        Self { client, server_url }
     }
 }
 
@@ -174,27 +177,29 @@ impl BucketWrapper {
         if response.is_err() {
             check_response(response)?;
         } else {
-            response
-                .ok()
-                .unwrap()
+            let response = response.unwrap();
+            let headers = response
                 .headers()
                 .iter()
                 .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
-                .for_each(|(key, value)| {
-                    let record_ts = key
-                        .as_str()
-                        .trim_start_matches("x-reduct-error-")
-                        .parse::<u64>()
-                        .unwrap();
-                    let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
-                    failed_records.insert(
-                        record_ts,
-                        ReductError::new(
-                            ErrorCode::from_int(status.parse().unwrap()).unwrap(),
-                            message,
-                        ),
-                    );
-                });
+                .collect::<Vec<_>>();
+
+            for (key, value) in headers {
+                let record_ts = key
+                    .as_str()
+                    .trim_start_matches("x-reduct-error-")
+                    .parse::<u64>()
+                    .map_err(|err| unprocessable_entity!("Invalid timestamp {}: {}", key, err))?;
+
+                let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
+                failed_records.insert(
+                    record_ts,
+                    ReductError::new(
+                        ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                        message,
+                    ),
+                );
+            }
         }
         Ok(failed_records)
     }
@@ -388,6 +393,12 @@ mod tests {
     }
 
     #[rstest]
+    fn test_add_slash_to_url() {
+        let client = ReductClient::new("http://localhost:8080", "");
+        assert_eq!(client.server_url, "http://localhost:8080/");
+    }
+
+    #[rstest]
     fn test_error_parsing() {
         let response = http::Response::builder()
             .header("x-reduct-error-1", "404,Not Found")
@@ -401,6 +412,21 @@ mod tests {
             ErrorCode::NotFound
         );
         assert_eq!(failed_records.get(&1).unwrap().message(), "Not Found");
+    }
+
+    #[rstest]
+    fn test_invalid_error_parsing() {
+        let response = http::Response::builder()
+            .header("x-reduct-error-1", "404,Not Found")
+            .header("x-reduct-error-xxx", "404")
+            .body(Bytes::new())
+            .unwrap();
+        let response = Ok(response).map(|r| r.into());
+        let failed_records = BucketWrapper::parse_record_errors(response);
+        assert_eq!(
+            failed_records.unwrap_err().status(),
+            ErrorCode::UnprocessableEntity
+        );
     }
 
     type Tx = Sender<Result<Bytes, ReductError>>;

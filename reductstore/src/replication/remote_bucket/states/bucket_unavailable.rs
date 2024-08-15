@@ -38,9 +38,10 @@ impl RemoteBucketState for BucketUnavailableState {
                 }
                 Err(err) => {
                     error!(
-                        "Failed to get remote bucket {}/{}",
+                        "Failed to get remote bucket {}{}: {}",
                         self.client.url(),
-                        self.bucket_name
+                        self.bucket_name,
+                        err
                     );
                     Box::new(BucketUnavailableState::new(
                         self.client,
