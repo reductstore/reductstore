@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{error, info};
+use log::{error, info, log};
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -115,7 +115,7 @@ impl ReplicationTask {
             }
 
             let sender = ReplicationSender::new(
-                thr_log_map,
+                thr_log_map.clone(),
                 thr_storage.clone(),
                 config.clone(),
                 thr_hourly_diagnostics,
@@ -145,9 +145,14 @@ impl ReplicationTask {
                         }
 
                         info!("Creating a new transaction log");
-                        TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                            .await
-                            .unwrap();
+                        thr_log_map.write().await.insert(
+                            entry_name,
+                            RwLock::new(
+                                TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
+                                    .await
+                                    .unwrap(),
+                            ),
+                        );
                     }
                 }
             }
@@ -278,6 +283,7 @@ impl ReplicationTask {
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
+    use axum::routing::patch;
     use bytes::Bytes;
 
     use mockall::mock;
@@ -391,32 +397,44 @@ mod tests {
 
         assert_eq!(replication.log_map.read().await.len(), 2);
         assert_eq!(
-            replication
-                .log_map
-                .read()
-                .await
-                .get("test1")
-                .unwrap()
-                .read()
-                .await
-                .front(10)
-                .await
-                .unwrap(),
+            get_entries_from_transaction_log(&mut replication, "test1").await,
             vec![Transaction::WriteRecord(10), Transaction::WriteRecord(30)]
         );
         assert_eq!(
-            replication
-                .log_map
-                .read()
-                .await
-                .get("test2")
-                .unwrap()
-                .read()
-                .await
-                .front(10)
-                .await
-                .unwrap(),
+            get_entries_from_transaction_log(&mut replication, "test2").await,
             vec![Transaction::WriteRecord(40), Transaction::WriteRecord(60)]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_broken_transaction_log(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .return_const(Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+        let mut replication = build_replication(remote_bucket, settings.clone()).await;
+
+        replication.notify(notification.clone()).await.unwrap();
+        assert!(!transaction_log_is_empty(&replication).await);
+
+        let path = ReplicationTask::build_path_to_transaction_log(
+            replication.storage.read().await.data_path(),
+            &settings.src_bucket,
+            &notification.entry,
+            &replication.name,
+        );
+        fs::write(path.clone(), "broken").await.unwrap();
+        sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            get_entries_from_transaction_log(&mut replication, "test1").await,
+            vec![],
+            "Transaction log is empty"
         );
     }
 
@@ -508,5 +526,22 @@ mod tests {
             .read()
             .await
             .is_empty()
+    }
+
+    async fn get_entries_from_transaction_log(
+        replication: &mut ReplicationTask,
+        entry: &str,
+    ) -> Vec<Transaction> {
+        replication
+            .log_map
+            .read()
+            .await
+            .get(entry)
+            .unwrap()
+            .read()
+            .await
+            .front(10)
+            .await
+            .unwrap()
     }
 }
