@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use bytes::Bytes;
 use bytesize::ByteSize;
-use log::{debug, error, warn};
+use log::{debug, error, trace, warn};
 use prost::Message;
 use tokio::sync::RwLock;
 
@@ -180,8 +180,13 @@ impl EntryLoader {
                 }
 
                 let block_ref = if block_manager.exist(block_id).await? {
+                    debug!(
+                        "Loading block {}/{} from block manager",
+                        entry.name, block_id
+                    );
                     block_manager.load(block_id).await?
                 } else {
+                    debug!("Creating block {}/{} from WAL", entry.name, block_id);
                     Arc::new(RwLock::new(
                         crate::storage::block_manager::block::Block::new(block_id),
                     ))
@@ -190,15 +195,28 @@ impl EntryLoader {
                 let mut block_removed = false;
                 {
                     let mut block = block_ref.write().await;
-                    for entry in wal_entries.unwrap() {
-                        match entry {
+                    for wal_entry in wal_entries? {
+                        match wal_entry {
                             WalEntry::WriteRecord(record) => {
+                                trace!(
+                                    "Write record to block {}/{}: {:?}",
+                                    entry.name,
+                                    block_id,
+                                    record
+                                );
                                 block.insert_or_update_record(record);
                             }
                             WalEntry::UpdateRecord(record) => {
+                                trace!(
+                                    "Update record to block {}/{}: {:?}",
+                                    entry.name,
+                                    block_id,
+                                    record
+                                );
                                 block.insert_or_update_record(record);
                             }
                             WalEntry::RemoveBlock => {
+                                debug!("Remove block {}/{}", entry.name, block_id);
                                 block_removed = true;
                                 break;
                             }

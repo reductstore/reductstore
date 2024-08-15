@@ -5,6 +5,7 @@ use std::io::SeekFrom;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use crc64fast::Digest;
 use prost::Message;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -69,6 +70,13 @@ impl WalEntry {
 }
 
 /// Manage WAL logs per block
+///
+/// The WAL is used to store changes to blocks that have not been written to the block file yet.
+///
+/// Format in big-endian:
+///
+/// | Entry Type (8) | Entry Length (64) | Entry Data (variable) | CRC (64) | Stop Marker (8) |
+///
 #[async_trait]
 pub(in crate::storage) trait Wal {
     /// Append a WAL entry to the WAL file
@@ -121,29 +129,36 @@ impl WalImpl {
     }
 }
 
+const STOP_MARKER: u8 = 255;
+
 #[async_trait]
 impl Wal for WalImpl {
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        let (file, created) = if !path.exists() {
+        let file = if !path.exists() {
             let file = get_global_file_cache().write_or_create(&path).await?;
             // preallocate file to speed up writes
             file.write().await.set_len(WAL_FILE_SIZE).await?;
-            (file, true)
+            file
         } else {
-            (get_global_file_cache().write_or_create(&path).await?, false)
+            get_global_file_cache().write_or_create(&path).await?
         };
 
-        if !created {
+        let mut lock = file.write().await;
+        if lock.stream_position().await? > 0 {
             // remove stop marker
-            file.write().await.seek(SeekFrom::Current(-1)).await?;
+            lock.seek(SeekFrom::Current(-1)).await?;
         }
 
-        let mut lock = file.write().await;
-        lock.write_all(&entry.encode()).await?;
-
+        let buf = entry.encode();
+        // write entry
+        lock.write_all(&buf).await?;
+        // write crc
+        let mut crc = Digest::new();
+        crc.write(&buf);
+        lock.write(&crc.sum64().to_be_bytes()).await?;
         // write stop marker
-        lock.write_u8(255).await?;
+        lock.write_u8(STOP_MARKER).await?;
         Ok(())
     }
 
@@ -155,18 +170,34 @@ impl Wal for WalImpl {
 
         let mut entries = Vec::new();
         loop {
+            // read entry type
             let entry_type = match lock.read_u8().await {
                 Ok(t) => t,
                 Err(err) => return Err(err.into()),
             };
 
-            if entry_type == 255 {
+            if entry_type == STOP_MARKER {
                 break;
             }
 
+            let mut crc = Digest::new();
+            crc.write(&[entry_type]);
+
+            // read entry length
             let len = lock.read_u64().await?;
+            crc.write(&len.to_be_bytes());
+
+            // read entry data
             let mut buf = vec![0; len as usize];
             lock.read_exact(&mut buf).await?;
+            crc.write(&buf);
+
+            // read crc
+            let crc_bytes = lock.read_u64().await?;
+
+            if crc.sum64() != crc_bytes {
+                return Err(internal_server_error!("WAL {:?} is corrupted", path));
+            }
 
             let entry = WalEntry::decode(entry_type, &buf)?;
             entries.push(entry);
@@ -235,12 +266,11 @@ mod tests {
     use super::*;
     use reduct_base::error::ErrorCode;
     use rstest::*;
+    use tokio::fs;
 
     #[rstest]
     #[tokio::test]
-    async fn test_read() {
-        let path = tempfile::tempdir().unwrap();
-        let mut wal = create_wal(path.path().to_path_buf());
+    async fn test_read(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
             .await
             .unwrap();
@@ -249,7 +279,7 @@ mod tests {
             .unwrap();
         wal.append(1, WalEntry::RemoveBlock).await.unwrap();
 
-        let wal = create_wal(path.path().to_path_buf());
+        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
         let entries = wal.read(1).await.unwrap();
 
         assert_eq!(
@@ -264,19 +294,72 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove() {
-        let path = tempfile::tempdir().unwrap();
-        let mut wal = create_wal(path.path().to_path_buf());
+    async fn test_remove(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
             .await
             .unwrap();
 
-        let wal = create_wal(path.path().to_path_buf());
         assert_eq!(wal.read(1).await.unwrap().len(), 1);
         wal.remove(1).await.unwrap();
 
-        let wal = create_wal(path.path().to_path_buf());
+        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
         let err = wal.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_list(mut wal: WalImpl) {
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+        wal.append(2, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+
+        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
+        let blocks = wal.list().await.unwrap();
+        assert_eq!(blocks, vec![1, 2]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_exists(mut wal: WalImpl) {
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+
+        assert!(wal.exists(1));
+        assert!(!wal.exists(2));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_crc_error(mut wal: WalImpl) {
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+
+        let path = wal.block_wal_path(1);
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .await
+            .unwrap();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        file.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
+            .await
+            .unwrap();
+
+        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
+        let err = wal.read(1).await.err().unwrap();
+        assert_eq!(&err.status, &ErrorCode::InternalServerError);
+    }
+
+    #[fixture]
+    fn wal() -> WalImpl {
+        let mut path = tempfile::tempdir().unwrap().into_path();
+        std::fs::create_dir_all(path.join("wal")).unwrap();
+        WalImpl::new(path.join("wal"))
     }
 }

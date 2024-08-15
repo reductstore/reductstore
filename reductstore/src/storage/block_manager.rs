@@ -795,8 +795,7 @@ mod tests {
         // must save record in WAL
         let mut bm = block_manager.write().await;
         {
-            let wal = bm.wal.read().await;
-            let entries = wal.read(block_id).await.unwrap();
+            let entries = bm.wal.read(block_id).await.unwrap();
             assert_eq!(entries.len(), 1);
             let record_from_wall = match &entries[0] {
                 WalEntry::WriteRecord(record) => record,
@@ -824,7 +823,7 @@ mod tests {
 
         // drop cache in disk when block is changed
         let _ = bm.start(block_id + 1, 1024).await.unwrap();
-        let err = bm.wal.write().await.read(block_id).await.err().unwrap();
+        let err = bm.wal.read(block_id).await.err().unwrap();
         assert_eq!(
             err.status(),
             ErrorCode::InternalServerError,
@@ -847,7 +846,7 @@ mod tests {
             "index update"
         );
 
-        let er = bm.wal.write().await.read(block_id + 1).await.err().unwrap();
+        let er = bm.wal.read(block_id + 1).await.err().unwrap();
         assert_eq!(
             er.status(),
             ErrorCode::InternalServerError,
