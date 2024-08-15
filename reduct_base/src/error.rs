@@ -218,6 +218,16 @@ impl ReductError {
 }
 
 #[macro_export]
+macro_rules! unprocessable_entity {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::unprocessable_entity(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::unprocessable_entity($msg)
+    };
+}
+
+#[macro_export]
 macro_rules! not_found {
     ($msg:expr, $($arg:tt)*) => {
         ReductError::not_found(&format!($msg, $($arg)*))

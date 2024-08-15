@@ -37,7 +37,7 @@ impl BucketAvailableState {
 
         if err.status.int_value() < 0 {
             error!(
-                "Failed to write record to remote bucket {}/{}: {}",
+                "Failed to write record to remote bucket {}{}: {}",
                 self.bucket.server_url(),
                 self.bucket.name(),
                 err
