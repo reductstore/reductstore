@@ -82,7 +82,7 @@ impl ManageStaticAsset for ZipAssetManager {
         let path = self.path.path().join(relative_path);
 
         trace!("Reading file {:?}", path);
-        if !path.exists() {
+        if !path.try_exists()? {
             return Err(ReductError::not_found(
                 format!("File {:?} not found", path).as_str(),
             ));

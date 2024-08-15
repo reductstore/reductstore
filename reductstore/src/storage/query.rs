@@ -11,7 +11,7 @@ use crate::storage::query::base::{Query, QueryOptions};
 use reduct_base::error::ReductError;
 
 /// Build a query.
-pub fn build_query(
+pub(in crate::storage) fn build_query(
     start: u64,
     stop: u64,
     options: QueryOptions,

@@ -56,7 +56,7 @@ impl TransactionLog {
     ///
     /// A new transaction log instance or an error.
     pub async fn try_load_or_create(path: PathBuf, capacity: usize) -> Result<Self, ReductError> {
-        let instance = if !path.exists() {
+        let instance = if !path.try_exists()? {
             let mut file = OpenOptions::new()
                 .read(true)
                 .write(true)

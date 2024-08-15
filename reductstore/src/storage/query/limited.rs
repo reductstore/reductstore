@@ -9,7 +9,6 @@ use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
 
 use reduct_base::error::{ErrorCode, ReductError};
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -32,7 +31,6 @@ impl LimitedQuery {
 impl Query for LimitedQuery {
     async fn next(
         &mut self,
-        block_indexes: &BTreeSet<u64>,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         // TODO: It could be done better, maybe it make senses to move the limit into HistoricalQuery instead of manipulating the state here.
@@ -46,7 +44,7 @@ impl Query for LimitedQuery {
             }
         }
 
-        let reader = self.query.next(block_indexes, block_manager).await?;
+        let reader = self.query.next(block_manager).await?;
 
         if let Running(count) = self.state() {
             if *count == self.options.limit.unwrap() {
@@ -66,16 +64,14 @@ impl Query for LimitedQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::query::base::tests::block_manager_and_index;
+    use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_limit(
-        #[future] block_manager_and_index: (Arc<RwLock<BlockManager>>, BTreeSet<u64>),
-    ) {
-        let (block_manager, block_indexes) = block_manager_and_index.await;
+    async fn test_limit(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = LimitedQuery::new(
             0,
             u64::MAX,
@@ -85,15 +81,12 @@ mod tests {
             },
         );
 
-        let reader = query
-            .next(&block_indexes, block_manager.clone())
-            .await
-            .unwrap();
+        let reader = query.next(block_manager.clone()).await.unwrap();
         assert_eq!(reader.timestamp(), 0);
         assert!(reader.last());
 
         assert_eq!(
-            query.next(&block_indexes, block_manager).await.err(),
+            query.next(block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

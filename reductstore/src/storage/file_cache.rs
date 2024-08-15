@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tokio::fs::File;
@@ -12,7 +12,17 @@ use tokio::time::Instant;
 
 use reduct_base::error::ReductError;
 
-pub(crate) type FileRef = Arc<RwLock<File>>;
+pub(super) type FileRef = Arc<RwLock<File>>;
+
+const FILE_CACHE_MAX_SIZE: usize = 1024;
+const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
+
+pub(super) fn get_global_file_cache() -> &'static FileCache {
+    static mut FILE_CACHE: OnceLock<FileCache> = OnceLock::new();
+    unsafe {
+        FILE_CACHE.get_or_init(|| FileCache::new(FILE_CACHE_MAX_SIZE, FILE_CACHE_TIME_TO_LIVE))
+    }
+}
 
 #[derive(PartialEq)]
 enum AccessMode {
@@ -26,8 +36,9 @@ struct FileDescriptor {
     used: Instant,
 }
 
+/// A cache to keep file descriptors open
 #[derive(Clone)]
-pub(super) struct FileCache {
+pub(in crate::storage) struct FileCache {
     cache: Arc<RwLock<HashMap<PathBuf, FileDescriptor>>>,
     max_size: usize,
     ttl: Duration,
@@ -103,6 +114,9 @@ impl FileCache {
     }
 
     pub async fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+        if path.try_exists()? {
+            tokio::fs::remove_file(path).await?;
+        }
         let mut cache = self.cache.write().await;
         cache.remove(path);
         Ok(())
@@ -179,12 +193,8 @@ mod tests {
         file.sync_all().unwrap();
         drop(file);
 
-        cache.read(&file_path).await.unwrap();
         cache.remove(&file_path).await.unwrap();
-
-        let file_ref = cache.read(&file_path).await.unwrap();
-        let file = file_ref.read().await;
-        assert_eq!(file.metadata().await.unwrap().len(), 4);
+        assert_eq!(file_path.exists(), false);
     }
 
     #[rstest]

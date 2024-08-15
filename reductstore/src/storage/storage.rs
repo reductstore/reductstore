@@ -15,9 +15,9 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 
-pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 32;
+pub(crate) const DEFAULT_MAX_READ_CHUNK: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
-pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Storage is the main entry point for the storage service.
 pub struct Storage {
@@ -44,7 +44,7 @@ impl Storage {
     ///
     /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
     pub(crate) async fn load(data_path: PathBuf, license: Option<License>) -> Storage {
-        if !data_path.exists() {
+        if !data_path.try_exists().unwrap_or(false) {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
         }
@@ -204,6 +204,14 @@ impl Storage {
         Ok(BucketInfoList { buckets })
     }
 
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        for bucket in self.buckets.values() {
+            bucket.sync_fs().await?;
+        }
+
+        Ok(())
+    }
+
     pub fn data_path(&self) -> &PathBuf {
         &self.data_path
     }
@@ -277,13 +285,14 @@ mod tests {
         write_entry!(bucket, "entry-2", 5000);
 
         tokio::time::sleep(Duration::from_millis(10)).await; // to make sure that write tasks are completed
+        storage.sync_fs().await.unwrap();
         let storage = Storage::load(storage.data_path.clone(), None).await;
         assert_eq!(
             storage.info().await.unwrap(),
             ServerInfo {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 bucket_count: 1,
-                usage: 127,
+                usage: 142,
                 uptime: 0,
                 oldest_record: 1000,
                 latest_record: 5000,

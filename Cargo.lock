@@ -400,6 +400,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc64fast"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26bb92ecea20291efcf0009e2713d64b7e327dedb8ce780545250f24075429e2"
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1563,6 +1569,7 @@ dependencies = [
  "bytes",
  "bytesize",
  "chrono",
+ "crc64fast",
  "futures-util",
  "hex",
  "hyper",

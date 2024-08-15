@@ -19,9 +19,9 @@ pub(crate) async fn get_bucket(
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
     let bucket_info = components
         .storage
-        .read()
+        .write()
         .await
-        .get_bucket(&bucket_name)?
+        .get_mut_bucket(&bucket_name)?
         .info()
         .await?;
     Ok(FullBucketInfoAxum::from(bucket_info))

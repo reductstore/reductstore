@@ -473,7 +473,7 @@ mod tests {
             diagnostics,
             DiagnosticsItem {
                 ok: 0,
-                errored: 20,
+                errored: 60,
                 errors: HashMap::from_iter(vec![(
                     425,
                     DiagnosticsError {
@@ -638,7 +638,7 @@ mod tests {
             storage,
             config: settings,
             hourly_diagnostics: Arc::new(RwLock::new(DiagnosticsCounter::new(
-                Duration::from_secs(1),
+                Duration::from_secs(3600),
             ))),
             bucket: Arc::new(RwLock::new(remote_bucket)),
         }

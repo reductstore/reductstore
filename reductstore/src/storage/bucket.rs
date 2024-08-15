@@ -21,7 +21,7 @@ use tokio::task::JoinSet;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
 
-const DEFAULT_MAX_RECORDS: u64 = 256;
+const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
 const SETTINGS_NAME: &str = "bucket.settings";
 
@@ -176,6 +176,7 @@ impl Bucket {
                             max_block_records: settings.max_block_records.unwrap(),
                         },
                     )
+                    .await
                 });
             }
         }
@@ -451,6 +452,14 @@ impl Bucket {
         }
     }
 
+    /// Sync all entries to the file system
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        for entry in self.entries.values() {
+            entry.sync_fs().await?;
+        }
+        Ok(())
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -604,13 +613,13 @@ mod tests {
         let blob: &[u8] = &[0u8; 40];
 
         write(&mut bucket, "test-1", 0, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 52);
+        assert_eq!(bucket.info().await.unwrap().info.size, 44);
 
         write(&mut bucket, "test-2", 1, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 110);
+        assert_eq!(bucket.info().await.unwrap().info.size, 91);
 
         write(&mut bucket, "test-3", 2, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 116);
+        assert_eq!(bucket.info().await.unwrap().info.size, 94);
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).await.err(),
@@ -634,7 +643,8 @@ mod tests {
         );
 
         write(&mut bucket, "test-1", 0, b"test").await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 16);
+        bucket.sync_fs().await.unwrap(); // we need to sync to get the correct size
+        assert_eq!(bucket.info().await.unwrap().info.size, 22);
 
         let result = write(&mut bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(
