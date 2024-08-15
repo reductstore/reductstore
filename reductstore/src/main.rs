@@ -17,7 +17,7 @@ use reductstore::api::create_axum_app;
 use reductstore::core::logger::Logger;
 use reductstore::storage::storage::Storage;
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let version: &str = env!("CARGO_PKG_VERSION");
 
