@@ -184,13 +184,14 @@ impl BlockManager {
         // overwrite the file
         let file = get_global_file_cache().write_or_create(&path).await?;
         let mut lock = file.write().await;
-        lock.set_len(buf.len() as u64).await?;
+        let len = buf.len() as u64;
+        lock.set_len(len).await?;
         lock.seek(SeekFrom::Start(0)).await?;
         lock.write_all(&buf).await?;
         lock.flush().await?;
 
         // update index
-        proto.metadata_size = buf.len() as u64; // update metadata size because it changed
+        proto.metadata_size = len; // update metadata size because it changed
         self.block_index.insert_or_update(proto);
         self.block_index.save().await?;
 
