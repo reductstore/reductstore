@@ -419,7 +419,7 @@ mod tests {
         });
 
         tx.send(Ok(Some(Bytes::from("xxxx")))).await.unwrap();
-        sleep(Duration::from_millis(15)).await;
+        sleep(Duration::from_millis(100)).await;
 
         let diagnostics = hourly_diagnostics.read().await.diagnostics();
         assert_eq!(

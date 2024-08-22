@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-429: Fix check for existing late record, [PR-549](https://github.com/reductstore/reductstore/pull/549)
+
 ## [1.11.0] - 2024-08-19
 
 ### Added
