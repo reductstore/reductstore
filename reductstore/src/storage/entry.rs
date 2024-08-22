@@ -119,6 +119,7 @@ impl Entry {
                     block_ref = bm.start(time, self.settings.max_block_size).await?;
                     RecordType::BelatedFirst
                 } else {
+                    block_ref = bm.find_block(time).await?;
                     let record = block_ref.read().await.get_record(time).map(|r| r.clone());
                     // check if the record already exists
                     if let Some(mut record) = record {
@@ -662,6 +663,20 @@ mod tests {
         async fn test_begin_write_existing_record(mut entry: Entry) {
             write_stub_record(&mut entry, 1000000).await.unwrap();
             write_stub_record(&mut entry, 2000000).await.unwrap();
+            let err = write_stub_record(&mut entry, 1000000).await;
+            assert_eq!(
+                err.err(),
+                Some(ReductError::conflict(
+                    "A record with timestamp 1000000 already exists"
+                ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_begin_write_existing_record_belated(mut entry: Entry) {
+            write_stub_record(&mut entry, 2000000).await.unwrap();
+            write_stub_record(&mut entry, 1000000).await.unwrap();
             let err = write_stub_record(&mut entry, 1000000).await;
             assert_eq!(
                 err.err(),
