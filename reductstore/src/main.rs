@@ -17,8 +17,7 @@ use reductstore::api::create_axum_app;
 use reductstore::core::logger::Logger;
 use reductstore::storage::storage::Storage;
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() {
+async fn launch_server() {
     let version: &str = env!("CARGO_PKG_VERSION");
 
     Logger::init("INFO");
@@ -102,13 +101,18 @@ async fn main() {
             .expect("Failed to install rustls crypto provider");
         let config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.cert_key_path)
             .await
-            .unwrap();
+            .expect("Failed to load TLS certificate");
         axum_server::bind_rustls(addr, config)
             .handle(handle)
             .serve(app.into_make_service())
             .await
-            .unwrap();
+            .expect("Failed to start HTTPS server");
     };
+}
+
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
+    launch_server().await;
 }
 
 async fn shutdown_ctrl_c(handle: Handle, storage: Arc<RwLock<Storage>>) {
@@ -138,4 +142,76 @@ async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
         .await
         .expect("Failed to shutdown storage");
     handle.shutdown();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::path::PathBuf;
+    use std::thread::spawn;
+    use tempfile::tempdir;
+    use tokio::time::sleep;
+
+    #[tokio::test]
+    async fn test_launch_http() {
+        let path = tempdir().unwrap().into_path();
+        env::set_var("RS_DATA_PATH", path.to_str().unwrap());
+
+        spawn(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                launch_server().await;
+            });
+        });
+
+        sleep(std::time::Duration::from_millis(100)).await;
+        reqwest::get("http://127.0.0.1:8383/api/v1/info")
+            .await
+            .expect("Failed to get info")
+            .error_for_status()
+            .expect("Failed to get info");
+    }
+
+    #[tokio::test]
+    async fn test_launch_https() {
+        let path = tempdir().unwrap().into_path();
+
+        let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        env::set_var("RS_DATA_PATH", path.to_str().unwrap());
+        env::set_var(
+            "RS_CERT_PATH",
+            project_path
+                .join("../misc/certificate.crt")
+                .to_str()
+                .unwrap(),
+        );
+        env::set_var(
+            "RS_CERT_KEY_PATH",
+            project_path
+                .join("../misc/privateKey.key")
+                .to_str()
+                .unwrap(),
+        );
+
+        spawn(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                launch_server().await;
+            });
+        });
+
+        sleep(std::time::Duration::from_millis(100)).await;
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+
+        client
+            .get("https://127.0.0.1:8383/api/v1/info")
+            .send()
+            .await
+            .expect("Failed to get info")
+            .error_for_status()
+            .expect("Failed to get info");
+    }
 }
