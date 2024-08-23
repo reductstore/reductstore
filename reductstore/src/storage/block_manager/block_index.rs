@@ -97,10 +97,9 @@ impl BlockIndex {
         }
 
         let block_index_proto = {
-            let file = FILE_CACHE.read(&path).await?;
+            let file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
             let mut lock = file.write().await;
             let mut buf = Vec::new();
-            lock.seek(SeekFrom::Start(0)).await?;
             if let Err(err) = lock.read_to_end(&mut buf).await {
                 return Err(internal_server_error!(
                     "Failed to read block index {:?}: {}",

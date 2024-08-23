@@ -2,11 +2,13 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
+use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use tokio::fs::File;
+use tokio::io::AsyncSeekExt;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 
@@ -63,11 +65,12 @@ impl FileCache {
     /// # Arguments
     ///
     /// * `path` - The path to the file
+    /// * `pos` - The position to read from
     ///
     /// # Returns
     ///
     /// A file reference
-    pub async fn read(&self, path: &PathBuf) -> Result<FileRef, ReductError> {
+    pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileRef, ReductError> {
         let mut cache = self.cache.write().await;
         let file = if let Some(desc) = cache.get_mut(path) {
             desc.used = Instant::now();
@@ -87,6 +90,8 @@ impl FileCache {
         };
 
         Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
+
+        file.write().await.seek(pos).await?;
         Ok(file)
     }
 
@@ -198,6 +203,7 @@ mod tests {
     use std::io::Write;
 
     use rstest::*;
+    use tokio::io::AsyncReadExt;
     use tokio::time::sleep;
 
     use super::*;
@@ -211,9 +217,25 @@ mod tests {
         file.sync_all().unwrap();
         drop(file);
 
-        let file_ref = cache.read(&file_path).await.unwrap();
-        let file = file_ref.read().await;
-        assert_eq!(file.metadata().await.unwrap().len(), 4);
+        let file_ref = cache.read(&file_path, SeekFrom::Start(0)).await.unwrap();
+        let mut data = String::new();
+        file_ref
+            .write()
+            .await
+            .read_to_string(&mut data)
+            .await
+            .unwrap();
+        assert_eq!(data, "test", "should read from beginning");
+
+        let file_ref = cache.read(&file_path, SeekFrom::End(-2)).await.unwrap();
+        let mut data = String::new();
+        file_ref
+            .write()
+            .await
+            .read_to_string(&mut data)
+            .await
+            .unwrap();
+        assert_eq!(data, "st", "should read last 2 bytes");
     }
 
     #[rstest]
@@ -265,7 +287,7 @@ mod tests {
 
         sleep(Duration::from_millis(200)).await;
 
-        cache.read(&file_path2).await.unwrap(); // should remove the file_path1 descriptor
+        cache.read(&file_path2, SeekFrom::Start(0)).await.unwrap(); // should remove the file_path1 descriptor
 
         let inner_cache = cache.cache.read().await;
         assert_eq!(inner_cache.len(), 1);

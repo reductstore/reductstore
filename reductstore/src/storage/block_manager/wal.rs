@@ -164,9 +164,8 @@ impl Wal for WalImpl {
 
     async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
         let path = self.block_wal_path(block_id);
-        let file = FILE_CACHE.read(&path).await?;
+        let file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
         let mut lock = file.write().await;
-        lock.seek(SeekFrom::Start(0)).await?;
 
         let mut entries = Vec::new();
         loop {

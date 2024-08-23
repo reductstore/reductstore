@@ -88,14 +88,14 @@ impl BlockManager {
         &mut self,
         block: BlockRef,
         record_timestamp: u64,
-    ) -> Result<(FileRef, usize), ReductError> {
+    ) -> Result<(FileRef, u64), ReductError> {
         let block = block.read().await;
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
         let file = FILE_CACHE.write_or_create(&path).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
-        Ok((file, offset as usize))
+        Ok((file, offset))
     }
 
     async fn finish_write_record(
@@ -143,14 +143,14 @@ impl BlockManager {
         &mut self,
         block_ref: BlockRef,
         record_timestamp: u64,
-    ) -> Result<(FileRef, usize), ReductError> {
+    ) -> Result<(FileRef, u64), ReductError> {
         let block = block_ref.read().await;
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
-        let file = FILE_CACHE.read(&path).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
-        Ok((file, offset as usize))
+        let file = FILE_CACHE.read(&path, SeekFrom::Start(offset)).await?;
+        Ok((file, offset))
     }
 
     pub fn finish_read_record(&mut self, block_id: u64) {
@@ -315,12 +315,11 @@ impl ManageBlock for BlockManager {
             }
 
             let path = self.path_to_desc(block_id);
-            let file = FILE_CACHE.read(&path).await?;
+            let file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
             let mut buf = vec![];
 
             // parse the block descriptor
             let mut lock = file.write().await;
-            lock.seek(SeekFrom::Start(0)).await?;
             lock.read_to_end(&mut buf).await?;
 
             let block_from_disk = BlockProto::decode(Bytes::from(buf)).map_err(|e| {
@@ -477,19 +476,18 @@ pub async fn spawn_read_task(
     let block = block_ref.read().await;
     let record = block.get_record(record_timestamp).unwrap();
     let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
-    let content_size = (record.end - record.begin) as usize;
+    let content_size = record.end - record.begin;
     let block_id = block.block_id();
     let local_bm = Arc::clone(&block_manager);
     tokio::spawn(async move {
         let mut read_bytes = 0;
         loop {
-            let chunk_size = min(content_size - read_bytes, DEFAULT_MAX_READ_CHUNK) as usize;
-            let mut buf = vec![0; chunk_size];
+            let chunk_size = min(content_size - read_bytes, DEFAULT_MAX_READ_CHUNK as u64);
+            let mut buf = vec![0; chunk_size as usize];
 
             let seek_and_read = async {
                 let mut lock = file.write().await;
-                lock.seek(SeekFrom::Start((offset + read_bytes) as u64))
-                    .await?;
+                lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
                 lock.read(&mut buf).await
             };
 
@@ -522,7 +520,7 @@ pub async fn spawn_read_task(
                 break;
             }
 
-            read_bytes += read;
+            read_bytes += read as u64;
             if read_bytes == content_size {
                 break;
             }
@@ -572,11 +570,11 @@ pub async fn spawn_write_task(
     let block = block_ref.read().await;
     let block_id = block.block_id();
     let record_index = block.get_record(record_timestamp).unwrap();
-    let content_size = (record_index.end - record_index.begin) as usize;
+    let content_size = (record_index.end - record_index.begin);
 
     tokio::spawn(async move {
         let recv = async move {
-            let mut written_bytes = 0;
+            let mut written_bytes = 0u64;
             while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, rx.recv())
                 .await
                 .map_err(|_| internal_server_error!("Timeout while reading record"))?
@@ -584,7 +582,7 @@ pub async fn spawn_write_task(
                 let chunk: Option<Bytes> = chunk?;
                 match chunk {
                     Some(chunk) => {
-                        written_bytes += chunk.len();
+                        written_bytes += chunk.len() as u64;
                         if written_bytes > content_size {
                             return Err(ReductError::bad_request(
                                 "Content is bigger than in content-length",
@@ -594,7 +592,7 @@ pub async fn spawn_write_task(
                         {
                             let mut lock = file.write().await;
                             lock.seek(SeekFrom::Start(
-                                (offset + written_bytes - chunk.len()) as u64,
+                                (offset + written_bytes - chunk.len() as u64),
                             ))
                             .await?;
                             lock.write_all(chunk.as_ref()).await?;
