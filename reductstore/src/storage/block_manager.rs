@@ -3,8 +3,10 @@
 
 pub(in crate::storage) mod block;
 pub(in crate::storage) mod block_index;
-mod use_counter;
 pub(in crate::storage) mod wal;
+
+mod block_cache;
+mod use_counter;
 
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
