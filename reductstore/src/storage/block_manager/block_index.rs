@@ -9,8 +9,7 @@ use reduct_base::internal_server_error;
 use std::collections::{BTreeSet, HashMap};
 use std::io::SeekFrom;
 use std::path::PathBuf;
-use tokio::io::AsyncWriteExt;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::storage::block_manager::block::Block;
 use crate::storage::file_cache::FILE_CACHE;
