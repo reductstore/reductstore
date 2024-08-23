@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- RS-411: Refactor FileCache, [PR-551](https://github.com/reductstore/reductstore/pull/551)
+
 ## [1.11.1] - 2024-08-23
 
 ### Fixed
