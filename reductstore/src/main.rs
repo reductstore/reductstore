@@ -164,7 +164,7 @@ mod tests {
             });
         });
 
-        sleep(std::time::Duration::from_millis(300)).await;
+        sleep(std::time::Duration::from_secs(1)).await;
         reqwest::get("http://127.0.0.1:8383/api/v1/info")
             .await
             .expect("Failed to get info")
@@ -200,7 +200,7 @@ mod tests {
             });
         });
 
-        sleep(std::time::Duration::from_millis(300)).await;
+        sleep(std::time::Duration::from_secs(1)).await;
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
