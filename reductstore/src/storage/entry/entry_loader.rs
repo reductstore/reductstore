@@ -228,6 +228,7 @@ impl EntryLoader {
                     block_manager.remove(block_id).await?;
                 } else {
                     block_manager.save(block_ref.clone()).await?;
+                    block_manager.finish(block_ref).await?;
                 }
             }
 
@@ -466,6 +467,7 @@ mod tests {
     mod wal_recovery {
         use crate::storage::proto::Record;
         use reduct_base::error::ErrorCode::InternalServerError;
+        use tokio::fs::File;
 
         use super::*;
 
@@ -485,7 +487,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let entry = EntryLoader::restore_entry(path, entry.settings.clone())
+            let entry = EntryLoader::restore_entry(path.clone(), entry.settings.clone())
                 .await
                 .unwrap();
 
@@ -500,6 +502,13 @@ mod tests {
             let block = block_ref.read().await;
             assert_eq!(block.get_record(1), Some(&record1));
             assert_eq!(block.get_record(2), Some(&record2));
+
+            let file = File::open(path.join("3.blk")).await.unwrap();
+            assert_eq!(
+                file.metadata().await.unwrap().len(),
+                block.size(),
+                "should save and truncate the block"
+            );
         }
 
         #[rstest]
@@ -517,19 +526,21 @@ mod tests {
                 .await
                 .unwrap();
 
-            let entry = EntryLoader::restore_entry(path, entry.settings.clone())
+            let entry = EntryLoader::restore_entry(path.clone(), entry.settings.clone())
                 .await
                 .unwrap();
 
-            let block = entry
-                .block_manager
-                .write()
-                .await
-                .load(1)
-                .await
-                .unwrap()
-                .clone();
-            assert_eq!(block.read().await.get_record(1), Some(&record1));
+            let block_ref = entry.block_manager.write().await.load(1).await.unwrap();
+
+            let block = block_ref.read().await;
+            assert_eq!(block.get_record(1), Some(&record1));
+
+            let file = File::open(path.join("1.blk")).await.unwrap();
+            assert_eq!(
+                file.metadata().await.unwrap().len(),
+                block.size(),
+                "should save and truncate the block"
+            );
         }
 
         #[rstest]
