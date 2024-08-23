@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.1] - 2024-08-23
+
 ### Fixed
 
 - RS-429: Fix check for existing late record, [PR-549](https://github.com/reductstore/reductstore/pull/549)
@@ -757,7 +759,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.11.1...HEAD
+
+[1.11.0]: https://github.com/reductstore/reductstore/compare/v1.11.0...v1.11.1
 
 [1.11.0]: https://github.com/reductstore/reductstore/compare/v1.10.1...v1.11.0
 
