@@ -12,4 +12,4 @@ resolver = "2"
 version = "1.11.1"
 authors = ["Alexey Timin <atimin@reduct.store>"]
 edition = "2021"
-rust-version = "1.75.0"
+rust-version = "1.80.0"
