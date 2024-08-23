@@ -70,6 +70,8 @@ async fn launch_server() {
     tokio::spawn(shutdown_ctrl_c(handle.clone(), components.storage.clone()));
     #[cfg(unix)]
     tokio::spawn(shutdown_signal(handle.clone(), components.storage.clone()));
+    #[cfg(test)]
+    tokio::spawn(tests::shutdown_server(handle.clone()));
 
     let addr = SocketAddr::new(
         IpAddr::from_str(&cfg.host).expect("Invalid host address"),
@@ -118,14 +120,13 @@ async fn main() {
 async fn shutdown_ctrl_c(handle: Handle, storage: Arc<RwLock<Storage>>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
-
+    handle.shutdown();
     storage
         .read()
         .await
         .sync_fs()
         .await
         .expect("Failed to shutdown storage");
-    handle.shutdown();
 }
 
 #[cfg(unix)]
@@ -135,72 +136,81 @@ async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
         .recv()
         .await;
     info!("SIGTERM received, shutting down...");
+    handle.shutdown();
     storage
         .read()
         .await
         .sync_fs()
         .await
         .expect("Failed to shutdown storage");
-    handle.shutdown();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use log::warn;
+    use rstest::rstest;
+    use serial_test::serial;
+    use std::collections::HashMap;
     use std::env;
+
     use std::path::PathBuf;
-    use std::thread::spawn;
+    use std::sync::LazyLock;
+    use std::thread::{spawn, JoinHandle};
     use tempfile::tempdir;
+    use tokio::sync::Mutex;
     use tokio::time::sleep;
 
+    static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+    pub(super) async fn shutdown_server(handle: Handle) {
+        while !*STOP_SERVER.lock().await {
+            sleep(std::time::Duration::from_millis(10)).await;
+        }
+        warn!("Shutting down server");
+        handle.shutdown();
+    }
+
+    #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_launch_http() {
-        let path = tempdir().unwrap().into_path();
-        env::set_var("RS_DATA_PATH", path.to_str().unwrap());
+        let task = set_env_and_run(HashMap::new()).await;
 
-        spawn(|| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                launch_server().await;
-            });
-        });
-
-        sleep(std::time::Duration::from_secs(1)).await;
         reqwest::get("http://127.0.0.1:8383/api/v1/info")
             .await
             .expect("Failed to get info")
             .error_for_status()
             .expect("Failed to get info");
+
+        // send shutdown signal
+        *STOP_SERVER.lock().await = true;
+        task.join().unwrap();
     }
 
+    #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_launch_https() {
-        let path = tempdir().unwrap().into_path();
-
         let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-        env::set_var("RS_DATA_PATH", path.to_str().unwrap());
-        env::set_var(
-            "RS_CERT_PATH",
+        let mut cfg = HashMap::new();
+        cfg.insert(
+            "RS_CERT_PATH".to_string(),
             project_path
                 .join("../misc/certificate.crt")
                 .to_str()
-                .unwrap(),
+                .unwrap()
+                .to_string(),
         );
-        env::set_var(
-            "RS_CERT_KEY_PATH",
+        cfg.insert(
+            "RS_CERT_KEY_PATH".to_string(),
             project_path
                 .join("../misc/privateKey.key")
                 .to_str()
-                .unwrap(),
+                .unwrap()
+                .to_string(),
         );
 
-        spawn(|| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                launch_server().await;
-            });
-        });
-
-        sleep(std::time::Duration::from_secs(1)).await;
+        let task = set_env_and_run(cfg).await;
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
@@ -213,5 +223,31 @@ mod tests {
             .expect("Failed to get info")
             .error_for_status()
             .expect("Failed to get info");
+
+        // send shutdown signal
+        *STOP_SERVER.lock().await = true;
+        task.join().unwrap();
+    }
+
+    async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {
+        let data_path = tempdir().unwrap().into_path();
+
+        env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+        env::set_var("RS_CERT_PATH", "");
+        env::set_var("RS_CERT_KEY_PATH", "");
+
+        for (key, value) in cfg {
+            env::set_var(key, value);
+        }
+
+        let task = spawn(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                *STOP_SERVER.lock().await = false;
+                launch_server().await;
+            });
+        });
+
+        sleep(std::time::Duration::from_secs(1)).await;
+        task
     }
 }
