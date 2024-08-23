@@ -93,8 +93,10 @@ impl BlockManager {
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
-        let file = FILE_CACHE.write_or_create(&path).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
+        let file = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Start(offset))
+            .await?;
         Ok((file, offset))
     }
 
@@ -182,13 +184,17 @@ impl BlockManager {
         })?;
 
         // overwrite the file
-        let file = FILE_CACHE.write_or_create(&path).await?;
-        let mut lock = file.write().await;
-        let len = buf.len() as u64;
-        lock.set_len(len).await?;
-        lock.seek(SeekFrom::Start(0)).await?;
-        lock.write_all(&buf).await?;
-        lock.flush().await?;
+        let len = {
+            let file = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Start(0))
+                .await?;
+            let mut lock = file.write().await;
+            let len = buf.len() as u64;
+            lock.set_len(len).await?;
+            lock.write_all(&buf).await?;
+            lock.flush().await?;
+            len
+        };
 
         // update index
         proto.metadata_size = len; // update metadata size because it changed
@@ -361,7 +367,7 @@ impl ManageBlock for BlockManager {
         // create a block with data
         {
             let file = FILE_CACHE
-                .write_or_create(&self.path_to_data(block_id))
+                .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))
                 .await?;
             let file = file.write().await;
             file.set_len(max_block_size).await?;
@@ -389,13 +395,15 @@ impl ManageBlock for BlockManager {
         let block = block.read().await;
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.block_id());
-        let file = FILE_CACHE.write_or_create(&path).await?;
+        let file = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Current(0))
+            .await?;
         let data_block = file.write().await;
         data_block.set_len(block.size()).await?;
         data_block.sync_all().await?;
 
         let file = FILE_CACHE
-            .write_or_create(&self.path_to_desc(block.block_id()))
+            .write_or_create(&self.path_to_desc(block.block_id()), SeekFrom::Current(0))
             .await?;
         let descr_block = file.write().await;
         descr_block.sync_all().await?;
@@ -570,7 +578,7 @@ pub async fn spawn_write_task(
     let block = block_ref.read().await;
     let block_id = block.block_id();
     let record_index = block.get_record(record_timestamp).unwrap();
-    let content_size = (record_index.end - record_index.begin);
+    let content_size = record_index.end - record_index.begin;
 
     tokio::spawn(async move {
         let recv = async move {
@@ -591,10 +599,8 @@ pub async fn spawn_write_task(
 
                         {
                             let mut lock = file.write().await;
-                            lock.seek(SeekFrom::Start(
-                                (offset + written_bytes - chunk.len() as u64),
-                            ))
-                            .await?;
+                            lock.seek(SeekFrom::Start(offset + written_bytes - chunk.len() as u64))
+                                .await?;
                             lock.write_all(chunk.as_ref()).await?;
                         }
                     }

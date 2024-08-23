@@ -2,9 +2,9 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use tokio::fs::File;
@@ -60,7 +60,9 @@ impl FileCache {
         }
     }
 
-    /// Read a file from the cache or open it
+    /// Get a file descriptor for reading
+    ///
+    /// If the file is not in the cache, it will be opened and added to the cache.
     ///
     /// # Arguments
     ///
@@ -91,20 +93,30 @@ impl FileCache {
 
         Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
 
-        file.write().await.seek(pos).await?;
+        if pos != SeekFrom::Current(0) {
+            file.write().await.seek(pos).await?;
+        }
         Ok(file)
     }
 
-    /// Write to a file in the cache or create it
+    /// Get a file descriptor for writing
+    ///
+    /// If the file is not in the cache, it will be opened or created and added to the cache.
     ///
     /// # Arguments
     ///
     /// * `path` - The path to the file
+    /// * `pos` - The position to write to
+    ///
     ///
     /// # Returns
     ///
     /// A file reference
-    pub async fn write_or_create(&self, path: &PathBuf) -> Result<FileRef, ReductError> {
+    pub async fn write_or_create(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<FileRef, ReductError> {
         let mut cache = self.cache.write().await;
 
         let file = if let Some(desc) = cache.get_mut(path) {
@@ -138,6 +150,10 @@ impl FileCache {
         };
 
         Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
+
+        if pos != SeekFrom::Current(0) {
+            file.write().await.seek(pos).await?;
+        }
         Ok(file)
     }
 
@@ -203,7 +219,7 @@ mod tests {
     use std::io::Write;
 
     use rstest::*;
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::time::sleep;
 
     use super::*;
@@ -243,9 +259,35 @@ mod tests {
     async fn test_write_or_create(cache: FileCache, tmp_dir: tempfile::TempDir) {
         let file_path = tmp_dir.path().join("test_write_or_create.txt");
 
-        let file_ref = cache.write_or_create(&file_path).await.unwrap();
-        let file = file_ref.read().await;
-        assert_eq!(file.metadata().await.unwrap().len(), 0);
+        let file_ref = cache
+            .write_or_create(&file_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        {
+            let mut file = file_ref.write().await;
+            file.write_all(b"test").await.unwrap()
+        };
+
+        assert_eq!(
+            fs::read(&file_path).unwrap(),
+            b"test",
+            "should write to file"
+        );
+
+        let file_ref = cache
+            .write_or_create(&file_path, SeekFrom::End(-2))
+            .await
+            .unwrap();
+        {
+            let mut file = file_ref.write().await;
+            file.write_all(b"xx").await.unwrap();
+        }
+
+        assert_eq!(
+            fs::read(&file_path).unwrap(),
+            b"texx",
+            "should override last 2 bytes"
+        );
     }
 
     #[rstest]
@@ -268,9 +310,18 @@ mod tests {
         let file_path2 = tmp_dir.path().join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.path().join("test_cache_max_size3.txt");
 
-        cache.write_or_create(&file_path1).await.unwrap();
-        cache.write_or_create(&file_path2).await.unwrap();
-        cache.write_or_create(&file_path3).await.unwrap();
+        cache
+            .write_or_create(&file_path1, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        cache
+            .write_or_create(&file_path2, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        cache
+            .write_or_create(&file_path3, SeekFrom::Start(0))
+            .await
+            .unwrap();
 
         let inner_cache = cache.cache.read().await;
         assert_eq!(inner_cache.len(), 2);
@@ -282,8 +333,14 @@ mod tests {
     async fn test_cache_ttl(cache: FileCache, tmp_dir: tempfile::TempDir) {
         let file_path1 = tmp_dir.path().join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.path().join("test_cache_max_size2.txt");
-        cache.write_or_create(&file_path1).await.unwrap();
-        cache.write_or_create(&file_path2).await.unwrap();
+        cache
+            .write_or_create(&file_path1, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        cache
+            .write_or_create(&file_path2, SeekFrom::Start(0))
+            .await
+            .unwrap();
 
         sleep(Duration::from_millis(200)).await;
 

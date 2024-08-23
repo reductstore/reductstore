@@ -136,12 +136,16 @@ impl Wal for WalImpl {
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
         let file = if !path.exists() {
-            let file = FILE_CACHE.write_or_create(&path).await?;
+            let file = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Current(0))
+                .await?;
             // preallocate file to speed up writes
             file.write().await.set_len(WAL_FILE_SIZE).await?;
             file
         } else {
-            FILE_CACHE.write_or_create(&path).await?
+            FILE_CACHE
+                .write_or_create(&path, SeekFrom::Current(0))
+                .await?
         };
 
         let mut lock = file.write().await;

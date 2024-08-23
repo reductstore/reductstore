@@ -188,9 +188,10 @@ impl BlockIndex {
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
 
-        let file = FILE_CACHE.write_or_create(&self.path_buf).await?;
+        let file = FILE_CACHE
+            .write_or_create(&self.path_buf, SeekFrom::Start(0))
+            .await?;
         let mut lock = file.write().await;
-        lock.seek(SeekFrom::Start(0)).await?;
         lock.set_len(0).await?;
         lock.write_all(&buf).await.map_err(|err| {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)
