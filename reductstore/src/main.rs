@@ -97,6 +97,9 @@ async fn main() {
             .await
             .unwrap();
     } else {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("Failed to install rustls crypto provider");
         let config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.cert_key_path)
             .await
             .unwrap();
