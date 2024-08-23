@@ -1,4 +1,4 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::net::{IpAddr, SocketAddr};
@@ -98,7 +98,7 @@ async fn launch_server() {
             .await
             .unwrap();
     } else {
-        rustls::crypto::ring::default_provider()
+        rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .expect("Failed to install rustls crypto provider");
         let config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.cert_key_path)
