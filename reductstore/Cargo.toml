@@ -63,7 +63,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 async-stream = "0.3.5"
 tower-http = { version = "0.5.2", features = ["cors"] }
 crc64fast = "1.1.0"
-rustls = "0.23.12"
 
 [build-dependencies]
 prost-build = "0.13.1"

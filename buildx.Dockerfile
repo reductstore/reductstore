@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     protobuf-compiler \
+    clang \
     ${GCC_COMPILER}
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -30,6 +31,8 @@ COPY .cargo /root/.cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 
+
+RUN cargo install --force --locked bindgen-cli
 RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release --target ${CARGO_TARGET} --package reductstore
 RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release
 
