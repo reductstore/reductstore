@@ -70,6 +70,8 @@ async fn launch_server() {
     tokio::spawn(shutdown_ctrl_c(handle.clone(), components.storage.clone()));
     #[cfg(unix)]
     tokio::spawn(shutdown_signal(handle.clone(), components.storage.clone()));
+    #[cfg(test)]
+    tokio::spawn(tests::shutdown_server(handle.clone()));
 
     let addr = SocketAddr::new(
         IpAddr::from_str(&cfg.host).expect("Invalid host address"),
@@ -118,14 +120,13 @@ async fn main() {
 async fn shutdown_ctrl_c(handle: Handle, storage: Arc<RwLock<Storage>>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
-
+    handle.shutdown();
     storage
         .read()
         .await
         .sync_fs()
         .await
         .expect("Failed to shutdown storage");
-    handle.shutdown();
 }
 
 #[cfg(unix)]
@@ -135,13 +136,13 @@ async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
         .recv()
         .await;
     info!("SIGTERM received, shutting down...");
+    handle.shutdown();
     storage
         .read()
         .await
         .sync_fs()
         .await
         .expect("Failed to shutdown storage");
-    handle.shutdown();
 }
 
 #[cfg(test)]
@@ -149,16 +150,26 @@ mod tests {
     use super::*;
     use std::env;
     use std::path::PathBuf;
+    use std::sync::LazyLock;
     use std::thread::spawn;
     use tempfile::tempdir;
+    use tokio::sync::Mutex;
     use tokio::time::sleep;
+
+    static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+    pub(super) async fn shutdown_server(handle: Handle) {
+        while !*STOP_SERVER.lock().await {
+            sleep(std::time::Duration::from_millis(10)).await;
+        }
+        handle.shutdown();
+    }
 
     #[tokio::test]
     async fn test_launch_http() {
         let path = tempdir().unwrap().into_path();
         env::set_var("RS_DATA_PATH", path.to_str().unwrap());
 
-        spawn(|| {
+        let task = spawn(|| {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 launch_server().await;
             });
@@ -170,6 +181,10 @@ mod tests {
             .expect("Failed to get info")
             .error_for_status()
             .expect("Failed to get info");
+
+        // send shutdown signal
+        *STOP_SERVER.lock().await = true;
+        task.join().unwrap();
     }
 
     #[tokio::test]
@@ -194,7 +209,7 @@ mod tests {
                 .unwrap(),
         );
 
-        spawn(|| {
+        let task = spawn(|| {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 launch_server().await;
             });
@@ -213,5 +228,9 @@ mod tests {
             .expect("Failed to get info")
             .error_for_status()
             .expect("Failed to get info");
+
+        // send shutdown signal
+        *STOP_SERVER.lock().await = true;
+        task.join().unwrap();
     }
 }
