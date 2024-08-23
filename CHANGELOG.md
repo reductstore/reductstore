@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-429: Fix check for existing late record, [PR-549](https://github.com/reductstore/reductstore/pull/549)
+- Fix truncating of a recovered block from WAL, [PR-550](https://github.com/reductstore/reductstore/pull/550)
 
 ## [1.11.0] - 2024-08-19
 
