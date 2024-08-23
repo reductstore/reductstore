@@ -13,7 +13,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::storage::block_manager::block::Block;
-use crate::storage::file_cache::get_global_file_cache;
+use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
@@ -97,7 +97,7 @@ impl BlockIndex {
         }
 
         let block_index_proto = {
-            let file = get_global_file_cache().read(&path).await?;
+            let file = FILE_CACHE.read(&path).await?;
             let mut lock = file.write().await;
             let mut buf = Vec::new();
             lock.seek(SeekFrom::Start(0)).await?;
@@ -189,9 +189,7 @@ impl BlockIndex {
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
 
-        let file = get_global_file_cache()
-            .write_or_create(&self.path_buf)
-            .await?;
+        let file = FILE_CACHE.write_or_create(&self.path_buf).await?;
         let mut lock = file.write().await;
         lock.seek(SeekFrom::Start(0)).await?;
         lock.set_len(0).await?;

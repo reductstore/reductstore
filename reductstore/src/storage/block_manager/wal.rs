@@ -12,7 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 
-use crate::storage::file_cache::get_global_file_cache;
+use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::Record;
 
 const WAL_FILE_SIZE: u64 = 1_000_000;
@@ -136,12 +136,12 @@ impl Wal for WalImpl {
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
         let file = if !path.exists() {
-            let file = get_global_file_cache().write_or_create(&path).await?;
+            let file = FILE_CACHE.write_or_create(&path).await?;
             // preallocate file to speed up writes
             file.write().await.set_len(WAL_FILE_SIZE).await?;
             file
         } else {
-            get_global_file_cache().write_or_create(&path).await?
+            FILE_CACHE.write_or_create(&path).await?
         };
 
         let mut lock = file.write().await;
@@ -164,7 +164,7 @@ impl Wal for WalImpl {
 
     async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
         let path = self.block_wal_path(block_id);
-        let file = get_global_file_cache().read(&path).await?;
+        let file = FILE_CACHE.read(&path).await?;
         let mut lock = file.write().await;
         lock.seek(SeekFrom::Start(0)).await?;
 
@@ -208,7 +208,7 @@ impl Wal for WalImpl {
 
     async fn remove(&self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        get_global_file_cache().remove(&path).await?;
+        FILE_CACHE.remove(&path).await?;
         Ok(())
     }
 

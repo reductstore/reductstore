@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use tokio::fs::File;
@@ -17,12 +17,8 @@ pub(super) type FileRef = Arc<RwLock<File>>;
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
-pub(super) fn get_global_file_cache() -> &'static FileCache {
-    static mut FILE_CACHE: OnceLock<FileCache> = OnceLock::new();
-    unsafe {
-        FILE_CACHE.get_or_init(|| FileCache::new(FILE_CACHE_MAX_SIZE, FILE_CACHE_TIME_TO_LIVE))
-    }
-}
+pub(super) static FILE_CACHE: LazyLock<FileCache> =
+    LazyLock::new(|| FileCache::new(FILE_CACHE_MAX_SIZE, FILE_CACHE_TIME_TO_LIVE));
 
 #[derive(PartialEq)]
 enum AccessMode {
@@ -37,6 +33,9 @@ struct FileDescriptor {
 }
 
 /// A cache to keep file descriptors open
+///
+/// This optimization is needed for network file systems because opening
+/// and closing files for writing causes synchronization overhead.
 #[derive(Clone)]
 pub(in crate::storage) struct FileCache {
     cache: Arc<RwLock<HashMap<PathBuf, FileDescriptor>>>,
@@ -45,6 +44,12 @@ pub(in crate::storage) struct FileCache {
 }
 
 impl FileCache {
+    /// Create a new file cache
+    ///
+    /// # Arguments
+    ///
+    /// * `max_size` - The maximum number of file descriptors to keep open
+    /// * `ttl` - The time to live for a file descriptor
     pub fn new(max_size: usize, ttl: Duration) -> Self {
         FileCache {
             cache: Arc::new(RwLock::new(HashMap::new())),
@@ -53,6 +58,15 @@ impl FileCache {
         }
     }
 
+    /// Read a file from the cache or open it
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the file
+    ///
+    /// # Returns
+    ///
+    /// A file reference
     pub async fn read(&self, path: &PathBuf) -> Result<FileRef, ReductError> {
         let mut cache = self.cache.write().await;
         let file = if let Some(desc) = cache.get_mut(path) {
@@ -76,6 +90,15 @@ impl FileCache {
         Ok(file)
     }
 
+    /// Write to a file in the cache or create it
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the file
+    ///
+    /// # Returns
+    ///
+    /// A file reference
     pub async fn write_or_create(&self, path: &PathBuf) -> Result<FileRef, ReductError> {
         let mut cache = self.cache.write().await;
 
@@ -113,6 +136,25 @@ impl FileCache {
         Ok(file)
     }
 
+    /// Removes a file from the file system and the cache.
+    ///
+    /// This function attempts to remove a file at the specified path from the file system.
+    /// If the file exists and is successfully removed, it also removes the file descriptor
+    /// from the cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the file to be removed.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is `Ok` if the file was successfully removed, or an `Err` containing
+    /// a `ReductError` if an error occurred.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the file does not exist or if there is an issue
+    /// removing the file from the file system.
     pub async fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         if path.try_exists()? {
             tokio::fs::remove_file(path).await?;

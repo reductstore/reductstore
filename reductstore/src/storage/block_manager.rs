@@ -19,7 +19,7 @@ use std::sync::Arc;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
-use crate::storage::file_cache::{get_global_file_cache, FileRef};
+use crate::storage::file_cache::{FileRef, FILE_CACHE};
 use crate::storage::proto::{record, Block as BlockProto, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
@@ -93,7 +93,7 @@ impl BlockManager {
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
-        let file = get_global_file_cache().write_or_create(&path).await?;
+        let file = FILE_CACHE.write_or_create(&path).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
         Ok((file, offset as usize))
     }
@@ -148,7 +148,7 @@ impl BlockManager {
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
-        let file = get_global_file_cache().read(&path).await?;
+        let file = FILE_CACHE.read(&path).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
         Ok((file, offset as usize))
     }
@@ -182,7 +182,7 @@ impl BlockManager {
         })?;
 
         // overwrite the file
-        let file = get_global_file_cache().write_or_create(&path).await?;
+        let file = FILE_CACHE.write_or_create(&path).await?;
         let mut lock = file.write().await;
         let len = buf.len() as u64;
         lock.set_len(len).await?;
@@ -315,7 +315,7 @@ impl ManageBlock for BlockManager {
             }
 
             let path = self.path_to_desc(block_id);
-            let file = get_global_file_cache().read(&path).await?;
+            let file = FILE_CACHE.read(&path).await?;
             let mut buf = vec![];
 
             // parse the block descriptor
@@ -361,7 +361,7 @@ impl ManageBlock for BlockManager {
 
         // create a block with data
         {
-            let file = get_global_file_cache()
+            let file = FILE_CACHE
                 .write_or_create(&self.path_to_data(block_id))
                 .await?;
             let file = file.write().await;
@@ -390,12 +390,12 @@ impl ManageBlock for BlockManager {
         let block = block.read().await;
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.block_id());
-        let file = get_global_file_cache().write_or_create(&path).await?;
+        let file = FILE_CACHE.write_or_create(&path).await?;
         let data_block = file.write().await;
         data_block.set_len(block.size()).await?;
         data_block.sync_all().await?;
 
-        let file = get_global_file_cache()
+        let file = FILE_CACHE
             .write_or_create(&self.path_to_desc(block.block_id()))
             .await?;
         let descr_block = file.write().await;
@@ -421,10 +421,10 @@ impl ManageBlock for BlockManager {
         }
 
         let path = self.path_to_data(block_id);
-        get_global_file_cache().remove(&path).await?;
+        FILE_CACHE.remove(&path).await?;
 
         let path = self.path_to_desc(block_id);
-        get_global_file_cache().remove(&path).await?;
+        FILE_CACHE.remove(&path).await?;
 
         self.block_index.remove_block(block_id);
         self.block_index.save().await?;
