@@ -18,7 +18,7 @@ on:
 
 env:
   REGISTRY_IMAGE: reduct/store
-  MINIMAL_RUST_VERSION: 1.75.0
+  MINIMAL_RUST_VERSION: 1.80.0
 
 jobs:
   rust_fmt:
