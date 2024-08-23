@@ -148,12 +148,12 @@ async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use log::{log, warn};
+    use log::warn;
     use rstest::rstest;
     use serial_test::serial;
     use std::collections::HashMap;
     use std::env;
-    use std::hash::Hash;
+
     use std::path::PathBuf;
     use std::sync::LazyLock;
     use std::thread::{spawn, JoinHandle};
