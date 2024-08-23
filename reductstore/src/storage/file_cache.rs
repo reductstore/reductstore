@@ -265,7 +265,8 @@ mod tests {
             .unwrap();
         {
             let mut file = file_ref.write().await;
-            file.write_all(b"test").await.unwrap()
+            file.write_all(b"test").await.unwrap();
+            file.sync_all().await.unwrap();
         };
 
         assert_eq!(
@@ -281,6 +282,7 @@ mod tests {
         {
             let mut file = file_ref.write().await;
             file.write_all(b"xx").await.unwrap();
+            file.sync_all().await.unwrap();
         }
 
         assert_eq!(
