@@ -148,7 +148,9 @@ async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use log::{log, warn};
     use rstest::rstest;
+    use serial_test::serial;
     use std::collections::HashMap;
     use std::env;
     use std::hash::Hash;
@@ -164,16 +166,17 @@ mod tests {
         while !*STOP_SERVER.lock().await {
             sleep(std::time::Duration::from_millis(10)).await;
         }
+        warn!("Shutting down server");
         handle.shutdown();
     }
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_launch_http() {
-        let (task, port) = set_env_and_run(HashMap::new()).await;
+        let task = set_env_and_run(HashMap::new()).await;
 
-        sleep(std::time::Duration::from_secs(1)).await;
-        reqwest::get(format!("http://127.0.0.1:{}/api/v1/info", port))
+        reqwest::get("http://127.0.0.1:8383/api/v1/info")
             .await
             .expect("Failed to get info")
             .error_for_status()
@@ -186,6 +189,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_launch_https() {
         let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let mut cfg = HashMap::new();
@@ -206,15 +210,14 @@ mod tests {
                 .to_string(),
         );
 
-        let (task, port) = set_env_and_run(cfg).await;
-
+        let task = set_env_and_run(cfg).await;
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
             .unwrap();
 
         client
-            .get(format!("https://127.0.0.1:{}/api/v1/info", port))
+            .get("https://127.0.0.1:8383/api/v1/info")
             .send()
             .await
             .expect("Failed to get info")
@@ -226,15 +229,10 @@ mod tests {
         task.join().unwrap();
     }
 
-    async fn set_env_and_run(cfg: HashMap<String, String>) -> (JoinHandle<()>, u16) {
-        static PORT: LazyLock<Mutex<u16>> = LazyLock::new(|| Mutex::new(1024));
-        let mut port = PORT.lock().await; // use this to block test from running in parallel
-        *port += 1;
-
+    async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {
         let data_path = tempdir().unwrap().into_path();
 
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
-        env::set_var("RS_PORT", port.to_string());
         env::set_var("RS_CERT_PATH", "");
         env::set_var("RS_CERT_KEY_PATH", "");
 
@@ -244,12 +242,12 @@ mod tests {
 
         let task = spawn(|| {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
+                *STOP_SERVER.lock().await = false;
                 launch_server().await;
             });
         });
 
         sleep(std::time::Duration::from_secs(1)).await;
-
-        (task, port.clone())
+        task
     }
 }
