@@ -148,10 +148,13 @@ async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
+    use std::collections::HashMap;
     use std::env;
+    use std::hash::Hash;
     use std::path::PathBuf;
     use std::sync::LazyLock;
-    use std::thread::spawn;
+    use std::thread::{spawn, JoinHandle};
     use tempfile::tempdir;
     use tokio::sync::Mutex;
     use tokio::time::sleep;
@@ -164,19 +167,13 @@ mod tests {
         handle.shutdown();
     }
 
+    #[rstest]
     #[tokio::test]
     async fn test_launch_http() {
-        let path = tempdir().unwrap().into_path();
-        env::set_var("RS_DATA_PATH", path.to_str().unwrap());
-
-        let task = spawn(|| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                launch_server().await;
-            });
-        });
+        let (task, port) = set_env_and_run(HashMap::new()).await;
 
         sleep(std::time::Duration::from_secs(1)).await;
-        reqwest::get("http://127.0.0.1:8383/api/v1/info")
+        reqwest::get(format!("http://127.0.0.1:{}/api/v1/info", port))
             .await
             .expect("Failed to get info")
             .error_for_status()
@@ -187,42 +184,37 @@ mod tests {
         task.join().unwrap();
     }
 
+    #[rstest]
     #[tokio::test]
     async fn test_launch_https() {
-        let path = tempdir().unwrap().into_path();
-
         let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-        env::set_var("RS_DATA_PATH", path.to_str().unwrap());
-        env::set_var(
-            "RS_CERT_PATH",
+        let mut cfg = HashMap::new();
+        cfg.insert(
+            "RS_CERT_PATH".to_string(),
             project_path
                 .join("../misc/certificate.crt")
                 .to_str()
-                .unwrap(),
+                .unwrap()
+                .to_string(),
         );
-        env::set_var(
-            "RS_CERT_KEY_PATH",
+        cfg.insert(
+            "RS_CERT_KEY_PATH".to_string(),
             project_path
                 .join("../misc/privateKey.key")
                 .to_str()
-                .unwrap(),
+                .unwrap()
+                .to_string(),
         );
 
-        let task = spawn(|| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                launch_server().await;
-            });
-        });
+        let (task, port) = set_env_and_run(cfg).await;
 
-        sleep(std::time::Duration::from_secs(1)).await;
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
             .unwrap();
 
         client
-            .get("https://127.0.0.1:8383/api/v1/info")
+            .get(format!("https://127.0.0.1:{}/api/v1/info", port))
             .send()
             .await
             .expect("Failed to get info")
@@ -232,5 +224,32 @@ mod tests {
         // send shutdown signal
         *STOP_SERVER.lock().await = true;
         task.join().unwrap();
+    }
+
+    async fn set_env_and_run(cfg: HashMap<String, String>) -> (JoinHandle<()>, u16) {
+        static PORT: LazyLock<Mutex<u16>> = LazyLock::new(|| Mutex::new(1024));
+        let mut port = PORT.lock().await; // use this to block test from running in parallel
+        *port += 1;
+
+        let data_path = tempdir().unwrap().into_path();
+
+        env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+        env::set_var("RS_PORT", port.to_string());
+        env::set_var("RS_CERT_PATH", "");
+        env::set_var("RS_CERT_KEY_PATH", "");
+
+        for (key, value) in cfg {
+            env::set_var(key, value);
+        }
+
+        let task = spawn(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                launch_server().await;
+            });
+        });
+
+        sleep(std::time::Duration::from_secs(1)).await;
+
+        (task, port.clone())
     }
 }
