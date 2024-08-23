@@ -12,6 +12,7 @@ use tokio::io::AsyncSeekExt;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 
+use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
 
 pub(super) type FileRef = Arc<RwLock<File>>;
@@ -31,7 +32,6 @@ enum AccessMode {
 struct FileDescriptor {
     file_ref: FileRef,
     mode: AccessMode,
-    used: Instant,
 }
 
 /// A cache to keep file descriptors open
@@ -40,9 +40,7 @@ struct FileDescriptor {
 /// and closing files for writing causes synchronization overhead.
 #[derive(Clone)]
 pub(in crate::storage) struct FileCache {
-    cache: Arc<RwLock<HashMap<PathBuf, FileDescriptor>>>,
-    max_size: usize,
-    ttl: Duration,
+    cache: Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
 }
 
 impl FileCache {
@@ -54,9 +52,7 @@ impl FileCache {
     /// * `ttl` - The time to live for a file descriptor
     pub fn new(max_size: usize, ttl: Duration) -> Self {
         FileCache {
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            max_size,
-            ttl,
+            cache: Arc::new(RwLock::new(Cache::new(max_size, ttl))),
         }
     }
 
@@ -75,7 +71,6 @@ impl FileCache {
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileRef, ReductError> {
         let mut cache = self.cache.write().await;
         let file = if let Some(desc) = cache.get_mut(path) {
-            desc.used = Instant::now();
             Arc::clone(&desc.file_ref)
         } else {
             let file = File::options().read(true).open(path).await?;
@@ -85,13 +80,10 @@ impl FileCache {
                 FileDescriptor {
                     file_ref: Arc::clone(&file),
                     mode: AccessMode::Read,
-                    used: Instant::now(),
                 },
             );
             file
         };
-
-        Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
 
         if pos != SeekFrom::Current(0) {
             file.write().await.seek(pos).await?;
@@ -120,7 +112,6 @@ impl FileCache {
         let mut cache = self.cache.write().await;
 
         let file = if let Some(desc) = cache.get_mut(path) {
-            desc.used = Instant::now();
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
@@ -143,13 +134,10 @@ impl FileCache {
                 FileDescriptor {
                     file_ref: Arc::clone(&file),
                     mode: AccessMode::ReadWrite,
-                    used: Instant::now(),
                 },
             );
             file
         };
-
-        Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
 
         if pos != SeekFrom::Current(0) {
             file.write().await.seek(pos).await?;
@@ -183,33 +171,6 @@ impl FileCache {
         let mut cache = self.cache.write().await;
         cache.remove(path);
         Ok(())
-    }
-
-    fn discard_old_descriptors(
-        ttl: Duration,
-        max_size: usize,
-        cache: &mut HashMap<PathBuf, FileDescriptor>,
-    ) {
-        // remove old descriptors
-        cache.retain(|_, desc| desc.used.elapsed() < ttl);
-
-        // check if the cache is full and remove old
-        if cache.len() > max_size {
-            let mut oldest: Option<(&PathBuf, &FileDescriptor)> = None;
-
-            for (path, desc) in cache.iter() {
-                if let Some(oldest_desc) = oldest {
-                    if desc.used < oldest_desc.1.used {
-                        oldest = Some((path, desc));
-                    }
-                } else {
-                    oldest = Some((path, desc));
-                }
-            }
-
-            let path = oldest.unwrap().0.clone();
-            cache.remove(&path);
-        }
     }
 }
 
