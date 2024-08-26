@@ -12,7 +12,7 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use std::cmp::min;
 
-use log::{debug, error};
+use log::{debug, error, trace};
 
 use std::io::SeekFrom;
 use std::path::PathBuf;
@@ -194,6 +194,8 @@ impl BlockManager {
             internal_server_error!("Failed to encode block descriptor {:?}: {}", path, e)
         })?;
 
+        trace!("Writing block descriptor {:?}", path);
+
         // overwrite the file
         let len = {
             let file = FILE_CACHE
@@ -207,11 +209,13 @@ impl BlockManager {
             len
         };
 
+        trace!("Updating block index");
         // update index
         proto.metadata_size = len; // update metadata size because it changed
         self.block_index.insert_or_update(proto);
         self.block_index.save().await?;
 
+        trace!("Block {}/{}/{} saved", self.bucket, self.entry, block_id);
         // clean WAL
         self.wal.remove(block_id).await?;
         Ok(())

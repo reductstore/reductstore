@@ -120,13 +120,7 @@ async fn main() {
 async fn shutdown_ctrl_c(handle: Handle, storage: Arc<RwLock<Storage>>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
-    handle.shutdown();
-    storage
-        .read()
-        .await
-        .sync_fs()
-        .await
-        .expect("Failed to shutdown storage");
+    shutdown_app(handle, storage).await;
 }
 
 #[cfg(unix)]
@@ -136,13 +130,17 @@ async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
         .recv()
         .await;
     info!("SIGTERM received, shutting down...");
-    handle.shutdown();
+    shutdown_app(handle, storage).await;
+}
+
+async fn shutdown_app(handle: Handle, storage: Arc<RwLock<Storage>>) {
     storage
-        .read()
+        .write()
         .await
         .sync_fs()
         .await
         .expect("Failed to shutdown storage");
+    handle.shutdown();
 }
 
 #[cfg(test)]
@@ -227,6 +225,16 @@ mod tests {
         // send shutdown signal
         *STOP_SERVER.lock().await = true;
         task.join().unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_shutdown() {
+        let handle = Handle::new();
+        let storage = Arc::new(RwLock::new(
+            Storage::load(tempdir().unwrap().into_path(), None).await,
+        ));
+        shutdown_app(handle.clone(), storage.clone()).await;
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {
