@@ -69,16 +69,8 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         self.store.remove(key).map(|v| v.value)
     }
 
-    pub fn clear(&mut self) {
-        self.store.clear()
-    }
-
     pub fn len(&self) -> usize {
         self.store.len()
-    }
-
-    pub fn contains_key(&self, key: &K) -> bool {
-        self.store.contains_key(key)
     }
 
     pub fn values(&mut self) -> Vec<&V> {

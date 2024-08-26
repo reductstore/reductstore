@@ -87,7 +87,7 @@ impl Entry {
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
     pub(crate) async fn begin_write(
-        &mut self,
+        &self,
         time: u64,
         content_size: usize,
         content_type: String,
@@ -186,7 +186,7 @@ impl Entry {
     }
 
     async fn prepare_block_for_writing(
-        &mut self,
+        &self,
         block: &mut BlockRef,
         time: u64,
         content_size: usize,
@@ -224,7 +224,7 @@ impl Entry {
         debug!("Reading record for ts={}", time);
 
         let (block_ref, record) = {
-            let mut bm = self.block_manager.write().await;
+            let bm = self.block_manager.read().await;
             let block_ref = bm.find_block(time).await?;
             let block = block_ref.read().await;
             let record = block
@@ -255,7 +255,7 @@ impl Entry {
     }
 
     pub async fn update_labels(
-        &mut self,
+        &self,
         time: u64,
         mut update: Labels,
         remove: HashSet<String>,
@@ -507,7 +507,7 @@ mod tests {
             write_stub_record(&mut entry, 1).await.unwrap();
             write_stub_record(&mut entry, 2000010).await.unwrap();
 
-            let mut bm = entry.block_manager.write().await;
+            let bm = entry.block_manager.read().await;
 
             assert_eq!(
                 bm.load(1)
@@ -563,7 +563,7 @@ mod tests {
             write_stub_record(&mut entry, 2).await.unwrap();
             write_stub_record(&mut entry, 2000010).await.unwrap();
 
-            let mut bm = entry.block_manager.write().await;
+            let bm = entry.block_manager.read().await;
             let records = bm
                 .load(1)
                 .await
@@ -612,7 +612,7 @@ mod tests {
             write_stub_record(&mut entry, 3000000).await.unwrap();
             write_stub_record(&mut entry, 2000000).await.unwrap();
 
-            let mut bm = entry.block_manager.write().await;
+            let bm = entry.block_manager.read().await;
             let records = bm
                 .load(1000000)
                 .await
@@ -642,7 +642,7 @@ mod tests {
             write_stub_record(&mut entry, 3000000).await.unwrap();
             write_stub_record(&mut entry, 1000000).await.unwrap();
 
-            let mut bm = entry.block_manager.write().await;
+            let bm = entry.block_manager.read().await;
             let records = bm
                 .load(1000000)
                 .await
@@ -688,7 +688,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_begin_override_errored(mut entry: Entry) {
+        async fn test_begin_override_errored(entry: Entry) {
             let sender = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .await
@@ -731,7 +731,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_begin_not_override_if_different_size(mut entry: Entry) {
+        async fn test_begin_not_override_if_different_size(entry: Entry) {
             let sender = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .await
@@ -797,7 +797,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_begin_read_still_written(mut entry: Entry) {
+        async fn test_begin_read_still_written(entry: Entry) {
             let sender = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .await

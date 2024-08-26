@@ -217,7 +217,7 @@ impl BlockManager {
         Ok(())
     }
 
-    pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
+    pub async fn find_block(&self, start: u64) -> Result<BlockRef, ReductError> {
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -1031,7 +1031,7 @@ mod tests {
 
     #[fixture]
     async fn block(#[future] block_manager: BlockManager, block_id: u64) -> BlockRef {
-        let mut bm = block_manager.await;
+        let bm = block_manager.await;
         bm.load(block_id).await.unwrap()
     }
 

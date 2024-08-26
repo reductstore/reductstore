@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(info.oldest_record, 1);
         assert_eq!(info.latest_record, 2000010);
 
-        let mut block_manager =
+        let block_manager =
             BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE))); // reload the block manager
         let block_v19 = block_manager.load(1).await.unwrap().read().await.clone();
         assert_eq!(block_v19.record_count(), 2);
@@ -570,7 +570,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let block = entry.block_manager.write().await.load(1).await.clone();
+            let block = entry.block_manager.read().await.load(1).await.clone();
             assert_eq!(block.err().unwrap().status, InternalServerError,);
         }
 

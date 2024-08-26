@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::collections::HashMap;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
@@ -10,7 +9,6 @@ use std::time::Duration;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 use tokio::sync::RwLock;
-use tokio::time::Instant;
 
 use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
@@ -286,9 +284,9 @@ mod tests {
             .await
             .unwrap();
 
-        let inner_cache = cache.cache.read().await;
+        let mut inner_cache = cache.cache.write().await;
         assert_eq!(inner_cache.len(), 2);
-        assert_eq!(inner_cache.contains_key(&file_path1), false);
+        assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[rstest]
@@ -314,9 +312,9 @@ mod tests {
             .await
             .unwrap(); // should remove the file_path1 descriptor
 
-        let inner_cache = cache.cache.read().await;
+        let mut inner_cache = cache.cache.write().await;
         assert_eq!(inner_cache.len(), 1);
-        assert_eq!(inner_cache.contains_key(&file_path1), false);
+        assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[fixture]
