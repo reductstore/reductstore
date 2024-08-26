@@ -14,7 +14,8 @@ use crate::storage::proto::record::Label;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
-use log::debug;
+use crate::storage::storage::IO_OPERATION_TIMEOUT;
+use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{internal_server_error, too_early, Labels};
@@ -23,14 +24,27 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
+use tokio_stream::StreamExt;
+
+const QUERY_BUFFER_SIZE: usize = 64;
+
+pub(super) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
+
+struct QueryHandle {
+    rx: QueryRx,
+    handle: JoinHandle<()>,
+}
 
 /// Entry is a time series in a bucket.
-pub struct Entry {
+pub(crate) struct Entry {
     name: String,
     settings: EntrySettings,
     block_manager: Arc<RwLock<BlockManager>>,
-    queries: HashMap<u64, Box<dyn Query + Send + Sync>>,
+    queries: HashMap<u64, QueryHandle>,
 }
 
 #[derive(PartialEq)]
@@ -48,11 +62,7 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub(crate) fn new(
-        name: &str,
-        path: PathBuf,
-        settings: EntrySettings,
-    ) -> Result<Self, ReductError> {
+    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
 
         Ok(Self {
@@ -333,7 +343,35 @@ impl Entry {
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         self.remove_expired_query();
-        self.queries.insert(id, build_query(start, end, options)?);
+
+        let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
+        let mut query = build_query(start, end, options)?;
+        let block_manager = Arc::clone(&self.block_manager);
+
+        let handle = tokio::spawn(async move {
+            loop {
+                let state = query.state();
+                if state == &QueryState::Done || state == &QueryState::Expired {
+                    break;
+                }
+
+                let next_result = query.next(block_manager.clone()).await;
+                let errored = next_result.is_err();
+
+                let send_result = timeout(IO_OPERATION_TIMEOUT, tx.send(next_result))
+                    .await
+                    .map_err(|e| {
+                        warn!("Error sending query result: {}", e);
+                        e
+                    });
+
+                if send_result.is_err() || errored {
+                    break;
+                }
+            }
+        });
+
+        self.queries.insert(id, QueryHandle { rx, handle });
 
         Ok(id)
     }
@@ -348,15 +386,15 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub async fn next(&mut self, query_id: u64) -> Result<RecordReader, ReductError> {
+    pub async fn get_query_receiver(&mut self, query_id: u64) -> Result<&mut QueryRx, ReductError> {
         self.remove_expired_query();
-        let query = self
+        let mut query = self
             .queries
             .get_mut(&query_id)
             .ok_or_else(||
             ReductError::not_found(
                 &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
-        query.next(Arc::clone(&self.block_manager)).await
+        Ok(&mut query.rx)
     }
 
     /// Returns stats about the entry.
@@ -421,7 +459,7 @@ impl Entry {
 
     fn remove_expired_query(&mut self) {
         self.queries
-            .retain(|_, query| matches!(query.state(), QueryState::Running(_)));
+            .retain(|_, query| !query.handle.is_finished() || !query.rx.is_empty());
     }
 }
 

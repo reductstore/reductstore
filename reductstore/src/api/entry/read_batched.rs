@@ -14,11 +14,14 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use log::{debug, warn};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
+use tokio::time::timeout;
 
 // GET /:bucket/:entry/batch?q=<number>
 pub(crate) async fn read_batched_records(
@@ -107,8 +110,44 @@ async fn fetch_and_response_batched_records(
     let mut headers = HeaderMap::new();
     let mut readers = Vec::new();
     let mut last = false;
+
+    let mut rx = bucket
+        .get_mut_entry(entry_name)
+        .unwrap()
+        .get_query_receiver(query_id)
+        .await?;
+
     loop {
-        let _reader = match bucket.next(entry_name, query_id).await {
+        let result = if readers.is_empty() {
+            rx.recv().await
+        } else {
+            if let Ok(result) = timeout(Duration::from_millis(5), rx.recv()).await {
+                result
+            } else {
+                debug!(
+                    "Timeout while waiting for record {}/{}/{}",
+                    bucket.name(),
+                    entry_name,
+                    query_id
+                );
+                break;
+            }
+        };
+
+        let reader = match result {
+            Some(reader) => reader,
+            None => {
+                warn!(
+                    "Query {}/{}/{} is empty",
+                    bucket.name(),
+                    entry_name,
+                    query_id
+                );
+                break;
+            }
+        };
+
+        match reader {
             Ok(reader) => {
                 {
                     let (name, value) = make_header(&reader);
@@ -133,6 +172,12 @@ async fn fetch_and_response_batched_records(
                 } else {
                     if err.status() == ErrorCode::NoContent {
                         last = true;
+                        debug!(
+                            "Last record in query {}/{}/{}",
+                            bucket.name(),
+                            entry_name,
+                            query_id
+                        );
                         break;
                     } else {
                         return Err(HttpError::from(err));

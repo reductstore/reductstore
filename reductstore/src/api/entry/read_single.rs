@@ -15,6 +15,7 @@ use axum_extra::headers::{HeaderMap, HeaderName};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use reduct_base::error::ErrorCode;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -92,7 +93,21 @@ async fn fetch_and_response_single_record(
     let reader = if let Some(ts) = ts {
         bucket.begin_read(entry_name, ts).await?
     } else {
-        bucket.next(entry_name, query_id.unwrap()).await?
+        let rx = bucket
+            .get_mut_entry(entry_name)?
+            .get_query_receiver(query_id.unwrap())
+            .await?;
+        if let Some(reader) = rx.recv().await {
+            reader?
+        } else {
+            return Err(HttpError::new(
+                ErrorCode::BadRequest,
+                &format!(
+                    "Query {} closed before the response was sent",
+                    query_id.unwrap()
+                ),
+            ));
+        }
     };
 
     let headers = make_headers(&reader);

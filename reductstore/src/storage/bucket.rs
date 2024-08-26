@@ -345,23 +345,6 @@ impl Bucket {
         entry.begin_read(time).await
     }
 
-    /// Get the next record from the entry
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Entry name.
-    /// * `time` - The timestamp of the record.
-    ///
-    /// # Returns
-    ///
-    /// * `RecordReader` - The record reader to read the record content in chunks.
-    /// * `bool` - True if the record is the last one.
-    /// * `HTTPError` - The error if any.
-    pub async fn next(&mut self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
-        let entry = self.get_mut_entry(name)?;
-        entry.next(time).await
-    }
-
     /// Remove entry from the bucket
     ///
     /// # Arguments
