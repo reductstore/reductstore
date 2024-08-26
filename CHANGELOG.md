@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-411: Refactor FileCache, [PR-551](https://github.com/reductstore/reductstore/pull/551)
 
+### Internal
+
+- Setup unit tests for main functions, [PR-552](https://github.com/reductstore/reductstore/pull/552)
+
 ## [1.11.1] - 2024-08-23
 
 ### Fixed
@@ -38,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-364: Mask replication token in logs, [PR-531](https://github.com/reductstore/reductstore/pull/531)
 - URL without slash at the end for dest server of replication task, [PR-540](https://github.com/reductstore/reductstore/pull/540)
 
-### Infrastructure
+### Internal
 
 - RS-232: Add replication test to CI, [PR-511](https://github.com/reductstore/reductstore/pull/511)
 - RS-274: Add test coverage in CI, [PR-532](https://github.com/reductstore/reductstore/pull/532)
@@ -49,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-366: Replication of a record larger than max. batch size, [PR-508](https://github.com/reductstore/reductstore/pull/508)
 
-### Infrastructure
+### Internal
 
 - RS-231: Add migration test to CI, [PR-506](https://github.com/reductstore/reductstore/pull/506)
 
