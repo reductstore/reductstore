@@ -296,6 +296,8 @@ mod tests {
     async fn test_cache_ttl(cache: FileCache, tmp_dir: tempfile::TempDir) {
         let file_path1 = tmp_dir.path().join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.path().join("test_cache_max_size2.txt");
+        let file_path3 = tmp_dir.path().join("test_cache_max_size3.txt");
+
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
             .await
@@ -307,7 +309,10 @@ mod tests {
 
         sleep(Duration::from_millis(200)).await;
 
-        cache.read(&file_path2, SeekFrom::Start(0)).await.unwrap(); // should remove the file_path1 descriptor
+        cache
+            .write_or_create(&file_path3, SeekFrom::Start(0))
+            .await
+            .unwrap(); // should remove the file_path1 descriptor
 
         let inner_cache = cache.cache.read().await;
         assert_eq!(inner_cache.len(), 1);

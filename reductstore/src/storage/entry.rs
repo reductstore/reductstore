@@ -1190,7 +1190,7 @@ mod tests {
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 1);
             assert_eq!(entry.info().await.unwrap().record_count, 2);
-            assert_eq!(entry.info().await.unwrap().size, 80);
+            assert_eq!(entry.info().await.unwrap().size, 58);
 
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 0);

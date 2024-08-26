@@ -32,13 +32,20 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         }
     }
 
-    pub fn insert(&mut self, key: K, value: V) {
+    /// Inserts a new value into the cache.
+    ///
+    /// If the cache is full or there are old entries, they will be removed.
+    ///
+    /// # Returns
+    ///
+    /// A vector of key-value pairs that were removed from the cache.
+    pub fn insert(&mut self, key: K, value: V) -> Vec<(K, V)> {
         let value = ExpiringValue {
             value,
             last_access: Instant::now(),
         };
         self.store.insert(key, value);
-        self.discard_old_descriptors();
+        self.discard_old_descriptors()
     }
 
     pub fn get(&mut self, key: &K) -> Option<&V> {
@@ -46,8 +53,6 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     }
 
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        self.discard_old_descriptors();
-
         let mut value = self.store.get_mut(key);
         if let Some(ref mut value) = value {
             value.last_access = Instant::now();
@@ -60,8 +65,8 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         }
     }
 
-    pub fn remove(&mut self, key: &K) {
-        self.store.remove(key);
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.store.remove(key).map(|v| v.value)
     }
 
     pub fn clear(&mut self) {
@@ -76,11 +81,23 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         self.store.contains_key(key)
     }
 
-    fn discard_old_descriptors(&mut self) {
+    pub fn values(&mut self) -> Vec<&V> {
+        self.store
+            .values_mut()
+            .map(|v| {
+                v.last_access = Instant::now();
+                &v.value
+            })
+            .collect()
+    }
+
+    fn discard_old_descriptors(&mut self) -> Vec<(K, V)> {
         // remove old descriptors
         self.store
             .retain(|_, value| value.last_access.elapsed() < self.ttl);
 
+        let mut removed = Vec::new();
+        removed.reserve(self.store.len());
         // check if the cache is full and remove old
         if self.store.len() > self.size {
             let mut oldest: Option<(&K, &ExpiringValue<V>)> = None;
@@ -96,7 +113,11 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
             }
 
             let key = oldest.unwrap().0.clone();
-            self.remove(&key);
+            if let Some(value) = self.remove(&key) {
+                removed.push((key, value));
+            }
         }
+
+        removed
     }
 }
