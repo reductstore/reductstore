@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - RS-411: Refactor FileCache, [PR-551](https://github.com/reductstore/reductstore/pull/551)
+- RS-412: Refactor BlockCache, [PR-556](https://github.com/reductstore/reductstore/pull/556)
 
 ### Internal
 
