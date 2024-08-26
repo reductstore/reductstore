@@ -3,8 +3,10 @@
 
 pub(in crate::storage) mod block;
 pub(in crate::storage) mod block_index;
-mod use_counter;
 pub(in crate::storage) mod wal;
+
+mod block_cache;
+mod use_counter;
 
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
@@ -17,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::storage::block_manager::block::Block;
+use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{FileRef, FILE_CACHE};
@@ -43,9 +46,8 @@ pub(in crate::storage) struct BlockManager {
     use_counter: UseCounter,
     bucket: String,
     entry: String,
-    cached_block_read: Option<BlockRef>,
-    cached_block_write: Option<BlockRef>,
     block_index: BlockIndex,
+    block_cache: BlockCache,
     wal: Box<dyn Wal + Sync + Send>,
 }
 
@@ -67,9 +69,8 @@ impl BlockManager {
             use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
             bucket,
             entry,
-            cached_block_read: None,
-            cached_block_write: None,
             block_index: index,
+            block_cache: BlockCache::new(1, 64, IO_OPERATION_TIMEOUT),
             wal: wal::create_wal(path.clone()),
         }
     }
@@ -107,7 +108,7 @@ impl BlockManager {
         record_timestamp: u64,
     ) -> Result<(), ReductError> {
         // check if the block is still in cache
-        let block_ref = if let Some(block_ref) = self.cached_block_write.clone() {
+        let block_ref = if let Some(block_ref) = self.block_cache.get_write(&block_id).await {
             let block = block_ref.read().await;
             if block.block_id() == block_id {
                 block_ref.clone()
@@ -160,18 +161,28 @@ impl BlockManager {
     }
 
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
-        if self.cached_block_write.is_none() {
+        if self.block_cache.write_len().await == 0 {
             return Ok(());
         }
 
-        let block_ref = self.cached_block_write.as_ref().unwrap().clone();
-        self.save_block_on_disk(block_ref).await
+        for block in self.block_cache.write_values().await {
+            self.save_block_on_disk(block).await?;
+        }
+
+        Ok(())
     }
 
     async fn save_block_on_disk(
         &mut self,
         block_ref: Arc<RwLock<Block>>,
     ) -> Result<(), ReductError> {
+        debug!(
+            "Saving block {}/{}/{} on disk and updating index",
+            self.bucket,
+            self.entry,
+            block_ref.read().await.block_id()
+        );
+
         let block = block_ref.write().await;
         let block_id = block.block_id();
 
@@ -206,7 +217,7 @@ impl BlockManager {
         Ok(())
     }
 
-    pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
+    pub async fn find_block(&self, start: u64) -> Result<BlockRef, ReductError> {
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -251,7 +262,7 @@ pub(in crate::storage) trait ManageBlock {
     /// # Returns
     ///
     /// * `Ok(block)` - Block was loaded successfully.
-    async fn load(&mut self, block_id: u64) -> Result<BlockRef, ReductError>;
+    async fn load(&self, block_id: u64) -> Result<BlockRef, ReductError>;
 
     /// Save block descriptor in cache and on disk if needed.
     ///
@@ -295,31 +306,14 @@ pub(in crate::storage) trait ManageBlock {
     async fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
 
     /// Check if a block exists in the file system.
-    async fn exist(&mut self, block_id: u64) -> Result<bool, ReductError>;
+    async fn exist(&self, block_id: u64) -> Result<bool, ReductError>;
 }
 
 impl ManageBlock for BlockManager {
-    async fn load(&mut self, block_id: u64) -> Result<BlockRef, ReductError> {
+    async fn load(&self, block_id: u64) -> Result<BlockRef, ReductError> {
         // first check if we have the block in write cache
-
-        let mut cached_block = None;
-        if let Some(block) = self.cached_block_write.as_ref() {
-            if block.read().await.block_id() == block_id {
-                cached_block = Some(block.clone());
-            } else if let Some(block) = self.cached_block_read.as_ref() {
-                // then check if we have the block in read cache
-                if block.read().await.block_id() == block_id {
-                    cached_block = Some(block.clone());
-                }
-            }
-        }
-
+        let mut cached_block = self.block_cache.get_read(&block_id).await;
         if cached_block.is_none() {
-            if self.wal.exists(block_id) {
-                // we have a WAL for the block, sync it
-                self.save_cache_on_disk().await?;
-            }
-
             let path = self.path_to_desc(block_id);
             let file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
             let mut buf = vec![];
@@ -334,29 +328,22 @@ impl ManageBlock for BlockManager {
             cached_block = Some(Arc::new(RwLock::new(block_from_disk.into())));
         }
 
-        self.cached_block_read = cached_block.clone();
-        Ok(cached_block.unwrap())
+        let cached_block = cached_block.unwrap();
+        self.block_cache
+            .insert_read(block_id, cached_block.clone())
+            .await;
+        Ok(cached_block)
     }
 
     async fn save(&mut self, block: BlockRef) -> Result<(), ReductError> {
         // cache is empty, save the block there first
-        if self.cached_block_write.is_none() {
-            let _ = self.cached_block_write.insert(block.clone());
-            return Ok(());
-        }
-
-        // update the cached block if we changed it and do nothing
-        // we have all needed information in WAL
+        for (_, block) in self
+            .block_cache
+            .insert_write(block.read().await.block_id(), block.clone())
+            .await
         {
-            if Arc::ptr_eq(self.cached_block_write.as_ref().unwrap(), &block) {
-                let _ = self.cached_block_write.insert(block);
-                return Ok(());
-            }
+            self.save_block_on_disk(block).await?;
         }
-        self.save_cache_on_disk().await?;
-
-        // update cache
-        let _ = self.cached_block_write.insert(block);
 
         Ok(())
     }
@@ -420,12 +407,9 @@ impl ManageBlock for BlockManager {
         }
 
         self.wal.append(block_id, WalEntry::RemoveBlock).await?;
-        self.save_cache_on_disk().await?;
-        if let Some(block) = self.cached_block_read.as_ref() {
-            if block.read().await.block_id() == block_id {
-                self.cached_block_read = None;
-            }
-        }
+
+        self.save_block_on_disk(self.load(block_id).await?).await?;
+        self.block_cache.remove(&block_id).await;
 
         let path = self.path_to_data(block_id);
         FILE_CACHE.remove(&path).await?;
@@ -440,7 +424,7 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    async fn exist(&mut self, block_id: u64) -> Result<bool, ReductError> {
+    async fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
         let path = self.path_to_desc(block_id);
         Ok(path.try_exists()?)
     }
@@ -1047,7 +1031,7 @@ mod tests {
 
     #[fixture]
     async fn block(#[future] block_manager: BlockManager, block_id: u64) -> BlockRef {
-        let mut bm = block_manager.await;
+        let bm = block_manager.await;
         bm.load(block_id).await.unwrap()
     }
 

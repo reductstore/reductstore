@@ -107,9 +107,6 @@ pub(in crate::storage) trait Wal {
 
     /// List all WALs
     async fn list(&self) -> Result<Vec<u64>, ReductError>;
-
-    /// Check if a WAL file exists for a block
-    fn exists(&self, block_id: u64) -> bool;
 }
 
 struct WalImpl {
@@ -233,11 +230,6 @@ impl Wal for WalImpl {
         }
         Ok(blocks)
     }
-
-    fn exists(&self, block_id: u64) -> bool {
-        let path = self.block_wal_path(block_id);
-        path.try_exists().unwrap_or(false)
-    }
 }
 
 /// Creates a new Write-Ahead Log (WAL) instance.
@@ -325,17 +317,6 @@ mod tests {
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains(&1));
         assert!(blocks.contains(&2));
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_exists(mut wal: WalImpl) {
-        wal.append(1, WalEntry::WriteRecord(Record::default()))
-            .await
-            .unwrap();
-
-        assert!(wal.exists(1));
-        assert!(!wal.exists(2));
     }
 
     #[rstest]

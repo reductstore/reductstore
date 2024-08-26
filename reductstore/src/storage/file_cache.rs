@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::collections::HashMap;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
@@ -10,8 +9,8 @@ use std::time::Duration;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 use tokio::sync::RwLock;
-use tokio::time::Instant;
 
+use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
 
 pub(super) type FileRef = Arc<RwLock<File>>;
@@ -31,7 +30,6 @@ enum AccessMode {
 struct FileDescriptor {
     file_ref: FileRef,
     mode: AccessMode,
-    used: Instant,
 }
 
 /// A cache to keep file descriptors open
@@ -40,9 +38,7 @@ struct FileDescriptor {
 /// and closing files for writing causes synchronization overhead.
 #[derive(Clone)]
 pub(in crate::storage) struct FileCache {
-    cache: Arc<RwLock<HashMap<PathBuf, FileDescriptor>>>,
-    max_size: usize,
-    ttl: Duration,
+    cache: Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
 }
 
 impl FileCache {
@@ -54,9 +50,7 @@ impl FileCache {
     /// * `ttl` - The time to live for a file descriptor
     pub fn new(max_size: usize, ttl: Duration) -> Self {
         FileCache {
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            max_size,
-            ttl,
+            cache: Arc::new(RwLock::new(Cache::new(max_size, ttl))),
         }
     }
 
@@ -75,7 +69,6 @@ impl FileCache {
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileRef, ReductError> {
         let mut cache = self.cache.write().await;
         let file = if let Some(desc) = cache.get_mut(path) {
-            desc.used = Instant::now();
             Arc::clone(&desc.file_ref)
         } else {
             let file = File::options().read(true).open(path).await?;
@@ -85,13 +78,10 @@ impl FileCache {
                 FileDescriptor {
                     file_ref: Arc::clone(&file),
                     mode: AccessMode::Read,
-                    used: Instant::now(),
                 },
             );
             file
         };
-
-        Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
 
         if pos != SeekFrom::Current(0) {
             file.write().await.seek(pos).await?;
@@ -120,7 +110,6 @@ impl FileCache {
         let mut cache = self.cache.write().await;
 
         let file = if let Some(desc) = cache.get_mut(path) {
-            desc.used = Instant::now();
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
@@ -143,13 +132,10 @@ impl FileCache {
                 FileDescriptor {
                     file_ref: Arc::clone(&file),
                     mode: AccessMode::ReadWrite,
-                    used: Instant::now(),
                 },
             );
             file
         };
-
-        Self::discard_old_descriptors(self.ttl, self.max_size, &mut cache);
 
         if pos != SeekFrom::Current(0) {
             file.write().await.seek(pos).await?;
@@ -183,33 +169,6 @@ impl FileCache {
         let mut cache = self.cache.write().await;
         cache.remove(path);
         Ok(())
-    }
-
-    fn discard_old_descriptors(
-        ttl: Duration,
-        max_size: usize,
-        cache: &mut HashMap<PathBuf, FileDescriptor>,
-    ) {
-        // remove old descriptors
-        cache.retain(|_, desc| desc.used.elapsed() < ttl);
-
-        // check if the cache is full and remove old
-        if cache.len() > max_size {
-            let mut oldest: Option<(&PathBuf, &FileDescriptor)> = None;
-
-            for (path, desc) in cache.iter() {
-                if let Some(oldest_desc) = oldest {
-                    if desc.used < oldest_desc.1.used {
-                        oldest = Some((path, desc));
-                    }
-                } else {
-                    oldest = Some((path, desc));
-                }
-            }
-
-            let path = oldest.unwrap().0.clone();
-            cache.remove(&path);
-        }
     }
 }
 
@@ -325,9 +284,9 @@ mod tests {
             .await
             .unwrap();
 
-        let inner_cache = cache.cache.read().await;
+        let mut inner_cache = cache.cache.write().await;
         assert_eq!(inner_cache.len(), 2);
-        assert_eq!(inner_cache.contains_key(&file_path1), false);
+        assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[rstest]
@@ -335,6 +294,8 @@ mod tests {
     async fn test_cache_ttl(cache: FileCache, tmp_dir: tempfile::TempDir) {
         let file_path1 = tmp_dir.path().join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.path().join("test_cache_max_size2.txt");
+        let file_path3 = tmp_dir.path().join("test_cache_max_size3.txt");
+
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
             .await
@@ -346,11 +307,14 @@ mod tests {
 
         sleep(Duration::from_millis(200)).await;
 
-        cache.read(&file_path2, SeekFrom::Start(0)).await.unwrap(); // should remove the file_path1 descriptor
+        cache
+            .write_or_create(&file_path3, SeekFrom::Start(0))
+            .await
+            .unwrap(); // should remove the file_path1 descriptor
 
-        let inner_cache = cache.cache.read().await;
+        let mut inner_cache = cache.cache.write().await;
         assert_eq!(inner_cache.len(), 1);
-        assert_eq!(inner_cache.contains_key(&file_path1), false);
+        assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[fixture]

@@ -106,7 +106,7 @@ impl Query for HistoricalQuery {
             };
 
             let block_range = {
-                let mut bm = block_manager.write().await;
+                let bm = block_manager.read().await;
                 let first_block = {
                     if let Ok(block) = bm.find_block(start).await {
                         block.read().await.block_id()
@@ -122,7 +122,7 @@ impl Query for HistoricalQuery {
             };
 
             for block_id in block_range {
-                let mut bm = block_manager.write().await;
+                let bm = block_manager.read().await;
                 let block_ref = bm.load(block_id).await?;
 
                 self.current_block = Some(block_ref);
