@@ -12,7 +12,7 @@ use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
-use crate::storage::query::base::{Query, QueryOptions};
+use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
@@ -23,10 +23,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio_stream::StreamExt;
 
 struct QueryHandle {
     rx: QueryRx,

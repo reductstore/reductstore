@@ -385,7 +385,7 @@ mod tests {
 
         #[rstest]
         fn test_size_hint() {
-            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
 
             let wrapper = ReaderWrapper {
                 reader: RecordReader::new(

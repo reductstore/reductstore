@@ -18,7 +18,6 @@ use crate::storage::query::QueryRx;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use std::collections::HashMap;
-use std::fmt::format;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -322,7 +321,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_next_record_reader_timeout() {
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
             assert!(
                 timeout(
                     Duration::from_secs(1),
@@ -364,7 +363,6 @@ mod tests {
 
     mod stram_wrapper {
         use super::*;
-        use crate::storage::proto::Record;
 
         #[rstest]
         fn test_size_hint() {

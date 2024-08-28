@@ -100,7 +100,7 @@ impl RecordReader {
 }
 
 /// Bucket is a single storage bucket.
-pub struct Bucket {
+pub(crate) struct Bucket {
     name: String,
     path: PathBuf,
     entries: BTreeMap<String, Entry>,
@@ -152,7 +152,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) async fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
+    pub async fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
         let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf)).map_err(|e| {
             ReductError::internal_server_error(format!("Failed to decode settings: {}", e).as_str())
