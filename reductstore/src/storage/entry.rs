@@ -13,7 +13,7 @@ use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
 use crate::storage::query::base::{Query, QueryOptions, QueryState};
-use crate::storage::query::build_query;
+use crate::storage::query::{build_query, spawn_query_task};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, warn};
 use reduct_base::error::ErrorCode::NoContent;
@@ -31,8 +31,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
-
-const QUERY_BUFFER_SIZE: usize = 64;
 
 pub(super) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
 
@@ -346,54 +344,10 @@ impl Entry {
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         self.remove_expired_query();
 
-        let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
-        let mut query = build_query(start, end, options)?;
+        let query = build_query(start, end, options)?;
         let block_manager = Arc::clone(&self.block_manager);
 
-        let handle = tokio::spawn(async move {
-            let mut no_content = false; // FIXME: we need to find a better way to handle repeating no content
-            loop {
-                if query.state() == &QueryState::Expired {
-                    break;
-                }
-
-                let next_result = query.next(block_manager.clone()).await;
-                let err = match next_result.as_ref().err().cloned() {
-                    Some(ReductError {
-                        status: NoContent, ..
-                    }) if no_content => {
-                        sleep(Duration::from_millis(50)).await; // it's continuous query, so we wait for the next record
-                        continue;
-                    }
-                    Some(err) => Some(err),
-                    None => None,
-                };
-
-                no_content = false;
-                let send_result = timeout(IO_OPERATION_TIMEOUT, tx.send(next_result)).await;
-
-                if let Err(err) = send_result {
-                    warn!("Error sending query result: {}", err);
-                    break;
-                }
-
-                if let Some(err) = err {
-                    if err.status == NoContent && query.state() != &QueryState::Done {
-                        no_content = true;
-                        // continuous query will never be done
-                        // but we don't want to flood the channel and wait for the receiver
-                        while tx.capacity() < tx.max_capacity()
-                            && query.state() != &QueryState::Expired
-                        {
-                            sleep(Duration::from_millis(50)).await;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
-        });
-
+        let (rx, handle) = spawn_query_task(query, block_manager);
         self.queries.insert(id, QueryHandle { rx, handle });
 
         Ok(id)
