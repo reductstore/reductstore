@@ -227,7 +227,7 @@ async fn start_writing(
 ) -> RecordTx {
     let get_tx = async move {
         let mut storage = components.storage.write().await;
-        let bucket = storage.get_mut_bucket(bucket_name)?;
+        let bucket = storage.get_bucket_mut(bucket_name)?;
 
         bucket
             .write_record(
@@ -421,7 +421,7 @@ mod tests {
         {
             let mut storage = components.storage.write().await;
             let tx = storage
-                .get_mut_bucket("bucket-1")
+                .get_bucket_mut("bucket-1")
                 .unwrap()
                 .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await

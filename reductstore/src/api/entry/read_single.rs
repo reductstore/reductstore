@@ -15,6 +15,8 @@ use axum_extra::headers::{HeaderMap, HeaderName};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::storage::query::QueryRx;
+use reduct_base::error::ErrorCode;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -45,7 +47,7 @@ pub(crate) async fn read_single_record(
     drop(storage); // Release the lock
 
     let mut storage = components.storage.write().await;
-    let bucket = storage.get_mut_bucket(bucket_name)?;
+    let bucket = storage.get_bucket_mut(bucket_name)?;
     fetch_and_response_single_record(bucket, entry_name, ts, query_id, method.name() == "HEAD")
         .await
 }
@@ -92,47 +94,65 @@ async fn fetch_and_response_single_record(
     let reader = if let Some(ts) = ts {
         bucket.begin_read(entry_name, ts).await?
     } else {
-        bucket.next(entry_name, query_id.unwrap()).await?
+        let query_id = query_id.unwrap();
+        let bucket_name = bucket.name().to_string();
+        let rx = bucket
+            .get_entry_mut(entry_name)?
+            .get_query_receiver(query_id)
+            .await?;
+        let query_path = format!("{}/{}/{}", bucket_name, entry_name, query_id);
+        next_record_reader(rx, &query_path).await?
     };
 
     let headers = make_headers(&reader);
-
-    struct ReaderWrapper {
-        reader: RecordReader,
-        empty_body: bool,
-    }
-
-    /// A wrapper around a `RecordReader` that implements `Stream` with RwLock
-    impl Stream for ReaderWrapper {
-        type Item = Result<Bytes, HttpError>;
-
-        fn poll_next(
-            mut self: Pin<&mut ReaderWrapper>,
-            cx: &mut Context<'_>,
-        ) -> Poll<Option<Self::Item>> {
-            if self.empty_body {
-                return Poll::Ready(None);
-            }
-
-            if let Poll::Ready(data) = self.reader.rx().poll_recv(cx) {
-                match data {
-                    Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
-                    Some(Err(e)) => Poll::Ready(Some(Err(HttpError::from(e)))),
-                    None => Poll::Ready(None),
-                }
-            } else {
-                Poll::Pending
-            }
-        }
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            (0, None)
-        }
-    }
 
     Ok((
         headers,
         Body::from_stream(ReaderWrapper { reader, empty_body }),
     ))
+}
+
+async fn next_record_reader(rx: &mut QueryRx, query_path: &str) -> Result<RecordReader, HttpError> {
+    if let Some(reader) = rx.recv().await {
+        reader.map_err(|e| HttpError::from(e))
+    } else {
+        Err(HttpError::new(
+            ErrorCode::BadRequest,
+            &format!("Query {} closed before the response was sent", query_path),
+        ))
+    }
+}
+
+struct ReaderWrapper {
+    reader: RecordReader,
+    empty_body: bool,
+}
+
+/// A wrapper around a `RecordReader` that implements `Stream` with RwLock
+impl Stream for ReaderWrapper {
+    type Item = Result<Bytes, HttpError>;
+
+    fn poll_next(
+        mut self: Pin<&mut ReaderWrapper>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if self.empty_body {
+            return Poll::Ready(None);
+        }
+
+        if let Poll::Ready(data) = self.reader.rx().poll_recv(cx) {
+            match data {
+                Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
+                Some(Err(e)) => Poll::Ready(Some(Err(HttpError::from(e)))),
+                None => Poll::Ready(None),
+            }
+        } else {
+            Poll::Pending
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
 }
 
 #[cfg(test)]
@@ -201,9 +221,9 @@ mod tests {
                 .storage
                 .write()
                 .await
-                .get_mut_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .get_bucket_mut(path_to_entry_1.get("bucket_name").unwrap())
                 .unwrap()
-                .get_mut_entry(path_to_entry_1.get("entry_name").unwrap())
+                .get_entry_mut(path_to_entry_1.get("entry_name").unwrap())
                 .unwrap()
                 .query(0, u64::MAX, QueryOptions::default())
                 .unwrap()
@@ -339,5 +359,50 @@ mod tests {
         .unwrap();
 
         assert_eq!(err, HttpError::new(NotFound, "Query 1 not found and it might have expired. Check TTL in your query request. Default value 60 sec."));
+    }
+
+    mod next_record_reader {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_next_record_reader_err() {
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            drop(tx);
+            assert_eq!(
+                next_record_reader(&mut rx, "test").await.err().unwrap(),
+                HttpError::new(
+                    ErrorCode::BadRequest,
+                    "Query test closed before the response was sent"
+                )
+            );
+        }
+    }
+
+    mod stram_wrapper {
+        use super::*;
+        use crate::storage::proto::Record;
+
+        #[rstest]
+        fn test_size_hint() {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+
+            let wrapper = ReaderWrapper {
+                reader: RecordReader::new(
+                    rx,
+                    Record {
+                        timestamp: None,
+                        begin: 0,
+                        end: 0,
+                        state: 0,
+                        labels: vec![],
+                        content_type: "".to_string(),
+                    },
+                    false,
+                ),
+                empty_body: false,
+            };
+            assert_eq!(wrapper.size_hint(), (0, None));
+        }
     }
 }

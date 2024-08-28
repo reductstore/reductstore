@@ -216,6 +216,15 @@ impl ReductError {
         }
     }
 }
+#[macro_export]
+macro_rules! no_content {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::no_content(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::no_content($msg)
+    };
+}
 
 #[macro_export]
 macro_rules! unprocessable_entity {

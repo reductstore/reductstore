@@ -65,8 +65,8 @@ pub(crate) async fn update_batched_records(
 
         let mut storage = components.storage.write().await;
         let entry = storage
-            .get_mut_bucket(bucket_name)?
-            .get_mut_entry(entry_name)?;
+            .get_bucket_mut(bucket_name)?
+            .get_entry_mut(entry_name)?;
         match entry
             .update_labels(time, labels_to_update.clone(), labels_to_remove)
             .await
@@ -233,7 +233,7 @@ mod tests {
         {
             let mut storage = components.storage.write().await;
             let tx = storage
-                .get_mut_bucket("bucket-1")
+                .get_bucket_mut("bucket-1")
                 .unwrap()
                 .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await

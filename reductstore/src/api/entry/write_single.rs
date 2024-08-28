@@ -68,7 +68,7 @@ pub(crate) async fn write_record(
 
         let sender = {
             let mut storage = components.storage.write().await;
-            let bucket = storage.get_mut_bucket(bucket)?;
+            let bucket = storage.get_bucket_mut(bucket)?;
             bucket
                 .write_record(
                     path.get("entry_name").unwrap(),

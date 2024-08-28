@@ -341,7 +341,7 @@ mod tests {
             .storage
             .write()
             .await
-            .get_mut_bucket("src")
+            .get_bucket_mut("src")
             .unwrap()
             .remove_entry("test")
             .unwrap();
@@ -591,7 +591,7 @@ mod tests {
         let mut storage = sender.storage.write().await;
         let bucket = match storage.create_bucket("src", BucketSettings::default()) {
             Ok(bucket) => bucket,
-            Err(_err) => storage.get_mut_bucket("src").unwrap(),
+            Err(_err) => storage.get_bucket_mut("src").unwrap(),
         };
 
         let tx = bucket

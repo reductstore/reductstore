@@ -20,7 +20,7 @@ pub(crate) async fn update_bucket(
     let mut storage = components.storage.write().await;
 
     Ok(storage
-        .get_mut_bucket(&bucket_name)?
+        .get_bucket_mut(&bucket_name)?
         .set_settings(settings.into())?)
 }
 

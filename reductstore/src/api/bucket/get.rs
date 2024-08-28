@@ -21,7 +21,7 @@ pub(crate) async fn get_bucket(
         .storage
         .write()
         .await
-        .get_mut_bucket(&bucket_name)?
+        .get_bucket_mut(&bucket_name)?
         .info()
         .await?;
     Ok(FullBucketInfoAxum::from(bucket_info))

@@ -14,7 +14,7 @@ use crate::storage::block_manager::{spawn_read_task, BlockManager, BlockRef, Man
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
-use crate::storage::query::base::{Query, QueryOptions, QueryState};
+use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::filters::{
     EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter,
     RecordFilter, RecordStateFilter, TimeRangeFilter,
@@ -50,7 +50,6 @@ pub struct HistoricalQuery {
 
     /// Filters
     filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>>,
-    pub(in crate::storage::query) state: QueryState,
 }
 
 impl HistoricalQuery {
@@ -84,7 +83,6 @@ impl HistoricalQuery {
             last_update: Instant::now(),
             options,
             filters,
-            state: QueryState::Running(0),
         }
     }
 }
@@ -136,16 +134,11 @@ impl Query for HistoricalQuery {
         }
 
         if self.records_from_current_block.is_empty() {
-            self.state = QueryState::Done;
             return Err(ReductError::no_content("No content"));
         }
 
         let record = self.records_from_current_block.pop_front().unwrap();
         let block = self.current_block.as_ref().unwrap();
-
-        if let QueryState::Running(idx) = &mut self.state {
-            *idx += 1;
-        }
 
         let rx = spawn_read_task(
             Arc::clone(&block_manager),
@@ -154,14 +147,6 @@ impl Query for HistoricalQuery {
         )
         .await?;
         Ok(RecordReader::new(rx, record.clone(), false))
-    }
-
-    fn state(&self) -> &QueryState {
-        if self.last_update.elapsed() > self.options.ttl {
-            &QueryState::Expired
-        } else {
-            &self.state
-        }
     }
 }
 
@@ -180,7 +165,6 @@ impl HistoricalQuery {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::time::Duration;
 
     use rstest::rstest;
 
@@ -193,14 +177,6 @@ mod tests {
     use super::*;
 
     #[rstest]
-    fn test_state() {
-        let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
-        assert_eq!(query.state(), &QueryState::Running(0));
-        query.last_update = Instant::now() - Duration::from_secs(61);
-        assert_eq!(query.state(), &QueryState::Expired);
-    }
-
-    #[rstest]
     #[tokio::test]
     async fn test_query_ok_1_rec(#[future] block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
@@ -209,7 +185,6 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
         assert_eq!(records[0].1, "0123456789");
-        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[rstest]
@@ -223,7 +198,6 @@ mod tests {
         assert_eq!(records[0].1, "0123456789");
         assert_eq!(records[1].0.timestamp, Some(us_to_ts(&5)));
         assert_eq!(records[1].1, "0123456789");
-        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[rstest]
@@ -239,7 +213,6 @@ mod tests {
         assert_eq!(records[1].1, "0123456789");
         assert_eq!(records[2].0.timestamp, Some(us_to_ts(&1000)));
         assert_eq!(records[2].1, "0123456789");
-        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[rstest]
@@ -274,7 +247,6 @@ mod tests {
             ]
         );
         assert_eq!(records[0].1, "0123456789");
-        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[rstest]
@@ -310,7 +282,6 @@ mod tests {
             ]
         );
         assert_eq!(records[0].1, "0123456789");
-        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[rstest]
@@ -354,7 +325,6 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
         assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
-        assert_eq!(query.state(), &QueryState::Done);
     }
 
     #[rstest]
@@ -373,7 +343,6 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
         assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
-        assert_eq!(query.state(), &QueryState::Done);
     }
 
     async fn read_to_vector(

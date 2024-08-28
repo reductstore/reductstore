@@ -132,9 +132,18 @@ impl EntryLoader {
 
         block_index.save().await?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let bucket_name = path
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
 
         Ok(Entry {
             name,
+            bucket_name,
             settings: options,
             block_manager: Arc::new(RwLock::new(BlockManager::new(path, block_index))),
             queries: HashMap::new(),
@@ -149,8 +158,17 @@ impl EntryLoader {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let bucket_name = path
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
         Ok(Entry {
             name,
+            bucket_name,
             settings: options,
             block_manager: Arc::new(RwLock::new(BlockManager::new(path, block_index))),
             queries: HashMap::new(),

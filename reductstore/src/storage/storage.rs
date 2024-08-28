@@ -105,7 +105,7 @@ impl Storage {
     }
 
     /// Creat a new bucket.
-    pub fn create_bucket(
+    pub(crate) fn create_bucket(
         &mut self,
         name: &str,
         settings: BucketSettings,
@@ -138,7 +138,7 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn get_bucket(&self, name: &str) -> Result<&Bucket, ReductError> {
+    pub(crate) fn get_bucket(&self, name: &str) -> Result<&Bucket, ReductError> {
         match self.buckets.get(name) {
             Some(bucket) => Ok(bucket),
             None => Err(ReductError::not_found(
@@ -156,7 +156,7 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn get_mut_bucket(&mut self, name: &str) -> Result<&mut Bucket, ReductError> {
+    pub(crate) fn get_bucket_mut(&mut self, name: &str) -> Result<&mut Bucket, ReductError> {
         match self.buckets.get_mut(name) {
             Some(bucket) => Ok(bucket),
             None => Err(ReductError::not_found(
@@ -174,7 +174,7 @@ impl Storage {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub fn remove_bucket(&mut self, name: &str) -> Result<(), ReductError> {
+    pub(crate) fn remove_bucket(&mut self, name: &str) -> Result<(), ReductError> {
         if let Some(bucket) = self.buckets.get(name) {
             if bucket.is_provisioned() {
                 return Err(ReductError::conflict(&format!(
@@ -195,7 +195,7 @@ impl Storage {
         }
     }
 
-    pub async fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
+    pub(crate) async fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
         let mut buckets = Vec::new();
         for bucket in self.buckets.values() {
             buckets.push(bucket.info().await?.info);

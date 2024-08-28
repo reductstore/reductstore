@@ -12,8 +12,8 @@ use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
-use crate::storage::query::base::{Query, QueryOptions, QueryState};
-use crate::storage::query::build_query;
+use crate::storage::query::base::QueryOptions;
+use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
@@ -24,13 +24,23 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
+
+struct QueryHandle {
+    rx: QueryRx,
+    options: QueryOptions,
+    last_access: Instant,
+    query_task_handle: JoinHandle<()>,
+}
 
 /// Entry is a time series in a bucket.
-pub struct Entry {
+pub(crate) struct Entry {
     name: String,
+    bucket_name: String,
     settings: EntrySettings,
     block_manager: Arc<RwLock<BlockManager>>,
-    queries: HashMap<u64, Box<dyn Query + Send + Sync>>,
+    queries: HashMap<u64, QueryHandle>,
 }
 
 #[derive(PartialEq)]
@@ -48,15 +58,12 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub(crate) fn new(
-        name: &str,
-        path: PathBuf,
-        settings: EntrySettings,
-    ) -> Result<Self, ReductError> {
+    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
 
         Ok(Self {
             name: name.to_string(),
+            bucket_name: path.file_name().unwrap().to_str().unwrap().to_string(),
             settings,
             block_manager: Arc::new(RwLock::new(BlockManager::new(
                 path.join(name),
@@ -332,8 +339,23 @@ impl Entry {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
-        self.remove_expired_query();
-        self.queries.insert(id, build_query(start, end, options)?);
+        let query = build_query(start, end, options.clone())?;
+        let block_manager = Arc::clone(&self.block_manager);
+
+        let (rx, task_handle) = spawn_query_task(query, options.clone(), block_manager);
+
+        if task_handle.is_finished() {
+            panic!("Query task finished immediately");
+        }
+        self.queries.insert(
+            id,
+            QueryHandle {
+                rx,
+                options,
+                last_access: Instant::now(),
+                query_task_handle: task_handle,
+            },
+        );
 
         Ok(id)
     }
@@ -348,15 +370,17 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub async fn next(&mut self, query_id: u64) -> Result<RecordReader, ReductError> {
+    pub async fn get_query_receiver(&mut self, query_id: u64) -> Result<&mut QueryRx, ReductError> {
         self.remove_expired_query();
         let query = self
             .queries
             .get_mut(&query_id)
             .ok_or_else(||
-            ReductError::not_found(
-                &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
-        query.next(Arc::clone(&self.block_manager)).await
+                ReductError::not_found(
+                    &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
+
+        query.last_access = Instant::now();
+        Ok(&mut query.rx)
     }
 
     /// Returns stats about the entry.
@@ -420,8 +444,22 @@ impl Entry {
     }
 
     fn remove_expired_query(&mut self) {
-        self.queries
-            .retain(|_, query| matches!(query.state(), QueryState::Running(_)));
+        let entry_path = format!("{}/{}", self.bucket_name, self.name);
+
+        self.queries.retain(|id, handle| {
+            if handle.last_access.elapsed() >= handle.options.ttl {
+                debug!("Query {}/{} expired", entry_path, id);
+                handle.query_task_handle.abort();
+                return false;
+            }
+
+            if handle.rx.is_empty() && handle.query_task_handle.is_finished() {
+                debug!("Query {}/{} finished", entry_path, id);
+                return false;
+            }
+
+            true
+        });
     }
 }
 
@@ -899,6 +937,7 @@ mod tests {
 
     mod query {
         use super::*;
+        use reduct_base::{no_content, not_found};
 
         #[rstest]
         #[tokio::test]
@@ -910,26 +949,29 @@ mod tests {
             let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
             assert!(id >= 1);
 
+            let rx = entry.get_query_receiver(id).await.unwrap();
+
             {
-                let reader = entry.next(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 1000000);
             }
             {
-                let reader = entry.next(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 2000000);
             }
             {
-                let reader = entry.next(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 3000000);
             }
 
             assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::no_content("No content"))
+                rx.recv().await.unwrap().err(),
+                Some(no_content!("No content"))
             );
+
             assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
             );
         }
 
@@ -951,25 +993,26 @@ mod tests {
                 .unwrap();
 
             {
-                let reader = entry.next(id).await.unwrap();
+                let rx = entry.get_query_receiver(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 1000000);
+                assert_eq!(
+                    rx.recv().await.unwrap().err(),
+                    Some(no_content!("No content"))
+                );
             }
-
-            assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::no_content("No content"))
-            );
 
             write_stub_record(&mut entry, 2000000).await.unwrap();
             {
-                let reader = entry.next(id).await.unwrap();
+                let rx = entry.get_query_receiver(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 2000000);
             }
 
-            sleep(Duration::from_millis(600)).await;
+            sleep(Duration::from_millis(700)).await;
             assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
             );
         }
     }

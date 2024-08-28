@@ -198,7 +198,7 @@ mod tests {
         ]);
 
         let sender = storage
-            .get_mut_bucket("bucket-1")
+            .get_bucket_mut("bucket-1")
             .unwrap()
             .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)
             .await

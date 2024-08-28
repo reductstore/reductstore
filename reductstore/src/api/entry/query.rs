@@ -52,7 +52,7 @@ pub(crate) async fn query(
     let limit = parse_limit(params)?;
 
     let mut storage = components.storage.write().await;
-    let bucket = storage.get_mut_bucket(bucket_name)?;
+    let bucket = storage.get_bucket_mut(bucket_name)?;
     let entry = bucket.get_or_create_entry(entry_name)?;
     let id = entry.query(
         start,
@@ -97,9 +97,9 @@ fn parse_continuous_flag(params: &HashMap<String, String>) -> Result<bool, HttpE
     Ok(continuous)
 }
 
-fn parse_limit(params: HashMap<String, String>) -> Result<Option<usize>, HttpError> {
+fn parse_limit(params: HashMap<String, String>) -> Result<Option<u64>, HttpError> {
     let limit = match params.get("limit") {
-        Some(limit) => Some(limit.parse::<usize>().map_err(|_| {
+        Some(limit) => Some(limit.parse::<u64>().map_err(|_| {
             HttpError::new(
                 ErrorCode::UnprocessableEntity,
                 "'limit' must unsigned integer",
@@ -470,16 +470,16 @@ mod tests {
 
         let mut storage = components.storage.write().await;
         let entry = storage
-            .get_mut_bucket("bucket-1")
+            .get_bucket_mut("bucket-1")
             .unwrap()
-            .get_mut_entry("entry-1")
+            .get_entry_mut("entry-1")
             .unwrap();
 
-        let reader = entry.next(query.id).await.unwrap();
-        assert!(reader.last());
+        let rx = entry.get_query_receiver(query.id).await.unwrap();
+        assert!(rx.recv().await.unwrap().unwrap().last());
 
         assert_eq!(
-            entry.next(query.id).await.err().unwrap().status,
+            rx.recv().await.unwrap().err().unwrap().status,
             ErrorCode::NoContent
         );
     }
