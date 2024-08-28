@@ -263,7 +263,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub fn get_mut_entry(&mut self, name: &str) -> Result<&mut Entry, ReductError> {
+    pub fn get_entry_mut(&mut self, name: &str) -> Result<&mut Entry, ReductError> {
         let entry = self.entries.get_mut(name).ok_or_else(|| {
             ReductError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",

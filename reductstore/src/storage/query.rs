@@ -21,6 +21,8 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 
+pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
+
 const QUERY_BUFFER_SIZE: usize = 64;
 
 /// Build a query.
@@ -47,7 +49,7 @@ pub(in crate::storage) fn build_query(
 pub(super) fn spawn_query_task(
     mut query: Box<dyn Query + Send + Sync>,
     block_manager: Arc<RwLock<BlockManager>>,
-) -> (Receiver<Result<RecordReader, ReductError>>, JoinHandle<()>) {
+) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     let handle = tokio::spawn(async move {

@@ -14,8 +14,11 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::storage::query::QueryRx;
 use log::{debug, warn};
+use reduct_base::error::ReductError;
 use std::collections::HashMap;
+use std::fmt::format;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -60,7 +63,7 @@ pub(crate) async fn read_batched_records(
             .storage
             .write()
             .await
-            .get_mut_bucket(bucket_name)?,
+            .get_bucket_mut(bucket_name)?,
         entry_name,
         query_id,
         method.name == "HEAD",
@@ -110,41 +113,28 @@ async fn fetch_and_response_batched_records(
     let mut headers = HeaderMap::new();
     let mut readers = Vec::new();
     let mut last = false;
-
+    let bucket_name = bucket.name().to_string();
     let rx = bucket
-        .get_mut_entry(entry_name)
+        .get_entry_mut(entry_name)
         .unwrap()
         .get_query_receiver(query_id)
         .await?;
 
     loop {
-        let result = if readers.is_empty() {
-            rx.recv().await
+        let timeout = if readers.is_empty() {
+            Some(Duration::from_secs(1))
         } else {
-            if let Ok(result) = timeout(Duration::from_secs(1), rx.recv()).await {
-                result
-            } else {
-                debug!(
-                    "Timeout while waiting for record {}/{}/{}",
-                    bucket.name(),
-                    entry_name,
-                    query_id
-                );
-                break;
-            }
+            None
         };
-
-        let reader = match result {
-            Some(reader) => reader,
-            None => {
-                warn!(
-                    "Query {}/{}/{} is empty",
-                    bucket.name(),
-                    entry_name,
-                    query_id
-                );
-                break;
-            }
+        let reader = match next_record_reader(
+            rx,
+            &format!("{}/{}/{}", bucket_name, entry_name, query_id),
+            timeout,
+        )
+        .await
+        {
+            Some(value) => value,
+            None => break,
         };
 
         match reader {
@@ -185,48 +175,6 @@ async fn fetch_and_response_batched_records(
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
     headers.insert("x-reduct-last", last.to_string().parse().unwrap());
 
-    struct ReadersWrapper {
-        readers: Vec<RecordReader>,
-        empty_body: bool,
-    }
-
-    impl Stream for ReadersWrapper {
-        type Item = Result<Bytes, HttpError>;
-
-        fn poll_next(
-            mut self: Pin<&mut ReadersWrapper>,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Option<Self::Item>> {
-            if self.empty_body {
-                return Poll::Ready(None);
-            }
-
-            if self.readers.is_empty() {
-                return Poll::Ready(None);
-            }
-
-            while !self.readers.is_empty() {
-                if let Poll::Ready(data) = self.readers[0].rx().poll_recv(_cx) {
-                    match data {
-                        Some(Ok(chunk)) => {
-                            return Poll::Ready(Some(Ok(chunk)));
-                        }
-                        Some(Err(err)) => {
-                            return Poll::Ready(Some(Err(HttpError::from(err))));
-                        }
-                        None => self.readers.remove(0),
-                    };
-                } else {
-                    return Poll::Pending;
-                }
-            }
-            Poll::Ready(None)
-        }
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            (0, None)
-        }
-    }
-
     Ok((
         headers,
         Body::from_stream(ReadersWrapper {
@@ -234,6 +182,77 @@ async fn fetch_and_response_batched_records(
             empty_body,
         }),
     ))
+}
+
+// This function is used to get the next record from the query receiver
+// created for better testing
+async fn next_record_reader(
+    rx: &mut QueryRx,
+    query_path: &str,
+    recv_timeout: Option<Duration>,
+) -> Option<Result<RecordReader, ReductError>> {
+    // we need to wait for the first record
+    let result = if let Some(recv_timeout) = recv_timeout {
+        if let Ok(result) = timeout(recv_timeout, rx.recv()).await {
+            result
+        } else {
+            debug!("Timeout while waiting for record from query {}", query_path);
+            return None;
+        }
+    } else {
+        rx.recv().await
+    };
+
+    let reader = match result {
+        Some(reader) => reader,
+        None => {
+            warn!("Query {} is closed", query_path);
+            return None;
+        }
+    };
+    Some(reader)
+}
+
+struct ReadersWrapper {
+    readers: Vec<RecordReader>,
+    empty_body: bool,
+}
+
+impl Stream for ReadersWrapper {
+    type Item = Result<Bytes, HttpError>;
+
+    fn poll_next(
+        mut self: Pin<&mut ReadersWrapper>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if self.empty_body {
+            return Poll::Ready(None);
+        }
+
+        if self.readers.is_empty() {
+            return Poll::Ready(None);
+        }
+
+        while !self.readers.is_empty() {
+            if let Poll::Ready(data) = self.readers[0].rx().poll_recv(_cx) {
+                match data {
+                    Some(Ok(chunk)) => {
+                        return Poll::Ready(Some(Ok(chunk)));
+                    }
+                    Some(Err(err)) => {
+                        return Poll::Ready(Some(Err(HttpError::from(err))));
+                    }
+                    None => self.readers.remove(0),
+                };
+            } else {
+                return Poll::Pending;
+            }
+        }
+        Poll::Ready(None)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
 }
 
 #[cfg(test)]
@@ -263,9 +282,9 @@ mod tests {
                 .storage
                 .write()
                 .await
-                .get_mut_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .get_bucket_mut(path_to_entry_1.get("bucket_name").unwrap())
                 .unwrap()
-                .get_mut_entry(path_to_entry_1.get("entry_name").unwrap())
+                .get_entry_mut(path_to_entry_1.get("entry_name").unwrap())
                 .unwrap()
                 .query(0, u64::MAX, QueryOptions::default())
                 .unwrap()
@@ -295,5 +314,51 @@ mod tests {
             to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             Bytes::from(body)
         );
+    }
+
+    mod next_record_reader {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_next_record_reader_timeout() {
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            assert!(
+                timeout(
+                    Duration::from_secs(1),
+                    next_record_reader(&mut rx, "", Some(Duration::from_millis(10)))
+                )
+                .await
+                .unwrap()
+                .is_none(),
+                "should return None if no record is received after timeout"
+            );
+            assert!(
+                timeout(
+                    Duration::from_secs(1),
+                    next_record_reader(&mut rx, "", None)
+                )
+                .await
+                .is_err(),
+                "should wait for the first record"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_next_record_reader_closed_tx() {
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            drop(tx);
+            assert!(
+                timeout(
+                    Duration::from_secs(1),
+                    next_record_reader(&mut rx, "", None)
+                )
+                .await
+                .unwrap()
+                .is_none(),
+                "should return None if the query is closed"
+            );
+        }
     }
 }

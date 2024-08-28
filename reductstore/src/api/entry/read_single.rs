@@ -46,7 +46,7 @@ pub(crate) async fn read_single_record(
     drop(storage); // Release the lock
 
     let mut storage = components.storage.write().await;
-    let bucket = storage.get_mut_bucket(bucket_name)?;
+    let bucket = storage.get_bucket_mut(bucket_name)?;
     fetch_and_response_single_record(bucket, entry_name, ts, query_id, method.name() == "HEAD")
         .await
 }
@@ -94,7 +94,7 @@ async fn fetch_and_response_single_record(
         bucket.begin_read(entry_name, ts).await?
     } else {
         let rx = bucket
-            .get_mut_entry(entry_name)?
+            .get_entry_mut(entry_name)?
             .get_query_receiver(query_id.unwrap())
             .await?;
         if let Some(reader) = rx.recv().await {
@@ -216,9 +216,9 @@ mod tests {
                 .storage
                 .write()
                 .await
-                .get_mut_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .get_bucket_mut(path_to_entry_1.get("bucket_name").unwrap())
                 .unwrap()
-                .get_mut_entry(path_to_entry_1.get("entry_name").unwrap())
+                .get_entry_mut(path_to_entry_1.get("entry_name").unwrap())
                 .unwrap()
                 .query(0, u64::MAX, QueryOptions::default())
                 .unwrap()

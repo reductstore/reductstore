@@ -156,7 +156,7 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn get_mut_bucket(&mut self, name: &str) -> Result<&mut Bucket, ReductError> {
+    pub fn get_bucket_mut(&mut self, name: &str) -> Result<&mut Bucket, ReductError> {
         match self.buckets.get_mut(name) {
             Some(bucket) => Ok(bucket),
             None => Err(ReductError::not_found(

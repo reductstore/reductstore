@@ -74,8 +74,8 @@ pub(crate) async fn update_record(
         .storage
         .write()
         .await
-        .get_mut_bucket(bucket)?
-        .get_mut_entry(entry_name)?
+        .get_bucket_mut(bucket)?
+        .get_entry_mut(entry_name)?
         .update_labels(ts, labels_to_update.clone(), labels_to_remove)
         .await?;
 

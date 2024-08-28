@@ -52,7 +52,7 @@ pub(crate) async fn query(
     let limit = parse_limit(params)?;
 
     let mut storage = components.storage.write().await;
-    let bucket = storage.get_mut_bucket(bucket_name)?;
+    let bucket = storage.get_bucket_mut(bucket_name)?;
     let entry = bucket.get_or_create_entry(entry_name)?;
     let id = entry.query(
         start,
@@ -470,9 +470,9 @@ mod tests {
 
         let mut storage = components.storage.write().await;
         let entry = storage
-            .get_mut_bucket("bucket-1")
+            .get_bucket_mut("bucket-1")
             .unwrap()
-            .get_mut_entry("entry-1")
+            .get_entry_mut("entry-1")
             .unwrap();
 
         let rx = entry.get_query_receiver(query.id).await.unwrap();
