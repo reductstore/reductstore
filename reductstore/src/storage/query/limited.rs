@@ -42,7 +42,7 @@ impl Query for LimitedQuery {
         self.limit_count -= 1;
         let reader = self.query.next(block_manager).await;
         if self.limit_count == 0 {
-            reader.map(|mut r| {
+            reader.map(|r| {
                 let record = r.record().clone();
                 RecordReader::new(r.into_rx(), record, true)
             })

@@ -165,7 +165,6 @@ impl HistoricalQuery {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::time::Duration;
 
     use rstest::rstest;
 

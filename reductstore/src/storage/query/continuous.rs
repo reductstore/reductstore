@@ -69,7 +69,6 @@ mod tests {
 
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
-    use tokio::time::sleep;
 
     use crate::storage::query::base::tests::block_manager;
 

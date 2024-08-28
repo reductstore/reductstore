@@ -11,7 +11,7 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::bucket::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
-use log::{debug, trace, warn};
+use log::{trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use std::sync::Arc;
