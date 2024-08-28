@@ -361,4 +361,18 @@ mod tests {
             );
         }
     }
+
+    mod stram_wrapper {
+        use super::*;
+        use crate::storage::proto::Record;
+
+        #[rstest]
+        fn test_size_hint() {
+            let wrapper = ReadersWrapper {
+                readers: vec![],
+                empty_body: false,
+            };
+            assert_eq!(wrapper.size_hint(), (0, None));
+        }
+    }
 }
