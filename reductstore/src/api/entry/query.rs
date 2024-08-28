@@ -475,11 +475,11 @@ mod tests {
             .get_mut_entry("entry-1")
             .unwrap();
 
-        let reader = entry.next(query.id).await.unwrap();
-        assert!(reader.last());
+        let rx = entry.get_query_receiver(query.id).await.unwrap();
+        assert!(rx.recv().await.unwrap().unwrap().last());
 
         assert_eq!(
-            entry.next(query.id).await.err().unwrap().status,
+            rx.recv().await.unwrap().err().unwrap().status,
             ErrorCode::NoContent
         );
     }

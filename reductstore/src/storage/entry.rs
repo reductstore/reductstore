@@ -16,7 +16,8 @@ use crate::storage::query::base::{Query, QueryOptions, QueryState};
 use crate::storage::query::build_query;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, warn};
-use reduct_base::error::ReductError;
+use reduct_base::error::ErrorCode::NoContent;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{internal_server_error, too_early, Labels};
 use std::collections::{HashMap, HashSet};
@@ -24,10 +25,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 
 const QUERY_BUFFER_SIZE: usize = 64;
@@ -349,24 +351,45 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
 
         let handle = tokio::spawn(async move {
+            let mut no_content = false; // FIXME: we need to find a better way to handle repeating no content
             loop {
-                let state = query.state();
-                if state == &QueryState::Done || state == &QueryState::Expired {
+                if query.state() == &QueryState::Expired {
                     break;
                 }
 
                 let next_result = query.next(block_manager.clone()).await;
-                let errored = next_result.is_err();
+                let err = match next_result.as_ref().err().cloned() {
+                    Some(ReductError {
+                        status: NoContent, ..
+                    }) if no_content => {
+                        sleep(Duration::from_millis(50)).await; // it's continuous query, so we wait for the next record
+                        continue;
+                    }
+                    Some(err) => Some(err),
+                    None => None,
+                };
 
-                let send_result = timeout(IO_OPERATION_TIMEOUT, tx.send(next_result))
-                    .await
-                    .map_err(|e| {
-                        warn!("Error sending query result: {}", e);
-                        e
-                    });
+                no_content = false;
+                let send_result = timeout(IO_OPERATION_TIMEOUT, tx.send(next_result)).await;
 
-                if send_result.is_err() || errored {
+                if let Err(err) = send_result {
+                    warn!("Error sending query result: {}", err);
                     break;
+                }
+
+                if let Some(err) = err {
+                    if err.status == NoContent && query.state() != &QueryState::Done {
+                        no_content = true;
+                        // continuous query will never be done
+                        // but we don't want to flood the channel and wait for the receiver
+                        while tx.capacity() < tx.max_capacity()
+                            && query.state() != &QueryState::Expired
+                        {
+                            sleep(Duration::from_millis(50)).await;
+                        }
+                    } else {
+                        break;
+                    }
                 }
             }
         });
@@ -392,8 +415,8 @@ impl Entry {
             .queries
             .get_mut(&query_id)
             .ok_or_else(||
-            ReductError::not_found(
-                &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
+                ReductError::not_found(
+                    &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
         Ok(&mut query.rx)
     }
 
@@ -937,6 +960,7 @@ mod tests {
 
     mod query {
         use super::*;
+        use reduct_base::{no_content, not_found};
 
         #[rstest]
         #[tokio::test]
@@ -948,26 +972,28 @@ mod tests {
             let id = entry.query(0, 4000000, QueryOptions::default()).unwrap();
             assert!(id >= 1);
 
+            let rx = entry.get_query_receiver(id).await.unwrap();
+
             {
-                let reader = entry.next(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 1000000);
             }
             {
-                let reader = entry.next(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 2000000);
             }
             {
-                let reader = entry.next(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 3000000);
             }
 
             assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::no_content("No content"))
+                rx.recv().await.unwrap().err(),
+                Some(no_content!("No content"))
             );
             assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
             );
         }
 
@@ -989,25 +1015,33 @@ mod tests {
                 .unwrap();
 
             {
-                let reader = entry.next(id).await.unwrap();
+                let rx = entry.get_query_receiver(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 1000000);
+                assert_eq!(
+                    rx.recv().await.unwrap().err(),
+                    Some(no_content!("No content"))
+                );
             }
-
-            assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::no_content("No content"))
-            );
 
             write_stub_record(&mut entry, 2000000).await.unwrap();
             {
-                let reader = entry.next(id).await.unwrap();
+                let rx = entry.get_query_receiver(id).await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 2000000);
             }
 
-            sleep(Duration::from_millis(600)).await;
+            sleep(Duration::from_millis(700)).await;
+            {
+                let rx = entry.get_query_receiver(id).await.unwrap();
+                assert_eq!(
+                    rx.recv().await.unwrap().err(),
+                    Some(no_content!("No content"))
+                );
+            }
             assert_eq!(
-                entry.next(id).await.err(),
-                Some(ReductError::not_found(&format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id)))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
             );
         }
     }

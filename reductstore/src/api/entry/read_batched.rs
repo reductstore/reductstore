@@ -121,7 +121,7 @@ async fn fetch_and_response_batched_records(
         let result = if readers.is_empty() {
             rx.recv().await
         } else {
-            if let Ok(result) = timeout(Duration::from_millis(5), rx.recv()).await {
+            if let Ok(result) = timeout(Duration::from_secs(1), rx.recv()).await {
                 result
             } else {
                 debug!(
@@ -172,12 +172,6 @@ async fn fetch_and_response_batched_records(
                 } else {
                     if err.status() == ErrorCode::NoContent {
                         last = true;
-                        debug!(
-                            "Last record in query {}/{}/{}",
-                            bucket.name(),
-                            entry_name,
-                            query_id
-                        );
                         break;
                     } else {
                         return Err(HttpError::from(err));
