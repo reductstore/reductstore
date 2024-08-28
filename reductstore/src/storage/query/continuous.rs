@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
-use crate::storage::query::base::{Query, QueryOptions, QueryState};
+use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use reduct_base::error::{ErrorCode, ReductError};
 
@@ -53,7 +53,6 @@ impl Query for ContinuousQuery {
                 ..
             }) => {
                 self.query = HistoricalQuery::new(self.next_start, u64::MAX, self.options.clone());
-                self.query.state = QueryState::Running(self.count);
                 Err(ReductError {
                     status: ErrorCode::NoContent,
                     message: "No content".to_string(),
@@ -61,10 +60,6 @@ impl Query for ContinuousQuery {
             }
             Err(err) => Err(err),
         }
-    }
-
-    fn state(&self) -> &QueryState {
-        self.query.state()
     }
 }
 
@@ -108,9 +103,5 @@ mod tests {
                 message: "No content".to_string(),
             })
         );
-        assert_eq!(query.state(), &QueryState::Running(1));
-
-        sleep(std::time::Duration::from_millis(100)).await;
-        assert_eq!(query.state(), &QueryState::Expired);
     }
 }

@@ -3,8 +3,7 @@
 
 use crate::storage::block_manager::BlockManager;
 use crate::storage::bucket::RecordReader;
-use crate::storage::query::base::QueryState::Running;
-use crate::storage::query::base::{Query, QueryOptions, QueryState};
+use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
 
@@ -15,14 +14,14 @@ use tokio::sync::RwLock;
 /// A query that is limited to a certain number of records.
 pub(crate) struct LimitedQuery {
     query: HistoricalQuery,
-    options: QueryOptions,
+    limit_count: u64,
 }
 
 impl LimitedQuery {
     pub fn new(start: u64, stop: u64, options: QueryOptions) -> LimitedQuery {
         LimitedQuery {
             query: HistoricalQuery::new(start, stop, options.clone()),
-            options,
+            limit_count: options.limit.unwrap(),
         }
     }
 }
@@ -33,31 +32,23 @@ impl Query for LimitedQuery {
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        // TODO: It could be done better, maybe it make senses to move the limit into HistoricalQuery instead of manipulating the state here.
-        if let Running(count) = self.state() {
-            if *count == self.options.limit.unwrap() {
-                self.query.state = QueryState::Done;
-                return Err(ReductError {
-                    status: ErrorCode::NoContent,
-                    message: "No content".to_string(),
-                });
-            }
+        if self.limit_count == 0 {
+            return Err(ReductError {
+                status: ErrorCode::NoContent,
+                message: "No content".to_string(),
+            });
         }
 
-        let reader = self.query.next(block_manager).await?;
-
-        if let Running(count) = self.state() {
-            if *count == self.options.limit.unwrap() {
-                let record = reader.record().clone();
-                return Ok(RecordReader::new(reader.into_rx(), record, true));
-            }
+        self.limit_count -= 1;
+        let reader = self.query.next(block_manager).await;
+        if self.limit_count == 0 {
+            reader.map(|mut r| {
+                let record = r.record().clone();
+                RecordReader::new(r.into_rx(), record, true)
+            })
+        } else {
+            reader
         }
-
-        Ok(reader)
-    }
-
-    fn state(&self) -> &QueryState {
-        self.query.state()
     }
 }
 

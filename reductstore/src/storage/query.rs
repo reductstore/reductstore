@@ -9,9 +9,9 @@ mod limited;
 
 use crate::storage::block_manager::BlockManager;
 use crate::storage::bucket::RecordReader;
-use crate::storage::query::base::{Query, QueryOptions, QueryState};
+use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
-use log::warn;
+use log::{debug, trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use std::sync::Arc;
@@ -48,18 +48,20 @@ pub(in crate::storage) fn build_query(
 
 pub(super) fn spawn_query_task(
     mut query: Box<dyn Query + Send + Sync>,
+    options: QueryOptions,
     block_manager: Arc<RwLock<BlockManager>>,
 ) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     let handle = tokio::spawn(async move {
         loop {
-            if query.state() == &QueryState::Expired {
-                break;
-            }
-
             let next_result = query.next(block_manager.clone()).await;
             let query_err = next_result.as_ref().err().cloned();
+
+            if tx.is_closed() {
+                trace!("Query task channel closed");
+                break;
+            }
 
             let send_result = timeout(IO_OPERATION_TIMEOUT, tx.send(next_result)).await;
 
@@ -69,14 +71,14 @@ pub(super) fn spawn_query_task(
             }
 
             if let Some(err) = query_err {
-                if err.status == NoContent && query.state() != &QueryState::Done {
+                if err.status == NoContent && options.continuous {
                     // continuous query will never be done
                     // but we don't want to flood the channel and wait for the receiver
-                    while tx.capacity() < tx.max_capacity() && query.state() != &QueryState::Expired
-                    {
+                    while tx.capacity() < tx.max_capacity() {
                         sleep(Duration::from_millis(10)).await;
                     }
                 } else {
+                    trace!("Query task done: {:?}", err);
                     break;
                 }
             }
@@ -126,7 +128,7 @@ mod tests {
         let query = build_query(0, 5, options.clone()).unwrap();
         sleep(Duration::from_millis(100)).await;
 
-        let (rx, handle) = spawn_query_task(query, block_manager.await.clone());
+        let (rx, handle) = spawn_query_task(query, options, block_manager.await.clone());
         assert!(rx.is_empty());
         assert!(handle.await.is_ok());
     }
@@ -134,9 +136,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_query_task_ok(#[future] block_manager: Arc<RwLock<BlockManager>>) {
-        let query = build_query(0, 5, QueryOptions::default()).unwrap();
+        let options = QueryOptions::default();
+        let query = build_query(0, 5, options.clone()).unwrap();
 
-        let (mut rx, handle) = spawn_query_task(query, block_manager.await.clone());
+        let (mut rx, handle) = spawn_query_task(query, options, block_manager.await.clone());
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
@@ -151,9 +154,9 @@ mod tests {
             continuous: true,
             ..Default::default()
         };
-        let query = build_query(0, 5, options).unwrap();
+        let query = build_query(0, 5, options.clone()).unwrap();
         let block_manager = block_manager.await;
-        let (mut rx, handle) = spawn_query_task(query, block_manager.clone());
+        let (mut rx, handle) = spawn_query_task(query, options, block_manager.clone());
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
@@ -180,15 +183,19 @@ mod tests {
 
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 2);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
-        assert!(timeout(Duration::from_millis(1000), handle).await.is_ok());
+        assert!(
+            timeout(Duration::from_millis(1000), handle).await.is_err(),
+            "never done"
+        );
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_query_task_err(#[future] block_manager: Arc<RwLock<BlockManager>>) {
-        let query = build_query(0, 10, QueryOptions::default()).unwrap();
+        let options = QueryOptions::default();
+        let query = build_query(0, 10, options.clone()).unwrap();
 
-        let (rx, handle) = spawn_query_task(query, block_manager.await.clone());
+        let (rx, handle) = spawn_query_task(query, options, block_manager.await.clone());
         drop(rx); // drop the receiver to simulate a closed channel
         assert!(timeout(Duration::from_millis(1000), handle).await.is_ok());
     }

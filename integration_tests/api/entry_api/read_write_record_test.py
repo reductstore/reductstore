@@ -307,8 +307,6 @@ def test_read_batched_continuous_query(base_url, session, bucket):
     resp = session.get(f"{base_url}/b/{bucket}/entry/batch?q={query_id}")
     assert resp.status_code == 204
 
-    sleep(1.1)
-
     resp = session.get(f"{base_url}/b/{bucket}/entry/batch?q={query_id}")
     assert resp.status_code == 404
 

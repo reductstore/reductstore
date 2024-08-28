@@ -97,9 +97,9 @@ fn parse_continuous_flag(params: &HashMap<String, String>) -> Result<bool, HttpE
     Ok(continuous)
 }
 
-fn parse_limit(params: HashMap<String, String>) -> Result<Option<usize>, HttpError> {
+fn parse_limit(params: HashMap<String, String>) -> Result<Option<u64>, HttpError> {
     let limit = match params.get("limit") {
-        Some(limit) => Some(limit.parse::<usize>().map_err(|_| {
+        Some(limit) => Some(limit.parse::<u64>().map_err(|_| {
             HttpError::new(
                 ErrorCode::UnprocessableEntity,
                 "'limit' must unsigned integer",

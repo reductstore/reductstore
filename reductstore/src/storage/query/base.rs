@@ -14,16 +14,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-#[derive(PartialEq, Debug)]
-pub enum QueryState {
-    /// The query is running.
-    Running(usize),
-    /// The query is done.
-    Done,
-    /// The query is outdated.
-    Expired,
-}
-
 /// Query is used to iterate over the records among multiple blocks.
 #[async_trait]
 pub(in crate::storage) trait Query {
@@ -47,9 +37,6 @@ pub(in crate::storage) trait Query {
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError>;
-
-    /// Get the state of the query.
-    fn state(&self) -> &QueryState;
 }
 
 /// QueryOptions is used to specify the options for a query.
@@ -64,7 +51,7 @@ pub struct QueryOptions {
     /// If true, the query will never be done
     pub continuous: bool,
     /// The maximum number of records to return only for non-continuous queries.
-    pub limit: Option<usize>,
+    pub limit: Option<u64>,
     /// Return each N records
     pub each_n: Option<u64>,
     /// Return a record every S seconds

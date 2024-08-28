@@ -25,15 +25,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 struct QueryHandle {
     rx: QueryRx,
-    handle: JoinHandle<()>,
+    options: QueryOptions,
+    last_access: Instant,
+    query_task_handle: JoinHandle<()>,
 }
 
 /// Entry is a time series in a bucket.
 pub(crate) struct Entry {
     name: String,
+    bucket_name: String,
     settings: EntrySettings,
     block_manager: Arc<RwLock<BlockManager>>,
     queries: HashMap<u64, QueryHandle>,
@@ -59,6 +63,7 @@ impl Entry {
 
         Ok(Self {
             name: name.to_string(),
+            bucket_name: path.file_name().unwrap().to_str().unwrap().to_string(),
             settings,
             block_manager: Arc::new(RwLock::new(BlockManager::new(
                 path.join(name),
@@ -334,13 +339,23 @@ impl Entry {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
-        self.remove_expired_query();
-
-        let query = build_query(start, end, options)?;
+        let query = build_query(start, end, options.clone())?;
         let block_manager = Arc::clone(&self.block_manager);
 
-        let (rx, handle) = spawn_query_task(query, block_manager);
-        self.queries.insert(id, QueryHandle { rx, handle });
+        let (rx, task_handle) = spawn_query_task(query, options.clone(), block_manager);
+
+        if task_handle.is_finished() {
+            panic!("Query task finished immediately");
+        }
+        self.queries.insert(
+            id,
+            QueryHandle {
+                rx,
+                options,
+                last_access: Instant::now(),
+                query_task_handle: task_handle,
+            },
+        );
 
         Ok(id)
     }
@@ -363,6 +378,8 @@ impl Entry {
             .ok_or_else(||
                 ReductError::not_found(
                     &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
+
+        query.last_access = Instant::now();
         Ok(&mut query.rx)
     }
 
@@ -427,8 +444,22 @@ impl Entry {
     }
 
     fn remove_expired_query(&mut self) {
-        self.queries
-            .retain(|_, query| !query.handle.is_finished() || !query.rx.is_empty());
+        let entry_path = format!("{}/{}", self.bucket_name, self.name);
+
+        self.queries.retain(|id, handle| {
+            if handle.last_access.elapsed() >= handle.options.ttl {
+                debug!("Query {}/{} expired", entry_path, id);
+                handle.query_task_handle.abort();
+                return false;
+            }
+
+            if handle.rx.is_empty() && handle.query_task_handle.is_finished() {
+                debug!("Query {}/{} finished", entry_path, id);
+                return false;
+            }
+
+            true
+        });
     }
 }
 
@@ -937,6 +968,7 @@ mod tests {
                 rx.recv().await.unwrap().err(),
                 Some(no_content!("No content"))
             );
+
             assert_eq!(
                 entry.get_query_receiver(id).await.err(),
                 Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
@@ -978,13 +1010,6 @@ mod tests {
             }
 
             sleep(Duration::from_millis(700)).await;
-            {
-                let rx = entry.get_query_receiver(id).await.unwrap();
-                assert_eq!(
-                    rx.recv().await.unwrap().err(),
-                    Some(no_content!("No content"))
-                );
-            }
             assert_eq!(
                 entry.get_query_receiver(id).await.err(),
                 Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
