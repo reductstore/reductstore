@@ -186,7 +186,7 @@ mod tests {
     async fn test_query_task_err(#[future] block_manager: Arc<RwLock<BlockManager>>) {
         let query = build_query(0, 10, QueryOptions::default()).unwrap();
 
-        let (mut rx, handle) = spawn_query_task(query, block_manager.await.clone());
+        let (rx, handle) = spawn_query_task(query, block_manager.await.clone());
         drop(rx); // drop the receiver to simulate a closed channel
         assert!(timeout(Duration::from_millis(1000), handle).await.is_ok());
     }

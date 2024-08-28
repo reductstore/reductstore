@@ -12,12 +12,10 @@ use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
-use crate::storage::query::base::{Query, QueryOptions, QueryState};
+use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::{build_query, spawn_query_task};
-use crate::storage::storage::IO_OPERATION_TIMEOUT;
-use log::{debug, warn};
-use reduct_base::error::ErrorCode::NoContent;
-use reduct_base::error::{ErrorCode, ReductError};
+use log::debug;
+use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{internal_server_error, too_early, Labels};
 use std::collections::{HashMap, HashSet};
@@ -25,11 +23,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 
 pub(super) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
@@ -365,7 +361,7 @@ impl Entry {
     /// * `HTTPError` - The error if any.
     pub async fn get_query_receiver(&mut self, query_id: u64) -> Result<&mut QueryRx, ReductError> {
         self.remove_expired_query();
-        let mut query = self
+        let query = self
             .queries
             .get_mut(&query_id)
             .ok_or_else(||

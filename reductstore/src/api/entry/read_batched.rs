@@ -111,7 +111,7 @@ async fn fetch_and_response_batched_records(
     let mut readers = Vec::new();
     let mut last = false;
 
-    let mut rx = bucket
+    let rx = bucket
         .get_mut_entry(entry_name)
         .unwrap()
         .get_query_receiver(query_id)
