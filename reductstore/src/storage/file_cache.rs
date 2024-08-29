@@ -170,6 +170,26 @@ impl FileCache {
         cache.remove(path);
         Ok(())
     }
+
+    /// Renames a file in the file system and updates the cache.
+    ///
+    /// This function attempts to rename a file at the specified old path to the new path.
+    /// If the file exists and is successfully renamed, it removes the old path from the cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `old_path` - The old path to the file to be renamed.
+    /// * `new_path` - The new path to the file.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is `Ok` if the file was successfully renamed, or an `Err` containing
+    pub async fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
+        tokio::fs::rename(old_path, new_path).await?;
+        let mut cache = self.cache.write().await;
+        cache.remove(old_path);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

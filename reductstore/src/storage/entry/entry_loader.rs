@@ -238,6 +238,15 @@ impl EntryLoader {
                                 block_removed = true;
                                 break;
                             }
+                            WalEntry::RemoveRecord(timestamp) => {
+                                trace!(
+                                    "Remove record from block {}/{}: {}",
+                                    entry.name,
+                                    block_id,
+                                    timestamp
+                                );
+                                panic!("Remove record from block is not supported");
+                            }
                         }
                     }
                 }

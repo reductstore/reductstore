@@ -142,8 +142,9 @@ pub(crate) mod tests {
 
         macro_rules! write_record {
             ($block:expr, $index:expr, $content:expr) => {{
+                let blk = $block.read().await;
                 let (file, _) = block_manager
-                    .begin_write_record($block.clone(), $index)
+                    .begin_write_record(&blk, $index)
                     .await
                     .unwrap();
                 let mut file = file.write().await;

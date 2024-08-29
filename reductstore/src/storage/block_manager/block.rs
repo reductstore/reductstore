@@ -8,6 +8,7 @@ use std::cmp::min;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
+/// A struct that contains the block id, the size, the record count, the metadata size and the record index.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::storage) struct Block {
     block_id: u64,
@@ -55,6 +56,12 @@ impl From<Block> for BlockProto {
 }
 
 impl Block {
+    /// Create a new block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_id` - The block id.
+    ///
     pub fn new(block_id: u64) -> Self {
         Block {
             block_id,
@@ -65,6 +72,13 @@ impl Block {
         }
     }
 
+    /// Insert or update a record.
+    ///
+    /// The method inserts or updates a record in the block and updates the size, the record count and the metadata size.
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - The record to insert or update.
     pub fn insert_or_update_record(&mut self, record: Record) {
         match self
             .record_index
@@ -88,12 +102,48 @@ impl Block {
         }
     }
 
+    /// Get a record by timestamp.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp` - The timestamp of the record to get.
+    ///
+    /// # Returns
+    ///
+    /// The record with the given timestamp or `None` if the record does not exist.
     pub fn get_record(&self, timestamp: u64) -> Option<&Record> {
         self.record_index.get(&timestamp)
     }
 
+    /// Remove a record by timestamp.
+    ///
+    /// The method removes a record by timestamp and updates the size, the record count and the metadata size.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp` - The timestamp of the record to remove.
+    ///
+    /// # Returns
+    ///
+    /// The removed record or `None` if the record does not exist.
+    pub fn remove_record(&mut self, timestamp: u64) -> Option<Record> {
+        match self.record_index.remove(&timestamp) {
+            Some(record) => {
+                self.size -= record.end - record.begin;
+                self.record_count -= 1;
+                self.metadata_size -= min(self.metadata_size, record.encoded_len() as u64);
+                Some(record)
+            }
+            None => None,
+        }
+    }
+
     pub fn record_index(&self) -> &BTreeMap<u64, Record> {
         &self.record_index
+    }
+
+    pub fn record_index_mut(&mut self) -> &mut BTreeMap<u64, Record> {
+        &mut self.record_index
     }
 
     pub fn block_id(&self) -> u64 {

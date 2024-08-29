@@ -47,10 +47,12 @@ impl Entry {
                     Ok(block_ref) => {
                         let block = block_ref.read().await;
                         if let Some(record) = block.get_record(time) {
+                            let record = Self::update_single_label(record.clone(), update, remove);
                             records_per_block
                                 .entry(block.block_id())
                                 .or_insert_with(Vec::new)
-                                .push(Self::update_single_label(record.clone(), update, remove));
+                                .push(record.clone());
+                            result.insert(time, Ok(record.labels.clone()));
                         } else {
                             result
                                 .insert(time, Err(not_found!("No record with timestamp {}", time)));
@@ -64,23 +66,11 @@ impl Entry {
         }
 
         // Update blocks
-        for (block_id, records) in records_per_block {
+        for (block_id, records) in records_per_block.into_iter() {
             let mut bm = self.block_manager.write().await;
             let block_ref = bm.load_block(block_id).await?;
 
-            let record_times = {
-                let mut block = block_ref.write().await;
-                let mut record_times = Vec::new();
-                for record in records.into_iter() {
-                    let time = ts_to_us(record.timestamp.as_ref().unwrap());
-                    record_times.push(time);
-                    block.insert_or_update_record(record.clone());
-                    result.insert(time, Ok(record.labels));
-                }
-                record_times
-            };
-
-            bm.update_records(block_ref.clone(), record_times).await?;
+            bm.update_records(block_ref.clone(), records).await?;
         }
 
         Ok(result)

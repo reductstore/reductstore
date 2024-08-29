@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use std::io::SeekFrom;
+use std::mem;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -22,6 +23,7 @@ pub(in crate::storage) enum WalEntry {
     WriteRecord(Record),
     UpdateRecord(Record),
     RemoveBlock,
+    RemoveRecord(u64),
 }
 
 impl WalEntry {
@@ -50,6 +52,12 @@ impl WalEntry {
                 buf.extend_from_slice(&0u64.to_be_bytes());
                 buf
             }
+            WalEntry::RemoveRecord(record_id) => {
+                let mut buf = vec![3];
+                buf.extend_from_slice(&(mem::size_of_val(record_id) as u64).to_be_bytes());
+                buf.extend_from_slice(&record_id.to_be_bytes());
+                buf
+            }
         }
     }
 
@@ -64,6 +72,10 @@ impl WalEntry {
                 Ok(WalEntry::UpdateRecord(record))
             }
             2 => Ok(WalEntry::RemoveBlock),
+            3 => {
+                let record_id = u64::from_be_bytes(buf.try_into().unwrap());
+                Ok(WalEntry::RemoveRecord(record_id))
+            }
             _ => Err(internal_server_error!("Invalid WAL entry")),
         }
     }
@@ -273,6 +285,7 @@ mod tests {
             .await
             .unwrap();
         wal.append(1, WalEntry::RemoveBlock).await.unwrap();
+        wal.append(1, WalEntry::RemoveRecord(1)).await.unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
         let entries = wal.read(1).await.unwrap();
@@ -283,6 +296,7 @@ mod tests {
                 WalEntry::WriteRecord(Record::default()),
                 WalEntry::UpdateRecord(Record::default()),
                 WalEntry::RemoveBlock,
+                WalEntry::RemoveRecord(1)
             ]
         );
     }

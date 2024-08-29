@@ -8,26 +8,27 @@ pub(in crate::storage) mod wal;
 mod block_cache;
 mod use_counter;
 
+use log::{debug, error, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use std::cmp::min;
-
-use log::{debug, error, trace};
-
-use std::io::SeekFrom;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::env::temp_dir;
 
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{FileRef, FILE_CACHE};
-use crate::storage::proto::{record, Block as BlockProto};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
+use hyper::header::CACHE_CONTROL;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::io::SeekFrom;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
@@ -79,104 +80,6 @@ impl BlockManager {
             block_cache: BlockCache::new(1, 64, IO_OPERATION_TIMEOUT),
             wal: wal::create_wal(path.clone()),
         }
-    }
-
-    /// Begin writing a record to a block.
-    ///
-    /// # Arguments
-    ///
-    /// * `block` - Block to write to.
-    /// * `record_index` - Index of the record to write.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(file)` - File to write to.
-    pub async fn begin_write_record(
-        &mut self,
-        block: BlockRef,
-        record_timestamp: u64,
-    ) -> Result<(FileRef, u64), ReductError> {
-        let block = block.read().await;
-        self.use_counter.increment(block.block_id());
-
-        let path = self.path_to_data(block.block_id());
-        let offset = block.get_record(record_timestamp).unwrap().begin;
-        let file = FILE_CACHE
-            .write_or_create(&path, SeekFrom::Start(offset))
-            .await?;
-        Ok((file, offset))
-    }
-
-    /// Finish writing a record to a block.
-    ///
-    /// This method will update the record state, add WAL entry and save the block on disk if needed.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_id` - ID of the block to write to.
-    /// * `state` - State of the record.
-    ///
-    /// # Errors
-    ///
-    /// * `ReductError` - If file system operation failed.
-    async fn finish_write_record(
-        &mut self,
-        block_id: u64,
-        state: record::State,
-        record_timestamp: u64,
-    ) -> Result<(), ReductError> {
-        // check if the block is still in cache
-        let block_ref = if let Some(block_ref) = self.block_cache.get_write(&block_id).await {
-            let block = block_ref.read().await;
-            if block.block_id() == block_id {
-                block_ref.clone()
-            } else {
-                self.load_block(block_id).await?
-            }
-        } else {
-            self.load_block(block_id).await?
-        };
-
-        {
-            let mut block = block_ref.write().await;
-            block.change_record_state(record_timestamp, i32::from(state))?;
-            self.use_counter.decrement(block_id);
-
-            // write to WAL
-            self.wal
-                .append(
-                    block_id,
-                    WalEntry::WriteRecord(block.get_record(record_timestamp).unwrap().clone()),
-                )
-                .await?;
-        }
-        self.save_block(block_ref).await?;
-
-        debug!(
-            "Finished writing record {}/{}/{} with state {:?}",
-            self.bucket, self.entry, block_id, state
-        );
-
-        Ok(())
-    }
-
-    /// Begin reading a record from a block.
-    pub async fn begin_read_record(
-        &mut self,
-        block_ref: BlockRef,
-        record_timestamp: u64,
-    ) -> Result<(FileRef, u64), ReductError> {
-        let block = block_ref.read().await;
-        self.use_counter.increment(block.block_id());
-
-        let path = self.path_to_data(block.block_id());
-        let offset = block.get_record(record_timestamp).unwrap().begin;
-        let file = FILE_CACHE.read(&path, SeekFrom::Start(offset)).await?;
-        Ok((file, offset))
-    }
-
-    pub fn finish_read_record(&mut self, block_id: u64) {
-        self.use_counter.decrement(block_id);
     }
 
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
@@ -270,45 +173,6 @@ impl BlockManager {
         Ok(block_ref)
     }
 
-    /// Update records in a block and save it on disk.
-    ///
-    /// Make sure the records are in the block before calling this method.
-    ///
-    /// # Arguments
-    ///
-    /// * `block` - Block to update.
-    /// * `records` - Timestamps of the records to update.
-    ///
-    ///
-    /// # Panics
-    ///
-    /// * If the record is not in the block.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - If the records were updated successfully.
-    ///
-    /// # Errors
-    ///
-    /// * `ReductError` - If failed to append to WAL or save the block on disk.
-    pub async fn update_records(
-        &mut self,
-        block: BlockRef,
-        records: Vec<u64>,
-    ) -> Result<(), ReductError> {
-        for record in records {
-            let block = block.read().await;
-            self.wal
-                .append(
-                    block.block_id(),
-                    WalEntry::UpdateRecord(block.get_record(record).unwrap().clone()),
-                )
-                .await?;
-        }
-
-        self.save_block_on_disk(block).await
-    }
-
     /// Finish writing a record to a block.
     ///
     /// This method will shrink the block data file to the record size and sync the descriptor and data files.
@@ -382,6 +246,271 @@ impl BlockManager {
     pub async fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
         let path = self.path_to_desc(block_id);
         Ok(path.try_exists()?)
+    }
+
+    /// Update records in a block and save it on disk.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - Block to update.
+    /// * `records` - Records to update.
+    ///
+    ///
+    /// # Panics
+    ///
+    /// * If the record is not in the block.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the records were updated successfully.
+    ///
+    /// # Errors
+    ///
+    /// * `ReductError` - If failed to append to WAL or save the block on disk.
+    pub async fn update_records(
+        &mut self,
+        block_ref: BlockRef,
+        mut records: Vec<Record>,
+    ) -> Result<(), ReductError> {
+        {
+            let mut block = block_ref.write().await;
+
+            for record in records.into_iter() {
+                self.wal
+                    .append(block.block_id(), WalEntry::UpdateRecord(record.clone()))
+                    .await?;
+                block.insert_or_update_record(record);
+            }
+        }
+
+        self.save_block_on_disk(block_ref).await
+    }
+
+    /// Remove records from a block and save it on disk.
+    ///
+    /// The method will create a temporary block file and copy the retained records to it.
+    /// In the end, the original block file will be replaced with the temporary one and the block descriptor will be updated.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - Block to remove records from.
+    /// * `records` - Record timestamps to remove.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the records were removed successfully.
+    pub async fn remove_records(
+        &mut self,
+        block_ref: BlockRef,
+        records: Vec<u64>,
+    ) -> Result<(), ReductError> {
+        {
+            let mut block = block_ref.write().await;
+            for record_time in records {
+                block.remove_record(record_time);
+            }
+
+            // if the block is empty, remove it
+            if block.record_count() == 0 {
+                return self.remove_block(block.block_id()).await;
+            }
+        }
+
+        let temp_block_path = {
+            let mut block = block_ref.write().await;
+            let temp_block_path = self.path.join(format!("{}.blk.tmp", block.block_id()));
+            let temp_block_ref = FILE_CACHE
+                .write_or_create(&temp_block_path, SeekFrom::Start(0))
+                .await?;
+            let mut temp_block = temp_block_ref.write().await;
+            temp_block.set_len(block.size()).await?;
+
+            let mut total_offset = 0;
+            let block_id = block.block_id();
+            for record in block.record_index_mut().values_mut() {
+                let record_time = ts_to_us(&record.timestamp.unwrap());
+                self.wal
+                    .append(block_id, WalEntry::RemoveRecord(record_time))
+                    .await?;
+
+                let (file, offset) = {
+                    let path = self.path_to_data(block_id);
+                    let offset = record.begin;
+                    let file = FILE_CACHE.read(&path, SeekFrom::Start(offset)).await?;
+                    (file, offset)
+                };
+
+                let mut read_bytes = 0;
+                let record_size = record.end - record.begin;
+                while read_bytes < record_size {
+                    let (buf, read) =
+                        read_in_chunks(&file, offset, record_size, read_bytes).await?;
+                    if read == 0 {
+                        return Err(internal_server_error!("Failed to read record chunk: EOF"));
+                    }
+
+                    read_bytes += read as u64;
+
+                    temp_block.write_all(&buf).await?;
+                }
+
+                // Set position of content in the new block
+                total_offset += read_bytes;
+                record.begin = total_offset - read_bytes;
+                record.end = total_offset;
+
+                trace!(
+                    "Record {}/{} retained with new position begin={}, end={}",
+                    block_id,
+                    record_time,
+                    record.begin,
+                    record.end
+                );
+            }
+
+            debug!(
+                "New block {:?} is created with {} records",
+                temp_block_path,
+                block.record_count()
+            );
+
+            temp_block_path
+        };
+
+        {
+            let block = block_ref.read().await;
+
+            FILE_CACHE
+                .remove(&self.path_to_data(block.block_id()))
+                .await?;
+            FILE_CACHE
+                .rename(&temp_block_path, &self.path_to_data(block.block_id()))
+                .await?;
+
+            debug!(
+                "Block {:?} is replaced with retained records",
+                self.path_to_data(block.block_id())
+            );
+        }
+
+        self.save_block_on_disk(block_ref).await
+    }
+
+    /// Begin writing a record to a block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - Block to write to.
+    /// * `record_timestamp` - Timestamp of the record to write.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(file)` - File to write to.
+    pub async fn begin_write_record(
+        &mut self,
+        block: &Block,
+        record_timestamp: u64,
+    ) -> Result<(FileRef, u64), ReductError> {
+        self.use_counter.increment(block.block_id());
+
+        let path = self.path_to_data(block.block_id());
+        let offset = block.get_record(record_timestamp).unwrap().begin;
+        let file = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Start(offset))
+            .await?;
+        Ok((file, offset))
+    }
+
+    /// Finish writing a record to a block.
+    ///
+    /// This method will update the record state, add WAL entry and save the block on disk if needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_id` - ID of the block to write to.
+    /// * `state` - State of the record.
+    ///
+    /// # Errors
+    ///
+    /// * `ReductError` - If file system operation failed.
+    async fn finish_write_record(
+        &mut self,
+        block_id: u64,
+        state: record::State,
+        record_timestamp: u64,
+    ) -> Result<(), ReductError> {
+        // check if the block is still in cache
+        let block_ref = if let Some(block_ref) = self.block_cache.get_write(&block_id).await {
+            let block = block_ref.read().await;
+            if block.block_id() == block_id {
+                block_ref.clone()
+            } else {
+                self.load_block(block_id).await?
+            }
+        } else {
+            self.load_block(block_id).await?
+        };
+
+        {
+            let mut block = block_ref.write().await;
+            block.change_record_state(record_timestamp, i32::from(state))?;
+            self.use_counter.decrement(block_id);
+
+            // write to WAL
+            self.wal
+                .append(
+                    block_id,
+                    WalEntry::WriteRecord(block.get_record(record_timestamp).unwrap().clone()),
+                )
+                .await?;
+        }
+        self.save_block(block_ref).await?;
+
+        debug!(
+            "Finished writing record {}/{}/{} with state {:?}",
+            self.bucket, self.entry, block_id, state
+        );
+
+        Ok(())
+    }
+
+    /// Begin reading a record from a block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - Block to read from.
+    /// * `record_timestamp` - Timestamp of the record to read.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(file, offset)` - File to read from and offset to start reading.
+    ///
+    /// # Errors
+    ///
+    /// * `ReductError` - If file system operation failed.
+    async fn begin_read_record(
+        &mut self,
+        block: &Block,
+        record_timestamp: u64,
+    ) -> Result<(FileRef, u64), ReductError> {
+        self.use_counter.increment(block.block_id());
+
+        let path = self.path_to_data(block.block_id());
+        let offset = block.get_record(record_timestamp).unwrap().begin;
+        let file = FILE_CACHE.read(&path, SeekFrom::Start(offset)).await?;
+        Ok((file, offset))
+    }
+
+    /// Finish reading a record from a block.
+    ///
+    /// This method will decrement the use counter of the block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_id` - ID of the block to read from.
+    ///
+    fn finish_read_record(&mut self, block_id: u64) {
+        self.use_counter.decrement(block_id);
     }
 
     pub fn index_mut(&mut self) -> &mut BlockIndex {
@@ -475,11 +604,14 @@ pub async fn spawn_read_task(
     block_ref: BlockRef,
     record_timestamp: u64,
 ) -> Result<RecordRx, ReductError> {
-    let (file, offset) = block_manager
-        .write()
-        .await
-        .begin_read_record(block_ref.clone(), record_timestamp)
-        .await?;
+    let (file_ref, offset) = {
+        let block = block_ref.read().await;
+        block_manager
+            .write()
+            .await
+            .begin_read_record(&block, record_timestamp)
+            .await?
+    };
 
     let (entry, bucket) = {
         let bm = block_manager.read().await;
@@ -494,37 +626,22 @@ pub async fn spawn_read_task(
     let local_bm = Arc::clone(&block_manager);
     tokio::spawn(async move {
         let mut read_bytes = 0;
-        loop {
-            let chunk_size = min(content_size - read_bytes, DEFAULT_MAX_READ_CHUNK as u64);
-            let mut buf = vec![0; chunk_size as usize];
 
-            let seek_and_read = async {
-                let mut lock = file.write().await;
-                lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
-                lock.read(&mut buf).await
-            };
+        while read_bytes < content_size {
+            let (buf, read) =
+                match read_in_chunks(&file_ref, offset, content_size, read_bytes).await {
+                    Ok((buf, read)) => (buf, read),
+                    Err(e) => {
+                        if let Err(e) = tx.send_timeout(Err(e), IO_OPERATION_TIMEOUT).await {
+                            debug!(
+                                "Failed to send record {}/{}/{}: {}",
+                                bucket, entry, record_timestamp, e
+                            ); // for some reason the receiver is closed
+                        }
+                        break;
+                    }
+                };
 
-            let read = match seek_and_read.await {
-                Ok(read) => read,
-                Err(e) => {
-                    let _ = tx
-                        .send(Err(internal_server_error!(
-                            "Failed to read record chunk: {}",
-                            e
-                        )))
-                        .await;
-                    break;
-                }
-            };
-
-            if read == 0 {
-                let _ = tx
-                    .send(Err(internal_server_error!(
-                        "Failed to read record chunk: EOF",
-                    )))
-                    .await;
-                break;
-            }
             if let Err(e) = tx.send_timeout(Ok(buf.into()), IO_OPERATION_TIMEOUT).await {
                 debug!(
                     "Failed to send record {}/{}/{}: {}",
@@ -534,16 +651,40 @@ pub async fn spawn_read_task(
             }
 
             read_bytes += read as u64;
-            if read_bytes == content_size {
-                break;
-            }
-
             local_bm.write().await.use_counter.update(block_id);
         }
 
         local_bm.write().await.finish_read_record(block_id);
     });
     Ok(rx)
+}
+
+async fn read_in_chunks(
+    file: &FileRef,
+    offset: u64,
+    content_size: u64,
+    read_bytes: u64,
+) -> Result<(Vec<u8>, usize), ReductError> {
+    let chunk_size = min(content_size - read_bytes, DEFAULT_MAX_READ_CHUNK as u64);
+    let mut buf = vec![0; chunk_size as usize];
+
+    let seek_and_read = async {
+        let mut lock = file.write().await;
+        lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
+        lock.read(&mut buf).await
+    };
+
+    let read = match seek_and_read.await {
+        Ok(read) => read,
+        Err(e) => {
+            return Err(internal_server_error!("Failed to read record chunk: {}", e));
+        }
+    };
+
+    if read == 0 {
+        return Err(internal_server_error!("Failed to read record chunk: EOF"));
+    }
+    Ok((buf, read))
 }
 
 /// Spawn a task that writes a record to a block.
@@ -569,14 +710,14 @@ pub async fn spawn_write_task(
     let (file, offset) = {
         let mut bm = block_manager.write().await;
 
-        {
+        let (file, offset) = {
             let block = block_ref.read().await;
             bm.index_mut().insert_or_update(block.to_owned());
-        }
+            bm.begin_write_record(&block, record_timestamp).await?
+        };
 
         bm.save_block(block_ref.clone()).await?;
-        bm.begin_write_record(block_ref.clone(), record_timestamp)
-            .await?
+        (file, offset)
     };
 
     let (tx, mut rx) = channel(CHANNEL_BUFFER_SIZE);
@@ -670,408 +811,555 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
+    use futures_util::AsyncReadExt;
     use std::time::Duration;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
     use tokio::time::sleep;
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_starting_block(#[future] block_manager: BlockManager) {
-        let mut block_manager = block_manager.await;
-        let block_id = 1_000_005;
+    mod block_operations {
+        use super::*;
 
-        let block = block_manager
-            .start_new_block(block_id, 1024)
-            .await
-            .unwrap()
-            .read()
-            .await
-            .clone();
-        assert_eq!(block.block_id(), block_id,);
+        #[rstest]
+        #[tokio::test]
+        async fn test_starting_block(#[future] block_manager: BlockManager) {
+            let mut block_manager = block_manager.await;
+            let block_id = 1_000_005;
 
-        // Create an empty block
-        block_manager.save_cache_on_disk().await.unwrap();
-        let file = std::fs::File::open(
-            block_manager
-                .path
-                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
-        )
-        .unwrap();
-        assert_eq!(file.metadata().unwrap().len(), 1024);
+            let block = block_manager
+                .start_new_block(block_id, 1024)
+                .await
+                .unwrap()
+                .read()
+                .await
+                .clone();
+            assert_eq!(block.block_id(), block_id,);
 
-        // Create a block descriptor
-        let buf = std::fs::read(
-            block_manager
-                .path
-                .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
-        )
-        .unwrap();
-
-        let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
-        assert_eq!(block_from_file, block.to_owned());
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_loading_block(#[future] block_manager: BlockManager, block_id: u64) {
-        let mut block_manager = block_manager.await;
-
-        block_manager.start_new_block(block_id, 1024).await.unwrap();
-        let block_ref = block_manager.start_new_block(20000005, 1024).await.unwrap();
-        let block = block_ref.read().await;
-        let loaded_block = block_manager.load_block(block.block_id()).await.unwrap();
-        assert_eq!(loaded_block.read().await.block_id(), block.block_id());
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_start_reading(#[future] block_manager: BlockManager, block_id: u64) {
-        let mut block_manager = block_manager.await;
-        let block = block_manager.start_new_block(block_id, 1024).await.unwrap();
-        let block_id = block.read().await.block_id();
-        let loaded_block = block_manager.load_block(block_id).await.unwrap();
-        assert_eq!(loaded_block.read().await.block_id(), block_id);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_finish_block(#[future] block_manager: BlockManager, block_id: u64) {
-        let mut block_manager = block_manager.await;
-        let block = block_manager
-            .start_new_block(block_id + 1, 1024)
-            .await
+            // Create an empty block
+            block_manager.save_cache_on_disk().await.unwrap();
+            let file = std::fs::File::open(
+                block_manager
+                    .path
+                    .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+            )
             .unwrap();
-        let block_id = block.read().await.block_id();
-        let loaded_block = block_manager.load_block(block_id).await.unwrap();
-        assert_eq!(loaded_block.read().await.block_id(), block_id);
+            assert_eq!(file.metadata().unwrap().len(), 1024);
 
-        block_manager.finish_block(loaded_block).await.unwrap();
-
-        let file = std::fs::File::open(
-            block_manager
-                .path
-                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
-        )
-        .unwrap();
-        assert_eq!(file.metadata().unwrap().len(), 0);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_unfinished_writing(
-        #[future] block_manager: BlockManager,
-        #[future] block: BlockRef,
-        block_id: u64,
-    ) {
-        let block_manager = Arc::new(RwLock::new(block_manager.await));
-        let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
-            .await
+            // Create a block descriptor
+            let buf = std::fs::read(
+                block_manager
+                    .path
+                    .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
+            )
             .unwrap();
 
-        tx.send(Ok(None)).await.unwrap();
-        drop(tx);
-        sleep(Duration::from_millis(10)).await; // wait for thread to finish
-
-        let block_ref = block_manager
-            .write()
-            .await
-            .load_block(block_id)
-            .await
-            .unwrap();
-        assert_eq!(block_ref.read().await.get_record(0).unwrap().state, 2);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_update_index_when_start_new_one(
-        #[future] block_manager: BlockManager,
-        #[future] block: BlockRef,
-        block_id: u64,
-    ) {
-        let block_manager = Arc::new(RwLock::new(block_manager.await));
-        let record = Record {
-            timestamp: Some(Timestamp {
-                seconds: 1,
-                nanos: 0,
-            }),
-            begin: 0,
-            end: 5,
-            state: 1,
-            labels: vec![],
-            content_type: "".to_string(),
-        };
-        let block = block.await;
-        block.write().await.insert_or_update_record(record.clone());
-
-        let tx = spawn_write_task(Arc::clone(&block_manager), block, 1000_000)
-            .await
-            .unwrap();
-        tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
-        drop(tx);
-        sleep(Duration::from_millis(10)).await; // wait for thread to finish
-
-        // must save record in WAL
-        let mut bm = block_manager.write().await;
-        {
-            let entries = bm.wal.read(block_id).await.unwrap();
-            assert_eq!(entries.len(), 1);
-            let record_from_wall = match &entries[0] {
-                WalEntry::WriteRecord(record) => record,
-                _ => panic!("Expected WriteRecord"),
-            };
-
-            assert_eq!(record, *record_from_wall);
+            let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
+            assert_eq!(block_from_file, block.to_owned());
         }
 
-        let index = BlockIndex::from_proto(
-            PathBuf::new(),
-            BlockIndexProto::decode(
+        #[rstest]
+        #[tokio::test]
+        async fn test_loading_block(#[future] block_manager: BlockManager, block_id: u64) {
+            let mut block_manager = block_manager.await;
+
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
+            let block_ref = block_manager.start_new_block(20000005, 1024).await.unwrap();
+            let block = block_ref.read().await;
+            let loaded_block = block_manager.load_block(block.block_id()).await.unwrap();
+            assert_eq!(loaded_block.read().await.block_id(), block.block_id());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_start_reading(#[future] block_manager: BlockManager, block_id: u64) {
+            let mut block_manager = block_manager.await;
+            let block = block_manager.start_new_block(block_id, 1024).await.unwrap();
+            let block_id = block.read().await.block_id();
+            let loaded_block = block_manager.load_block(block_id).await.unwrap();
+            assert_eq!(loaded_block.read().await.block_id(), block_id);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_finish_block(#[future] block_manager: BlockManager, block_id: u64) {
+            let mut block_manager = block_manager.await;
+            let block = block_manager
+                .start_new_block(block_id + 1, 1024)
+                .await
+                .unwrap();
+            let block_id = block.read().await.block_id();
+            let loaded_block = block_manager.load_block(block_id).await.unwrap();
+            assert_eq!(loaded_block.read().await.block_id(), block_id);
+
+            block_manager.finish_block(loaded_block).await.unwrap();
+
+            let file = std::fs::File::open(
+                block_manager
+                    .path
+                    .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+            )
+            .unwrap();
+            assert_eq!(file.metadata().unwrap().len(), 0);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_unfinished_writing(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
+            let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
+                .await
+                .unwrap();
+
+            tx.send(Ok(None)).await.unwrap();
+            drop(tx);
+            sleep(Duration::from_millis(10)).await; // wait for thread to finish
+
+            let block_ref = block_manager
+                .write()
+                .await
+                .load_block(block_id)
+                .await
+                .unwrap();
+            assert_eq!(block_ref.read().await.get_record(0).unwrap().state, 2);
+        }
+    }
+
+    mod index_operations {
+        use super::*;
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_index_when_start_new_one(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
+            let record = Record {
+                timestamp: Some(Timestamp {
+                    seconds: 1,
+                    nanos: 0,
+                }),
+                begin: 0,
+                end: 5,
+                state: 1,
+                labels: vec![],
+                content_type: "".to_string(),
+            };
+            let block = block.await;
+            block.write().await.insert_or_update_record(record.clone());
+
+            let tx = spawn_write_task(Arc::clone(&block_manager), block, 1000_000)
+                .await
+                .unwrap();
+            tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
+            drop(tx);
+            sleep(Duration::from_millis(10)).await; // wait for thread to finish
+
+            // must save record in WAL
+            let mut bm = block_manager.write().await;
+            {
+                let entries = bm.wal.read(block_id).await.unwrap();
+                assert_eq!(entries.len(), 1);
+                let record_from_wall = match &entries[0] {
+                    WalEntry::WriteRecord(record) => record,
+                    _ => panic!("Expected WriteRecord"),
+                };
+
+                assert_eq!(record, *record_from_wall);
+            }
+
+            let index = BlockIndex::from_proto(
+                PathBuf::new(),
+                BlockIndexProto::decode(
+                    std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                index.get_block(block_id).unwrap().record_count,
+                1,
+                "index not updated"
+            );
+
+            // drop cache in disk when block is changed
+            let _ = bm.start_new_block(block_id + 1, 1024).await.unwrap();
+            let err = bm.wal.read(block_id).await.err().unwrap();
+            assert_eq!(
+                err.status(),
+                ErrorCode::InternalServerError,
+                "WAL removed after index updated"
+            );
+
+            let index = BlockIndex::from_proto(
+                PathBuf::new(),
+                BlockIndexProto::decode(
+                    std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                index.get_block(block_id).unwrap().record_count,
+                2,
+                "index update"
+            );
+
+            let er = bm.wal.read(block_id + 1).await.err().unwrap();
+            assert_eq!(
+                er.status(),
+                ErrorCode::InternalServerError,
+                "WAL not removed after index updated"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_index_when_update_labels(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let mut bm = block_manager.await;
+            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+                .await
+                .unwrap();
+            assert_eq!(
+                index.get_block(block_id).unwrap().metadata_size,
+                21,
+                "index not updated"
+            );
+
+            let block = block.await;
+            let record = {
+                let lock = block.write().await;
+                let mut record = lock.get_record(0).unwrap().clone();
+                record.labels = vec![Label {
+                    name: "key".to_string(),
+                    value: "value".to_string(),
+                }];
+                record
+            };
+
+            block.write().await.insert_or_update_record(record.clone());
+            bm.update_records(block, vec![record]).await.unwrap();
+            let block_index_proto = BlockIndexProto::decode(
                 std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
                     .unwrap()
                     .as_slice(),
             )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            index.get_block(block_id).unwrap().record_count,
-            1,
-            "index not updated"
-        );
+            .unwrap();
+            assert_eq!(
+                block_index_proto.blocks[0].metadata_size, 35,
+                "index updated"
+            );
+        }
 
-        // drop cache in disk when block is changed
-        let _ = bm.start_new_block(block_id + 1, 1024).await.unwrap();
-        let err = bm.wal.read(block_id).await.err().unwrap();
-        assert_eq!(
-            err.status(),
-            ErrorCode::InternalServerError,
-            "WAL removed after index updated"
-        );
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_index_when_remove_block(
+            #[future] block_manager: BlockManager,
+            block_id: u64,
+        ) {
+            let mut bm = block_manager.await;
+            bm.remove_block(block_id).await.unwrap();
 
-        let index = BlockIndex::from_proto(
-            PathBuf::new(),
-            BlockIndexProto::decode(
-                std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
-                    .unwrap()
-                    .as_slice(),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            index.get_block(block_id).unwrap().record_count,
-            2,
-            "index update"
-        );
-
-        let er = bm.wal.read(block_id + 1).await.err().unwrap();
-        assert_eq!(
-            er.status(),
-            ErrorCode::InternalServerError,
-            "WAL not removed after index updated"
-        );
+            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+                .await
+                .unwrap();
+            assert!(index.get_block(block_id).is_none(), "index updated");
+        }
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_update_index_when_update_labels(
-        #[future] block_manager: BlockManager,
-        #[future] block: BlockRef,
-        block_id: u64,
-    ) {
-        let mut bm = block_manager.await;
-        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
-            .await
-            .unwrap();
-        assert_eq!(
-            index.get_block(block_id).unwrap().metadata_size,
-            21,
-            "index not updated"
-        );
+    mod read_writer_counters {
+        use super::*;
 
-        let block = block.await;
-        let record = {
-            let lock = block.write().await;
-            let mut record = lock.get_record(0).unwrap().clone();
-            record.labels = vec![Label {
-                name: "key".to_string(),
-                value: "value".to_string(),
-            }];
-            record
-        };
-
-        block.write().await.insert_or_update_record(record.clone());
-        bm.update_records(block, vec![0]).await.unwrap();
-        let block_index_proto = BlockIndexProto::decode(
-            std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
-                .unwrap()
-                .as_slice(),
-        )
-        .unwrap();
-        assert_eq!(
-            block_index_proto.blocks[0].metadata_size, 35,
-            "index updated"
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_update_index_when_remove_block(
-        #[future] block_manager: BlockManager,
-        block_id: u64,
-    ) {
-        let mut bm = block_manager.await;
-        bm.remove_block(block_id).await.unwrap();
-
-        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
-            .await
-            .unwrap();
-        assert!(index.get_block(block_id).is_none(), "index updated");
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_remove_with_writers(
-        #[future] block_manager: BlockManager,
-        #[future] block: BlockRef,
-        block_id: u64,
-    ) {
-        let block_manager = Arc::new(RwLock::new(block_manager.await));
-        let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            block_manager
-                .write()
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_with_writers(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
+            let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
                 .await
-                .remove_block(block_id)
-                .await
-                .err(),
-            Some(internal_server_error!(
-                "Cannot remove block {} because it is still in use",
-                block_id
-            ))
-        );
+                .unwrap();
 
-        tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
-        drop(tx);
-        sleep(Duration::from_millis(10)).await; // wait for thread to finish
-        assert_eq!(
-            block_manager
-                .write()
-                .await
-                .remove_block(block_id)
-                .await
-                .err(),
-            None
-        );
-    }
+            assert_eq!(
+                block_manager
+                    .write()
+                    .await
+                    .remove_block(block_id)
+                    .await
+                    .err(),
+                Some(internal_server_error!(
+                    "Cannot remove block {} because it is still in use",
+                    block_id
+                ))
+            );
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_remove_block_with_writers_timeout(
-        #[future] block_manager: BlockManager,
-        #[future] block: BlockRef,
-        block_id: u64,
-    ) {
-        let block_manager = Arc::new(RwLock::new(block_manager.await));
-        spawn_write_task(Arc::clone(&block_manager), block.await, 0)
-            .await
-            .unwrap();
-        assert!(block_manager
-            .write()
-            .await
-            .remove_block(block_id)
-            .await
-            .err()
-            .is_some());
+            tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
+            drop(tx);
+            sleep(Duration::from_millis(10)).await; // wait for thread to finish
+            assert_eq!(
+                block_manager
+                    .write()
+                    .await
+                    .remove_block(block_id)
+                    .await
+                    .err(),
+                None
+            );
+        }
 
-        sleep(IO_OPERATION_TIMEOUT).await;
-        assert!(
-            block_manager
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_block_with_writers_timeout(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
+            spawn_write_task(Arc::clone(&block_manager), block.await, 0)
+                .await
+                .unwrap();
+            assert!(block_manager
                 .write()
                 .await
                 .remove_block(block_id)
                 .await
                 .err()
-                .is_none(),
-            "Timeout should have unlocked the block"
-        );
-    }
+                .is_some());
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_remove_block_with_readers(
-        #[future] block_manager: BlockManager,
-        #[future] block: BlockRef,
-        block_id: u64,
-    ) {
-        let block_manager = Arc::new(RwLock::new(block_manager.await));
+            sleep(IO_OPERATION_TIMEOUT).await;
+            assert!(
+                block_manager
+                    .write()
+                    .await
+                    .remove_block(block_id)
+                    .await
+                    .err()
+                    .is_none(),
+                "Timeout should have unlocked the block"
+            );
+        }
 
-        let mut rx = spawn_read_task(Arc::clone(&block_manager), block.await, 0)
-            .await
-            .unwrap();
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_block_with_readers(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
 
-        assert_eq!(
-            block_manager
-                .write()
+            let mut rx = spawn_read_task(Arc::clone(&block_manager), block.await, 0)
                 .await
-                .remove_block(block_id)
+                .unwrap();
+
+            assert_eq!(
+                block_manager
+                    .write()
+                    .await
+                    .remove_block(block_id)
+                    .await
+                    .err(),
+                Some(internal_server_error!(
+                    "Cannot remove block {} because it is still in use",
+                    block_id
+                ))
+            );
+
+            assert_eq!(rx.recv().await.unwrap().unwrap().as_ref(), b"hallo");
+            drop(rx);
+            sleep(Duration::from_millis(10)).await; // wait for thread to finish
+
+            assert_eq!(
+                block_manager
+                    .write()
+                    .await
+                    .remove_block(block_id)
+                    .await
+                    .err(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_block_with_readers_timeout(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
+            spawn_read_task(Arc::clone(&block_manager), block.await, 0)
                 .await
-                .err(),
-            Some(internal_server_error!(
-                "Cannot remove block {} because it is still in use",
-                block_id
-            ))
-        );
-
-        assert_eq!(rx.recv().await.unwrap().unwrap().as_ref(), b"hallo");
-        drop(rx);
-        sleep(Duration::from_millis(10)).await; // wait for thread to finish
-
-        assert_eq!(
-            block_manager
-                .write()
-                .await
-                .remove_block(block_id)
-                .await
-                .err(),
-            None
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_remove_block_with_readers_timeout(
-        #[future] block_manager: BlockManager,
-        #[future] block: BlockRef,
-        block_id: u64,
-    ) {
-        let block_manager = Arc::new(RwLock::new(block_manager.await));
-        spawn_read_task(Arc::clone(&block_manager), block.await, 0)
-            .await
-            .unwrap();
-        assert!(block_manager
-            .write()
-            .await
-            .remove_block(block_id)
-            .await
-            .err()
-            .is_some());
-
-        sleep(IO_OPERATION_TIMEOUT).await;
-        assert!(
-            block_manager
+                .unwrap();
+            assert!(block_manager
                 .write()
                 .await
                 .remove_block(block_id)
                 .await
                 .err()
-                .is_none(),
-            "Timeout should have unlocked the block"
-        );
+                .is_some());
+
+            sleep(IO_OPERATION_TIMEOUT).await;
+            assert!(
+                block_manager
+                    .write()
+                    .await
+                    .remove_block(block_id)
+                    .await
+                    .err()
+                    .is_none(),
+                "Timeout should have unlocked the block"
+            );
+        }
+    }
+
+    mod record_removing {
+        use super::*;
+        use rand::distributions::Alphanumeric;
+        use rand::{thread_rng, Rng};
+        use tokio::fs;
+
+        #[rstest]
+        #[case(0)]
+        #[case(500)]
+        #[case(DEFAULT_MAX_READ_CHUNK+1)]
+        #[tokio::test]
+        async fn test_remove_records(
+            #[case] record_size: usize,
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
+            let block_ref = block.await;
+            let (record, record_body) =
+                write_record(1, record_size, &block_manager, block_ref.clone()).await;
+
+            // remove first record
+            block_manager
+                .write()
+                .await
+                .remove_records(block_ref.clone(), vec![0])
+                .await
+                .unwrap();
+
+            let block = block_ref.read().await;
+            assert_eq!(block.record_count(), 1);
+
+            let record_time = ts_to_us(&record.timestamp.unwrap());
+            let record = block.get_record(record_time).unwrap();
+            assert_eq!(ts_to_us(&record.timestamp.unwrap()), record_time);
+            assert_eq!(record.begin, 0);
+            assert_eq!(record.end, record_size as u64);
+            assert_eq!(record.state, 1);
+
+            // read content
+            let mut rx =
+                spawn_read_task(Arc::clone(&block_manager), block_ref.clone(), record_time)
+                    .await
+                    .unwrap();
+
+            let mut received = BytesMut::new();
+            while let Some(Ok(chunk)) = rx.recv().await {
+                received.extend_from_slice(&chunk);
+            }
+            assert_eq!(received.len(), record_size);
+            assert_eq!(received, record_body.as_bytes());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_only_record(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+        ) {
+            let mut block_manager = block_manager.await;
+            let block_ref = block.await;
+            block_manager
+                .remove_records(block_ref.clone(), vec![0])
+                .await
+                .unwrap();
+
+            // block must be removed
+            let block = block_ref.read().await;
+            assert_eq!(block.record_count(), 0);
+            assert!(block_manager
+                .block_index
+                .get_block(block.block_id())
+                .is_none());
+            assert!(!block_manager.exist(block.block_id()).await.unwrap());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_records_wall(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+        ) {
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
+            let block_ref = block.await;
+            let (record, record_body) = write_record(1, 5, &block_manager, block_ref.clone()).await;
+
+            let mut bm = block_manager.write().await;
+
+            let block_id = block_ref.read().await.block_id();
+            fs::remove_file(bm.path_to_data(block_id)).await.unwrap();
+
+            bm.remove_records(block_ref.clone(), vec![1]).await.unwrap();
+
+            let entries = bm.wal.read(block_id).await.unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0], WalEntry::RemoveRecord(1));
+        }
+
+        async fn write_record(
+            record_time: u64,
+            record_size: usize,
+            block_manager: &Arc<RwLock<BlockManager>>,
+            block_ref: BlockRef,
+        ) -> (Record, String) {
+            let block_size = block_ref.read().await.size();
+            let record = Record {
+                timestamp: Some(us_to_ts(&record_time)),
+                begin: block_size,
+                end: (record_size as u64 + block_size),
+                state: 1,
+                labels: vec![],
+                content_type: "".to_string(),
+            };
+            block_ref
+                .write()
+                .await
+                .insert_or_update_record(record.clone());
+
+            let record_body: String = thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(record_size)
+                .map(char::from)
+                .collect();
+            let tx = spawn_write_task(Arc::clone(&block_manager), block_ref.clone(), record_time)
+                .await
+                .unwrap();
+            tx.send(Ok(Some(Bytes::from(record_body.clone()))))
+                .await
+                .unwrap();
+            drop(tx);
+            sleep(Duration::from_millis(10)).await; // wait for thread to finish
+            (record, record_body)
+        }
     }
 
     #[fixture]
@@ -1090,28 +1378,29 @@ mod tests {
         let path = tempdir().unwrap().into_path();
 
         let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
-        let block = bm.start_new_block(block_id, 1024).await.unwrap().clone();
-        block.write().await.insert_or_update_record(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 0,
-            }),
-            begin: 0,
-            end: 5,
-            state: 0,
-            labels: vec![],
-            content_type: "".to_string(),
-        });
+        let block_ref = bm.start_new_block(block_id, 1024).await.unwrap().clone();
+        {
+            let mut block = block_ref.write().await;
+            block.insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 0,
+                }),
+                begin: 0,
+                end: 5,
+                state: 0,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
 
-        bm.save_block(block.clone()).await.unwrap();
+            let (file, _) = bm.begin_write_record(&block, 0).await.unwrap();
+            file.write().await.write(b"hallo").await.unwrap();
+        }
 
-        let (file, _) = bm.begin_write_record(block.clone(), 0).await.unwrap();
-        file.write().await.write(b"hallo").await.unwrap();
         bm.finish_write_record(block_id, record::State::Finished, 0)
             .await
             .unwrap();
-
-        bm.save_block_on_disk(block).await.unwrap();
+        bm.save_block_on_disk(block_ref).await.unwrap();
         bm
     }
 }
