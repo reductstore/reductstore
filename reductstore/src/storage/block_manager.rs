@@ -23,7 +23,7 @@ use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{FileRef, FILE_CACHE};
-use crate::storage::proto::{record, Block as BlockProto, Record};
+use crate::storage::proto::{record, Block as BlockProto};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
 use reduct_base::error::ReductError;

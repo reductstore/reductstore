@@ -45,8 +45,6 @@ pub struct HistoricalQuery {
     current_block: Option<BlockRef>,
     /// The time of the last update. We use this to check if the query has expired.
     last_update: Instant,
-    /// The query options.
-    options: QueryOptions,
 
     /// Filters
     filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>>,
@@ -81,7 +79,6 @@ impl HistoricalQuery {
             records_from_current_block: VecDeque::new(),
             current_block: None,
             last_update: Instant::now(),
-            options,
             filters,
         }
     }

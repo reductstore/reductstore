@@ -1,7 +1,6 @@
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
-use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
 use std::collections::{BTreeMap, HashSet};
@@ -24,7 +23,7 @@ impl Entry {
             let bm = self.block_manager.read().await;
             for UpdateLabels {
                 time,
-                mut update,
+                update,
                 remove,
             } in updates
             {
@@ -53,7 +52,7 @@ impl Entry {
         // Update blocks
         for (block_id, records) in records_per_block {
             let mut bm = self.block_manager.write().await;
-            let mut block_ref = bm.load(block_id).await?;
+            let block_ref = bm.load(block_id).await?;
 
             let record_times = {
                 let mut block = block_ref.write().await;
@@ -113,9 +112,8 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::entry::tests::{entry, write_record_with_labels};
-    use mockall::predicate::str::contains;
+
     use rstest::rstest;
-    use std::fmt::format;
 
     #[rstest]
     #[tokio::test]
@@ -126,7 +124,7 @@ mod tests {
         write_stub_record(&mut entry, 3).await.unwrap();
 
         // update, remove and add labels
-        let mut result = entry
+        let result = entry
             .update_labels(vec![
                 make_update(0),
                 make_update(1),

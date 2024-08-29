@@ -10,7 +10,6 @@ use crate::storage::block_manager::{
 };
 use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
-use crate::storage::proto::record::Label;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
@@ -18,7 +17,7 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{internal_server_error, not_found, too_early, Labels};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
