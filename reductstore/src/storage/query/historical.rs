@@ -118,7 +118,7 @@ impl Query for HistoricalQuery {
 
             for block_id in block_range {
                 let bm = block_manager.read().await;
-                let block_ref = bm.load(block_id).await?;
+                let block_ref = bm.load_block(block_id).await?;
 
                 self.current_block = Some(block_ref);
                 let mut found_records = self.filter_records_from_current_block().await;
@@ -287,14 +287,19 @@ mod tests {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
         let block_manager = block_manager.await;
         {
-            let block_ref = block_manager.write().await.load(0).await.unwrap();
+            let block_ref = block_manager.write().await.load_block(0).await.unwrap();
             {
                 let mut block = block_ref.write().await;
                 let mut record = block.get_record(0).unwrap().clone();
                 record.state = record::State::Errored as i32;
                 block.insert_or_update_record(record);
             }
-            block_manager.write().await.save(block_ref).await.unwrap();
+            block_manager
+                .write()
+                .await
+                .save_block(block_ref)
+                .await
+                .unwrap();
         }
 
         assert_eq!(

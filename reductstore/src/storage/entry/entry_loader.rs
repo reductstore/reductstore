@@ -202,7 +202,7 @@ impl EntryLoader {
                         "Loading block {}/{} from block manager",
                         entry.name, block_id
                     );
-                    block_manager.load(block_id).await?
+                    block_manager.load_block(block_id).await?
                 } else {
                     debug!("Creating block {}/{} from WAL", entry.name, block_id);
                     Arc::new(RwLock::new(
@@ -243,10 +243,10 @@ impl EntryLoader {
                 }
 
                 if block_removed {
-                    block_manager.remove(block_id).await?;
+                    block_manager.remove_block(block_id).await?;
                 } else {
-                    block_manager.save(block_ref.clone()).await?;
-                    block_manager.finish(block_ref).await?;
+                    block_manager.save_block(block_ref.clone()).await?;
+                    block_manager.finish_block(block_ref).await?;
                 }
             }
 
@@ -276,7 +276,7 @@ mod tests {
 
         let mut bm = entry.block_manager.write().await;
         let records = bm
-            .load(1)
+            .load_block(1)
             .await
             .unwrap()
             .read()
@@ -373,7 +373,7 @@ mod tests {
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
         );
         {
-            let block_v18_ref = block_manager.start(1, 100).await.unwrap();
+            let block_v18_ref = block_manager.start_new_block(1, 100).await.unwrap();
             let mut block_v18 = block_v18_ref.write().await;
             block_v18.insert_or_update_record(Record {
                 timestamp: Some(us_to_ts(&1)),
@@ -408,7 +408,13 @@ mod tests {
 
         let block_manager =
             BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE))); // reload the block manager
-        let block_v19 = block_manager.load(1).await.unwrap().read().await.clone();
+        let block_v19 = block_manager
+            .load_block(1)
+            .await
+            .unwrap()
+            .read()
+            .await
+            .clone();
         assert_eq!(block_v19.record_count(), 2);
         assert_eq!(block_v19.size(), 20);
         assert_eq!(block_v19.metadata_size(), 46);
@@ -512,7 +518,7 @@ mod tests {
                 .block_manager
                 .write()
                 .await
-                .load(3)
+                .load_block(3)
                 .await
                 .unwrap()
                 .clone();
@@ -547,7 +553,13 @@ mod tests {
                 .await
                 .unwrap();
 
-            let block_ref = entry.block_manager.write().await.load(1).await.unwrap();
+            let block_ref = entry
+                .block_manager
+                .write()
+                .await
+                .load_block(1)
+                .await
+                .unwrap();
 
             let block = block_ref.read().await;
             assert_eq!(block.get_record(1), Some(&record1));
@@ -587,7 +599,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let block = entry.block_manager.read().await.load(1).await.clone();
+            let block = entry.block_manager.read().await.load_block(1).await.clone();
             assert_eq!(block.err().unwrap().status, InternalServerError,);
         }
 
@@ -610,9 +622,9 @@ mod tests {
             {
                 let mut block_manager = entry.block_manager.write().await;
 
-                block_manager.start(1, 10).await.unwrap();
+                block_manager.start_new_block(1, 10).await.unwrap();
 
-                block_manager.start(2, 10).await.unwrap();
+                block_manager.start_new_block(2, 10).await.unwrap();
                 block_manager.save_cache_on_disk().await.unwrap();
             }
 

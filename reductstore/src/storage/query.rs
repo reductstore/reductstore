@@ -163,7 +163,7 @@ mod tests {
         block_manager
             .write()
             .await
-            .load(0)
+            .load_block(0)
             .await
             .unwrap()
             .write()
@@ -205,7 +205,7 @@ mod tests {
 
         let mut block_manager =
             BlockManager::new(path.clone(), BlockIndex::new(path.join("index")));
-        let block_ref = block_manager.start(0, 10).await.unwrap();
+        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
         block_ref.write().await.insert_or_update_record(Record {
             timestamp: Some(Timestamp {
                 seconds: 0,
@@ -230,7 +230,7 @@ mod tests {
             content_type: "".to_string(),
         });
 
-        block_manager.finish(block_ref).await.unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
         Arc::new(RwLock::new(block_manager))
     }
 }

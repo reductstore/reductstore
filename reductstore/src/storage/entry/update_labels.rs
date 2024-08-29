@@ -5,6 +5,7 @@ use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
 use std::collections::{BTreeMap, HashSet};
 
+/// A struct that contains the timestamp of the record to update, the labels to update and the labels to remove.
 pub(crate) struct UpdateLabels {
     pub time: u64,
     pub update: Labels,
@@ -12,6 +13,19 @@ pub(crate) struct UpdateLabels {
 }
 
 impl Entry {
+    /// Update labels for multiple records.
+    ///
+    /// The method updates labels for multiple records. The records are identified by their timestamps
+    /// and batched by the block they belong to
+    ///
+    /// # Arguments
+    ///
+    /// * `updates` - A vector of `UpdateLabels` structs that contain the timestamp of the record to update,
+    ///
+    /// # Returns
+    ///
+    /// A map of timestamps to the result of the update operation. The result is either a vector of labels
+    /// or an error if the record was not found.
     pub async fn update_labels(
         &self,
         updates: Vec<UpdateLabels>,
@@ -52,7 +66,7 @@ impl Entry {
         // Update blocks
         for (block_id, records) in records_per_block {
             let mut bm = self.block_manager.write().await;
-            let block_ref = bm.load(block_id).await?;
+            let block_ref = bm.load_block(block_id).await?;
 
             let record_times = {
                 let mut block = block_ref.write().await;
@@ -165,7 +179,13 @@ mod tests {
         assert!(updated_labels.contains(expected_labels_3.get(1).unwrap()));
 
         // check if the records were updated
-        let block_ref = entry.block_manager.write().await.load(1).await.unwrap();
+        let block_ref = entry
+            .block_manager
+            .write()
+            .await
+            .load_block(1)
+            .await
+            .unwrap();
 
         let block = block_ref.read().await;
         assert_eq!(block.record_count(), 2);
@@ -180,7 +200,13 @@ mod tests {
         assert!(record.labels.contains(expected_labels_2.get(0).unwrap()));
         assert!(record.labels.contains(expected_labels_2.get(1).unwrap()));
 
-        let block_ref = entry.block_manager.write().await.load(3).await.unwrap();
+        let block_ref = entry
+            .block_manager
+            .write()
+            .await
+            .load_block(3)
+            .await
+            .unwrap();
 
         let block = block_ref.read().await;
         assert_eq!(block.record_count(), 1);
@@ -222,7 +248,13 @@ mod tests {
         assert!(updated_labels.contains(&expected_labels[0]));
         assert!(updated_labels.contains(&expected_labels[1]));
 
-        let block = entry.block_manager.write().await.load(1).await.unwrap();
+        let block = entry
+            .block_manager
+            .write()
+            .await
+            .load_block(1)
+            .await
+            .unwrap();
         let record = block.read().await.get_record(1).unwrap().clone();
         assert_eq!(record.labels.len(), 2);
         assert!(updated_labels.contains(&expected_labels[0]));

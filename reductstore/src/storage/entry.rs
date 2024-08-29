@@ -104,10 +104,11 @@ impl Entry {
         let mut bm = self.block_manager.write().await;
 
         let mut block_ref = if bm.index().tree().is_empty() {
-            bm.start(time, self.settings.max_block_size).await?
+            bm.start_new_block(time, self.settings.max_block_size)
+                .await?
         } else {
             let block_id = *bm.index().tree().last().unwrap();
-            bm.load(block_id).await?
+            bm.load_block(block_id).await?
         };
 
         let record_type = {
@@ -122,7 +123,9 @@ impl Entry {
                 if *index_tree.first().unwrap() > time {
                     // The timestamp is the earliest. We need to create a new block.
                     debug!("Timestamp {} is the earliest. Creating a new block", time);
-                    block_ref = bm.start(time, self.settings.max_block_size).await?;
+                    block_ref = bm
+                        .start_new_block(time, self.settings.max_block_size)
+                        .await?;
                     RecordType::BelatedFirst
                 } else {
                     block_ref = bm.find_block(time).await?;
@@ -174,8 +177,9 @@ impl Entry {
             if record_type == RecordType::Latest && (has_no_space || has_too_many_records) {
                 // We need to create a new block.
                 debug!("Creating a new block");
-                bm.finish(block_ref.clone()).await?;
-                bm.start(time, self.settings.max_block_size).await?
+                bm.finish_block(block_ref.clone()).await?;
+                bm.start_new_block(time, self.settings.max_block_size)
+                    .await?
             } else {
                 // We can just append to the latest block.
                 block_ref.clone()
@@ -361,7 +365,7 @@ impl Entry {
         }
 
         let oldest_block_id = *index_tree.first().unwrap();
-        bm.remove(oldest_block_id).await?;
+        bm.remove_block(oldest_block_id).await?;
 
         Ok(())
     }
@@ -424,7 +428,7 @@ mod tests {
 
             let mut bm = entry.block_manager.write().await;
             let records = bm
-                .load(1)
+                .load_block(1)
                 .await
                 .unwrap()
                 .read()
@@ -488,7 +492,7 @@ mod tests {
             let bm = entry.block_manager.read().await;
 
             assert_eq!(
-                bm.load(1)
+                bm.load_block(1)
                     .await
                     .unwrap()
                     .read()
@@ -507,7 +511,7 @@ mod tests {
             );
 
             assert_eq!(
-                bm.load(2000010)
+                bm.load_block(2000010)
                     .await
                     .unwrap()
                     .read()
@@ -543,7 +547,7 @@ mod tests {
 
             let bm = entry.block_manager.read().await;
             let records = bm
-                .load(1)
+                .load_block(1)
                 .await
                 .unwrap()
                 .read()
@@ -563,7 +567,7 @@ mod tests {
             );
 
             let records = bm
-                .load(2000010)
+                .load_block(2000010)
                 .await
                 .unwrap()
                 .read()
@@ -592,7 +596,7 @@ mod tests {
 
             let bm = entry.block_manager.read().await;
             let records = bm
-                .load(1000000)
+                .load_block(1000000)
                 .await
                 .unwrap()
                 .read()
@@ -622,7 +626,7 @@ mod tests {
 
             let bm = entry.block_manager.read().await;
             let records = bm
-                .load(1000000)
+                .load_block(1000000)
                 .await
                 .unwrap()
                 .read()
@@ -693,7 +697,7 @@ mod tests {
                 .block_manager
                 .write()
                 .await
-                .load(1000000)
+                .load_block(1000000)
                 .await
                 .unwrap()
                 .read()
