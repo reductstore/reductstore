@@ -23,7 +23,7 @@ use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{FileRef, FILE_CACHE};
-use crate::storage::proto::{record, Block as BlockProto, Record};
+use crate::storage::proto::{record, Block as BlockProto};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
 use reduct_base::error::ReductError;
@@ -255,66 +255,8 @@ impl BlockManager {
     fn path_to_data(&self, block_id: u64) -> PathBuf {
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
     }
-}
 
-pub(in crate::storage) trait ManageBlock {
-    /// Load block descriptor from disk.
-    ///
-    /// # Arguments
-    /// * `block_id` - ID of the block to load (begin time of the block).
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(block)` - Block was loaded successfully.
-    async fn load(&self, block_id: u64) -> Result<BlockRef, ReductError>;
-
-    /// Save block descriptor in cache and on disk if needed.
-    ///
-    ///
-    /// # Arguments
-    ///
-    /// * `block` - Block to save.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Block was saved successfully.
-    async fn save(&mut self, block: BlockRef) -> Result<(), ReductError>;
-
-    /// Start a new block
-    ///
-    /// # Arguments
-    ///
-    /// * `begin_time` - Begin time of the block.
-    /// * `max_block_size` - Maximum size of the block.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(block)` - Block was created successfully.
-    async fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<BlockRef, ReductError>;
-
-    /// Update a record in a block and save it to disk.
-    async fn update_record(&mut self, block: BlockRef, record: Record) -> Result<(), ReductError>;
-
-    /// Finish a block by truncating the file to the actual size.
-    ///
-    /// # Arguments
-    ///
-    /// * `block` - Block to finish.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Block was finished successfully.
-    async fn finish(&mut self, block: BlockRef) -> Result<(), ReductError>;
-
-    /// Remove a block from disk if there are no readers or writers.
-    async fn remove(&mut self, block_id: u64) -> Result<(), ReductError>;
-
-    /// Check if a block exists in the file system.
-    async fn exist(&self, block_id: u64) -> Result<bool, ReductError>;
-}
-
-impl ManageBlock for BlockManager {
-    async fn load(&self, block_id: u64) -> Result<BlockRef, ReductError> {
+    pub async fn load(&self, block_id: u64) -> Result<BlockRef, ReductError> {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id).await;
         if cached_block.is_none() {
@@ -339,7 +281,7 @@ impl ManageBlock for BlockManager {
         Ok(cached_block)
     }
 
-    async fn save(&mut self, block: BlockRef) -> Result<(), ReductError> {
+    pub async fn save(&mut self, block: BlockRef) -> Result<(), ReductError> {
         // cache is empty, save the block there first
         for (_, block) in self
             .block_cache
@@ -352,7 +294,11 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    async fn start(&mut self, block_id: u64, max_block_size: u64) -> Result<BlockRef, ReductError> {
+    pub async fn start(
+        &mut self,
+        block_id: u64,
+        max_block_size: u64,
+    ) -> Result<BlockRef, ReductError> {
         let block = Block::new(block_id);
 
         // create a block with data
@@ -371,18 +317,46 @@ impl ManageBlock for BlockManager {
         Ok(block_ref)
     }
 
-    async fn update_record(&mut self, block: BlockRef, record: Record) -> Result<(), ReductError> {
-        self.wal
-            .append(
-                block.read().await.block_id(),
-                WalEntry::UpdateRecord(record),
-            )
-            .await?;
+    /// Update records in a block and save it on disk.
+    ///
+    /// Make sure the records are in the block before calling this method.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - Block to update.
+    /// * `records` - Timestamps of the records to update.
+    ///
+    ///
+    /// # Panics
+    ///
+    /// * If the record is not in the block.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the records were updated successfully.
+    ///
+    /// # Errors
+    ///
+    /// * `ReductError` - If failed to append to WAL or save the block on disk.
+    pub async fn update_records(
+        &mut self,
+        block: BlockRef,
+        records: Vec<u64>,
+    ) -> Result<(), ReductError> {
+        for record in records {
+            let block = block.read().await;
+            self.wal
+                .append(
+                    block.block_id(),
+                    WalEntry::UpdateRecord(block.get_record(record).unwrap().clone()),
+                )
+                .await?;
+        }
 
         self.save_block_on_disk(block).await
     }
 
-    async fn finish(&mut self, block: BlockRef) -> Result<(), ReductError> {
+    pub async fn finish(&mut self, block: BlockRef) -> Result<(), ReductError> {
         let block = block.read().await;
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.block_id());
@@ -402,7 +376,7 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    async fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
+    pub async fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
         if !self.use_counter.clean_stale_and_check(block_id) {
             return Err(internal_server_error!(
                 "Cannot remove block {} because it is still in use",
@@ -428,7 +402,7 @@ impl ManageBlock for BlockManager {
         Ok(())
     }
 
-    async fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
+    pub async fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
         let path = self.path_to_desc(block_id);
         Ok(path.try_exists()?)
     }
@@ -876,7 +850,7 @@ mod tests {
         };
 
         block.write().await.insert_or_update_record(record.clone());
-        bm.update_record(block, record).await.unwrap();
+        bm.update_records(block, vec![0]).await.unwrap();
         let block_index_proto = BlockIndexProto::decode(
             std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
                 .unwrap()

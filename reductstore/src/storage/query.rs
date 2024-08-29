@@ -91,7 +91,6 @@ pub(super) fn spawn_query_task(
 mod tests {
     use super::*;
     use crate::storage::block_manager::block_index::BlockIndex;
-    use crate::storage::block_manager::ManageBlock;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
     use rstest::*;

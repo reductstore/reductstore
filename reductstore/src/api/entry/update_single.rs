@@ -15,6 +15,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
+use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry?ts=<number>
 pub(crate) async fn update_record(
@@ -70,13 +71,17 @@ pub(crate) async fn update_record(
     }
 
     let entry_name = path.get("entry_name").unwrap();
-    let new_labels = components
+    let batched_result = components
         .storage
         .write()
         .await
         .get_bucket_mut(bucket)?
         .get_entry_mut(entry_name)?
-        .update_labels(ts, labels_to_update.clone(), labels_to_remove)
+        .update_labels(vec![UpdateLabels {
+            time: ts,
+            update: labels_to_update,
+            remove: labels_to_remove,
+        }])
         .await?;
 
     components
@@ -86,7 +91,7 @@ pub(crate) async fn update_record(
         .notify(TransactionNotification {
             bucket: bucket.clone(),
             entry: entry_name.clone(),
-            labels: new_labels,
+            labels: batched_result.get(&ts).unwrap().clone()?,
             event: Transaction::UpdateRecord(ts),
         })
         .await?;
