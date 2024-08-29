@@ -19,7 +19,7 @@ use reduct_base::error::ReductError;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
-    BlockManager, ManageBlock, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+    BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
@@ -260,7 +260,6 @@ impl EntryLoader {
 #[cfg(test)]
 mod tests {
     use crate::storage::block_manager::wal::WalEntry;
-    use crate::storage::block_manager::ManageBlock;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
 

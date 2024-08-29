@@ -18,6 +18,8 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
+use crate::storage::entry::update_labels::UpdateLabels;
+use crate::storage::proto::record::Label;
 
 // PATCH /:bucket/:entry/batch
 pub(crate) async fn update_batched_records(
@@ -48,7 +50,7 @@ pub(crate) async fn update_batched_records(
 
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
-    let mut error_map = BTreeMap::new();
+    let mut records_to_update = Vec::new();
 
     for (time, v) in record_headers {
         let header = parse_batched_header(v.to_str().unwrap())?;
@@ -63,19 +65,31 @@ pub(crate) async fn update_batched_records(
             }
         }
 
+        records_to_update.push(UpdateLabels {
+            time,
+            update: labels_to_update,
+            remove: labels_to_remove,
+        });
+    }
+
+    let result = {
         let mut storage = components.storage.write().await;
         let entry = storage
             .get_bucket_mut(bucket_name)?
             .get_entry_mut(entry_name)?;
-        match entry
-            .update_labels(time, labels_to_update.clone(), labels_to_remove)
-            .await
-        {
+        entry.update_labels(records_to_update).await?
+    };
+
+    let mut headers = HeaderMap::new();
+    for (time, result) in result {
+        match result {
             Err(err) => {
-                error_map.insert(time, err);
+                headers.insert(
+                    HeaderName::from_str(&format!("x-reduct-error-{}", time)).unwrap(),
+                    HeaderValue::from_str(&format!("{},{}", err.status(), err.message())).unwrap(),
+                );
             }
             Ok(new_labels) => {
-                drop(storage); // drop the lock because we may need to wait for the replication
                 let mut replication_repo = components.replication_repo.write().await;
                 replication_repo
                     .notify(TransactionNotification {
@@ -88,14 +102,6 @@ pub(crate) async fn update_batched_records(
             }
         };
     }
-
-    let mut headers = HeaderMap::new();
-    error_map.iter().for_each(|(time, err)| {
-        headers.insert(
-            HeaderName::from_str(&format!("x-reduct-error-{}", time)).unwrap(),
-            HeaderValue::from_str(&format!("{},{}", err.status(), err.message())).unwrap(),
-        );
-    });
 
     Ok(headers.into())
 }

@@ -75,7 +75,6 @@ impl Default for QueryOptions {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::storage::block_manager::ManageBlock;
     use crate::storage::proto::record::{Label, State as RecordState};
     use crate::storage::proto::Record;
 

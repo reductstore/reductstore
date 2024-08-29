@@ -2,11 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 mod entry_loader;
+pub(crate) mod update_labels;
 
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{
-    spawn_read_task, spawn_write_task, BlockManager, BlockRef, ManageBlock, RecordTx,
-    BLOCK_INDEX_FILE,
+    spawn_read_task, spawn_write_task, BlockManager, BlockRef, RecordTx, BLOCK_INDEX_FILE,
 };
 use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
@@ -17,7 +17,7 @@ use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{internal_server_error, too_early, Labels};
+use reduct_base::{internal_server_error, not_found, too_early, Labels};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
@@ -236,9 +236,7 @@ impl Entry {
             let block = block_ref.read().await;
             let record = block
                 .get_record(time)
-                .ok_or_else(|| {
-                    ReductError::not_found(&format!("No record with timestamp {}", time))
-                })?
+                .ok_or_else(|| not_found!("No record with timestamp {}", time))?
                 .clone();
             (block_ref.clone(), record)
         };
@@ -259,63 +257,6 @@ impl Entry {
 
         let rx = spawn_read_task(self.block_manager.clone(), block_ref, time).await?;
         Ok(RecordReader::new(rx, record.clone(), true))
-    }
-
-    pub async fn update_labels(
-        &self,
-        time: u64,
-        mut update: Labels,
-        remove: HashSet<String>,
-    ) -> Result<Vec<Label>, ReductError> {
-        debug!("Updating labels for ts={}", time);
-
-        let mut bm = self.block_manager.write().await;
-        let block_ref = bm.find_block(time).await?;
-        let record = {
-            let block = block_ref.write().await;
-            let mut record = block
-                .get_record(time)
-                .ok_or_else(|| {
-                    ReductError::not_found(&format!("No record with timestamp {}", time))
-                })?
-                .clone();
-
-            let mut new_labels = Vec::new();
-            for label in &record.labels {
-                // remove labels
-                if remove.contains(label.name.as_str()) {
-                    continue;
-                }
-
-                // update existing labels or add new labels
-                match update.remove(label.name.as_str()) {
-                    Some(value) => {
-                        new_labels.push(Label {
-                            name: label.name.clone(),
-                            value,
-                        });
-                    }
-                    None => {
-                        new_labels.push(label.clone());
-                    }
-                }
-            }
-
-            // add new labels
-            for (name, value) in update {
-                new_labels.push(Label { name, value });
-            }
-
-            record.labels = new_labels;
-            record
-        };
-
-        block_ref
-            .write()
-            .await
-            .insert_or_update_record(record.clone());
-        bm.update_record(block_ref, record.clone()).await?;
-        Ok(record.labels)
     }
 
     /// Query records for a time range.
@@ -1017,121 +958,6 @@ mod tests {
         }
     }
 
-    mod update_labels {
-        use super::*;
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_update_labels(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            let mut new_labels = entry
-                .update_labels(
-                    1000000,
-                    Labels::from_iter(vec![
-                        ("a".to_string(), "x".to_string()),
-                        ("e".to_string(), "f".to_string()),
-                    ]),
-                    HashSet::new(),
-                )
-                .await
-                .unwrap();
-
-            let block_ref = entry
-                .block_manager
-                .write()
-                .await
-                .load(1000000)
-                .await
-                .unwrap();
-            let mut record = block_ref.read().await.get_record(1000000).unwrap().clone();
-            record.labels.sort_by(|a, b| a.name.cmp(&b.name));
-            new_labels.sort_by(|a, b| a.name.cmp(&b.name));
-
-            assert_eq!(record.labels.len(), 3);
-            assert_eq!(record.labels[0].name, "a");
-            assert_eq!(record.labels[0].value, "x");
-            assert_eq!(record.labels[1].name, "c");
-            assert_eq!(record.labels[1].value, "d");
-            assert_eq!(record.labels[2].name, "e");
-            assert_eq!(record.labels[2].value, "f");
-            assert_eq!(new_labels, record.labels, "should return new labels");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_update_labels_remove(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            entry
-                .update_labels(
-                    1000000,
-                    Labels::new(),
-                    HashSet::from_iter(vec!["a".to_string()]),
-                )
-                .await
-                .unwrap();
-
-            let block = entry
-                .block_manager
-                .write()
-                .await
-                .load(1000000)
-                .await
-                .unwrap();
-            let record = block.read().await.get_record(1000000).unwrap().clone();
-            assert_eq!(record.labels.len(), 1);
-            assert_eq!(record.labels[0].name, "c");
-            assert_eq!(record.labels[0].value, "d");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_update_nothing(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            entry
-                .update_labels(1000000, Labels::new(), HashSet::new())
-                .await
-                .unwrap();
-
-            let block = entry
-                .block_manager
-                .write()
-                .await
-                .load(1000000)
-                .await
-                .unwrap();
-            let record = block.read().await.get_record(1000000).unwrap().clone();
-            assert_eq!(record.labels.len(), 2);
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_remove_labels_not_found(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            let err = entry
-                .update_labels(
-                    1000000,
-                    Labels::new(),
-                    HashSet::from_iter(vec!["x".to_string()]),
-                )
-                .await;
-
-            assert!(err.is_ok(), "Ignore removing labels that are not found")
-        }
-
-        async fn write_stub_record(mut entry: &mut Entry, time: u64) -> Result<(), ReductError> {
-            write_record_with_labels(
-                &mut entry,
-                time,
-                vec![],
-                Labels::from_iter(vec![
-                    ("a".to_string(), "b".to_string()),
-                    ("c".to_string(), "d".to_string()),
-                ]),
-            )
-            .await
-        }
-    }
-
     #[rstest]
     #[tokio::test]
     async fn test_info(path: PathBuf) {
@@ -1273,7 +1099,7 @@ mod tests {
         }
     }
 
-    async fn write_record_with_labels(
+    pub async fn write_record_with_labels(
         entry: &mut Entry,
         time: u64,
         data: Vec<u8>,

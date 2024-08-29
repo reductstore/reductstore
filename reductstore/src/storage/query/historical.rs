@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 
-use crate::storage::block_manager::{spawn_read_task, BlockManager, BlockRef, ManageBlock};
+use crate::storage::block_manager::{spawn_read_task, BlockManager, BlockRef};
 use crate::storage::bucket::RecordReader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
