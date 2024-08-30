@@ -12,23 +12,20 @@ use log::{debug, error, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use std::cmp::min;
-use std::env::temp_dir;
 
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::file_cache::{FileRef, FILE_CACHE};
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
+use crate::storage::proto::{record, ts_to_us, Block as BlockProto, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
 use block_index::BlockIndex;
-use hyper::header::CACHE_CONTROL;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
@@ -270,7 +267,7 @@ impl BlockManager {
     pub async fn update_records(
         &mut self,
         block_id: u64,
-        mut records: Vec<Record>,
+        records: Vec<Record>,
     ) -> Result<(), ReductError> {
         let block_ref = self.load_block(block_id).await?;
 
@@ -811,8 +808,8 @@ pub async fn spawn_write_task(
 mod tests {
     use super::*;
     use crate::storage::proto::record::Label;
-    use crate::storage::proto::BlockIndex as BlockIndexProto;
     use crate::storage::proto::Record;
+    use crate::storage::proto::{us_to_ts, BlockIndex as BlockIndexProto};
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
@@ -1093,7 +1090,7 @@ mod tests {
             #[future] block: BlockRef,
             block_id: u64,
         ) {
-            let mut block_manager = Arc::new(RwLock::new(block_manager.await));
+            let block_manager = Arc::new(RwLock::new(block_manager.await));
             let block = block.await;
             write_record(1, 100, &block_manager, block.clone()).await;
 
@@ -1262,9 +1259,6 @@ mod tests {
 
     mod record_removing {
         use super::*;
-        use rand::distributions::Alphanumeric;
-        use rand::{thread_rng, Rng};
-        use tokio::fs;
 
         #[rstest]
         #[case(0)]

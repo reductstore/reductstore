@@ -3,7 +3,7 @@
 
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
-use crate::storage::proto::{ts_to_us, Record};
+use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
 use std::collections::{BTreeMap, HashSet};
