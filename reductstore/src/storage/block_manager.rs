@@ -1340,11 +1340,10 @@ mod tests {
         async fn test_remove_records_wal(
             #[future] block_manager: BlockManager,
             #[future] block: BlockRef,
-            block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
             let block_ref = block.await;
-            let (record, record_body) = write_record(1, 5, &block_manager, block_ref.clone()).await;
+            write_record(1, 5, &block_manager, block_ref.clone()).await;
 
             let mut bm = block_manager.write().await;
 

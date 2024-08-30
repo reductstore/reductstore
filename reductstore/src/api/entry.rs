@@ -6,12 +6,14 @@ mod query;
 mod read_batched;
 mod read_single;
 mod remove_entry;
+mod remove_single;
 mod update_batched;
 mod update_single;
 mod write_batched;
 mod write_single;
+
 use crate::api::entry::read_batched::read_batched_records;
-use crate::api::entry::read_single::read_single_record;
+use crate::api::entry::read_single::read_record;
 use crate::api::entry::remove_entry::remove_entry;
 
 use crate::api::entry::write_batched::write_batched_records;
@@ -24,6 +26,7 @@ use axum::extract::FromRequest;
 
 use axum_extra::headers::HeaderMapExt;
 
+use crate::api::entry::remove_single::remove_record;
 use crate::api::entry::update_batched::update_batched_records;
 use crate::api::entry::update_single::update_record;
 use axum::body::Body;
@@ -109,17 +112,17 @@ pub struct QueryInfoAxum(QueryInfo);
 pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
-        .route("/:bucket_name/:entry_name", patch(update_record))
         .route(
             "/:bucket_name/:entry_name/batch",
             post(write_batched_records),
         )
+        .route("/:bucket_name/:entry_name", patch(update_record))
         .route(
             "/:bucket_name/:entry_name/batch",
             patch(update_batched_records),
         )
-        .route("/:bucket_name/:entry_name", get(read_single_record))
-        .route("/:bucket_name/:entry_name", head(read_single_record))
+        .route("/:bucket_name/:entry_name", get(read_record))
+        .route("/:bucket_name/:entry_name", head(read_record))
         .route("/:bucket_name/:entry_name/batch", get(read_batched_records))
         .route(
             "/:bucket_name/:entry_name/batch",
@@ -127,4 +130,5 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
         )
         .route("/:bucket_name/:entry_name/q", get(query::query))
         .route("/:bucket_name/:entry_name", delete(remove_entry))
+        .route("/:bucket_name/:entry_name", delete(remove_record))
 }
