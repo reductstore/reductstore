@@ -19,7 +19,6 @@ pub(crate) async fn remove_record(
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
-    _: Body,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
     check_permissions(

@@ -5,6 +5,7 @@ mod common;
 mod query;
 mod read_batched;
 mod read_single;
+mod remove_batched;
 mod remove_entry;
 mod remove_single;
 mod update_batched;
@@ -22,15 +23,16 @@ use crate::api::Components;
 use crate::api::HttpError;
 use crate::storage::storage::Storage;
 use axum::async_trait;
-use axum::extract::FromRequest;
+use axum::extract::{FromRequest, Path, Query, State};
 
 use axum_extra::headers::HeaderMapExt;
 
+use crate::api::entry::remove_batched::remove_batched_records;
 use crate::api::entry::remove_single::remove_record;
 use crate::api::entry::update_batched::update_batched_records;
 use crate::api::entry::update_single::update_record;
 use axum::body::Body;
-use axum::http::Request;
+use axum::http::{HeaderMap, Request};
 use axum::routing::{delete, get, head, patch, post};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::entry_api::QueryInfo;
@@ -109,6 +111,19 @@ async fn check_and_extract_ts_or_query_id(
 #[derive(IntoResponse, Twin)]
 pub struct QueryInfoAxum(QueryInfo);
 
+// Workaround for DELETE /:bucket/:entry and DELETE /:bucket/:entry?ts=<number>
+async fn remove_entry_router(
+    State(components): State<Arc<Components>>,
+    headers: HeaderMap,
+    path: Path<HashMap<String, String>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<(), HttpError> {
+    if params.is_empty() {
+        remove_entry(State(components), path, headers).await
+    } else {
+        remove_record(State(components), headers, path, Query(params)).await
+    }
+}
 pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/:bucket_name/:entry_name", post(write_record))
@@ -129,6 +144,9 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
             head(read_batched_records),
         )
         .route("/:bucket_name/:entry_name/q", get(query::query))
-        .route("/:bucket_name/:entry_name", delete(remove_entry))
-        .route("/:bucket_name/:entry_name", delete(remove_record))
+        .route("/:bucket_name/:entry_name", delete(remove_entry_router))
+        .route(
+            "/:bucket_name/:entry_name/batch",
+            delete(remove_batched_records),
+        )
 }

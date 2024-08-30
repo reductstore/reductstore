@@ -12,6 +12,7 @@ use axum_extra::headers::{Expect, Header, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures_util::StreamExt;
 
+use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::RecordTx;
 use crate::storage::proto::record::Label;
@@ -152,10 +153,7 @@ pub(crate) async fn write_batched_records(
 
     let mut headers = HeaderMap::new();
     error_map.iter().for_each(|(time, err)| {
-        headers.insert(
-            HeaderName::from_str(&format!("x-reduct-error-{}", time)).unwrap(),
-            HeaderValue::from_str(&format!("{},{}", err.status(), err.message())).unwrap(),
-        );
+        err_to_batched_header(&mut headers, *time, err);
     });
 
     Ok(headers.into())
