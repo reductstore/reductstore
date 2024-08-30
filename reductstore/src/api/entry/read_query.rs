@@ -48,6 +48,7 @@ pub(crate) async fn read_query(
 mod tests {
     use super::*;
     use crate::api::tests::{components, headers, path_to_entry_1};
+    use reduct_base::error::ErrorCode;
     use rstest::*;
 
     #[rstest]
