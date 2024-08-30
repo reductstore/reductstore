@@ -814,7 +814,6 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
-    use futures_util::AsyncReadExt;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use std::time::Duration;

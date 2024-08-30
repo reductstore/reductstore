@@ -3,10 +3,8 @@
 
 use crate::api::HttpError;
 use crate::storage::query::base::QueryOptions;
-use axum::extract::Query;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -182,7 +180,6 @@ fn parse_include_exclude_filters(
 mod tests {
     use super::*;
 
-    use reduct_base::msg::entry_api::EntryInfo;
     use rstest::rstest;
     use std::collections::HashMap;
     use std::time::Duration;

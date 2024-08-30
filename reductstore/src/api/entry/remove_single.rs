@@ -53,7 +53,7 @@ pub(crate) async fn remove_record(
 mod tests {
     use super::*;
 
-    use crate::api::tests::{components, empty_body, path_to_entry_1};
+    use crate::api::tests::{components, path_to_entry_1};
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::error::ReductError;
     use reduct_base::{not_found, unprocessable_entity};

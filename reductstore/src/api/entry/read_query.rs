@@ -5,16 +5,13 @@ use crate::api::entry::QueryInfoAxum;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
-use crate::storage::query::base::QueryOptions;
 
 use crate::api::entry::common::{parse_query_params, parse_time_range};
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
-use reduct_base::error::ErrorCode;
-use reduct_base::msg::entry_api::{EntryInfo, QueryInfo};
+use reduct_base::msg::entry_api::QueryInfo;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
 pub(crate) async fn read_query(
