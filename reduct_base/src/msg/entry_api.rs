@@ -27,3 +27,10 @@ pub struct QueryInfo {
     /// Unique query name
     pub id: u64,
 }
+
+/// Remove Query Info
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct RemoveQueryInfo {
+    /// Unique query name
+    pub removed_records: u64,
+}

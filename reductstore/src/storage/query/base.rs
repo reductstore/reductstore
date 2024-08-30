@@ -56,6 +56,8 @@ pub struct QueryOptions {
     pub each_n: Option<u64>,
     /// Return a record every S seconds
     pub each_s: Option<f64>,
+    /// Only metadata
+    pub only_metadata: bool,
 }
 
 impl Default for QueryOptions {
@@ -68,6 +70,7 @@ impl Default for QueryOptions {
             limit: None,
             each_n: None,
             each_s: None,
+            only_metadata: false,
         }
     }
 }

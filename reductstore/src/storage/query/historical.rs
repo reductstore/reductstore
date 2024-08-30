@@ -43,11 +43,10 @@ pub struct HistoricalQuery {
     records_from_current_block: VecDeque<Record>,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
     current_block: Option<BlockRef>,
-    /// The time of the last update. We use this to check if the query has expired.
-    last_update: Instant,
-
     /// Filters
     filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>>,
+    /// Request only metadata without the content.
+    only_metadata: bool,
 }
 
 impl HistoricalQuery {
@@ -78,8 +77,8 @@ impl HistoricalQuery {
             stop_time,
             records_from_current_block: VecDeque::new(),
             current_block: None,
-            last_update: Instant::now(),
             filters,
+            only_metadata: options.only_metadata,
         }
     }
 }
@@ -90,8 +89,6 @@ impl Query for HistoricalQuery {
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        self.last_update = Instant::now();
-
         if self.records_from_current_block.is_empty() {
             let start = if let Some(block) = &self.current_block {
                 let block = block.read().await;
@@ -137,13 +134,17 @@ impl Query for HistoricalQuery {
         let record = self.records_from_current_block.pop_front().unwrap();
         let block = self.current_block.as_ref().unwrap();
 
-        let rx = spawn_read_task(
-            Arc::clone(&block_manager),
-            block.clone(),
-            ts_to_us(&record.timestamp.unwrap()),
-        )
-        .await?;
-        Ok(RecordReader::new(rx, record.clone(), false))
+        if self.only_metadata {
+            Ok(RecordReader::form_record(record.clone(), false))
+        } else {
+            let rx = spawn_read_task(
+                Arc::clone(&block_manager),
+                block.clone(),
+                ts_to_us(&record.timestamp.unwrap()),
+            )
+            .await?;
+            Ok(RecordReader::new(rx, record.clone(), false))
+        }
     }
 }
 

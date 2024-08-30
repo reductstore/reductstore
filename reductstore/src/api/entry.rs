@@ -2,11 +2,12 @@
 // Licensed under the Business Source License 1.1
 
 mod common;
-mod query;
 mod read_batched;
+mod read_query;
 mod read_single;
 mod remove_batched;
 mod remove_entry;
+mod remove_query;
 mod remove_single;
 mod update_batched;
 mod update_single;
@@ -28,6 +29,7 @@ use axum::extract::{FromRequest, Path, Query, State};
 use axum_extra::headers::HeaderMapExt;
 
 use crate::api::entry::remove_batched::remove_batched_records;
+use crate::api::entry::remove_query::remove_query;
 use crate::api::entry::remove_single::remove_record;
 use crate::api::entry::update_batched::update_batched_records;
 use crate::api::entry::update_single::update_record;
@@ -35,7 +37,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request};
 use axum::routing::{delete, get, head, patch, post};
 use reduct_base::error::ErrorCode;
-use reduct_base::msg::entry_api::QueryInfo;
+use reduct_base::msg::entry_api::{QueryInfo, RemoveQueryInfo};
 use reduct_macros::{IntoResponse, Twin};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -111,6 +113,9 @@ async fn check_and_extract_ts_or_query_id(
 #[derive(IntoResponse, Twin)]
 pub struct QueryInfoAxum(QueryInfo);
 
+#[derive(IntoResponse, Twin)]
+pub struct RemoveQueryInfoAxum(RemoveQueryInfo);
+
 // Workaround for DELETE /:bucket/:entry and DELETE /:bucket/:entry?ts=<number>
 async fn remove_entry_router(
     State(components): State<Arc<Components>>,
@@ -143,10 +148,11 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
             "/:bucket_name/:entry_name/batch",
             head(read_batched_records),
         )
-        .route("/:bucket_name/:entry_name/q", get(query::query))
+        .route("/:bucket_name/:entry_name/q", get(read_query::read_query))
         .route("/:bucket_name/:entry_name", delete(remove_entry_router))
         .route(
             "/:bucket_name/:entry_name/batch",
             delete(remove_batched_records),
         )
+        .route("/:bucket_name/:entry_name/q", delete(remove_query))
 }

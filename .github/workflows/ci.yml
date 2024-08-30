@@ -294,8 +294,8 @@ jobs:
         include:
           # Many small blobs
           - max_blob_size: 1
-            entries: 8
-            records: 1024
+            entries: 4
+            records: 2024
           # Few big blobs (bigger than batch size)
           - max_blob_size: 18
             entries: 2
