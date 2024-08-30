@@ -1,3 +1,6 @@
+// Copyright 2024 ReductSoftware UG
+// Licensed under the Business Source License 1.1
+
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
@@ -68,9 +71,7 @@ impl Entry {
         // Update blocks
         for (block_id, records) in records_per_block.into_iter() {
             let mut bm = self.block_manager.write().await;
-            let block_ref = bm.load_block(block_id).await?;
-
-            bm.update_records(block_ref.clone(), records).await?;
+            bm.update_records(block_id, records).await?;
         }
 
         Ok(result)
@@ -153,58 +154,36 @@ mod tests {
         let updated_labels = result.get(&1).unwrap().as_ref().unwrap();
         let expected_labels_1 = make_expected_labels(1);
         assert_eq!(updated_labels.len(), 2);
-        assert!(updated_labels.contains(expected_labels_1.get(0).unwrap()));
-        assert!(updated_labels.contains(expected_labels_1.get(1).unwrap()));
+        assert!(updated_labels.contains(&expected_labels_1[0]));
+        assert!(updated_labels.contains(&expected_labels_1[1]));
 
         let updated_labels = result.get(&2).unwrap().as_ref().unwrap();
         let expected_labels_2 = make_expected_labels(2);
         assert_eq!(updated_labels.len(), 2);
-        assert!(updated_labels.contains(expected_labels_2.get(0).unwrap()));
-        assert!(updated_labels.contains(expected_labels_2.get(1).unwrap()));
+        assert!(updated_labels.contains(&expected_labels_2[0]));
+        assert!(updated_labels.contains(&expected_labels_2[1]));
 
         let updated_labels = result.get(&3).unwrap().as_ref().unwrap();
         let expected_labels_3 = make_expected_labels(3);
         assert_eq!(updated_labels.len(), 2);
-        assert!(updated_labels.contains(expected_labels_3.get(0).unwrap()));
-        assert!(updated_labels.contains(expected_labels_3.get(1).unwrap()));
+        assert!(updated_labels.contains(&expected_labels_3[0]));
+        assert!(updated_labels.contains(&expected_labels_3[1]));
 
         // check if the records were updated
-        let block_ref = entry
-            .block_manager
-            .write()
-            .await
-            .load_block(1)
-            .await
-            .unwrap();
-
-        let block = block_ref.read().await;
-        assert_eq!(block.record_count(), 2);
-
-        let record = block.get_record(1).unwrap().clone();
+        let record = entry.begin_read(1).await.unwrap().record().clone();
         assert_eq!(record.labels.len(), 2);
-        assert!(record.labels.contains(expected_labels_1.get(0).unwrap()));
-        assert!(record.labels.contains(expected_labels_1.get(1).unwrap()));
+        assert!(record.labels.contains(&expected_labels_1[0]));
+        assert!(record.labels.contains(&expected_labels_1[1]));
 
-        let record = block.get_record(2).unwrap().clone();
+        let record = entry.begin_read(2).await.unwrap().record().clone();
         assert_eq!(record.labels.len(), 2);
-        assert!(record.labels.contains(expected_labels_2.get(0).unwrap()));
-        assert!(record.labels.contains(expected_labels_2.get(1).unwrap()));
+        assert!(record.labels.contains(&expected_labels_2[0]));
+        assert!(record.labels.contains(&expected_labels_2[1]));
 
-        let block_ref = entry
-            .block_manager
-            .write()
-            .await
-            .load_block(3)
-            .await
-            .unwrap();
-
-        let block = block_ref.read().await;
-        assert_eq!(block.record_count(), 1);
-
-        let record = block.get_record(3).unwrap().clone();
+        let record = entry.begin_read(3).await.unwrap().record().clone();
         assert_eq!(record.labels.len(), 2);
-        assert!(record.labels.contains(expected_labels_3.get(0).unwrap()));
-        assert!(record.labels.contains(expected_labels_3.get(1).unwrap()));
+        assert!(record.labels.contains(&expected_labels_3[0]));
+        assert!(record.labels.contains(&expected_labels_3[1]));
     }
 
     #[rstest]

@@ -252,7 +252,7 @@ impl BlockManager {
     ///
     /// # Arguments
     ///
-    /// * `block` - Block to update.
+    /// * `block_id` - Block to update records in.
     /// * `records` - Records to update.
     ///
     ///
@@ -269,9 +269,11 @@ impl BlockManager {
     /// * `ReductError` - If failed to append to WAL or save the block on disk.
     pub async fn update_records(
         &mut self,
-        block_ref: BlockRef,
+        block_id: u64,
         mut records: Vec<Record>,
     ) -> Result<(), ReductError> {
+        let block_ref = self.load_block(block_id).await?;
+
         {
             let mut block = block_ref.write().await;
 
@@ -293,7 +295,7 @@ impl BlockManager {
     ///
     /// # Arguments
     ///
-    /// * `block` - Block to remove records from.
+    /// * `block_id` - Block to remove records from.
     /// * `records` - Record timestamps to remove.
     ///
     /// # Returns
@@ -301,9 +303,10 @@ impl BlockManager {
     /// * `Ok(())` - If the records were removed successfully.
     pub async fn remove_records(
         &mut self,
-        block_ref: BlockRef,
+        block_id: u64,
         records: Vec<u64>,
     ) -> Result<(), ReductError> {
+        let block_ref = self.load_block(block_id).await?;
         {
             let mut block = block_ref.write().await;
             for record_time in records {
@@ -316,7 +319,9 @@ impl BlockManager {
 
             // if the block is empty, remove it
             if block.record_count() == 0 {
-                return self.remove_block(block.block_id()).await;
+                let block_id = block.block_id();
+                drop(block); // drop the lock before calling remove_block to avoid deadlock
+                return self.remove_block(block_id).await;
             }
         }
 
@@ -1041,19 +1046,19 @@ mod tests {
                 "index not updated"
             );
 
-            let block = block.await;
+            let block_ref = block.await;
             let record = {
-                let lock = block.write().await;
+                let lock = block_ref.write().await;
                 let mut record = lock.get_record(0).unwrap().clone();
                 record.labels = vec![Label {
                     name: "key".to_string(),
                     value: "value".to_string(),
                 }];
+
                 record
             };
 
-            block.write().await.insert_or_update_record(record.clone());
-            bm.update_records(block, vec![record]).await.unwrap();
+            bm.update_records(block_id, vec![record]).await.unwrap();
             let block_index_proto = BlockIndexProto::decode(
                 std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
                     .unwrap()
@@ -1086,6 +1091,7 @@ mod tests {
         async fn test_update_imdex_when_remove_record(
             #[future] block_manager: BlockManager,
             #[future] block: BlockRef,
+            block_id: u64,
         ) {
             let mut block_manager = Arc::new(RwLock::new(block_manager.await));
             let block = block.await;
@@ -1097,7 +1103,7 @@ mod tests {
                 .unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 2);
 
-            bm.remove_records(block, vec![1]).await.unwrap();
+            bm.remove_records(block_id, vec![1]).await.unwrap();
 
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
                 .await
@@ -1269,6 +1275,7 @@ mod tests {
             #[case] record_size: usize,
             #[future] block_manager: BlockManager,
             #[future] block: BlockRef,
+            block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
             let block_ref = block.await;
@@ -1279,7 +1286,7 @@ mod tests {
             block_manager
                 .write()
                 .await
-                .remove_records(block_ref.clone(), vec![0])
+                .remove_records(block_id, vec![0])
                 .await
                 .unwrap();
 
@@ -1320,25 +1327,18 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_only_record(
-            #[future] block_manager: BlockManager,
-            #[future] block: BlockRef,
-        ) {
+        async fn test_remove_only_one_record(#[future] block_manager: BlockManager, block_id: u64) {
             let mut block_manager = block_manager.await;
-            let block_ref = block.await;
             block_manager
-                .remove_records(block_ref.clone(), vec![0])
+                .remove_records(block_id, vec![0])
                 .await
                 .unwrap();
 
             // block must be removed
-            let block = block_ref.read().await;
-            assert_eq!(block.record_count(), 0);
-            assert!(block_manager
-                .block_index
-                .get_block(block.block_id())
-                .is_none());
-            assert!(!block_manager.exist(block.block_id()).await.unwrap());
+            let err = block_manager.load_block(block_id).await.err().unwrap();
+            assert_eq!(err.status(), ErrorCode::InternalServerError);
+            assert!(block_manager.block_index.get_block(block_id).is_none());
+            assert!(!block_manager.exist(block_id).await.unwrap());
         }
 
         #[rstest]
@@ -1346,6 +1346,7 @@ mod tests {
         async fn test_remove_records_wal(
             #[future] block_manager: BlockManager,
             #[future] block: BlockRef,
+            block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
             let block_ref = block.await;
@@ -1356,7 +1357,7 @@ mod tests {
             let block_id = block_ref.read().await.block_id();
             FILE_CACHE.remove(&bm.path_to_data(block_id)).await.unwrap();
 
-            let res = bm.remove_records(block_ref.clone(), vec![1]).await;
+            let res = bm.remove_records(block_id, vec![1]).await;
             assert!(
                 res.is_err(),
                 "we broke the method removing the source block"

@@ -5,15 +5,14 @@ mod common;
 mod query;
 mod read_batched;
 mod read_single;
-mod remove;
+mod remove_entry;
 mod update_batched;
 mod update_single;
 mod write_batched;
 mod write_single;
-
 use crate::api::entry::read_batched::read_batched_records;
 use crate::api::entry::read_single::read_single_record;
-use crate::api::entry::remove::remove_entry;
+use crate::api::entry::remove_entry::remove_entry;
 
 use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;

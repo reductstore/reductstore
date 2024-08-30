@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 mod entry_loader;
+mod remove_records;
 pub(crate) mod update_labels;
 
 use crate::storage::block_manager::block_index::BlockIndex;
