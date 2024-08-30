@@ -6,9 +6,8 @@ use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::HeaderName;
 use axum::response::IntoResponse;
-use axum_extra::headers::{Expect, Header, HeaderMap, HeaderValue};
+use axum_extra::headers::{Expect, Header, HeaderMap};
 use bytes::Bytes;
 use futures_util::StreamExt;
 
@@ -21,7 +20,6 @@ use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashMap};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
@@ -263,6 +261,7 @@ mod tests {
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
+    use axum_extra::headers::HeaderValue;
 
     use rstest::{fixture, rstest};
 

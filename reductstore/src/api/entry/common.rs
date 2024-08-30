@@ -3,7 +3,7 @@
 
 use crate::api::HttpError;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;

@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
 
@@ -66,7 +65,6 @@ mod tests {
         #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] empty_body: Body,
     ) {
         let components = components.await;
 
@@ -78,7 +76,6 @@ mod tests {
                 "ts".to_string(),
                 "0".to_string(),
             )])),
-            empty_body.await,
         )
         .await
         .unwrap();
@@ -101,7 +98,6 @@ mod tests {
     async fn test_remove_bucket_not_found(
         #[future] components: Arc<Components>,
         headers: HeaderMap,
-        #[future] empty_body: Body,
     ) {
         let components = components.await;
         let path = Path(HashMap::from_iter(vec![
@@ -116,7 +112,6 @@ mod tests {
                 "ts".to_string(),
                 "1".to_string(),
             )])),
-            empty_body.await,
         )
         .await
         .err()
@@ -134,7 +129,6 @@ mod tests {
         #[future] components: Arc<Components>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] empty_body: Body,
     ) {
         let components = components.await;
         let err = remove_record(
@@ -145,7 +139,6 @@ mod tests {
                 "ts".to_string(),
                 "bad".to_string(),
             )])),
-            empty_body.await,
         )
         .await
         .err()

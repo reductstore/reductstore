@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -13,7 +12,7 @@ use reduct_base::batch::sort_headers_by_time;
 
 use crate::api::entry::common::err_to_batched_header;
 use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
 // DELETE /:bucket/:entry/batch
@@ -58,7 +57,7 @@ pub(crate) async fn remove_batched_records(
 mod tests {
     use super::*;
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
-    use reduct_base::error::ReductError;
+    use reduct_base::error::{ErrorCode, ReductError};
     use reduct_base::not_found;
     use rstest::rstest;
 
