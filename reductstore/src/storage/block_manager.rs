@@ -135,7 +135,7 @@ impl BlockManager {
     }
 
     pub async fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
-        // cache is empty, save the block there first
+        // save the current block in cache and write on the disk the evicted one
         for (_, block) in self
             .block_cache
             .insert_write(block.read().await.block_id(), block.clone())
@@ -467,6 +467,7 @@ impl BlockManager {
                 )
                 .await?;
         }
+
         self.save_block(block_ref).await?;
 
         debug!(

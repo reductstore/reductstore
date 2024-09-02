@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-412: Refactor BlockCache, [PR-556](https://github.com/reductstore/reductstore/pull/556)
 - RS-380: Send uncompleted batch when query is timed out, [PR-558](https://github.com/reductstore/reductstore/pull/558)
 - RS-422: Batch update records per block, [PR-559](https://github.com/reductstore/reductstore/pull/559)
-
+- RS-418: Remove record API, [PR-560](https://github.com/reductstore/reductstore/pull/560)
 ### Fixed
 
 - Server shutdown, [PR-557](https://github.com/reductstore/reductstore/pull/557)
