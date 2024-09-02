@@ -56,6 +56,8 @@ pub struct QueryOptions {
     pub each_n: Option<u64>,
     /// Return a record every S seconds
     pub each_s: Option<f64>,
+    /// Only metadata
+    pub only_metadata: bool,
 }
 
 impl Default for QueryOptions {
@@ -68,6 +70,7 @@ impl Default for QueryOptions {
             limit: None,
             each_n: None,
             each_s: None,
+            only_metadata: false,
         }
     }
 }
@@ -91,7 +94,7 @@ pub(crate) mod tests {
         // the second block has a record: 1000
         let dir = tempdir().unwrap().into_path();
         let mut block_manager = BlockManager::new(dir.clone(), BlockIndex::new(dir.join("index")));
-        let block_ref = block_manager.start(0, 10).await.unwrap();
+        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
 
         {
             let mut block = block_ref.write().await;
@@ -138,12 +141,13 @@ pub(crate) mod tests {
             });
         }
 
-        block_manager.save(block_ref.clone()).await.unwrap();
+        block_manager.save_block(block_ref.clone()).await.unwrap();
 
         macro_rules! write_record {
             ($block:expr, $index:expr, $content:expr) => {{
+                let blk = $block.read().await;
                 let (file, _) = block_manager
-                    .begin_write($block.clone(), $index)
+                    .begin_write_record(&blk, $index)
                     .await
                     .unwrap();
                 let mut file = file.write().await;
@@ -155,8 +159,8 @@ pub(crate) mod tests {
         write_record!(block_ref, 0, b"0123456789");
         write_record!(block_ref, 5, b"0123456789");
 
-        block_manager.finish(block_ref).await.unwrap();
-        let block_ref = block_manager.start(1000, 10).await.unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
+        let block_ref = block_manager.start_new_block(1000, 10).await.unwrap();
         {
             let mut block = block_ref.write().await;
 
@@ -181,11 +185,11 @@ pub(crate) mod tests {
                 content_type: "".to_string(),
             });
         }
-        block_manager.save(block_ref.clone()).await.unwrap();
+        block_manager.save_block(block_ref.clone()).await.unwrap();
 
         write_record!(block_ref, 1000, b"0123456789");
 
-        block_manager.finish(block_ref).await.unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
         let block_manager = Arc::new(RwLock::new(block_manager));
         block_manager
     }

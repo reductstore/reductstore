@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
-pub(crate) async fn read_single_record(
+pub(crate) async fn read_record(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -179,7 +179,7 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
-        let response = read_single_record(
+        let response = read_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -229,7 +229,7 @@ mod tests {
                 .unwrap()
         };
 
-        let response = read_single_record(
+        let response = read_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -266,7 +266,7 @@ mod tests {
             ("entry_name".to_string(), "entru-1".to_string()),
         ]));
 
-        let err = read_single_record(
+        let err = read_record(
             State(Arc::clone(&components)),
             path,
             Query(HashMap::from_iter(vec![(
@@ -291,7 +291,7 @@ mod tests {
         headers: HeaderMap,
     ) {
         let components = components.await;
-        let err = read_single_record(
+        let err = read_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -316,7 +316,7 @@ mod tests {
         headers: HeaderMap,
     ) {
         let components = components.await;
-        let err = read_single_record(
+        let err = read_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -347,7 +347,7 @@ mod tests {
         headers: HeaderMap,
     ) {
         let components = components.await;
-        let err = read_single_record(
+        let err = read_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![("q".to_string(), "1".to_string())])),

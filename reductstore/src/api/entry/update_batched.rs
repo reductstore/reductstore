@@ -2,18 +2,16 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::HeaderName;
-use axum_extra::headers::{HeaderMap, HeaderValue};
+use axum_extra::headers::HeaderMap;
 
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time};
 use reduct_base::Labels;
 
-use crate::api::entry::common::parse_content_length_from_header;
+use crate::api::entry::common::{err_to_batched_header, parse_content_length_from_header};
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
@@ -83,10 +81,7 @@ pub(crate) async fn update_batched_records(
     for (time, result) in result {
         match result {
             Err(err) => {
-                headers.insert(
-                    HeaderName::from_str(&format!("x-reduct-error-{}", time)).unwrap(),
-                    HeaderValue::from_str(&format!("{},{}", err.status(), err.message())).unwrap(),
-                );
+                err_to_batched_header(&mut headers, time, &err);
             }
             Ok(new_labels) => {
                 let mut replication_repo = components.replication_repo.write().await;
@@ -110,6 +105,7 @@ mod tests {
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
     use axum::response::IntoResponse;
+    use axum_extra::headers::HeaderValue;
     use bytes::Bytes;
     use rstest::rstest;
 

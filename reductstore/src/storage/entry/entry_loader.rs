@@ -202,7 +202,7 @@ impl EntryLoader {
                         "Loading block {}/{} from block manager",
                         entry.name, block_id
                     );
-                    block_manager.load(block_id).await?
+                    block_manager.load_block(block_id).await?
                 } else {
                     debug!("Creating block {}/{} from WAL", entry.name, block_id);
                     Arc::new(RwLock::new(
@@ -238,15 +238,24 @@ impl EntryLoader {
                                 block_removed = true;
                                 break;
                             }
+                            WalEntry::RemoveRecord(timestamp) => {
+                                trace!(
+                                    "Remove record from block {}/{}: {}",
+                                    entry.name,
+                                    block_id,
+                                    timestamp
+                                );
+                                block.remove_record(timestamp);
+                            }
                         }
                     }
                 }
 
                 if block_removed {
-                    block_manager.remove(block_id).await?;
+                    block_manager.remove_block(block_id).await?;
                 } else {
-                    block_manager.save(block_ref.clone()).await?;
-                    block_manager.finish(block_ref).await?;
+                    block_manager.save_block(block_ref.clone()).await?;
+                    block_manager.finish_block(block_ref).await?;
                 }
             }
 
@@ -276,7 +285,7 @@ mod tests {
 
         let mut bm = entry.block_manager.write().await;
         let records = bm
-            .load(1)
+            .load_block(1)
             .await
             .unwrap()
             .read()
@@ -373,7 +382,7 @@ mod tests {
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
         );
         {
-            let block_v18_ref = block_manager.start(1, 100).await.unwrap();
+            let block_v18_ref = block_manager.start_new_block(1, 100).await.unwrap();
             let mut block_v18 = block_v18_ref.write().await;
             block_v18.insert_or_update_record(Record {
                 timestamp: Some(us_to_ts(&1)),
@@ -408,7 +417,13 @@ mod tests {
 
         let block_manager =
             BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE))); // reload the block manager
-        let block_v19 = block_manager.load(1).await.unwrap().read().await.clone();
+        let block_v19 = block_manager
+            .load_block(1)
+            .await
+            .unwrap()
+            .read()
+            .await
+            .clone();
         assert_eq!(block_v19.record_count(), 2);
         assert_eq!(block_v19.size(), 20);
         assert_eq!(block_v19.metadata_size(), 46);
@@ -490,17 +505,17 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_new_block(#[future] entry_fix: (Entry, PathBuf), record1: Record) {
+        async fn test_new_block(#[future] entry_fix: (Entry, PathBuf), record2: Record) {
             let (entry, path) = entry_fix.await;
             let mut wal = create_wal(path.clone());
             // Block #3 was created
-            wal.append(3, WalEntry::WriteRecord(record1.clone()))
+            wal.append(3, WalEntry::WriteRecord(record2.clone()))
                 .await
                 .unwrap();
 
-            let mut record2 = record1.clone();
-            record2.timestamp = Some(us_to_ts(&2));
-            wal.append(3, WalEntry::WriteRecord(record2.clone()))
+            let mut record3 = record2.clone();
+            record3.timestamp = Some(us_to_ts(&3));
+            wal.append(3, WalEntry::WriteRecord(record3.clone()))
                 .await
                 .unwrap();
 
@@ -512,13 +527,13 @@ mod tests {
                 .block_manager
                 .write()
                 .await
-                .load(3)
+                .load_block(3)
                 .await
                 .unwrap()
                 .clone();
             let block = block_ref.read().await;
-            assert_eq!(block.get_record(1), Some(&record1));
             assert_eq!(block.get_record(2), Some(&record2));
+            assert_eq!(block.get_record(3), Some(&record3));
 
             let file = File::open(path.join("3.blk")).await.unwrap();
             assert_eq!(
@@ -530,16 +545,16 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_update_block(#[future] entry_fix: (Entry, PathBuf), mut record1: Record) {
+        async fn test_update_block(#[future] entry_fix: (Entry, PathBuf), mut record2: Record) {
             let (entry, path) = entry_fix.await;
             let mut wal = create_wal(path.clone());
 
             // Block #1 was updated
-            wal.append(1, WalEntry::WriteRecord(record1.clone()))
+            wal.append(1, WalEntry::WriteRecord(record2.clone()))
                 .await
                 .unwrap();
-            record1.end = 20; //size 20
-            wal.append(1, WalEntry::UpdateRecord(record1.clone()))
+            record2.end = 20; //size 20
+            wal.append(1, WalEntry::UpdateRecord(record2.clone()))
                 .await
                 .unwrap();
 
@@ -547,10 +562,16 @@ mod tests {
                 .await
                 .unwrap();
 
-            let block_ref = entry.block_manager.write().await.load(1).await.unwrap();
+            let block_ref = entry
+                .block_manager
+                .write()
+                .await
+                .load_block(1)
+                .await
+                .unwrap();
 
             let block = block_ref.read().await;
-            assert_eq!(block.get_record(1), Some(&record1));
+            assert_eq!(block.get_record(2), Some(&record2));
 
             let file = File::open(path.join("1.blk")).await.unwrap();
             assert_eq!(
@@ -558,6 +579,49 @@ mod tests {
                 block.size(),
                 "should save and truncate the block"
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_record(#[future] entry_fix: (Entry, PathBuf)) {
+            let (entry, path) = entry_fix.await;
+            let mut wal = create_wal(path.clone());
+
+            // Record #1 was removed
+            wal.append(1, WalEntry::RemoveRecord(0)).await.unwrap();
+
+            let entry = EntryLoader::restore_entry(path, entry.settings.clone())
+                .await
+                .unwrap();
+
+            let block = entry
+                .block_manager
+                .read()
+                .await
+                .load_block(1)
+                .await
+                .unwrap();
+            let block = block.read().await;
+            assert_eq!(block.record_count(), 1);
+            assert!(block.get_record(0).is_none());
+            assert!(block.get_record(1).is_some());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_block(#[future] entry_fix: (Entry, PathBuf)) {
+            let (entry, path) = entry_fix.await;
+            let mut wal = create_wal(path.clone());
+
+            // Block #1 was removed
+            wal.append(1, WalEntry::RemoveBlock).await.unwrap();
+
+            let entry = EntryLoader::restore_entry(path, entry.settings.clone())
+                .await
+                .unwrap();
+
+            let block = entry.block_manager.read().await.load_block(1).await.clone();
+            assert_eq!(block.err().unwrap().status, InternalServerError,);
         }
 
         #[rstest]
@@ -574,27 +638,10 @@ mod tests {
             );
         }
 
-        #[rstest]
-        #[tokio::test]
-        async fn test_remove_block(#[future] entry_fix: (Entry, PathBuf)) {
-            let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone());
-
-            // Block #1 was removed
-            wal.append(1, WalEntry::RemoveBlock).await.unwrap();
-
-            let entry = EntryLoader::restore_entry(path, entry.settings.clone())
-                .await
-                .unwrap();
-
-            let block = entry.block_manager.read().await.load(1).await.clone();
-            assert_eq!(block.err().unwrap().status, InternalServerError,);
-        }
-
         #[fixture]
-        fn record1() -> Record {
+        fn record2() -> Record {
             Record {
-                timestamp: Some(us_to_ts(&1)),
+                timestamp: Some(us_to_ts(&2)),
                 begin: 0,
                 end: 10,
                 content_type: "text/plain".to_string(),
@@ -610,9 +657,29 @@ mod tests {
             {
                 let mut block_manager = entry.block_manager.write().await;
 
-                block_manager.start(1, 10).await.unwrap();
+                {
+                    let block_ref = block_manager.start_new_block(1, 10).await.unwrap();
+                    let mut block = block_ref.write().await;
+                    block.insert_or_update_record(Record {
+                        timestamp: Some(us_to_ts(&0)),
+                        begin: 0,
+                        end: 10,
+                        content_type: "text/plain".to_string(),
+                        state: record::State::Finished as i32,
+                        labels: vec![],
+                    });
 
-                block_manager.start(2, 10).await.unwrap();
+                    block.insert_or_update_record(Record {
+                        timestamp: Some(us_to_ts(&1)),
+                        begin: 0,
+                        end: 10,
+                        content_type: "text/plain".to_string(),
+                        state: record::State::Finished as i32,
+                        labels: vec![],
+                    });
+                }
+
+                block_manager.start_new_block(2, 10).await.unwrap();
                 block_manager.save_cache_on_disk().await.unwrap();
             }
 

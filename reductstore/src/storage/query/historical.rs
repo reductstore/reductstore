@@ -3,7 +3,6 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
@@ -43,11 +42,10 @@ pub struct HistoricalQuery {
     records_from_current_block: VecDeque<Record>,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
     current_block: Option<BlockRef>,
-    /// The time of the last update. We use this to check if the query has expired.
-    last_update: Instant,
-
     /// Filters
     filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>>,
+    /// Request only metadata without the content.
+    only_metadata: bool,
 }
 
 impl HistoricalQuery {
@@ -78,8 +76,8 @@ impl HistoricalQuery {
             stop_time,
             records_from_current_block: VecDeque::new(),
             current_block: None,
-            last_update: Instant::now(),
             filters,
+            only_metadata: options.only_metadata,
         }
     }
 }
@@ -90,8 +88,6 @@ impl Query for HistoricalQuery {
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        self.last_update = Instant::now();
-
         if self.records_from_current_block.is_empty() {
             let start = if let Some(block) = &self.current_block {
                 let block = block.read().await;
@@ -118,7 +114,7 @@ impl Query for HistoricalQuery {
 
             for block_id in block_range {
                 let bm = block_manager.read().await;
-                let block_ref = bm.load(block_id).await?;
+                let block_ref = bm.load_block(block_id).await?;
 
                 self.current_block = Some(block_ref);
                 let mut found_records = self.filter_records_from_current_block().await;
@@ -137,13 +133,17 @@ impl Query for HistoricalQuery {
         let record = self.records_from_current_block.pop_front().unwrap();
         let block = self.current_block.as_ref().unwrap();
 
-        let rx = spawn_read_task(
-            Arc::clone(&block_manager),
-            block.clone(),
-            ts_to_us(&record.timestamp.unwrap()),
-        )
-        .await?;
-        Ok(RecordReader::new(rx, record.clone(), false))
+        if self.only_metadata {
+            Ok(RecordReader::form_record(record.clone(), false))
+        } else {
+            let rx = spawn_read_task(
+                Arc::clone(&block_manager),
+                block.clone(),
+                ts_to_us(&record.timestamp.unwrap()),
+            )
+            .await?;
+            Ok(RecordReader::new(rx, record.clone(), false))
+        }
     }
 }
 
@@ -287,14 +287,19 @@ mod tests {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
         let block_manager = block_manager.await;
         {
-            let block_ref = block_manager.write().await.load(0).await.unwrap();
+            let block_ref = block_manager.write().await.load_block(0).await.unwrap();
             {
                 let mut block = block_ref.write().await;
                 let mut record = block.get_record(0).unwrap().clone();
                 record.state = record::State::Errored as i32;
                 block.insert_or_update_record(record);
             }
-            block_manager.write().await.save(block_ref).await.unwrap();
+            block_manager
+                .write()
+                .await
+                .save_block(block_ref)
+                .await
+                .unwrap();
         }
 
         assert_eq!(

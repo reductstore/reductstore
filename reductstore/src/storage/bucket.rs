@@ -56,14 +56,26 @@ impl Into<BucketSettings> for ProtoBucketSettings {
 }
 
 pub struct RecordReader {
-    rx: RecordRx,
+    rx: Option<RecordRx>,
     record: Record,
     last: bool,
 }
 
 impl RecordReader {
     pub fn new(rx: Receiver<Result<Bytes, ReductError>>, record: Record, last: bool) -> Self {
-        RecordReader { rx, record, last }
+        RecordReader {
+            rx: Some(rx),
+            record,
+            last,
+        }
+    }
+
+    pub fn form_record(record: Record, last: bool) -> Self {
+        RecordReader {
+            rx: None,
+            record,
+            last,
+        }
     }
 
     pub fn timestamp(&self) -> u64 {
@@ -82,12 +94,34 @@ impl RecordReader {
         self.record.end - self.record.begin
     }
 
-    pub fn rx(&mut self) -> &mut Receiver<Result<Bytes, ReductError>> {
-        &mut self.rx
+    pub fn only_metadata(&self) -> bool {
+        self.rx.is_none()
     }
 
+    /// Get the receiver to read the record content
+    ///
+    /// # Returns
+    ///
+    /// * `&mut Receiver<Result<Bytes, ReductError>>` - The receiver to read the record content
+    ///
+    /// # Panics
+    ///
+    /// Panics if the receiver isn't set (we read only metadata)
+    pub fn rx(&mut self) -> &mut Receiver<Result<Bytes, ReductError>> {
+        self.rx.as_mut().unwrap()
+    }
+
+    /// Consume the RecordReader and return the receiver to read the record content
+    ///
+    /// # Returns
+    ///
+    /// * `Receiver<Result<Bytes, ReductError>` - The receiver to read the record content
+    ///
+    /// # Panics
+    ///
+    /// Panics if the receiver isn't set (we read only metadata)
     pub fn into_rx(self) -> Receiver<Result<Bytes, ReductError>> {
-        self.rx
+        self.rx.unwrap()
     }
 
     pub fn last(&self) -> bool {
