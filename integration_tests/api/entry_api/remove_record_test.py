@@ -1,5 +1,4 @@
 import pytest
-from aiohttp.pytest_plugin import test_server
 
 
 @pytest.fixture(name="write_data")
@@ -12,7 +11,7 @@ def _write_data(base_url, session, bucket):
     assert resp.status_code == 200
 
     resp = session.post(
-        f"{base_url}/b/{bucket}/entry?ts={ts+1}",
+        f"{base_url}/b/{bucket}/entry?ts={ts + 1}",
         data="some_data",
     )
     assert resp.status_code == 200
@@ -48,8 +47,8 @@ def test_update_labels_in_batch(base_url, session, bucket, write_data):
 
     assert resp.status_code == 200
     assert (
-        resp.headers[f"x-reduct-error-{ts2+1}"]
-        == f"404,No record with timestamp {ts2+1}"
+        resp.headers[f"x-reduct-error-{ts2 + 1}"]
+        == f"404,No record with timestamp {ts2 + 1}"
     )
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts1}")
@@ -64,7 +63,7 @@ def test_update_labels_query(base_url, session, bucket, write_data):
     ts1, ts2 = write_data
 
     resp = session.delete(
-        f"{base_url}/b/{bucket}/entry/q?start={ts1}&stop={ts2+1}",
+        f"{base_url}/b/{bucket}/entry/q?start={ts1}&stop={ts2 + 1}",
     )
 
     assert resp.status_code == 200
