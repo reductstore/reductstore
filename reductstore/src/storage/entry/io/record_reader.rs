@@ -339,6 +339,8 @@ mod tests {
     mod reader {
         use super::*;
         use crate::storage::entry::Entry;
+        use std::thread::sleep;
+        use std::time::Duration;
 
         #[rstest]
         #[tokio::test]
@@ -372,6 +374,30 @@ mod tests {
             assert_eq!(
                 reader.rx().recv().await.unwrap().unwrap().len(),
                 MAX_IO_BUFFER_SIZE
+            );
+
+            tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to finish
+
+            assert!(
+                reader.io_task_handle.as_ref().unwrap().is_finished(),
+                "The task should finish after reading the record"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_with_io_timeout(mut entry: Entry) {
+            write_record(&mut entry, 1000, vec![0; MAX_IO_BUFFER_SIZE + 1])
+                .await
+                .unwrap();
+
+            let mut reader = entry.begin_read(1000).await.unwrap();
+            tokio::time::sleep(IO_OPERATION_TIMEOUT).await;
+            tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to finish
+
+            assert!(
+                reader.io_task_handle.as_ref().unwrap().is_finished(),
+                "The task should finish after reading the record"
             );
         }
     }
