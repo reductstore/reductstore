@@ -276,7 +276,7 @@ pub async fn read_in_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::entry::tests::{entry, path, write_record, write_stub_record};
+    use crate::storage::entry::tests::{entry, write_record, write_stub_record};
     use crate::storage::file_cache::FILE_CACHE;
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rstest::{fixture, rstest};
@@ -325,7 +325,7 @@ mod tests {
 
         #[fixture]
         fn content_size() -> usize {
-            (MAX_IO_BUFFER_SIZE + 1)
+            MAX_IO_BUFFER_SIZE + 1
         }
         #[fixture]
         fn file_to_read(content_size: usize) -> PathBuf {
