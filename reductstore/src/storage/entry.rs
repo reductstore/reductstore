@@ -11,7 +11,7 @@ mod write_record;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::entry::entry_loader::EntryLoader;
-use crate::storage::proto::{record, ts_to_us};
+use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
@@ -240,7 +240,7 @@ mod tests {
 
     mod restore {
         use super::*;
-        use crate::storage::proto::{us_to_ts, Record};
+        use crate::storage::proto::{record, us_to_ts, Record};
 
         #[rstest]
         #[tokio::test]
