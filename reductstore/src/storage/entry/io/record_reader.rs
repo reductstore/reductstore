@@ -45,7 +45,7 @@ impl Drop for RecordReader {
 }
 
 impl RecordReader {
-    pub async fn try_new(
+    pub(in crate::storage) async fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
         record_timestamp: u64,

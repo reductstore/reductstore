@@ -3,6 +3,7 @@
 
 mod entry_loader;
 pub(crate) mod io;
+mod read_record;
 mod remove_records;
 pub(crate) mod update_labels;
 mod write_record;
@@ -16,7 +17,6 @@ use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{internal_server_error, not_found, too_early};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -81,47 +81,6 @@ impl Entry {
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
         EntryLoader::restore_entry(path, options).await
-    }
-
-    /// Starts a new record read.
-    ///
-    /// # Arguments
-    ///
-    /// * `time` - The timestamp of the record.
-    ///
-    /// # Returns
-    ///
-    /// * `RecordReader` - The record reader to read the record content in chunks.
-    /// * `HTTPError` - The error if any.
-    pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
-        debug!("Reading record for ts={}", time);
-
-        let (block_ref, record) = {
-            let bm = self.block_manager.read().await;
-            let block_ref = bm.find_block(time).await?;
-            let block = block_ref.read().await;
-            let record = block
-                .get_record(time)
-                .ok_or_else(|| not_found!("No record with timestamp {}", time))?
-                .clone();
-            (block_ref.clone(), record)
-        };
-
-        if record.state == record::State::Started as i32 {
-            return Err(too_early!(
-                "Record with timestamp {} is still being written",
-                time
-            ));
-        }
-
-        if record.state == record::State::Errored as i32 {
-            return Err(internal_server_error!(
-                "Record with timestamp {} is broken",
-                time
-            ));
-        }
-
-        RecordReader::try_new(self.block_manager.clone(), block_ref, time, true).await
     }
 
     /// Query records for a time range.
@@ -333,147 +292,6 @@ mod tests {
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
             assert_eq!(info.size, 88);
-        }
-    }
-
-    // Test begin_read
-    mod begin_read {
-        use super::*;
-        use crate::storage::storage::MAX_IO_BUFFER_SIZE;
-        use reduct_base::Labels;
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_empty(entry: Entry) {
-            let writer = entry.begin_read(1000).await;
-            assert_eq!(
-                writer.err(),
-                Some(ReductError::not_found("No record with timestamp 1000"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_early(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            let writer = entry.begin_read(1000).await;
-            assert_eq!(
-                writer.err(),
-                Some(ReductError::not_found("No record with timestamp 1000"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_late(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            let reader = entry.begin_read(2000000).await;
-            assert_eq!(
-                reader.err(),
-                Some(ReductError::not_found("No record with timestamp 2000000"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_still_written(entry: Entry) {
-            let sender = entry
-                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-                .await
-                .unwrap();
-            sender
-                .tx()
-                .send(Ok(Some(Bytes::from(vec![0; 5]))))
-                .await
-                .unwrap();
-
-            let reader = entry.begin_read(1000000).await;
-            assert_eq!(
-                reader.err(),
-                Some(ReductError::too_early(
-                    "Record with timestamp 1000000 is still being written"
-                ))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_not_found(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            write_stub_record(&mut entry, 3000000).await.unwrap();
-
-            let reader = entry.begin_read(2000000).await;
-            assert_eq!(
-                reader.err(),
-                Some(ReductError::not_found("No record with timestamp 2000000"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_ok1(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            let mut reader = entry.begin_read(1000000).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_ok2(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            write_stub_record(&mut entry, 1010000).await.unwrap();
-
-            let mut reader = entry.begin_read(1010000).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("0123456789"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_begin_read_ok_in_chunks(mut entry: Entry) {
-            let mut data = vec![0; MAX_IO_BUFFER_SIZE + 1];
-            data[0] = 1;
-            data[MAX_IO_BUFFER_SIZE] = 2;
-
-            write_record(&mut entry, 1000000, data.clone())
-                .await
-                .unwrap();
-
-            let mut reader = entry.begin_read(1000000).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap().unwrap().to_vec(),
-                data[0..MAX_IO_BUFFER_SIZE]
-            );
-            assert_eq!(
-                reader.rx().recv().await.unwrap().unwrap().to_vec(),
-                data[MAX_IO_BUFFER_SIZE..]
-            );
-            assert_eq!(reader.rx().recv().await, None);
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_search(path: PathBuf) {
-            let mut entry = entry(
-                EntrySettings {
-                    max_block_size: 10000,
-                    max_block_records: 5,
-                },
-                path,
-            );
-
-            let step = 100000;
-            for i in 0..100 {
-                write_stub_record(&mut entry, i * step).await.unwrap();
-            }
-
-            let reader = entry.begin_read(30 * step).await.unwrap();
-            assert_eq!(reader.timestamp(), 3000000);
         }
     }
 
@@ -691,7 +509,11 @@ mod tests {
         tempfile::tempdir().unwrap().into_path()
     }
 
-    async fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), ReductError> {
+    pub async fn write_record(
+        entry: &mut Entry,
+        time: u64,
+        data: Vec<u8>,
+    ) -> Result<(), ReductError> {
         let sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
             .await?;

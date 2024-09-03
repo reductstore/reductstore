@@ -47,7 +47,7 @@ struct WriteContext {
 }
 
 impl RecordWriter {
-    pub async fn try_new(
+    pub(in crate::storage) async fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
         time: u64,

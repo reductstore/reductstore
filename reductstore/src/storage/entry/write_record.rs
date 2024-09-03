@@ -159,7 +159,6 @@ impl Entry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::storage::entry::tests::{entry, path, write_stub_record};
     use crate::storage::entry::{Entry, EntrySettings};
     use crate::storage::proto::{record, us_to_ts, Record};
