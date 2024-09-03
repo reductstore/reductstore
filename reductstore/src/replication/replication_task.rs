@@ -282,6 +282,8 @@ impl ReplicationTask {
 #[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use async_trait::async_trait;
 
     use bytes::Bytes;
@@ -290,14 +292,12 @@ mod tests {
     use rstest::*;
 
     use crate::replication::remote_bucket::ErrorRecordMap;
+    use crate::storage::entry::io::record_reader::RecordReader;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;
 
     use crate::replication::Transaction;
-    use crate::storage::bucket::RecordReader;
-
-    use super::*;
 
     mock! {
         RmBucket {}

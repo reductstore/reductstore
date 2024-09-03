@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::replication::Transaction;
-use crate::storage::bucket::RecordReader;
+use crate::storage::entry::RecordReader;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
@@ -212,7 +212,6 @@ mod tests {
     use super::*;
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
-    use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
     use mockall::mock;

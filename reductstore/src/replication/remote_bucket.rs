@@ -5,7 +5,6 @@ mod client_wrapper;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
-use crate::storage::bucket::RecordReader;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
@@ -13,6 +12,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::replication::Transaction;
+use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
 
 struct RemoteBucketImpl {

@@ -7,7 +7,7 @@ use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavail
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
-use crate::storage::bucket::RecordReader;
+use crate::storage::entry::RecordReader;
 use async_trait::async_trait;
 use log::error;
 use reduct_base::error::ReductError;

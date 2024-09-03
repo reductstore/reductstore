@@ -2,11 +2,11 @@ mod bucket_available;
 mod bucket_unavailable;
 mod initial_state;
 
-use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
+use crate::storage::entry::RecordReader;
 pub(super) use initial_state::InitialState;
 use reduct_base::error::ReductError;
 

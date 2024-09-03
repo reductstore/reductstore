@@ -22,6 +22,7 @@ pub(crate) trait WriteRecordContent {
     fn tx(&self) -> &RecordTx;
 }
 
+/// RecordWriter is responsible for writing the content of a record to the storage.
 pub(crate) struct RecordWriter {
     io_task_handle: Option<JoinHandle<()>>,
     tx: RecordTx,
@@ -45,6 +46,7 @@ struct WriteContext {
     content_size: u64,
     block_manager: Arc<RwLock<BlockManager>>,
 }
+
 impl RecordWriter {
     pub async fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 mod entry_loader;
-mod record_writer;
+pub(crate) mod io;
 mod remove_records;
 pub(crate) mod update_labels;
 mod write_record;
@@ -11,7 +11,6 @@ use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{
     spawn_read_task, BlockManager, BlockRef, RecordTx, BLOCK_INDEX_FILE,
 };
-use crate::storage::bucket::RecordReader;
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
 use crate::storage::query::base::QueryOptions;
@@ -29,9 +28,9 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-pub(crate) use crate::storage::entry::record_writer::{
-    RecordDrainer, RecordWriter, WriteRecordContent,
-};
+pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
+
+pub(crate) use io::record_reader::RecordReader;
 
 struct QueryHandle {
     rx: QueryRx,

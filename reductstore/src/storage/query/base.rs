@@ -6,10 +6,9 @@ use reduct_base::error::ReductError;
 
 use std::collections::HashMap;
 
-use crate::storage::bucket::RecordReader;
-
 use axum::async_trait;
 
+use crate::storage::entry::RecordReader;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;

@@ -1,3 +1,4 @@
 *.snap
 target
 src/asset/console.zip
+/venv/

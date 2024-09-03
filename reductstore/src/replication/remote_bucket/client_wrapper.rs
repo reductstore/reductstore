@@ -1,8 +1,6 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::bucket::RecordReader;
-
 use async_stream::stream;
 use async_trait::async_trait;
 use axum::http::HeaderName;
@@ -15,6 +13,7 @@ use std::str::FromStr;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::storage::entry::RecordReader;
 use crate::storage::proto::ts_to_us;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
