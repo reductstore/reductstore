@@ -18,6 +18,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
+/// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
     io_task_handle: Option<JoinHandle<()>>,
@@ -45,6 +46,19 @@ impl Drop for RecordReader {
 }
 
 impl RecordReader {
+    /// Create a new record reader.
+    ///
+    /// The reader spawns a task to read the record content in chunks. If the size of the record is less than or equal to the maximum IO buffer size, the reader reads the record content in one go.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_manager` - The block manager to read the record from
+    /// * `block_ref` - The block reference to read the record from
+    /// * `record_timestamp` - The timestamp of the record
+    ///
+    /// # Returns
+    ///
+    /// * `Result<RecordReader, ReductError>` - The record reader to read the record content in chunks
     pub(in crate::storage) async fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
@@ -99,6 +113,18 @@ impl RecordReader {
         })
     }
 
+    /// Create a new record reader for a record with no content.
+    ///
+    /// We need it to read only metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - The record to read
+    /// * `last` - Whether this is the last record in the entry
+    ///
+    /// # Returns
+    ///
+    /// * `RecordReader` - The record reader to read the record content in chunks
     pub fn form_record(record: Record, last: bool) -> Self {
         RecordReader {
             rx: None,
@@ -242,4 +268,108 @@ pub async fn read_in_chunks(
         return Err(internal_server_error!("Failed to read record chunk: EOF"));
     }
     Ok((buf, read))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::entry::tests::{entry, path, write_record, write_stub_record};
+    use crate::storage::file_cache::FILE_CACHE;
+    use crate::storage::storage::MAX_IO_BUFFER_SIZE;
+    use rstest::{fixture, rstest};
+
+    mod read_in_chunks {
+        use super::*;
+
+        use std::io::SeekFrom;
+        use std::path::PathBuf;
+        use tempfile::tempdir;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_ok(file_to_read: PathBuf, content_size: usize) {
+            let file_ref = FILE_CACHE
+                .read(&file_to_read, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            let content_size = content_size as u64;
+            let (data, len) = read_in_chunks(&file_ref, 0, content_size, 0).await.unwrap();
+            assert_eq!(len, MAX_IO_BUFFER_SIZE);
+
+            let (data, len) = read_in_chunks(&file_ref, 0, content_size, len as u64)
+                .await
+                .unwrap();
+            assert_eq!(len, content_size as usize - MAX_IO_BUFFER_SIZE);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_eof(file_to_read: PathBuf, content_size: usize) {
+            let file_ref = FILE_CACHE
+                .read(&file_to_read, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            let content_size = content_size as u64;
+            let err = read_in_chunks(&file_ref, content_size, content_size, 0)
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                internal_server_error!("Failed to read record chunk: EOF")
+            );
+        }
+
+        #[fixture]
+        fn content_size() -> usize {
+            (MAX_IO_BUFFER_SIZE + 1)
+        }
+        #[fixture]
+        fn file_to_read(content_size: usize) -> PathBuf {
+            let tmp_file = tempdir().unwrap().into_path().join("test_file");
+            std::fs::write(&tmp_file, vec![0; content_size]).unwrap();
+
+            tmp_file
+        }
+    }
+
+    mod reader {
+        use super::*;
+        use crate::storage::entry::Entry;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_tokio_task(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000).await.unwrap();
+
+            let mut reader = entry.begin_read(1000).await.unwrap();
+            assert!(
+                reader.io_task_handle.is_none(),
+                "We don't spawn a task for small records"
+            );
+            assert_eq!(
+                reader.rx().recv().await.unwrap().unwrap(),
+                Bytes::from("0123456789")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_with_tokio_task(mut entry: Entry) {
+            write_record(&mut entry, 1000, vec![0; MAX_IO_BUFFER_SIZE + 1])
+                .await
+                .unwrap();
+
+            let mut reader = entry.begin_read(1000).await.unwrap();
+
+            assert!(
+                reader.io_task_handle.is_some(),
+                "We spawn a task for big records"
+            );
+            assert_eq!(
+                reader.rx().recv().await.unwrap().unwrap().len(),
+                MAX_IO_BUFFER_SIZE
+            );
+        }
+    }
 }
