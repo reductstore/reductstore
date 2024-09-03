@@ -83,8 +83,8 @@ pub(crate) async fn write_record(
     };
 
     match check_request_and_get_sender.await {
-        Ok((ts, labels, mut writer)) => {
-            let mut tx = writer.tx();
+        Ok((ts, labels, writer)) => {
+            let tx = writer.tx();
             macro_rules! send_chunk {
                 ($chunk:expr) => {
                     tx.send_timeout($chunk, IO_OPERATION_TIMEOUT)

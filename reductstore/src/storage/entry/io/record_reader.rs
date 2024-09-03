@@ -7,19 +7,18 @@ use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
 use bytes::Bytes;
-use log::{debug, warn};
+use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::cmp::min;
 use std::io::SeekFrom;
 use std::sync::Arc;
-use std::thread::sleep;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-pub struct RecordReader {
+pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
     io_task_handle: Option<JoinHandle<()>>,
     record: Record,

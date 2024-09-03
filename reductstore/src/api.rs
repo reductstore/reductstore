@@ -197,7 +197,7 @@ mod tests {
             ("b".to_string(), "[a,b]".to_string()),
         ]);
 
-        let mut sender = storage
+        let sender = storage
             .get_bucket_mut("bucket-1")
             .unwrap()
             .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)

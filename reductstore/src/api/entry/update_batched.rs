@@ -233,7 +233,7 @@ mod tests {
         let components = components.await;
         {
             let mut storage = components.storage.write().await;
-            let mut writer = storage
+            let writer = storage
                 .get_bucket_mut("bucket-1")
                 .unwrap()
                 .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())

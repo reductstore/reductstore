@@ -7,10 +7,9 @@ pub(in crate::storage) mod wal;
 
 mod block_cache;
 mod use_counter;
-use log::{debug, error, trace};
+use log::{debug, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
-use std::cmp::min;
 
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
@@ -19,17 +18,16 @@ use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::file_cache::{FileRef, FILE_CACHE};
 use crate::storage::proto::{record, ts_to_us, Block as BlockProto, Record};
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
+use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use block_index::BlockIndex;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
-use tokio::time::timeout;
 
 pub(crate) type BlockRef = Arc<RwLock<Block>>;
 
@@ -614,6 +612,7 @@ mod tests {
     use rstest::{fixture, rstest};
 
     use crate::storage::entry::{RecordWriter, WriteRecordContent};
+    use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use std::time::Duration;

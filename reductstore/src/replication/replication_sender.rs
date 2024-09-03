@@ -400,7 +400,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut writer = sender
+        let writer = sender
             .storage
             .write()
             .await
@@ -597,7 +597,7 @@ mod tests {
             Err(_err) => storage.get_bucket_mut("src").unwrap(),
         };
 
-        let mut writer = bucket
+        let writer = bucket
             .write_record(
                 "test",
                 transaction.timestamp().clone(),

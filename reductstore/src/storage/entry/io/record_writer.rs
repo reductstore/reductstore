@@ -1,18 +1,16 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx, RecordTx};
+use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::file_cache::FileRef;
 use crate::storage::proto::record;
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
+use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT};
 use bytes::Bytes;
-use futures_util::stream::Concat;
-use log::{error, warn};
+use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::SeekFrom;
 use std::sync::Arc;
-use std::thread::sleep;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::RwLock;

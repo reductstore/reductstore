@@ -13,7 +13,6 @@ use futures_util::StreamExt;
 
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::bucket::RecordTx;
 use crate::storage::entry::{RecordDrainer, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
@@ -410,7 +409,7 @@ mod tests {
         let components = components.await;
         {
             let mut storage = components.storage.write().await;
-            let mut writer = storage
+            let writer = storage
                 .get_bucket_mut("bucket-1")
                 .unwrap()
                 .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())

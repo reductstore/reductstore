@@ -8,15 +8,15 @@ pub(crate) mod update_labels;
 mod write_record;
 
 use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx, BLOCK_INDEX_FILE};
+use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::entry::entry_loader::EntryLoader;
-use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
+use crate::storage::proto::{record, ts_to_us};
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{internal_server_error, not_found, too_early, Labels};
+use reduct_base::{internal_server_error, not_found, too_early};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -273,6 +273,7 @@ impl Entry {
 mod tests {
     use super::*;
     use bytes::Bytes;
+    use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::time::Duration;
     use tempfile;
@@ -280,6 +281,7 @@ mod tests {
 
     mod restore {
         use super::*;
+        use crate::storage::proto::{us_to_ts, Record};
 
         #[rstest]
         #[tokio::test]
@@ -338,6 +340,7 @@ mod tests {
     mod begin_read {
         use super::*;
         use crate::storage::storage::MAX_IO_BUFFER_SIZE;
+        use reduct_base::Labels;
 
         #[rstest]
         #[tokio::test]
@@ -374,7 +377,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_begin_read_still_written(entry: Entry) {
-            let mut sender = entry
+            let sender = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .await
                 .unwrap();
@@ -615,7 +618,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_entry_which_has_writer(mut entry: Entry) {
-            let mut sender = entry
+            let sender = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .await
                 .unwrap();
@@ -689,7 +692,7 @@ mod tests {
     }
 
     async fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) -> Result<(), ReductError> {
-        let mut sender = entry
+        let sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
             .await?;
         let x = sender.tx().send(Ok(Some(Bytes::from(data)))).await;
@@ -707,7 +710,7 @@ mod tests {
         data: Vec<u8>,
         labels: Labels,
     ) -> Result<(), ReductError> {
-        let mut sender = entry
+        let sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), labels)
             .await?;
         let x = sender.tx().send(Ok(Some(Bytes::from(data)))).await;

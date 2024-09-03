@@ -456,7 +456,7 @@ mod tests {
             let mut time = 10;
             for entry in ["test1", "test2"] {
                 for _ in 0..3 {
-                    let mut writer = bucket
+                    let writer = bucket
                         .write_record(entry, time, 4, "text/plain".to_string(), Labels::new())
                         .await
                         .unwrap();

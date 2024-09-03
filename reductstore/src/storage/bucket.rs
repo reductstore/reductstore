@@ -2,8 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
-use crate::storage::proto::record::Label;
-use crate::storage::proto::{ts_to_us, BucketSettings as ProtoBucketSettings, Record};
+use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
@@ -15,7 +14,6 @@ use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
-use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinSet;
 
 pub use crate::storage::block_manager::RecordRx;
@@ -643,7 +641,7 @@ mod tests {
         time: u64,
         content: &'static [u8],
     ) -> Result<(), ReductError> {
-        let mut sender = bucket
+        let sender = bucket
             .write_record(
                 entry_name,
                 time,
