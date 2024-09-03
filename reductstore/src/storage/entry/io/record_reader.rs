@@ -14,6 +14,7 @@ use std::cmp::min;
 use std::io::SeekFrom;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::sync::mpsc::error::SendTimeoutError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -192,36 +193,38 @@ impl RecordReader {
     async fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
         let mut read_bytes = 0;
 
-        while read_bytes < ctx.content_size {
-            let (buf, read) =
-                match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes).await
-                {
-                    Ok((buf, read)) => (buf, read),
-                    Err(e) => {
-                        if let Err(e) = tx.send_timeout(Err(e), IO_OPERATION_TIMEOUT).await {
-                            debug!(
-                                "Failed to send record {}/{}/{}: {}",
-                                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
-                            ); // for some reason the receiver is closed
+        let read_all = async {
+            while read_bytes < ctx.content_size {
+                let (buf, read) =
+                    match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes)
+                        .await
+                    {
+                        Ok((buf, read)) => (buf, read),
+                        Err(e) => {
+                            tx.send_timeout(Err(e), IO_OPERATION_TIMEOUT).await?;
+                            break;
                         }
-                        break;
-                    }
-                };
+                    };
 
-            if let Err(e) = tx.send_timeout(Ok(buf.into()), IO_OPERATION_TIMEOUT).await {
-                debug!(
-                    "Failed to send record {}/{}/{}: {}",
-                    ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
-                ); // for some reason the receiver is closed
-                break;
+                tx.send_timeout(Ok(buf.into()), IO_OPERATION_TIMEOUT)
+                    .await?;
+
+                read_bytes += read as u64;
+                ctx.block_manager
+                    .write()
+                    .await
+                    .use_counter_mut()
+                    .update(ctx.block_id);
             }
 
-            read_bytes += read as u64;
-            ctx.block_manager
-                .write()
-                .await
-                .use_counter_mut()
-                .update(ctx.block_id);
+            Ok::<(), SendTimeoutError<_>>(())
+        };
+
+        if let Err(e) = read_all.await {
+            debug!(
+                "Failed to send record {}/{}/{}: {}",
+                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
+            )
         }
 
         ctx.block_manager

@@ -539,6 +539,10 @@ impl BlockManager {
         &self.entry
     }
 
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
     fn path_to_desc(&self, block_id: u64) -> PathBuf {
         self.path
             .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
