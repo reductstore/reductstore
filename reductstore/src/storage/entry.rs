@@ -8,9 +8,7 @@ pub(crate) mod update_labels;
 mod write_record;
 
 use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::{
-    spawn_read_task, BlockManager, BlockRef, RecordTx, BLOCK_INDEX_FILE,
-};
+use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx, BLOCK_INDEX_FILE};
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Record};
 use crate::storage::query::base::QueryOptions;
@@ -123,8 +121,7 @@ impl Entry {
             ));
         }
 
-        let rx = spawn_read_task(self.block_manager.clone(), block_ref, time).await?;
-        Ok(RecordReader::new(rx, record.clone(), true))
+        RecordReader::try_new(self.block_manager.clone(), block_ref, time, true).await
     }
 
     /// Query records for a time range.
@@ -585,6 +582,7 @@ mod tests {
 
     mod try_remove_oldest_block {
         use super::*;
+        use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 
         #[rstest]
         #[tokio::test]
@@ -598,7 +596,9 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_entry_which_has_reader(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
+            write_record(&mut entry, 1000000, vec![0; MAX_IO_BUFFER_SIZE + 1])
+                .await
+                .unwrap();
             let _rx = entry.begin_read(1000000).await.unwrap();
 
             assert_eq!(
@@ -609,7 +609,7 @@ mod tests {
             );
             let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
-            assert_eq!(info.size, 28);
+            assert_eq!(info.size, 524309);
         }
 
         #[rstest]

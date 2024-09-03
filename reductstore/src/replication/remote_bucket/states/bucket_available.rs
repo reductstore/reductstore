@@ -356,7 +356,7 @@ mod tests {
     fn record_to_write() -> (RecordReader, Transaction) {
         let (_, rx) = tokio::sync::mpsc::channel(1);
         (
-            RecordReader::new(
+            RecordReader::form_record_with_rx(
                 rx,
                 Record {
                     timestamp: Some(us_to_ts(&0)),
@@ -376,7 +376,7 @@ mod tests {
     fn record_to_update() -> (RecordReader, Transaction) {
         let (_, rx) = tokio::sync::mpsc::channel(1);
         (
-            RecordReader::new(
+            RecordReader::form_record_with_rx(
                 rx,
                 Record {
                     timestamp: Some(us_to_ts(&0)),

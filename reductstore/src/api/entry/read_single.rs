@@ -380,7 +380,7 @@ mod tests {
         }
     }
 
-    mod stram_wrapper {
+    mod steam_wrapper {
         use super::*;
         use crate::storage::proto::Record;
 
@@ -389,7 +389,7 @@ mod tests {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
 
             let wrapper = ReaderWrapper {
-                reader: RecordReader::new(
+                reader: RecordReader::form_record_with_rx(
                     rx,
                     Record {
                         timestamp: None,

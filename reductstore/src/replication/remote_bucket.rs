@@ -220,7 +220,7 @@ pub(super) mod tests {
         let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
-        let record = RecordReader::new(rx, rec, false);
+        let record = RecordReader::form_record_with_rx(rx, rec, false);
         remote_bucket
             .write_batch("test", vec![(record, Transaction::WriteRecord(0))])
             .await

@@ -467,8 +467,8 @@ mod tests {
 
         (
             vec![
-                RecordReader::new(rx1, rec1, false),
-                RecordReader::new(rx2, rec2, false),
+                RecordReader::form_record_with_rx(rx1, rec1, false),
+                RecordReader::form_record_with_rx(rx2, rec2, false),
             ],
             vec![tx1, tx2],
         )
