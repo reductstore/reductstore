@@ -47,6 +47,19 @@ struct WriteContext {
 }
 
 impl RecordWriter {
+    /// Creates a new RecordWriter.
+    ///
+    /// It spins up a new task to write the record content to the storage and provides a channel to send the record content.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_manager` - The block manager.
+    /// * `block_ref` - The block reference.
+    /// * `time` - The timestamp of the record.
+    ///
+    /// # Returns
+    ///
+    /// * `RecordWriter` - The record writer.
     pub(in crate::storage) async fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
@@ -180,6 +193,7 @@ impl RecordWriter {
     }
 }
 
+/// Drains the record content and discards it.
 pub(crate) struct RecordDrainer {
     tx: RecordTx,
     io_task_handle: JoinHandle<()>,
