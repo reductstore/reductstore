@@ -61,6 +61,7 @@ mod tests {
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;
+    use std::thread::sleep;
 
     #[rstest]
     #[tokio::test]
@@ -68,7 +69,7 @@ mod tests {
         let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
-            Some(ReductError::not_found("No record with timestamp 1000"))
+            Some(not_found!("No record with timestamp 1000"))
         );
     }
 
@@ -79,7 +80,7 @@ mod tests {
         let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
-            Some(ReductError::not_found("No record with timestamp 1000"))
+            Some(not_found!("No record with timestamp 1000"))
         );
     }
 
@@ -90,7 +91,30 @@ mod tests {
         let reader = entry.begin_read(2000000).await;
         assert_eq!(
             reader.err(),
-            Some(ReductError::not_found("No record with timestamp 2000000"))
+            Some(not_found!("No record with timestamp 2000000"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_begin_read_broken(entry: Entry) {
+        let sender = entry
+            .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        sender
+            .tx()
+            .send(Ok(Some(Bytes::from(vec![0; 50]))))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let reader = entry.begin_read(1000000).await;
+        assert_eq!(
+            reader.err(),
+            Some(internal_server_error!(
+                "Record with timestamp 1000000 is broken"
+            ))
         );
     }
 
@@ -110,7 +134,7 @@ mod tests {
         let reader = entry.begin_read(1000000).await;
         assert_eq!(
             reader.err(),
-            Some(ReductError::too_early(
+            Some(too_early!(
                 "Record with timestamp 1000000 is still being written"
             ))
         );
@@ -125,7 +149,7 @@ mod tests {
         let reader = entry.begin_read(2000000).await;
         assert_eq!(
             reader.err(),
-            Some(ReductError::not_found("No record with timestamp 2000000"))
+            Some(not_found!("No record with timestamp 2000000"))
         );
     }
 
