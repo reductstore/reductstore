@@ -2,11 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
-use crate::storage::bucket::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
 
+use crate::storage::entry::RecordReader;
 use reduct_base::error::{ErrorCode, ReductError};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -42,9 +42,9 @@ impl Query for LimitedQuery {
         self.limit_count -= 1;
         let reader = self.query.next(block_manager).await;
         if self.limit_count == 0 {
-            reader.map(|r| {
-                let record = r.record().clone();
-                RecordReader::new(r.into_rx(), record, true)
+            reader.map(|mut r| {
+                r.set_last(true);
+                r
             })
         } else {
             reader

@@ -8,7 +8,7 @@ mod historical;
 mod limited;
 
 use crate::storage::block_manager::BlockManager;
-use crate::storage::bucket::RecordReader;
+use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{trace, warn};

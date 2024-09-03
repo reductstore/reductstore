@@ -7,29 +7,27 @@ pub(in crate::storage) mod wal;
 
 mod block_cache;
 mod use_counter;
-
-use log::{debug, error, trace};
+use log::{debug, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
-use std::cmp::min;
 
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
+use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::file_cache::{FileRef, FILE_CACHE};
 use crate::storage::proto::{record, ts_to_us, Block as BlockProto, Record};
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, DEFAULT_MAX_READ_CHUNK, IO_OPERATION_TIMEOUT};
+use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use block_index::BlockIndex;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
-use tokio::time::timeout;
 
 pub(crate) type BlockRef = Arc<RwLock<Block>>;
 
@@ -436,7 +434,7 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    async fn finish_write_record(
+    pub(crate) async fn finish_write_record(
         &mut self,
         block_id: u64,
         state: record::State,
@@ -492,7 +490,7 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    async fn begin_read_record(
+    pub(crate) async fn begin_read_record(
         &mut self,
         block: &Block,
         record_timestamp: u64,
@@ -513,7 +511,7 @@ impl BlockManager {
     ///
     /// * `block_id` - ID of the block to read from.
     ///
-    fn finish_read_record(&mut self, block_id: u64) {
+    pub(crate) fn finish_read_record(&mut self, block_id: u64) {
         self.use_counter.decrement(block_id);
     }
 
@@ -523,6 +521,26 @@ impl BlockManager {
 
     pub fn index(&self) -> &BlockIndex {
         &self.block_index
+    }
+
+    pub fn use_counter(&self) -> &UseCounter {
+        &self.use_counter
+    }
+
+    pub fn use_counter_mut(&mut self) -> &mut UseCounter {
+        &mut self.use_counter
+    }
+
+    pub fn bucket_name(&self) -> &String {
+        &self.bucket
+    }
+
+    pub fn entry_name(&self) -> &String {
+        &self.entry
+    }
+
+    pub fn path(&self) -> &PathBuf {
+        &self.path
     }
 
     fn path_to_desc(&self, block_id: u64) -> PathBuf {
@@ -587,224 +605,6 @@ impl BlockManager {
 pub type RecordRx = Receiver<Result<Bytes, ReductError>>;
 pub type RecordTx = Sender<Result<Option<Bytes>, ReductError>>;
 
-/// Spawn a task that reads a record from a block.
-/// The task will send chunks of the record to the receiver or an error if file reading failed
-///
-/// # Arguments
-///
-/// * `block_manager` - Block manager to use.
-/// * `block` - Block to read from.
-/// * `record_index` - Index of the record to read.
-///
-/// # Returns
-///
-/// * `Ok(rx)` - Receiver to receive chunks from.
-///
-/// # Errors
-///
-/// * `ReductError` - If could not open the block
-pub async fn spawn_read_task(
-    block_manager: Arc<RwLock<BlockManager>>,
-    block_ref: BlockRef,
-    record_timestamp: u64,
-) -> Result<RecordRx, ReductError> {
-    let (file_ref, offset) = {
-        let block = block_ref.read().await;
-        block_manager
-            .write()
-            .await
-            .begin_read_record(&block, record_timestamp)
-            .await?
-    };
-
-    let (entry, bucket) = {
-        let bm = block_manager.read().await;
-        (bm.entry.clone(), bm.bucket.clone())
-    };
-
-    let block = block_ref.read().await;
-    let record = block.get_record(record_timestamp).unwrap();
-    let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
-    let content_size = record.end - record.begin;
-    let block_id = block.block_id();
-    let local_bm = Arc::clone(&block_manager);
-    tokio::spawn(async move {
-        let mut read_bytes = 0;
-
-        while read_bytes < content_size {
-            let (buf, read) =
-                match read_in_chunks(&file_ref, offset, content_size, read_bytes).await {
-                    Ok((buf, read)) => (buf, read),
-                    Err(e) => {
-                        if let Err(e) = tx.send_timeout(Err(e), IO_OPERATION_TIMEOUT).await {
-                            debug!(
-                                "Failed to send record {}/{}/{}: {}",
-                                bucket, entry, record_timestamp, e
-                            ); // for some reason the receiver is closed
-                        }
-                        break;
-                    }
-                };
-
-            if let Err(e) = tx.send_timeout(Ok(buf.into()), IO_OPERATION_TIMEOUT).await {
-                debug!(
-                    "Failed to send record {}/{}/{}: {}",
-                    bucket, entry, record_timestamp, e
-                ); // for some reason the receiver is closed
-                break;
-            }
-
-            read_bytes += read as u64;
-            local_bm.write().await.use_counter.update(block_id);
-        }
-
-        local_bm.write().await.finish_read_record(block_id);
-    });
-    Ok(rx)
-}
-
-async fn read_in_chunks(
-    file: &FileRef,
-    offset: u64,
-    content_size: u64,
-    read_bytes: u64,
-) -> Result<(Vec<u8>, usize), ReductError> {
-    let chunk_size = min(content_size - read_bytes, DEFAULT_MAX_READ_CHUNK as u64);
-    let mut buf = vec![0; chunk_size as usize];
-
-    let seek_and_read = async {
-        let mut lock = file.write().await;
-        lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
-        lock.read(&mut buf).await
-    };
-
-    let read = match seek_and_read.await {
-        Ok(read) => read,
-        Err(e) => {
-            return Err(internal_server_error!("Failed to read record chunk: {}", e));
-        }
-    };
-
-    if read == 0 {
-        return Err(internal_server_error!("Failed to read record chunk: EOF"));
-    }
-    Ok((buf, read))
-}
-
-/// Spawn a task that writes a record to a block.
-///
-/// # Arguments
-///
-/// * `block_manager` - Block manager to use.
-/// * `block` - Block to write to.
-/// * `record_index` - Index of the record to write.
-///
-/// # Returns
-///
-/// * `Ok(tx)` - Sender to send chunks to.
-///
-/// # Errors
-///
-/// * `ReductError` - If the block is invalid or the record is already finished.
-pub async fn spawn_write_task(
-    block_manager: Arc<RwLock<BlockManager>>,
-    block_ref: BlockRef,
-    record_timestamp: u64,
-) -> Result<RecordTx, ReductError> {
-    let (file, offset) = {
-        let mut bm = block_manager.write().await;
-
-        let (file, offset) = {
-            let block = block_ref.read().await;
-            bm.index_mut().insert_or_update(block.to_owned());
-            bm.begin_write_record(&block, record_timestamp).await?
-        };
-
-        bm.save_block(block_ref.clone()).await?;
-        (file, offset)
-    };
-
-    let (tx, mut rx) = channel(CHANNEL_BUFFER_SIZE);
-    let bm = Arc::clone(&block_manager);
-    let block = block_ref.read().await;
-    let block_id = block.block_id();
-    let record_index = block.get_record(record_timestamp).unwrap();
-    let content_size = record_index.end - record_index.begin;
-
-    tokio::spawn(async move {
-        let recv = async move {
-            let mut written_bytes = 0u64;
-            while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, rx.recv())
-                .await
-                .map_err(|_| internal_server_error!("Timeout while reading record"))?
-            {
-                let chunk: Option<Bytes> = chunk?;
-                match chunk {
-                    Some(chunk) => {
-                        written_bytes += chunk.len() as u64;
-                        if written_bytes > content_size {
-                            return Err(ReductError::bad_request(
-                                "Content is bigger than in content-length",
-                            ));
-                        }
-
-                        {
-                            let mut lock = file.write().await;
-                            lock.seek(SeekFrom::Start(offset + written_bytes - chunk.len() as u64))
-                                .await?;
-                            lock.write_all(chunk.as_ref()).await?;
-                        }
-                    }
-                    None => {
-                        break;
-                    }
-                }
-
-                if written_bytes >= content_size {
-                    break;
-                }
-
-                block_manager.write().await.use_counter.update(block_id);
-            }
-
-            if written_bytes < content_size {
-                Err(ReductError::bad_request(
-                    "Content is smaller than in content-length",
-                ))
-            } else {
-                file.write().await.flush().await?;
-                Ok(())
-            }
-        };
-
-        let state = match recv.await {
-            Ok(_) => record::State::Finished,
-            Err(err) => {
-                let bm = bm.read().await;
-                error!(
-                    "Failed to write record {}/{}/{}: {}",
-                    bm.bucket, bm.entry, record_timestamp, err
-                );
-                record::State::Errored
-            }
-        };
-
-        if let Err(err) = bm
-            .write()
-            .await
-            .finish_write_record(block_id, state, record_timestamp)
-            .await
-        {
-            let bm = bm.read().await;
-            error!(
-                "Failed to finish writing {}/{}/{} record: {}",
-                bm.bucket, bm.entry, record_timestamp, err
-            );
-        }
-    });
-    Ok(tx)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -815,6 +615,8 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
+    use crate::storage::entry::{RecordWriter, WriteRecordContent};
+    use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use std::time::Duration;
@@ -915,12 +717,11 @@ mod tests {
             block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
-            let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
+            let writer = RecordWriter::try_new(Arc::clone(&block_manager), block.await, 0)
                 .await
                 .unwrap();
 
-            tx.send(Ok(None)).await.unwrap();
-            drop(tx);
+            writer.tx().send(Ok(None)).await.unwrap();
             sleep(Duration::from_millis(10)).await; // wait for thread to finish
 
             let block_ref = block_manager
@@ -957,11 +758,14 @@ mod tests {
             let block = block.await;
             block.write().await.insert_or_update_record(record.clone());
 
-            let tx = spawn_write_task(Arc::clone(&block_manager), block, 1000_000)
+            let writer = RecordWriter::try_new(Arc::clone(&block_manager), block, 1000_000)
                 .await
                 .unwrap();
-            tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
-            drop(tx);
+            writer
+                .tx()
+                .send(Ok(Some(Bytes::from("hallo"))))
+                .await
+                .unwrap();
             sleep(Duration::from_millis(10)).await; // wait for thread to finish
 
             // must save record in WAL
@@ -1039,7 +843,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 index.get_block(block_id).unwrap().metadata_size,
-                21,
+                25,
                 "index not updated"
             );
 
@@ -1063,7 +867,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                block_index_proto.blocks[0].metadata_size, 35,
+                block_index_proto.blocks[0].metadata_size, 39,
                 "index updated"
             );
         }
@@ -1111,6 +915,7 @@ mod tests {
 
     mod read_writer_counters {
         use super::*;
+        use crate::storage::entry::RecordReader;
 
         #[rstest]
         #[tokio::test]
@@ -1120,7 +925,7 @@ mod tests {
             block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
-            let tx = spawn_write_task(Arc::clone(&block_manager), block.await, 0)
+            let writer = RecordWriter::try_new(Arc::clone(&block_manager), block.await, 0)
                 .await
                 .unwrap();
 
@@ -1137,9 +942,13 @@ mod tests {
                 ))
             );
 
-            tx.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
-            drop(tx);
+            writer
+                .tx()
+                .send(Ok(Some(Bytes::from(vec![0; MAX_IO_BUFFER_SIZE + 1]))))
+                .await
+                .unwrap();
             sleep(Duration::from_millis(10)).await; // wait for thread to finish
+
             assert_eq!(
                 block_manager
                     .write()
@@ -1159,7 +968,7 @@ mod tests {
             block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
-            spawn_write_task(Arc::clone(&block_manager), block.await, 0)
+            RecordWriter::try_new(Arc::clone(&block_manager), block.await, 0)
                 .await
                 .unwrap();
             assert!(block_manager
@@ -1192,9 +1001,10 @@ mod tests {
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
 
-            let mut rx = spawn_read_task(Arc::clone(&block_manager), block.await, 0)
-                .await
-                .unwrap();
+            let mut reader =
+                RecordReader::try_new(Arc::clone(&block_manager), block.await, 0, false)
+                    .await
+                    .unwrap();
 
             assert_eq!(
                 block_manager
@@ -1209,9 +1019,12 @@ mod tests {
                 ))
             );
 
-            assert_eq!(rx.recv().await.unwrap().unwrap().as_ref(), b"hallo");
-            drop(rx);
+            while let Some(Ok(_)) = reader.rx().recv().await {
+                // wait for reader to finish
+            }
+
             sleep(Duration::from_millis(10)).await; // wait for thread to finish
+            drop(reader);
 
             assert_eq!(
                 block_manager
@@ -1232,7 +1045,7 @@ mod tests {
             block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager.await));
-            spawn_read_task(Arc::clone(&block_manager), block.await, 0)
+            let _reader = RecordReader::try_new(Arc::clone(&block_manager), block.await, 0, false)
                 .await
                 .unwrap();
             assert!(block_manager
@@ -1259,11 +1072,12 @@ mod tests {
 
     mod record_removing {
         use super::*;
+        use crate::storage::entry::RecordReader;
 
         #[rstest]
         #[case(0)]
         #[case(500)]
-        #[case(DEFAULT_MAX_READ_CHUNK+1)]
+        #[case(MAX_IO_BUFFER_SIZE+1)]
         #[tokio::test]
         async fn test_remove_records(
             #[case] record_size: usize,
@@ -1295,13 +1109,17 @@ mod tests {
             assert_eq!(record.state, 1);
 
             // read content
-            let mut rx =
-                spawn_read_task(Arc::clone(&block_manager), block_ref.clone(), record_time)
-                    .await
-                    .unwrap();
+            let mut reader = RecordReader::try_new(
+                Arc::clone(&block_manager),
+                block_ref.clone(),
+                record_time,
+                false,
+            )
+            .await
+            .unwrap();
 
             let mut received = BytesMut::new();
-            while let Some(Ok(chunk)) = rx.recv().await {
+            while let Some(Ok(chunk)) = reader.rx().recv().await {
                 received.extend_from_slice(&chunk);
             }
             assert_eq!(received.len(), record_size);
@@ -1391,13 +1209,16 @@ mod tests {
             .take(record_size)
             .map(char::from)
             .collect();
-        let tx = spawn_write_task(Arc::clone(&block_manager), block_ref.clone(), record_time)
+
+        let writer =
+            RecordWriter::try_new(Arc::clone(&block_manager), block_ref.clone(), record_time)
+                .await
+                .unwrap();
+        writer
+            .tx()
+            .send(Ok(Some(Bytes::from(record_body.clone()))))
             .await
             .unwrap();
-        tx.send(Ok(Some(Bytes::from(record_body.clone()))))
-            .await
-            .unwrap();
-        drop(tx);
         sleep(Duration::from_millis(10)).await; // wait for thread to finish
         block_manager
             .write()
@@ -1432,14 +1253,18 @@ mod tests {
                     nanos: 0,
                 }),
                 begin: 0,
-                end: 5,
+                end: (MAX_IO_BUFFER_SIZE + 1) as u64,
                 state: 0,
                 labels: vec![],
                 content_type: "".to_string(),
             });
 
             let (file, _) = bm.begin_write_record(&block, 0).await.unwrap();
-            file.write().await.write(b"hallo").await.unwrap();
+            file.write()
+                .await
+                .write(&vec![0; MAX_IO_BUFFER_SIZE + 1])
+                .await
+                .unwrap();
         }
 
         bm.finish_write_record(block_id, record::State::Finished, 0)

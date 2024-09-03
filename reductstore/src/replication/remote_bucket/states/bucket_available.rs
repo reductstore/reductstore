@@ -6,7 +6,7 @@ use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavail
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
-use crate::storage::bucket::RecordReader;
+use crate::storage::entry::RecordReader;
 use async_trait::async_trait;
 use log::{debug, error, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
@@ -157,6 +157,7 @@ mod tests {
     use crate::storage::proto::{us_to_ts, Record};
     use mockall::predicate;
 
+    use crate::storage::entry::RecordReader;
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::{fixture, rstest};
 
@@ -355,7 +356,7 @@ mod tests {
     fn record_to_write() -> (RecordReader, Transaction) {
         let (_, rx) = tokio::sync::mpsc::channel(1);
         (
-            RecordReader::new(
+            RecordReader::form_record_with_rx(
                 rx,
                 Record {
                     timestamp: Some(us_to_ts(&0)),
@@ -375,7 +376,7 @@ mod tests {
     fn record_to_update() -> (RecordReader, Transaction) {
         let (_, rx) = tokio::sync::mpsc::channel(1);
         (
-            RecordReader::new(
+            RecordReader::form_record_with_rx(
                 rx,
                 Record {
                     timestamp: Some(us_to_ts(&0)),

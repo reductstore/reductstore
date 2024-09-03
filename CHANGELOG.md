@@ -14,9 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-380: Send uncompleted batch when query is timed out, [PR-558](https://github.com/reductstore/reductstore/pull/558)
 - RS-422: Batch update records per block, [PR-559](https://github.com/reductstore/reductstore/pull/559)
 - RS-418: Remove record API, [PR-560](https://github.com/reductstore/reductstore/pull/560)
+
 ### Fixed
 
 - Server shutdown, [PR-557](https://github.com/reductstore/reductstore/pull/557)
+- RS-446: Fix storage engine hanging during replication, [PR-564](https://github.com/reductstore/reductstore/pull/564)
 
 ### Internal
 

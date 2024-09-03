@@ -6,12 +6,11 @@ use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use reduct_base::error::{ErrorCode, ReductError};
 
-use crate::storage::bucket::RecordReader;
-
 use async_trait::async_trait;
 
 use std::sync::Arc;
 
+use crate::storage::entry::RecordReader;
 use tokio::sync::RwLock;
 
 pub struct ContinuousQuery {

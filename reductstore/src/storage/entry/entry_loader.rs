@@ -328,25 +328,23 @@ mod tests {
         assert_eq!(info.record_count, 2);
         assert_eq!(info.size, 88);
 
-        let rec = entry.begin_read(1).await.unwrap();
+        let mut rec = entry.begin_read(1).await.unwrap();
         assert_eq!(rec.timestamp(), 1);
         assert_eq!(rec.content_length(), 10);
         assert_eq!(rec.content_type(), "text/plain");
 
-        let mut rx = rec.into_rx();
         assert_eq!(
-            rx.recv().await.unwrap().unwrap(),
+            rec.rx().recv().await.unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
 
-        let rec = entry.begin_read(2000010).await.unwrap();
+        let mut rec = entry.begin_read(2000010).await.unwrap();
         assert_eq!(rec.timestamp(), 2000010);
         assert_eq!(rec.content_length(), 10);
         assert_eq!(rec.content_type(), "text/plain");
 
-        let mut rx = rec.into_rx();
         assert_eq!(
-            rx.recv().await.unwrap().unwrap(),
+            rec.rx().recv().await.unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
     }

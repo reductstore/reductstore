@@ -203,8 +203,12 @@ mod tests {
             .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)
             .await
             .unwrap();
-        sender.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
-        sender.closed().await;
+        sender
+            .tx()
+            .send(Ok(Some(Bytes::from("Hey!!!"))))
+            .await
+            .unwrap();
+        sender.tx().closed().await;
 
         let permissions = Permissions {
             read: vec!["bucket-1".to_string(), "bucket-2".to_string()],

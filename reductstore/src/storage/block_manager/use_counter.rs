@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// A counter to keep track of the number of times a block has been used.
-pub(super) struct UseCounter {
+pub(crate) struct UseCounter {
     counter: HashMap<u64, (usize, Instant)>,
     timeout: Duration,
 }

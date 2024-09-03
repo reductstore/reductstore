@@ -5,7 +5,7 @@ use crate::api::entry::MethodExtractor;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
-use crate::storage::bucket::{Bucket, RecordReader};
+use crate::storage::bucket::Bucket;
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -14,6 +14,7 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
 use log::{debug, warn};
 use reduct_base::error::ReductError;

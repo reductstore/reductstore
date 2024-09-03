@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::bucket::RecordTx;
+use crate::storage::entry::{RecordDrainer, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::debug;
@@ -82,7 +82,7 @@ pub(crate) async fn write_batched_records(
 
             while !chunk.is_empty() {
                 match write_chunk(
-                    &mut senders[index],
+                    &senders[index].tx(),
                     chunk,
                     &mut written,
                     timed_headers[index].1.content_length.clone(),
@@ -96,12 +96,13 @@ pub(crate) async fn write_batched_records(
                     Ok(Some(rest)) => {
                         // finish writing the current record and start a new one
                         if let Err(_) = senders[index]
+                            .tx()
                             .send_timeout(Ok(None), Duration::from_millis(1))
                             .await
                         {
                             debug!("Failed to sync the channel - it may be already closed");
                         }
-                        senders[index].closed().await;
+                        senders[index].tx().closed().await;
 
                         components
                             .replication_repo
@@ -158,7 +159,7 @@ pub(crate) async fn write_batched_records(
 }
 
 async fn write_chunk(
-    sender: &mut Sender<Result<Option<Bytes>, ReductError>>,
+    sender: &Sender<Result<Option<Bytes>, ReductError>>,
     chunk: Bytes,
     written: &mut usize,
     content_size: usize,
@@ -220,8 +221,8 @@ async fn start_writing(
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
-) -> RecordTx {
-    let get_tx = async move {
+) -> Box<dyn WriteRecordContent + Sync + Send> {
+    let get_writer = async move {
         let mut storage = components.storage.write().await;
         let bucket = storage.get_bucket_mut(bucket_name)?;
 
@@ -236,21 +237,12 @@ async fn start_writing(
             .await
     };
 
-    match get_tx.await {
-        Ok(tx) => tx,
+    match get_writer.await {
+        Ok(writer) => writer,
         Err(err) => {
             error_map.insert(time, err);
             // drain the stream
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-            tokio::spawn(async move {
-                while let Some(chunk) = rx.recv().await {
-                    if let Ok(None) = chunk {
-                        // sync the channel
-                        break;
-                    }
-                }
-            });
-            tx
+            Box::new(RecordDrainer::new())
         }
     }
 }
@@ -417,14 +409,18 @@ mod tests {
         let components = components.await;
         {
             let mut storage = components.storage.write().await;
-            let tx = storage
+            let writer = storage
                 .get_bucket_mut("bucket-1")
                 .unwrap()
                 .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await
                 .unwrap();
-            tx.send(Ok(Some(Bytes::from(vec![0; 20])))).await.unwrap();
-            tx.closed().await;
+            writer
+                .tx()
+                .send(Ok(Some(Bytes::from(vec![0; 20]))))
+                .await
+                .unwrap();
+            writer.tx().closed().await;
         }
 
         headers.insert("content-length", "48".parse().unwrap());

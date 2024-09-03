@@ -4,13 +4,13 @@
 use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::storage::bucket::RecordReader;
 use async_trait::async_trait;
 
 use log::error;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
+use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
 use tokio::time::{Duration, Instant};
 

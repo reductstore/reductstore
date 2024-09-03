@@ -1,9 +1,8 @@
 // Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::entry::{Entry, EntrySettings};
-use crate::storage::proto::record::Label;
-use crate::storage::proto::{ts_to_us, BucketSettings as ProtoBucketSettings, Record};
+use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
+use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
@@ -15,7 +14,6 @@ use std::collections::BTreeMap;
 use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
-use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinSet;
 
 pub use crate::storage::block_manager::RecordRx;
@@ -52,84 +50,6 @@ impl Into<BucketSettings> for ProtoBucketSettings {
             max_block_records: self.max_block_records,
             max_block_size: self.max_block_size,
         }
-    }
-}
-
-pub struct RecordReader {
-    rx: Option<RecordRx>,
-    record: Record,
-    last: bool,
-}
-
-impl RecordReader {
-    pub fn new(rx: Receiver<Result<Bytes, ReductError>>, record: Record, last: bool) -> Self {
-        RecordReader {
-            rx: Some(rx),
-            record,
-            last,
-        }
-    }
-
-    pub fn form_record(record: Record, last: bool) -> Self {
-        RecordReader {
-            rx: None,
-            record,
-            last,
-        }
-    }
-
-    pub fn timestamp(&self) -> u64 {
-        ts_to_us(self.record.timestamp.as_ref().unwrap())
-    }
-
-    pub fn content_type(&self) -> &str {
-        self.record.content_type.as_str()
-    }
-
-    pub fn labels(&self) -> &Vec<Label> {
-        &self.record.labels
-    }
-
-    pub fn content_length(&self) -> u64 {
-        self.record.end - self.record.begin
-    }
-
-    pub fn only_metadata(&self) -> bool {
-        self.rx.is_none()
-    }
-
-    /// Get the receiver to read the record content
-    ///
-    /// # Returns
-    ///
-    /// * `&mut Receiver<Result<Bytes, ReductError>>` - The receiver to read the record content
-    ///
-    /// # Panics
-    ///
-    /// Panics if the receiver isn't set (we read only metadata)
-    pub fn rx(&mut self) -> &mut Receiver<Result<Bytes, ReductError>> {
-        self.rx.as_mut().unwrap()
-    }
-
-    /// Consume the RecordReader and return the receiver to read the record content
-    ///
-    /// # Returns
-    ///
-    /// * `Receiver<Result<Bytes, ReductError>` - The receiver to read the record content
-    ///
-    /// # Panics
-    ///
-    /// Panics if the receiver isn't set (we read only metadata)
-    pub fn into_rx(self) -> Receiver<Result<Bytes, ReductError>> {
-        self.rx.unwrap()
-    }
-
-    pub fn last(&self) -> bool {
-        self.last
-    }
-
-    pub fn record(&self) -> &Record {
-        &self.record
     }
 }
 
@@ -355,7 +275,7 @@ impl Bucket {
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<RecordTx, ReductError> {
+    ) -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
         self.keep_quota_for(content_size).await?;
         let entry = self.get_or_create_entry(name)?;
         entry
@@ -731,12 +651,13 @@ mod tests {
             )
             .await?;
         sender
+            .tx()
             .send(Ok(Some(Bytes::from(content))))
             .await
             .map_err(|e| {
                 ReductError::internal_server_error(format!("Failed to send data: {}", e).as_str())
             })?;
-        sender.closed().await;
+        sender.tx().closed().await;
         Ok(())
     }
 

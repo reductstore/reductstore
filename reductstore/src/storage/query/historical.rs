@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 
-use crate::storage::block_manager::{spawn_read_task, BlockManager, BlockRef};
-use crate::storage::bucket::RecordReader;
+use crate::storage::block_manager::{BlockManager, BlockRef};
+use crate::storage::entry::RecordReader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
@@ -136,13 +136,13 @@ impl Query for HistoricalQuery {
         if self.only_metadata {
             Ok(RecordReader::form_record(record.clone(), false))
         } else {
-            let rx = spawn_read_task(
+            RecordReader::try_new(
                 Arc::clone(&block_manager),
                 block.clone(),
                 ts_to_us(&record.timestamp.unwrap()),
+                false,
             )
-            .await?;
-            Ok(RecordReader::new(rx, record.clone(), false))
+            .await
         }
     }
 }

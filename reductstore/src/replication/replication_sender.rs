@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::replication::Transaction;
-use crate::storage::bucket::RecordReader;
+use crate::storage::entry::RecordReader;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
@@ -212,7 +212,6 @@ mod tests {
     use super::*;
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
-    use crate::storage::bucket::RecordReader;
     use async_trait::async_trait;
     use bytes::Bytes;
     use mockall::mock;
@@ -401,7 +400,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tx = sender
+        let writer = sender
             .storage
             .write()
             .await
@@ -418,7 +417,11 @@ mod tests {
             sender.run().await
         });
 
-        tx.send(Ok(Some(Bytes::from("xxxx")))).await.unwrap();
+        writer
+            .tx()
+            .send(Ok(Some(Bytes::from("xxxx"))))
+            .await
+            .unwrap();
         sleep(Duration::from_millis(100)).await;
 
         let diagnostics = hourly_diagnostics.read().await.diagnostics();
@@ -594,7 +597,7 @@ mod tests {
             Err(_err) => storage.get_bucket_mut("src").unwrap(),
         };
 
-        let tx = bucket
+        let writer = bucket
             .write_record(
                 "test",
                 transaction.timestamp().clone(),
@@ -604,13 +607,15 @@ mod tests {
             )
             .await
             .unwrap();
-        tx.send(Ok(Some(Bytes::from(
-            (0..size).map(|_| 'x').collect::<String>(),
-        ))))
-        .await
-        .unwrap();
-        tx.send(Ok(None)).await.unwrap();
-        tx.closed().await;
+        writer
+            .tx()
+            .send(Ok(Some(Bytes::from(
+                (0..size).map(|_| 'x').collect::<String>(),
+            ))))
+            .await
+            .unwrap();
+        writer.tx().send(Ok(None)).await.unwrap();
+        writer.tx().closed().await;
     }
 
     async fn build_sender(

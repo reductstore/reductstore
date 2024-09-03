@@ -282,6 +282,8 @@ impl ReplicationTask {
 #[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use async_trait::async_trait;
 
     use bytes::Bytes;
@@ -290,14 +292,12 @@ mod tests {
     use rstest::*;
 
     use crate::replication::remote_bucket::ErrorRecordMap;
+    use crate::storage::entry::io::record_reader::RecordReader;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;
 
     use crate::replication::Transaction;
-    use crate::storage::bucket::RecordReader;
-
-    use super::*;
 
     mock! {
         RmBucket {}
@@ -456,13 +456,17 @@ mod tests {
             let mut time = 10;
             for entry in ["test1", "test2"] {
                 for _ in 0..3 {
-                    let tx = bucket
+                    let writer = bucket
                         .write_record(entry, time, 4, "text/plain".to_string(), Labels::new())
                         .await
                         .unwrap();
-                    tx.send(Ok(Some(Bytes::from("test")))).await.unwrap();
-                    tx.send(Ok(None)).await.unwrap_or(());
-                    tx.closed().await;
+                    writer
+                        .tx()
+                        .send(Ok(Some(Bytes::from("test"))))
+                        .await
+                        .unwrap();
+                    writer.tx().send(Ok(None)).await.unwrap_or(());
+                    writer.tx().closed().await;
                     time += 10;
                 }
 
