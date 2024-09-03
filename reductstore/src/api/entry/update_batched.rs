@@ -233,14 +233,18 @@ mod tests {
         let components = components.await;
         {
             let mut storage = components.storage.write().await;
-            let tx = storage
+            let mut writer = storage
                 .get_bucket_mut("bucket-1")
                 .unwrap()
                 .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await
                 .unwrap();
-            tx.send(Ok(Some(Bytes::from(vec![0; 20])))).await.unwrap();
-            tx.closed().await;
+            writer
+                .tx()
+                .send(Ok(Some(Bytes::from(vec![0; 20]))))
+                .await
+                .unwrap();
+            writer.tx().closed().await;
         }
 
         headers.insert("content-length", "0".parse().unwrap());

@@ -1,7 +1,7 @@
 // Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::entry::{Entry, EntrySettings};
+use crate::storage::entry::{Entry, EntrySettings, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, BucketSettings as ProtoBucketSettings, Record};
 use log::debug;
@@ -355,7 +355,7 @@ impl Bucket {
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<RecordTx, ReductError> {
+    ) -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
         self.keep_quota_for(content_size).await?;
         let entry = self.get_or_create_entry(name)?;
         entry
@@ -721,7 +721,7 @@ mod tests {
         time: u64,
         content: &'static [u8],
     ) -> Result<(), ReductError> {
-        let sender = bucket
+        let mut sender = bucket
             .write_record(
                 entry_name,
                 time,
@@ -731,12 +731,13 @@ mod tests {
             )
             .await?;
         sender
+            .tx()
             .send(Ok(Some(Bytes::from(content))))
             .await
             .map_err(|e| {
                 ReductError::internal_server_error(format!("Failed to send data: {}", e).as_str())
             })?;
-        sender.closed().await;
+        sender.tx().closed().await;
         Ok(())
     }
 
