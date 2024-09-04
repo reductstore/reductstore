@@ -61,7 +61,6 @@ mod tests {
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;
-    use std::thread::sleep;
 
     #[rstest]
     #[tokio::test]

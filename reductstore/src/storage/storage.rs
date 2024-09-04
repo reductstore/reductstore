@@ -4,7 +4,6 @@
 use log::{debug, info};
 use std::collections::BTreeMap;
 
-use std::fs::remove_dir_all;
 use std::path::PathBuf;
 
 use std::time::{Duration, Instant};

@@ -11,7 +11,6 @@ use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, Q
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
 use std::collections::BTreeMap;
-use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::task::JoinSet;

@@ -255,7 +255,7 @@ pub async fn read_in_chunks(
     let mut buf = vec![0; chunk_size as usize];
 
     let seek_and_read = async {
-        let mut rc = file.upgrade()?;
+        let rc = file.upgrade()?;
         let mut lock = rc.write().await;
         lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
         let read = lock.read(&mut buf).await?;
@@ -341,7 +341,7 @@ mod tests {
     mod reader {
         use super::*;
         use crate::storage::entry::Entry;
-        use std::thread::sleep;
+
         use std::time::Duration;
 
         #[rstest]
@@ -393,7 +393,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let mut reader = entry.begin_read(1000).await.unwrap();
+            let reader = entry.begin_read(1000).await.unwrap();
             tokio::time::sleep(IO_OPERATION_TIMEOUT).await;
             tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to finish
 

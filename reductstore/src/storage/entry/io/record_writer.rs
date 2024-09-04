@@ -133,7 +133,7 @@ impl RecordWriter {
                         }
 
                         {
-                            let mut rc = ctx.file_ref.upgrade()?;
+                            let rc = ctx.file_ref.upgrade()?;
                             let mut lock = rc.write().await;
                             lock.seek(SeekFrom::Start(
                                 ctx.offset + written_bytes - chunk.len() as u64,
