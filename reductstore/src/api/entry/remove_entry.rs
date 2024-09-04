@@ -34,7 +34,8 @@ pub(crate) async fn remove_entry(
         .write()
         .await
         .get_bucket_mut(bucket_name)?
-        .remove_entry(entry_name)?;
+        .remove_entry(entry_name)
+        .await?;
     Ok(())
 }
 

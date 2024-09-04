@@ -167,7 +167,28 @@ impl FileCache {
             tokio::fs::remove_file(path).await?;
         }
         let mut cache = self.cache.write().await;
+
         cache.remove(path);
+        Ok(())
+    }
+
+    pub async fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
+        if path.try_exists()? {
+            tokio::fs::remove_dir_all(path).await?;
+        }
+
+        let mut cache = self.cache.write().await;
+
+        let files_to_remove = cache
+            .keys()
+            .iter()
+            .filter(|file_path| file_path.starts_with(path))
+            .map(|file_path| (*file_path).clone())
+            .collect::<Vec<PathBuf>>();
+        for file_path in files_to_remove {
+            cache.remove(&file_path);
+        }
+
         Ok(())
     }
 

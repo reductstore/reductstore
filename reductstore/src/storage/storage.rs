@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use log::info;
+use log::{debug, info};
 use std::collections::BTreeMap;
 
 use std::fs::remove_dir_all;
@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
+use crate::storage::file_cache::FILE_CACHE;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 
@@ -174,7 +175,7 @@ impl Storage {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub(crate) fn remove_bucket(&mut self, name: &str) -> Result<(), ReductError> {
+    pub(crate) async fn remove_bucket(&mut self, name: &str) -> Result<(), ReductError> {
         if let Some(bucket) = self.buckets.get(name) {
             if bucket.is_provisioned() {
                 return Err(ReductError::conflict(&format!(
@@ -186,7 +187,9 @@ impl Storage {
 
         match self.buckets.remove(name) {
             Some(_) => {
-                remove_dir_all(&self.data_path.join(name))?;
+                let path = self.data_path.join(name);
+                FILE_CACHE.remove_dir(&path).await?;
+                debug!("Bucket '{}' and folder {:?} are removed", name, path);
                 Ok(())
             }
             None => Err(ReductError::not_found(

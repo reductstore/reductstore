@@ -118,7 +118,6 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     ///
     /// A vector of references to all values in the cache.
     ///
-    /// # Examples
     pub fn values(&mut self) -> Vec<&V> {
         self.store
             .values_mut()
@@ -127,6 +126,16 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
                 &v.value
             })
             .collect()
+    }
+
+    /// Returns a vector of references to all keys in the cache.
+    ///
+    /// # Returns
+    ///
+    /// A vector of references to all keys in the cache.
+    ///
+    pub fn keys(&self) -> Vec<&K> {
+        self.store.keys().collect()
     }
 
     fn discard_old_descriptors(&mut self) -> Vec<(K, V)> {
