@@ -2,7 +2,7 @@ coverage:
   status:
     project:
       default:
-        target: auto
+        target: 90
 
 comment:                  #this is a top-level key
   layout: " diff, flags, files"
