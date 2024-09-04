@@ -21,7 +21,8 @@ pub(crate) async fn remove_bucket(
         .storage
         .write()
         .await
-        .remove_bucket(&bucket_name)?;
+        .remove_bucket(&bucket_name)
+        .await?;
     components
         .token_repo
         .write()

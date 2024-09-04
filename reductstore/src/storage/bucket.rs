@@ -11,13 +11,13 @@ use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, Q
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::Labels;
 use std::collections::BTreeMap;
-use std::fs::remove_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::task::JoinSet;
 
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
+use crate::storage::file_cache::FILE_CACHE;
 
 const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -121,7 +121,6 @@ impl Bucket {
         for entry in std::fs::read_dir(&path)? {
             let path = entry?.path();
             if path.is_dir() {
-                let _entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
                 task_set.spawn(async move {
                     Entry::restore(
                         path,
@@ -308,11 +307,17 @@ impl Bucket {
     /// # Returns
     ///
     /// * `HTTPError` - The error if any.
-    pub fn remove_entry(&mut self, name: &str) -> Result<(), ReductError> {
+    pub async fn remove_entry(&mut self, name: &str) -> Result<(), ReductError> {
         _ = self.get_entry(name)?;
 
         let path = self.path.join(name);
-        remove_dir_all(path)?;
+        FILE_CACHE.remove_dir(&path).await?;
+        debug!(
+            "Remove entry '{}' from bucket '{}' and folder '{}'",
+            name,
+            self.name,
+            path.display()
+        );
         self.entries.remove(name);
         Ok(())
     }
@@ -597,7 +602,7 @@ mod tests {
     async fn test_remove_entry(mut bucket: Bucket) {
         write(&mut bucket, "test-1", 1, b"test").await.unwrap();
 
-        bucket.remove_entry("test-1").unwrap();
+        bucket.remove_entry("test-1").await.unwrap();
         assert_eq!(
             bucket.get_entry("test-1").err(),
             Some(ReductError::not_found(
@@ -607,9 +612,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_remove_entry_not_found(mut bucket: Bucket) {
+    #[tokio::test]
+    async fn test_remove_entry_not_found(mut bucket: Bucket) {
         assert_eq!(
-            bucket.remove_entry("test-1").err(),
+            bucket.remove_entry("test-1").await.err(),
             Some(ReductError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
             ))

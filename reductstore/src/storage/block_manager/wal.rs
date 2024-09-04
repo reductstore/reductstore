@@ -145,19 +145,21 @@ impl Wal for WalImpl {
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
         let file = if !path.exists() {
-            let file = FILE_CACHE
+            let wk = FILE_CACHE
                 .write_or_create(&path, SeekFrom::Current(0))
                 .await?;
+            let file = wk.upgrade()?;
             // preallocate file to speed up writes
             file.write().await.set_len(WAL_FILE_SIZE).await?;
-            file
+            wk
         } else {
             FILE_CACHE
                 .write_or_create(&path, SeekFrom::Current(0))
                 .await?
         };
 
-        let mut lock = file.write().await;
+        let rc = file.upgrade()?;
+        let mut lock = rc.write().await;
         if lock.stream_position().await? > 0 {
             // remove stop marker
             lock.seek(SeekFrom::Current(-1)).await?;
@@ -177,7 +179,10 @@ impl Wal for WalImpl {
 
     async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
         let path = self.block_wal_path(block_id);
-        let file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+        let file = FILE_CACHE
+            .read(&path, SeekFrom::Start(0))
+            .await?
+            .upgrade()?;
         let mut lock = file.write().await;
 
         let mut entries = Vec::new();

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
-use crate::storage::file_cache::FileRef;
+use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record;
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT};
 use bytes::Bytes;
@@ -40,7 +40,7 @@ struct WriteContext {
     entry_name: String,
     block_id: u64,
     record_timestamp: u64,
-    file_ref: FileRef,
+    file_ref: FileWeak,
     offset: u64,
     content_size: u64,
     block_manager: Arc<RwLock<BlockManager>>,
@@ -133,7 +133,8 @@ impl RecordWriter {
                         }
 
                         {
-                            let mut lock = ctx.file_ref.write().await;
+                            let rc = ctx.file_ref.upgrade()?;
+                            let mut lock = rc.write().await;
                             lock.seek(SeekFrom::Start(
                                 ctx.offset + written_bytes - chunk.len() as u64,
                             ))
@@ -162,7 +163,7 @@ impl RecordWriter {
                     "Content is smaller than in content-length",
                 ))
             } else {
-                ctx.file_ref.write().await.flush().await?;
+                ctx.file_ref.upgrade()?.write().await.flush().await?;
                 Ok(())
             }
         };

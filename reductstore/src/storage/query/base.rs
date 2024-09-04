@@ -149,7 +149,8 @@ pub(crate) mod tests {
                     .begin_write_record(&blk, $index)
                     .await
                     .unwrap();
-                let mut file = file.write().await;
+                let rc = file.upgrade().unwrap();
+                let mut file = rc.write().await;
                 file.write($content).await.unwrap();
                 file.flush().await.unwrap();
             }};
