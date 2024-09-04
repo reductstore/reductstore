@@ -603,7 +603,7 @@ mod tests {
     async fn test_remove_entry(mut bucket: Bucket) {
         write(&mut bucket, "test-1", 1, b"test").await.unwrap();
 
-        bucket.remove_entry("test-1").unwrap();
+        bucket.remove_entry("test-1").await.unwrap();
         assert_eq!(
             bucket.get_entry("test-1").err(),
             Some(ReductError::not_found(
@@ -613,9 +613,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_remove_entry_not_found(mut bucket: Bucket) {
+    #[tokio::test]
+    async fn test_remove_entry_not_found(mut bucket: Bucket) {
         assert_eq!(
-            bucket.remove_entry("test-1").err(),
+            bucket.remove_entry("test-1").await.err(),
             Some(ReductError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
             ))

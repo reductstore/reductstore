@@ -343,6 +343,7 @@ mod tests {
             .get_bucket_mut("src")
             .unwrap()
             .remove_entry("test")
+            .await
             .unwrap();
 
         assert_eq!(sender.run().await, SyncState::SyncedOrRemoved);

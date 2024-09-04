@@ -401,7 +401,7 @@ mod tests {
             .unwrap();
         assert_eq!(bucket.name(), "test");
 
-        let result = storage.remove_bucket("test");
+        let result = storage.remove_bucket("test").await;
         assert_eq!(result, Ok(()));
 
         let result = storage.get_bucket("test");
@@ -414,7 +414,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_bucket_with_non_existing_name(#[future] mut storage: Storage) {
-        let result = storage.await.remove_bucket("test");
+        let result = storage.await.remove_bucket("test").await;
         assert_eq!(
             result,
             Err(ReductError::not_found("Bucket 'test' is not found"))
@@ -430,7 +430,7 @@ mod tests {
             .unwrap();
         assert_eq!(bucket.name(), "test");
 
-        let result = storage.remove_bucket("test");
+        let result = storage.remove_bucket("test").await;
         assert_eq!(result, Ok(()));
 
         let storage = Storage::load(path, None).await;
@@ -462,7 +462,7 @@ mod tests {
             .create_bucket("test", BucketSettings::default())
             .unwrap();
         bucket.set_provisioned(true);
-        let err = storage.remove_bucket("test").err().unwrap();
+        let err = storage.remove_bucket("test").await.err().unwrap();
         assert_eq!(
             err,
             ReductError::conflict("Can't remove provisioned bucket 'test'")
