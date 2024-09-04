@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
-use crate::storage::file_cache::FileRef;
+use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
@@ -32,7 +32,7 @@ struct ReadContext {
     entry_name: String,
     block_id: u64,
     record_timestamp: u64,
-    file_ref: FileRef,
+    file_ref: FileWeak,
     offset: u64,
     content_size: u64,
     block_manager: Arc<RwLock<BlockManager>>,
@@ -246,7 +246,7 @@ impl RecordReader {
 ///
 /// * `Result<(Vec<u8>, usize), ReductError>` - The read buffer and the number of bytes read
 pub async fn read_in_chunks(
-    file: &FileRef,
+    file: &FileWeak,
     offset: u64,
     content_size: u64,
     read_bytes: u64,
@@ -255,9 +255,11 @@ pub async fn read_in_chunks(
     let mut buf = vec![0; chunk_size as usize];
 
     let seek_and_read = async {
-        let mut lock = file.write().await;
+        let mut rc = file.upgrade()?;
+        let mut lock = rc.write().await;
         lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
-        lock.read(&mut buf).await
+        let read = lock.read(&mut buf).await?;
+        Ok::<usize, ReductError>(read)
     };
 
     let read = match seek_and_read.await {

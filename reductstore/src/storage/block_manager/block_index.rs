@@ -96,7 +96,10 @@ impl BlockIndex {
         }
 
         let block_index_proto = {
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+            let file = FILE_CACHE
+                .read(&path, SeekFrom::Start(0))
+                .await?
+                .upgrade()?;
             let mut lock = file.write().await;
             let mut buf = Vec::new();
             if let Err(err) = lock.read_to_end(&mut buf).await {
@@ -189,7 +192,8 @@ impl BlockIndex {
 
         let file = FILE_CACHE
             .write_or_create(&self.path_buf, SeekFrom::Start(0))
-            .await?;
+            .await?
+            .upgrade()?;
         let mut lock = file.write().await;
         lock.set_len(0).await?;
         lock.write_all(&buf).await.map_err(|err| {

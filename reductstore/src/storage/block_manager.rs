@@ -16,7 +16,7 @@ use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::use_counter::UseCounter;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
-use crate::storage::file_cache::{FileRef, FILE_CACHE};
+use crate::storage::file_cache::{FileWeak, FILE_CACHE};
 use crate::storage::proto::{record, ts_to_us, Block as BlockProto, Record};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use block_index::BlockIndex;
@@ -112,7 +112,10 @@ impl BlockManager {
         let mut cached_block = self.block_cache.get_read(&block_id).await;
         if cached_block.is_none() {
             let path = self.path_to_desc(block_id);
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+            let file = FILE_CACHE
+                .read(&path, SeekFrom::Start(0))
+                .await?
+                .upgrade()?;
             let mut buf = vec![];
 
             // parse the block descriptor
@@ -156,7 +159,8 @@ impl BlockManager {
         {
             let file = FILE_CACHE
                 .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))
-                .await?;
+                .await?
+                .upgrade()?;
             let file = file.write().await;
             file.set_len(max_block_size).await?;
         }
@@ -185,14 +189,16 @@ impl BlockManager {
         let path = self.path_to_data(block.block_id());
         let file = FILE_CACHE
             .write_or_create(&path, SeekFrom::Current(0))
-            .await?;
+            .await?
+            .upgrade()?;
         let data_block = file.write().await;
         data_block.set_len(block.size()).await?;
         data_block.sync_all().await?;
 
         let file = FILE_CACHE
             .write_or_create(&self.path_to_desc(block.block_id()), SeekFrom::Current(0))
-            .await?;
+            .await?
+            .upgrade()?;
         let descr_block = file.write().await;
         descr_block.sync_all().await?;
 
@@ -325,7 +331,8 @@ impl BlockManager {
             let temp_block_path = self.path.join(format!("{}.blk.tmp", block.block_id()));
             let temp_block_ref = FILE_CACHE
                 .write_or_create(&temp_block_path, SeekFrom::Start(0))
-                .await?;
+                .await?
+                .upgrade()?;
             let mut temp_block = temp_block_ref.write().await;
             temp_block.set_len(block.size()).await?;
 
@@ -411,7 +418,7 @@ impl BlockManager {
         &mut self,
         block: &Block,
         record_timestamp: u64,
-    ) -> Result<(FileRef, u64), ReductError> {
+    ) -> Result<(FileWeak, u64), ReductError> {
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
@@ -494,7 +501,7 @@ impl BlockManager {
         &mut self,
         block: &Block,
         record_timestamp: u64,
-    ) -> Result<(FileRef, u64), ReductError> {
+    ) -> Result<(FileWeak, u64), ReductError> {
         self.use_counter.increment(block.block_id());
 
         let path = self.path_to_data(block.block_id());
@@ -580,7 +587,8 @@ impl BlockManager {
         let len = {
             let file = FILE_CACHE
                 .write_or_create(&path, SeekFrom::Start(0))
-                .await?;
+                .await?
+                .upgrade()?;
             let mut lock = file.write().await;
             let len = buf.len() as u64;
             lock.set_len(len).await?;
@@ -1260,7 +1268,9 @@ mod tests {
             });
 
             let (file, _) = bm.begin_write_record(&block, 0).await.unwrap();
-            file.write()
+            file.upgrade()
+                .unwrap()
+                .write()
                 .await
                 .write(&vec![0; MAX_IO_BUFFER_SIZE + 1])
                 .await
