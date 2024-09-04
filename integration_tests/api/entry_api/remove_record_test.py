@@ -1,7 +1,5 @@
 import pytest
 
-from integration_tests.api.conftest import requires_env
-
 
 @pytest.fixture(name="write_data")
 def _write_data(base_url, session, bucket):
