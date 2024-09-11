@@ -101,9 +101,12 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_enum_as_string() {
+    #[case(QuotaType::NONE, "NONE")]
+    #[case(QuotaType::FIFO, "FIFO")]
+    #[case(QuotaType::HARD, "HARD")]
+    fn test_enum_as_string(#[case] quota_type: QuotaType, #[case] expected: &str) {
         let settings = BucketSettings {
-            quota_type: Some(QuotaType::FIFO),
+            quota_type: Some(quota_type),
             quota_size: Some(100),
             max_block_size: Some(100),
             max_block_records: Some(100),
@@ -112,7 +115,15 @@ mod tests {
 
         assert_eq!(
             serialized,
-            r#"{"quota_type":"FIFO","quota_size":100,"max_block_size":100,"max_block_records":100}"#
+            format!("{{\"quota_type\":\"{}\",\"quota_size\":100,\"max_block_size\":100,\"max_block_records\":100}}", expected)
         );
+    }
+
+    #[rstest]
+    #[case(QuotaType::NONE, "NONE")]
+    #[case(QuotaType::FIFO, "FIFO")]
+    #[case(QuotaType::HARD, "HARD")]
+    fn test_quota_from_string(#[case] expected: QuotaType, #[case] as_string: &str) {
+        assert_eq!(QuotaType::from_str(as_string).unwrap(), expected);
     }
 }
