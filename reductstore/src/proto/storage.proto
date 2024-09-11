@@ -12,6 +12,7 @@ message BucketSettings {
   enum QuotaType {
     NONE = 0;   // No quota
     FIFO = 1;   // Remove oldest block in the bucket if we reach quota
+    HARD = 2;   // Reject new records if we reach quota
   }
 
   optional uint64 max_block_size = 1; // max size of block in bytes

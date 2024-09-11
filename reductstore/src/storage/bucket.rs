@@ -9,7 +9,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::Labels;
+use reduct_base::{bad_request, conflict, internal_server_error, Labels};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -325,73 +325,82 @@ impl Bucket {
     async fn keep_quota_for(&mut self, content_size: usize) -> Result<(), ReductError> {
         match self.settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
-            QuotaType::FIFO => {
-                let mut size = self.info().await?.info.size + content_size as u64;
-                while size > self.settings.quota_size.unwrap_or(0) {
-                    debug!(
-                        "Need more space. Remove an oldest block from bucket '{}'",
-                        self.name()
-                    );
-
-                    let mut candidates: Vec<(u64, &Entry)> = vec![];
-                    for (_, entry) in self.entries.iter_mut() {
-                        let info = entry.info().await?;
-                        candidates.push((info.oldest_record, entry));
-                    }
-                    candidates.sort_by_key(|entry| entry.0);
-
-                    let candidates = candidates
-                        .iter()
-                        .map(|(_, entry)| entry.name().to_string())
-                        .collect::<Vec<String>>();
-
-                    let mut success = false;
-                    for name in candidates {
-                        debug!("Remove an oldest block from entry '{}'", name);
-                        match self
-                            .entries
-                            .get_mut(&name)
-                            .unwrap()
-                            .try_remove_oldest_block()
-                            .await
-                        {
-                            Ok(_) => {
-                                success = true;
-                                break;
-                            }
-                            Err(e) => {
-                                debug!(
-                                    "Failed to remove oldest block from entry '{}': {}",
-                                    name, e
-                                );
-                            }
-                        }
-                    }
-
-                    if !success {
-                        return Err(ReductError::internal_server_error(
-                            format!("Failed to keep quota of '{}'", self.name()).as_str(),
-                        ));
-                    }
-
-                    size = self.info().await?.info.size + content_size as u64;
+            QuotaType::FIFO => self.remove_oldest_block(content_size).await,
+            QuotaType::HARD => {
+                if self.info().await?.info.size + content_size as u64
+                    > self.settings.quota_size.unwrap_or(0)
+                {
+                    Err(bad_request!("Quota of '{}' exceeded", self.name()))
+                } else {
+                    Ok(())
                 }
-
-                // Remove empty entries
-                let mut names_to_remove = vec![];
-                for (name, entry) in self.entries.iter_mut() {
-                    if entry.info().await?.record_count != 0 {
-                        continue;
-                    }
-                    names_to_remove.push(name.clone());
-                }
-
-                for name in names_to_remove {
-                    self.entries.remove(&name);
-                }
-                Ok(())
             }
         }
+    }
+
+    async fn remove_oldest_block(&mut self, content_size: usize) -> Result<(), ReductError> {
+        let mut size = self.info().await?.info.size + content_size as u64;
+        while size > self.settings.quota_size.unwrap_or(0) {
+            debug!(
+                "Need more space. Remove an oldest block from bucket '{}'",
+                self.name()
+            );
+
+            let mut candidates: Vec<(u64, &Entry)> = vec![];
+            for (_, entry) in self.entries.iter_mut() {
+                let info = entry.info().await?;
+                candidates.push((info.oldest_record, entry));
+            }
+            candidates.sort_by_key(|entry| entry.0);
+
+            let candidates = candidates
+                .iter()
+                .map(|(_, entry)| entry.name().to_string())
+                .collect::<Vec<String>>();
+
+            let mut success = false;
+            for name in candidates {
+                debug!("Remove an oldest block from entry '{}'", name);
+                match self
+                    .entries
+                    .get_mut(&name)
+                    .unwrap()
+                    .try_remove_oldest_block()
+                    .await
+                {
+                    Ok(_) => {
+                        success = true;
+                        break;
+                    }
+                    Err(e) => {
+                        debug!("Failed to remove oldest block from entry '{}': {}", name, e);
+                    }
+                }
+            }
+
+            if !success {
+                return Err(internal_server_error!(
+                    "Failed to keep quota of '{}'",
+                    self.name()
+                ));
+            }
+
+            size = self.info().await?.info.size + content_size as u64;
+        }
+
+        // Remove empty entries
+        let mut names_to_remove = vec![];
+        for (name, entry) in self.entries.iter_mut() {
+            if entry.info().await?.record_count != 0 {
+                continue;
+            }
+            names_to_remove.push(name.clone());
+        }
+
+        for name in names_to_remove {
+            self.entries.remove(&name);
+        }
+        Ok(())
     }
 
     /// Sync all entries to the file system
@@ -412,10 +421,10 @@ impl Bucket {
 
     pub fn set_settings(&mut self, settings: BucketSettings) -> Result<(), ReductError> {
         if self.is_provisioned {
-            return Err(ReductError::conflict(&format!(
+            return Err(conflict!(
                 "Can't change settings of provisioned bucket '{}'",
                 self.name()
-            )));
+            ));
         }
 
         self.settings = Self::fill_settings(settings, self.settings.clone());
@@ -541,7 +550,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_quota_keeping(path: PathBuf) {
+    async fn test_fifo_quota_keeping(path: PathBuf) {
         let mut bucket = bucket(
             BucketSettings {
                 max_block_size: Some(20),
@@ -569,6 +578,26 @@ mod tests {
                 "Entry 'test-1' not found in bucket 'test'"
             ))
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_hard_quota_keeping(path: PathBuf) {
+        let mut bucket = bucket(
+            BucketSettings {
+                quota_type: Some(QuotaType::HARD),
+                quota_size: Some(100),
+                ..BucketSettings::default()
+            },
+            path,
+        );
+
+        let blob: &[u8] = &[0u8; 40];
+        write(&mut bucket, "test-1", 0, blob).await.unwrap();
+        write(&mut bucket, "test-2", 1, blob).await.unwrap();
+
+        let err = write(&mut bucket, "test-3", 2, blob).await.err().unwrap();
+        assert_eq!(err, ReductError::bad_request("Quota of 'test' exceeded"));
     }
 
     #[rstest]

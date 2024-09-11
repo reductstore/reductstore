@@ -11,11 +11,13 @@ use std::str::FromStr;
 ///
 /// NONE: No quota
 /// FIFO: When quota_size is reached, the oldest records are deleted
+/// HARD: When quota_size is reached, no more records can be added
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub enum QuotaType {
     #[default]
     NONE = 0,
     FIFO = 1,
+    HARD = 2,
 }
 
 impl From<i32> for QuotaType {
@@ -23,6 +25,7 @@ impl From<i32> for QuotaType {
         match value {
             0 => QuotaType::NONE,
             1 => QuotaType::FIFO,
+            2 => QuotaType::HARD,
             _ => QuotaType::NONE,
         }
     }
@@ -35,6 +38,7 @@ impl FromStr for QuotaType {
         match s {
             "NONE" => Ok(QuotaType::NONE),
             "FIFO" => Ok(QuotaType::FIFO),
+            "HARD" => Ok(QuotaType::HARD),
             _ => Err(()),
         }
     }
@@ -45,6 +49,7 @@ impl Display for QuotaType {
         match self {
             QuotaType::NONE => write!(f, "NONE"),
             QuotaType::FIFO => write!(f, "FIFO"),
+            QuotaType::HARD => write!(f, "HARD"),
         }
     }
 }
@@ -96,9 +101,12 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_enum_as_string() {
+    #[case(QuotaType::NONE, "NONE")]
+    #[case(QuotaType::FIFO, "FIFO")]
+    #[case(QuotaType::HARD, "HARD")]
+    fn test_enum_as_string(#[case] quota_type: QuotaType, #[case] expected: &str) {
         let settings = BucketSettings {
-            quota_type: Some(QuotaType::FIFO),
+            quota_type: Some(quota_type),
             quota_size: Some(100),
             max_block_size: Some(100),
             max_block_records: Some(100),
@@ -107,7 +115,15 @@ mod tests {
 
         assert_eq!(
             serialized,
-            r#"{"quota_type":"FIFO","quota_size":100,"max_block_size":100,"max_block_records":100}"#
+            format!("{{\"quota_type\":\"{}\",\"quota_size\":100,\"max_block_size\":100,\"max_block_records\":100}}", expected)
         );
+    }
+
+    #[rstest]
+    #[case(QuotaType::NONE, "NONE")]
+    #[case(QuotaType::FIFO, "FIFO")]
+    #[case(QuotaType::HARD, "HARD")]
+    fn test_quota_from_string(#[case] expected: QuotaType, #[case] as_string: &str) {
+        assert_eq!(QuotaType::from_str(as_string).unwrap(), expected);
     }
 }
