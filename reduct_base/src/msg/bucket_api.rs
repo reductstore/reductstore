@@ -11,11 +11,13 @@ use std::str::FromStr;
 ///
 /// NONE: No quota
 /// FIFO: When quota_size is reached, the oldest records are deleted
+/// HARD: When quota_size is reached, no more records can be added
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub enum QuotaType {
     #[default]
     NONE = 0,
     FIFO = 1,
+    HARD = 2,
 }
 
 impl From<i32> for QuotaType {
@@ -23,6 +25,7 @@ impl From<i32> for QuotaType {
         match value {
             0 => QuotaType::NONE,
             1 => QuotaType::FIFO,
+            2 => QuotaType::HARD,
             _ => QuotaType::NONE,
         }
     }
@@ -35,6 +38,7 @@ impl FromStr for QuotaType {
         match s {
             "NONE" => Ok(QuotaType::NONE),
             "FIFO" => Ok(QuotaType::FIFO),
+            "HARD" => Ok(QuotaType::HARD),
             _ => Err(()),
         }
     }
@@ -45,6 +49,7 @@ impl Display for QuotaType {
         match self {
             QuotaType::NONE => write!(f, "NONE"),
             QuotaType::FIFO => write!(f, "FIFO"),
+            QuotaType::HARD => write!(f, "HARD"),
         }
     }
 }

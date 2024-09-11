@@ -227,6 +227,16 @@ macro_rules! no_content {
 }
 
 #[macro_export]
+macro_rules! bad_request {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::bad_request(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::bad_request($msg)
+    };
+}
+
+#[macro_export]
 macro_rules! unprocessable_entity {
     ($msg:expr, $($arg:tt)*) => {
         ReductError::unprocessable_entity(&format!($msg, $($arg)*))
@@ -243,6 +253,15 @@ macro_rules! not_found {
     };
     ($msg:expr) => {
         ReductError::not_found($msg)
+    };
+}
+#[macro_export]
+macro_rules! conflict {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::conflict(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::conflict($msg)
     };
 }
 
