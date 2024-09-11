@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- RS-418: Remove record API, [PR-560](https://github.com/reductstore/reductstore/pull/560)
+- RS-289: Hard bucket quota, [PR-570](https://github.com/reductstore/reductstore/pull/570)
+
 ### Changed
 
 - RS-411: Refactor FileCache, [PR-551](https://github.com/reductstore/reductstore/pull/551)
 - RS-412: Refactor BlockCache, [PR-556](https://github.com/reductstore/reductstore/pull/556)
 - RS-380: Send uncompleted batch when query is timed out, [PR-558](https://github.com/reductstore/reductstore/pull/558)
 - RS-422: Batch update records per block, [PR-559](https://github.com/reductstore/reductstore/pull/559)
-- RS-418: Remove record API, [PR-560](https://github.com/reductstore/reductstore/pull/560)
 
 ### Fixed
 
