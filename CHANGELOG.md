@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - RS-418: Remove record API, [PR-560](https://github.com/reductstore/reductstore/pull/560)
-- RS-289: Hard bucket quota, [PR-570](https://github.com/reductstore/reductstore/pull/570)
+- RS-389: Hard bucket quota, [PR-570](https://github.com/reductstore/reductstore/pull/570)
 
 ### Changed
 
