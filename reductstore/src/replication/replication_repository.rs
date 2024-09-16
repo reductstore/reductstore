@@ -19,8 +19,7 @@ use reduct_base::msg::replication_api::{
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use url::Url;
 
 const REPLICATION_REPO_FILE_NAME: &str = ".replications";
@@ -85,13 +84,12 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
 
 pub(crate) struct ReplicationRepository {
     replications: HashMap<String, ReplicationTask>,
-    storage: Arc<RwLock<Storage>>,
+    storage: Arc<Storage>,
     config_path: PathBuf,
 }
 
-#[async_trait]
 impl ManageReplications for ReplicationRepository {
-    async fn create_replication(
+    fn create_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -104,10 +102,10 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
 
-        self.check_and_create_replication(&name, settings).await
+        self.check_and_create_replication(&name, settings)
     }
 
-    async fn update_replication(
+    fn update_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -131,23 +129,23 @@ impl ManageReplications for ReplicationRepository {
         }?;
 
         self.replications.remove(name); // remove old replication because it may have a different connection configuration
-        self.check_and_create_replication(&name, settings).await
+        self.check_and_create_replication(&name, settings)
     }
 
-    async fn replications(&self) -> Vec<ReplicationInfo> {
+    fn replications(&self) -> Vec<ReplicationInfo> {
         let mut replications = Vec::new();
         for (_, replication) in self.replications.iter() {
-            replications.push(replication.info().await);
+            replications.push(replication.info());
         }
         replications
     }
 
-    async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
+    fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
         let replication = self.get_replication(name)?;
         let info = FullReplicationInfo {
-            info: replication.info().await,
+            info: replication.info(),
             settings: replication.masked_settings().clone(),
-            diagnostics: replication.diagnostics().await,
+            diagnostics: replication.diagnostics(),
         };
         Ok(info)
     }
@@ -176,21 +174,17 @@ impl ManageReplications for ReplicationRepository {
         self.save_repo()
     }
 
-    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+    fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         for (_, replication) in self.replications.iter_mut() {
-            let _ = replication.notify(notification.clone()).await?;
+            let _ = replication.notify(notification.clone())?;
         }
         Ok(())
     }
 }
 
 impl ReplicationRepository {
-    pub(crate) async fn load_or_create(storage: Arc<RwLock<Storage>>) -> Self {
-        let config_path = storage
-            .read()
-            .await
-            .data_path()
-            .join(REPLICATION_REPO_FILE_NAME);
+    pub(crate) fn load_or_create(storage: Arc<Storage>) -> Self {
+        let config_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
 
         let mut repo = Self {
             replications: HashMap::new(),
@@ -207,9 +201,8 @@ impl ReplicationRepository {
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(data))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
-                    if let Err(err) = repo
-                        .create_replication(&item.name, item.settings.unwrap().into())
-                        .await
+                    if let Err(err) =
+                        repo.create_replication(&item.name, item.settings.unwrap().into())
                     {
                         error!("Failed to load replication '{}': {}", item.name, err);
                     }
@@ -253,7 +246,7 @@ impl ReplicationRepository {
         })
     }
 
-    async fn check_and_create_replication(
+    fn check_and_create_replication(
         &mut self,
         name: &&str,
         settings: ReplicationSettings,
@@ -267,8 +260,7 @@ impl ReplicationRepository {
         }
 
         // check if source bucket exists
-        let storage = self.storage.read().await;
-        if storage.get_bucket(&settings.src_bucket).is_err() {
+        if self.storage.get_bucket(&settings.src_bucket).is_err() {
             return Err(ReductError::not_found(&format!(
                 "Source bucket '{}' for replication '{}' does not exist",
                 settings.src_bucket, name

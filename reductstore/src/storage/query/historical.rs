@@ -2,10 +2,9 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 
@@ -82,25 +81,24 @@ impl HistoricalQuery {
     }
 }
 
-#[async_trait]
 impl Query for HistoricalQuery {
-    async fn next(
+    fn next(
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_block.is_empty() {
             let start = if let Some(block) = &self.current_block {
-                let block = block.read().await;
+                let block = block.read()?;
                 block.latest_record_time()
             } else {
                 self.start_time
             };
 
             let block_range = {
-                let bm = block_manager.read().await;
+                let bm = block_manager.read()?;
                 let first_block = {
-                    if let Ok(block) = bm.find_block(start).await {
-                        block.read().await.block_id()
+                    if let Ok(block) = bm.find_block(start) {
+                        block.read()?.block_id()
                     } else {
                         0
                     }
@@ -113,11 +111,11 @@ impl Query for HistoricalQuery {
             };
 
             for block_id in block_range {
-                let bm = block_manager.read().await;
-                let block_ref = bm.load_block(block_id).await?;
+                let bm = block_manager.read()?;
+                let block_ref = bm.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
-                let mut found_records = self.filter_records_from_current_block().await;
+                let mut found_records = self.filter_records_from_current_block();
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
                 self.records_from_current_block.extend(found_records);
                 if !self.records_from_current_block.is_empty() {
@@ -142,14 +140,13 @@ impl Query for HistoricalQuery {
                 ts_to_us(&record.timestamp.unwrap()),
                 false,
             )
-            .await
         }
     }
 }
 
 impl HistoricalQuery {
-    async fn filter_records_from_current_block(&mut self) -> Vec<Record> {
-        let block = self.current_block.as_ref().unwrap().read().await;
+    fn filter_records_from_current_block(&mut self) -> Vec<Record> {
+        let block = self.current_block.as_ref().unwrap().read().unwrap();
         block
             .record_index()
             .values()

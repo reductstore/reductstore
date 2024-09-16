@@ -14,12 +14,10 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::thread::{sleep, JoinHandle};
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
-use tokio::time::{sleep, timeout};
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
 
@@ -53,9 +51,9 @@ pub(super) fn spawn_query_task(
 ) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
-    let handle = tokio::spawn(async move {
+    let handle = std::thread::spawn(move || {
         loop {
-            let next_result = query.next(block_manager.clone()).await;
+            let next_result = query.next(block_manager.clone());
             let query_err = next_result.as_ref().err().cloned();
 
             if tx.is_closed() {
@@ -63,7 +61,7 @@ pub(super) fn spawn_query_task(
                 break;
             }
 
-            let send_result = timeout(IO_OPERATION_TIMEOUT, tx.send(next_result)).await;
+            let send_result = tx.blocking_send(next_result);
 
             if let Err(err) = send_result {
                 warn!("Error sending query result: {}", err);
@@ -75,7 +73,7 @@ pub(super) fn spawn_query_task(
                     // continuous query will never be done
                     // but we don't want to flood the channel and wait for the receiver
                     while tx.capacity() < tx.max_capacity() {
-                        sleep(Duration::from_millis(10)).await;
+                        sleep(Duration::from_millis(10));
                     }
                 } else {
                     trace!("Query task done: {:?}", err);

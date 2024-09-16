@@ -11,13 +11,14 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::cmp::min;
-use std::io::SeekFrom;
-use std::sync::Arc;
+use std::io::Read;
+use std::io::{Seek, SeekFrom};
+use std::sync::{Arc, RwLock};
+use std::thread::JoinHandle;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::SendTimeoutError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
@@ -38,14 +39,6 @@ struct ReadContext {
     block_manager: Arc<RwLock<BlockManager>>,
 }
 
-impl Drop for RecordReader {
-    fn drop(&mut self) {
-        if let Some(io) = self.io_task_handle.take() {
-            io.abort(); // Abort the task if it is still running
-        }
-    }
-}
-
 impl RecordReader {
     /// Create a new record reader.
     ///
@@ -60,17 +53,17 @@ impl RecordReader {
     /// # Returns
     ///
     /// * `Result<RecordReader, ReductError>` - The record reader to read the record content in chunks
-    pub(in crate::storage) async fn try_new(
+    pub(in crate::storage) fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
         record_timestamp: u64,
         last: bool,
     ) -> Result<Self, ReductError> {
-        let (record, ctx) = async move {
-            let mut bm = block_manager.write().await;
-            let block = block_ref.read().await;
+        let (record, ctx) = {
+            let mut bm = block_manager.write()?;
+            let block = block_ref.read()?;
 
-            let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp).await?;
+            let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;
 
             let record = block.get_record(record_timestamp).unwrap();
             let content_size = record.end - record.begin;
@@ -92,17 +85,16 @@ impl RecordReader {
                     block_manager,
                 },
             ))
-        }
-        .await?;
+        }?;
 
         let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
 
         let io_task_handle = if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
-            Self::read(tx, ctx).await;
+            Self::read(tx, ctx);
             None
         } else {
-            Some(tokio::spawn(async move {
-                Self::read(tx, ctx).await;
+            Some(std::thread::spawn(move || {
+                Self::read(tx, ctx);
             }))
         };
 
@@ -190,37 +182,34 @@ impl RecordReader {
         &self.record
     }
 
-    async fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
+    fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
         let mut read_bytes = 0;
 
-        let read_all = async {
+        let mut read_all = || {
             while read_bytes < ctx.content_size {
                 let (buf, read) =
-                    match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes)
-                        .await
-                    {
+                    match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes) {
                         Ok((buf, read)) => (buf, read),
                         Err(e) => {
-                            tx.send_timeout(Err(e), IO_OPERATION_TIMEOUT).await?;
+                            tx.blocking_send(Err(e))?;
                             break;
                         }
                     };
 
-                tx.send_timeout(Ok(buf.into()), IO_OPERATION_TIMEOUT)
-                    .await?;
+                tx.blocking_send(Ok(buf.into()))?;
 
                 read_bytes += read as u64;
                 ctx.block_manager
                     .write()
-                    .await
+                    .unwrap()
                     .use_counter_mut()
                     .update(ctx.block_id);
             }
 
-            Ok::<(), SendTimeoutError<_>>(())
+            Ok::<(), SendError<_>>(())
         };
 
-        if let Err(e) = read_all.await {
+        if let Err(e) = read_all() {
             debug!(
                 "Failed to send record {}/{}/{}: {}",
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
@@ -229,7 +218,7 @@ impl RecordReader {
 
         ctx.block_manager
             .write()
-            .await
+            .unwrap()
             .finish_read_record(ctx.block_id);
     }
 }
@@ -245,7 +234,7 @@ impl RecordReader {
 /// # Returns
 ///
 /// * `Result<(Vec<u8>, usize), ReductError>` - The read buffer and the number of bytes read
-pub async fn read_in_chunks(
+pub fn read_in_chunks(
     file: &FileWeak,
     offset: u64,
     content_size: u64,
@@ -254,15 +243,15 @@ pub async fn read_in_chunks(
     let chunk_size = min(content_size - read_bytes, MAX_IO_BUFFER_SIZE as u64);
     let mut buf = vec![0; chunk_size as usize];
 
-    let seek_and_read = async {
+    let seek_and_read = {
         let rc = file.upgrade()?;
-        let mut lock = rc.write().await;
-        lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
-        let read = lock.read(&mut buf).await?;
+        let mut lock = rc.write()?;
+        lock.seek(SeekFrom::Start(offset + read_bytes))?;
+        let read = lock.read(&mut buf)?;
         Ok::<usize, ReductError>(read)
     };
 
-    let read = match seek_and_read.await {
+    let read = match seek_and_read {
         Ok(read) => read,
         Err(e) => {
             return Err(internal_server_error!("Failed to read record chunk: {}", e));

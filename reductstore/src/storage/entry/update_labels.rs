@@ -29,7 +29,7 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the update operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    pub async fn update_labels(
+    pub fn update_labels(
         &self,
         updates: Vec<UpdateLabels>,
     ) -> Result<BTreeMap<u64, Result<Vec<Label>, ReductError>>, ReductError> {
@@ -37,7 +37,7 @@ impl Entry {
         let mut records_per_block = BTreeMap::new();
 
         {
-            let bm = self.block_manager.read().await;
+            let bm = self.block_manager.read()?;
             for UpdateLabels {
                 time,
                 update,
@@ -46,9 +46,9 @@ impl Entry {
             {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match bm.find_block(time).await {
+                match bm.find_block(time) {
                     Ok(block_ref) => {
-                        let block = block_ref.read().await;
+                        let block = block_ref.read()?;
                         if let Some(record) = block.get_record(time) {
                             let record = Self::update_single_label(record.clone(), update, remove);
                             records_per_block
@@ -70,8 +70,8 @@ impl Entry {
 
         // Update blocks
         for (block_id, records) in records_per_block.into_iter() {
-            let mut bm = self.block_manager.write().await;
-            bm.update_records(block_id, records).await?;
+            let mut bm = self.block_manager.write()?;
+            bm.update_records(block_id, records)?;
         }
 
         Ok(result)

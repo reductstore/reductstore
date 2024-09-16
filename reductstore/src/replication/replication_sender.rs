@@ -16,18 +16,17 @@ use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::thread::sleep;
 use std::time::Duration;
 
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
-use tokio::sync::RwLock;
-use tokio::time::sleep;
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
-    storage: Arc<RwLock<Storage>>,
+    storage: Arc<Storage>,
     config: ReplicationSettings,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
@@ -47,7 +46,7 @@ const MAX_BATCH_SIZE: usize = 100;
 impl ReplicationSender {
     pub fn new(
         log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
-        storage: Arc<RwLock<Storage>>,
+        storage: Arc<Storage>,
         config: ReplicationSettings,
         hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
         bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
@@ -61,10 +60,10 @@ impl ReplicationSender {
         }
     }
 
-    pub async fn run(&self) -> SyncState {
+    pub fn run(&self) -> SyncState {
         let mut sync_something = false;
-        for (entry_name, log) in self.log_map.read().await.iter() {
-            let transactions = log.write().await.front(MAX_BATCH_SIZE).await;
+        for (entry_name, log) in self.log_map.read().unwrap().iter() {
+            let transactions = log.write().unwrap().front(MAX_BATCH_SIZE);
             let state = match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
@@ -80,7 +79,7 @@ impl ReplicationSender {
                                 self.config.src_bucket, entry_name, transaction
                             );
 
-                            let record_to_sync = self.read_record(entry_name, &transaction).await;
+                            let record_to_sync = self.read_record(entry_name, &transaction);
                             if let Some(record_to_sync) = record_to_sync {
                                 let record_size = record_to_sync.content_length();
                                 if total_size > 0 && total_size + record_size > MAX_PAYLOAD_SIZE {
@@ -94,21 +93,21 @@ impl ReplicationSender {
                             }
                         }
 
-                        let mut bucket = self.bucket.write().await;
+                        let mut bucket = self.bucket.write().unwrap();
                         let batch_size = batch.len() as u64;
-                        match bucket.write_batch(entry_name, batch).await {
+                        match bucket.write_batch(entry_name, batch) {
                             Ok(map) => {
                                 if bucket.is_active() {
                                     self.hourly_diagnostics
                                         .write()
-                                        .await
+                                        .unwrap()
                                         .count(Ok(()), batch_size - map.len() as u64);
                                     for (timestamp, err) in map {
                                         debug!(
                                             "Failed to replicate record {}/{}/{}: {:?}",
                                             self.config.src_bucket, entry_name, timestamp, err
                                         );
-                                        self.hourly_diagnostics.write().await.count(Err(err), 1);
+                                        self.hourly_diagnostics.write().unwrap().count(Err(err), 1);
                                     }
                                 }
                             }
@@ -119,14 +118,13 @@ impl ReplicationSender {
                                 );
                                 self.hourly_diagnostics
                                     .write()
-                                    .await
+                                    .unwrap()
                                     .count(Err(err), batch_size);
                             }
                         }
 
                         if bucket.is_active() {
-                            if let Err(err) =
-                                log.write().await.pop_front(processed_transactions).await
+                            if let Err(err) = log.write().unwrap().pop_front(processed_transactions)
                             {
                                 error!("Failed to remove transaction: {:?}", err);
                             }
@@ -157,30 +155,24 @@ impl ReplicationSender {
         }
     }
 
-    async fn read_record(
-        &self,
-        entry_name: &str,
-        transaction: &Transaction,
-    ) -> Option<RecordReader> {
-        let read_record_from_storage = async {
+    fn read_record(&self, entry_name: &str, transaction: &Transaction) -> Option<RecordReader> {
+        let read_record_from_storage = || {
             let mut atempts = 3;
             loop {
-                let read_record = async {
+                let read_record = || {
                     self.storage
-                        .read()
-                        .await
                         .get_bucket(&self.config.src_bucket)?
+                        .upgrade()?
                         .begin_read(&entry_name, *transaction.timestamp())
-                        .await
                 };
-                let record = read_record.await;
+                let record = read_record();
                 match record {
                     Err(ReductError {
                         status: ErrorCode::TooEarly,
                         ..
                     }) => {
                         debug!("Transaction is too early, retrying later");
-                        sleep(Duration::from_millis(10)).await;
+                        sleep(Duration::from_millis(10));
                         atempts -= 1;
                     }
 
@@ -195,11 +187,11 @@ impl ReplicationSender {
             }
         };
 
-        match read_record_from_storage.await {
+        match read_record_from_storage() {
             Ok(record) => Some(record),
             Err(err) => {
                 error!("Failed to read record: {}", err);
-                self.hourly_diagnostics.write().await.count(Err(err), 1);
+                self.hourly_diagnostics.write().unwrap().count(Err(err), 1);
                 None
             }
         }

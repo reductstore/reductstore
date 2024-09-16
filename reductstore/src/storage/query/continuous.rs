@@ -8,10 +8,9 @@ use reduct_base::error::{ErrorCode, ReductError};
 
 use async_trait::async_trait;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::storage::entry::RecordReader;
-use tokio::sync::RwLock;
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
@@ -34,14 +33,12 @@ impl ContinuousQuery {
         }
     }
 }
-
-#[async_trait]
 impl Query for ContinuousQuery {
-    async fn next(
+    fn next(
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        match self.query.next(block_manager).await {
+        match self.query.next(block_manager) {
             Ok(reader) => {
                 self.next_start = reader.timestamp() + 1;
                 self.count += 1;

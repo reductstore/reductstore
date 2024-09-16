@@ -31,11 +31,9 @@ pub(crate) async fn remove_entry(
 
     components
         .storage
-        .write()
-        .await
-        .get_bucket_mut(bucket_name)?
-        .remove_entry(entry_name)
-        .await?;
+        .get_bucket(bucket_name)?
+        .upgrade()?
+        .remove_entry(entry_name)?;
     Ok(())
 }
 

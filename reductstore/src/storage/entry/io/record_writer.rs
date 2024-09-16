@@ -8,13 +8,14 @@ use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT};
 use bytes::Bytes;
 use log::error;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
+use reduct_base::{bad_request, internal_server_error};
+use std::io::Seek;
 use std::io::SeekFrom;
-use std::sync::Arc;
+use std::io::Write;
+use std::sync::{Arc, RwLock};
+use std::thread::{spawn, JoinHandle};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 pub(crate) trait WriteRecordContent {
@@ -25,14 +26,6 @@ pub(crate) trait WriteRecordContent {
 pub(crate) struct RecordWriter {
     io_task_handle: Option<JoinHandle<()>>,
     tx: RecordTx,
-}
-
-impl Drop for RecordWriter {
-    fn drop(&mut self) {
-        if let Some(handle) = self.io_task_handle.take() {
-            handle.abort(); // Abort the task if it is still running
-        }
-    }
 }
 
 struct WriteContext {
@@ -60,21 +53,21 @@ impl RecordWriter {
     /// # Returns
     ///
     /// * `RecordWriter` - The record writer.
-    pub(in crate::storage) async fn try_new(
+    pub(in crate::storage) fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
-        let block = block_ref.read().await;
+        let block = block_ref.read()?;
         let (file_ref, offset, bucket_name, entry_name) = {
-            let mut bm = block_manager.write().await;
+            let mut bm = block_manager.write()?;
 
             let (file, offset) = {
                 bm.index_mut().insert_or_update(block.to_owned());
-                bm.begin_write_record(&block, time).await?
+                bm.begin_write_record(&block, time)?
             };
 
-            bm.save_block(block_ref.clone()).await?;
+            bm.save_block(block_ref.clone())?;
             (
                 file,
                 offset,
@@ -106,8 +99,8 @@ impl RecordWriter {
         };
 
         // Spawn a task to write the record if it is bigger than the buffer size
-        let handle = tokio::spawn(async move {
-            Self::receive(rx, ctx).await;
+        let handle = spawn(move || {
+            Self::receive(rx, ctx);
         });
 
         me.io_task_handle = Some(handle);
@@ -115,31 +108,25 @@ impl RecordWriter {
         Ok(me)
     }
 
-    async fn receive(mut rx: Receiver<Result<Option<Bytes>, ReductError>>, ctx: WriteContext) {
-        let recv = async {
+    fn receive(mut rx: Receiver<Result<Option<Bytes>, ReductError>>, ctx: WriteContext) {
+        let mut recv = || {
             let mut written_bytes = 0u64;
-            while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, rx.recv())
-                .await
-                .map_err(|_| internal_server_error!("Timeout while reading record"))?
-            {
+            while let Some(chunk) = rx.blocking_recv() {
                 let chunk: Option<Bytes> = chunk?;
                 match chunk {
                     Some(chunk) => {
                         written_bytes += chunk.len() as u64;
                         if written_bytes > ctx.content_size {
-                            return Err(ReductError::bad_request(
-                                "Content is bigger than in content-length",
-                            ));
+                            return Err(bad_request!("Content is bigger than in content-length",));
                         }
 
                         {
                             let rc = ctx.file_ref.upgrade()?;
-                            let mut lock = rc.write().await;
+                            let mut lock = rc.write()?;
                             lock.seek(SeekFrom::Start(
                                 ctx.offset + written_bytes - chunk.len() as u64,
-                            ))
-                            .await?;
-                            lock.write_all(chunk.as_ref()).await?;
+                            ))?;
+                            lock.write_all(chunk.as_ref())?;
                         }
                     }
                     None => {
@@ -152,8 +139,7 @@ impl RecordWriter {
                 }
 
                 ctx.block_manager
-                    .write()
-                    .await
+                    .write()?
                     .use_counter_mut()
                     .update(ctx.block_id);
             }
@@ -163,12 +149,12 @@ impl RecordWriter {
                     "Content is smaller than in content-length",
                 ))
             } else {
-                ctx.file_ref.upgrade()?.write().await.flush().await?;
+                ctx.file_ref.upgrade()?.write()?.flush()?;
                 Ok(())
             }
         };
 
-        let state = match recv.await {
+        let state = match recv() {
             Ok(_) => record::State::Finished,
             Err(err) => {
                 error!(
@@ -179,13 +165,11 @@ impl RecordWriter {
             }
         };
 
-        if let Err(err) = ctx
-            .block_manager
-            .write()
-            .await
-            .finish_write_record(ctx.block_id, state, ctx.record_timestamp)
-            .await
-        {
+        if let Err(err) = ctx.block_manager.write().unwrap().finish_write_record(
+            ctx.block_id,
+            state,
+            ctx.record_timestamp,
+        ) {
             error!(
                 "Failed to finish writing {}/{}/{} record: {}",
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err
@@ -200,17 +184,11 @@ pub(crate) struct RecordDrainer {
     io_task_handle: JoinHandle<()>,
 }
 
-impl Drop for RecordDrainer {
-    fn drop(&mut self) {
-        self.io_task_handle.abort();
-    }
-}
-
 impl RecordDrainer {
     pub fn new() -> Self {
         let (tx, mut rx) = channel(1);
-        let handle = tokio::spawn(async move {
-            while let Some(chunk) = rx.recv().await {
+        let handle = spawn(move || {
+            while let Some(chunk) = rx.blocking_recv() {
                 if let Ok(None) = chunk {
                     // sync the channel
                     break;

@@ -20,8 +20,6 @@ pub(crate) async fn create_bucket(
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
     components
         .storage
-        .write()
-        .await
         .create_bucket(&bucket_name, settings.into())?;
     Ok(())
 }

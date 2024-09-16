@@ -2,14 +2,13 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::thread::{sleep, spawn};
 use std::time::Duration;
 
 use log::{error, info};
-use tokio::fs;
-use tokio::sync::RwLock;
-use tokio::time::sleep;
 
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -29,7 +28,7 @@ pub struct ReplicationTask {
     settings: ReplicationSettings,
     filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
-    storage: Arc<RwLock<Storage>>,
+    storage: Arc<Storage>,
     remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
 }
@@ -38,11 +37,7 @@ const TRANSACTION_LOG_SIZE: usize = 1000_000;
 
 impl ReplicationTask {
     /// Create a new replication task.
-    pub(super) fn new(
-        name: String,
-        settings: ReplicationSettings,
-        storage: Arc<RwLock<Storage>>,
-    ) -> Self {
+    pub(super) fn new(name: String, settings: ReplicationSettings, storage: Arc<Storage>) -> Self {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
             dst_host: remote_host,
@@ -70,7 +65,7 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
         filter: Arc<RwLock<HashMap<String, TransactionFilter>>>,
-        storage: Arc<RwLock<Storage>>,
+        storage: Arc<Storage>,
     ) -> Self {
         let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
 
@@ -85,32 +80,29 @@ impl ReplicationTask {
         let thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
 
-        tokio::spawn(async move {
-            let init_transaction_logs = async {
-                let mut logs = thr_log_map.write().await;
-                let storage = thr_storage.read().await;
-                for entry in storage
+        spawn(move || {
+            let init_transaction_logs = || {
+                let mut logs = thr_log_map.write()?;
+                for entry in thr_storage
                     .get_bucket(&config.src_bucket)?
-                    .info()
-                    .await?
+                    .upgrade()?
+                    .info()?
                     .entries
                 {
                     let path = Self::build_path_to_transaction_log(
-                        storage.data_path(),
+                        thr_storage.data_path(),
                         &config.src_bucket,
                         &entry.name,
                         &replication_name,
                     );
-                    let log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                        .await
-                        .unwrap();
+                    let log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)?;
                     logs.insert(entry.name, RwLock::new(log));
                 }
 
                 Ok::<(), ReductError>(())
             };
 
-            if let Err(err) = init_transaction_logs.await {
+            if let Err(err) = init_transaction_logs() {
                 error!("Failed to initialize transaction logs: {:?}", err);
             }
 
@@ -123,33 +115,32 @@ impl ReplicationTask {
             );
 
             loop {
-                match sender.run().await {
+                match sender.run() {
                     SyncState::SyncedOrRemoved => {}
                     SyncState::NotAvailable => {
-                        sleep(Duration::from_secs(5)).await;
+                        sleep(Duration::from_secs(5));
                     }
                     SyncState::NoTransactions => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
-                        sleep(Duration::from_millis(250)).await;
+                        sleep(Duration::from_millis(250));
                     }
                     SyncState::BrokenLog(entry_name) => {
                         info!("Transaction log is corrupted, dropping the whole log");
                         let path = ReplicationTask::build_path_to_transaction_log(
-                            thr_storage.read().await.data_path(),
+                            thr_storage.data_path(),
                             &config.src_bucket,
                             &entry_name,
                             &replication_name,
                         );
-                        if let Err(err) = fs::remove_file(&path).await {
+                        if let Err(err) = fs::remove_file(&path) {
                             error!("Failed to remove transaction log: {:?}", err);
                         }
 
                         info!("Creating a new transaction log");
-                        thr_log_map.write().await.insert(
+                        thr_log_map.write().unwrap().insert(
                             entry_name,
                             RwLock::new(
                                 TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                                    .await
                                     .unwrap(),
                             ),
                         );
@@ -170,13 +161,10 @@ impl ReplicationTask {
         }
     }
 
-    pub async fn notify(
-        &mut self,
-        notification: TransactionNotification,
-    ) -> Result<(), ReductError> {
+    pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         // We need to have a filter for each entry
         {
-            let mut lock = self.filter_map.write().await;
+            let mut lock = self.filter_map.write()?;
             if !lock.contains_key(&notification.entry) {
                 lock.insert(
                     notification.entry.clone(),
@@ -192,34 +180,26 @@ impl ReplicationTask {
 
         // NOTE: very important not to lock the log_map for too long
         // because it is used by the replication thread
-        if !self.log_map.read().await.contains_key(&notification.entry) {
-            let mut map = self.log_map.write().await;
+        if !self.log_map.read()?.contains_key(&notification.entry) {
+            let mut map = self.log_map.write()?;
             map.insert(
                 notification.entry.clone(),
-                RwLock::new(
-                    TransactionLog::try_load_or_create(
-                        Self::build_path_to_transaction_log(
-                            self.storage.read().await.data_path(),
-                            &self.settings.src_bucket,
-                            &notification.entry,
-                            &self.name,
-                        ),
-                        TRANSACTION_LOG_SIZE,
-                    )
-                    .await?,
-                ),
+                RwLock::new(TransactionLog::try_load_or_create(
+                    Self::build_path_to_transaction_log(
+                        self.storage.data_path(),
+                        &self.settings.src_bucket,
+                        &notification.entry,
+                        &self.name,
+                    ),
+                    TRANSACTION_LOG_SIZE,
+                )?),
             );
         };
 
-        let log_map = self.log_map.read().await;
+        let log_map = self.log_map.read()?;
         let log = log_map.get(&notification.entry).unwrap();
 
-        if let Some(_) = log
-            .write()
-            .await
-            .push_back(notification.event.clone())
-            .await?
-        {
+        if let Some(_) = log.write()?.push_back(notification.event.clone())? {
             error!("Transaction log is full, dropping the oldest transaction without replication");
         }
 
@@ -250,22 +230,22 @@ impl ReplicationTask {
         self.is_provisioned = provisioned;
     }
 
-    pub async fn info(&self) -> ReplicationInfo {
+    pub fn info(&self) -> ReplicationInfo {
         let mut pending_records = 0;
-        for (_, log) in self.log_map.read().await.iter() {
-            pending_records += log.read().await.len() as u64;
+        for (_, log) in self.log_map.read().unwrap().iter() {
+            pending_records += log.read().unwrap().len() as u64;
         }
         ReplicationInfo {
             name: self.name.clone(),
-            is_active: self.remote_bucket.read().await.is_active(),
+            is_active: self.remote_bucket.read().unwrap().is_active(),
             is_provisioned: self.is_provisioned,
             pending_records,
         }
     }
 
-    pub async fn diagnostics(&self) -> Diagnostics {
+    pub fn diagnostics(&self) -> Diagnostics {
         Diagnostics {
-            hourly: self.hourly_diagnostics.read().await.diagnostics(),
+            hourly: self.hourly_diagnostics.read().unwrap().diagnostics(),
         }
     }
 

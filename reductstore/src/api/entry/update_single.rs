@@ -73,16 +73,15 @@ pub(crate) async fn update_record(
     let entry_name = path.get("entry_name").unwrap();
     let batched_result = components
         .storage
-        .write()
-        .await
-        .get_bucket_mut(bucket)?
-        .get_entry_mut(entry_name)?
+        .get_bucket(bucket)?
+        .upgrade()?
+        .get_entry(entry_name)?
+        .upgrade()?
         .update_labels(vec![UpdateLabels {
             time: ts,
             update: labels_to_update,
             remove: labels_to_remove,
-        }])
-        .await?;
+        }])?;
 
     components
         .replication_repo
@@ -93,8 +92,7 @@ pub(crate) async fn update_record(
             entry: entry_name.clone(),
             labels: batched_result.get(&ts).unwrap().clone()?,
             event: Transaction::UpdateRecord(ts),
-        })
-        .await?;
+        })?;
 
     Ok(())
 }

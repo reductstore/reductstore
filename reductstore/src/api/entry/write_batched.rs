@@ -104,11 +104,8 @@ pub(crate) async fn write_batched_records(
                         }
                         senders[index].tx().closed().await;
 
-                        components
-                            .replication_repo
-                            .write()
-                            .await
-                            .notify(TransactionNotification {
+                        components.replication_repo.write().await.notify(
+                            TransactionNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),
                                 labels: timed_headers[index]
@@ -121,8 +118,8 @@ pub(crate) async fn write_batched_records(
                                     })
                                     .collect::<Vec<Label>>(), // TODO: find a way to avoid cloning
                                 event: Transaction::WriteRecord(timed_headers[index].0),
-                            })
-                            .await?;
+                            },
+                        )?;
 
                         chunk = rest;
                         index += 1;
@@ -222,22 +219,19 @@ async fn start_writing(
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
 ) -> Box<dyn WriteRecordContent + Sync + Send> {
-    let get_writer = async move {
-        let mut storage = components.storage.write().await;
-        let bucket = storage.get_bucket_mut(bucket_name)?;
+    let mut get_writer = || {
+        let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
 
-        bucket
-            .write_record(
-                entry_name,
-                time,
-                record_header.content_length.clone(),
-                record_header.content_type.clone(),
-                record_header.labels.clone(),
-            )
-            .await
+        bucket.write_record(
+            entry_name,
+            time,
+            record_header.content_length.clone(),
+            record_header.content_type.clone(),
+            record_header.labels.clone(),
+        )
     };
 
-    match get_writer.await {
+    match get_writer() {
         Ok(writer) => writer,
         Err(err) => {
             error_map.insert(time, err);

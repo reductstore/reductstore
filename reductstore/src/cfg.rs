@@ -19,8 +19,7 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// Database configuration
 pub struct Cfg<EnvGetter: GetEnv> {
@@ -65,20 +64,18 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         cfg
     }
 
-    pub async fn build(&self) -> Result<Components, ReductError> {
-        let storage = Arc::new(RwLock::new(self.provision_storage().await));
+    pub fn build(&self) -> Result<Components, ReductError> {
+        let storage = Arc::new(self.provision_storage());
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
-        let replication_engine = self
-            .provision_replication_repo(Arc::clone(&storage))
-            .await?;
+        let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
 
         Ok(Components {
             storage,
-            token_repo: RwLock::new(token_repo),
+            token_repo: tokio::sync::RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
             console,
-            replication_repo: RwLock::new(replication_engine),
+            replication_repo: tokio::sync::RwLock::new(replication_engine),
             base_path: self.api_base_path.clone(),
         })
     }
@@ -117,18 +114,19 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         token_repo
     }
 
-    async fn provision_storage(&self) -> Storage {
+    fn provision_storage(&self) -> Storage {
         let license = parse_license(self.license_path.clone());
-        let mut storage = Storage::load(PathBuf::from(self.data_path.clone()), license).await;
+        let mut storage = Storage::load(PathBuf::from(self.data_path.clone()), license);
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {
+                    let bucket = bucket.upgrade().unwrap();
                     bucket.set_provisioned(true);
                     Ok(bucket.settings().clone())
                 }
                 Err(e) => {
                     if e.status() == ErrorCode::Conflict {
-                        let bucket = storage.get_bucket_mut(&name).unwrap();
+                        let bucket = storage.get_bucket(&name).unwrap().upgrade().unwrap();
                         bucket.set_provisioned(false);
                         bucket.set_settings(settings.clone()).unwrap();
                         bucket.set_provisioned(true);
@@ -153,15 +151,15 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         storage
     }
 
-    async fn provision_replication_repo(
+    fn provision_replication_repo(
         &self,
-        storage: Arc<RwLock<Storage>>,
+        storage: Arc<Storage>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_repo(Arc::clone(&storage)).await;
+        let mut repo = create_replication_repo(Arc::clone(&storage));
         for (name, settings) in &self.replications {
-            if let Err(e) = repo.create_replication(&name, settings.clone()).await {
+            if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {
-                    repo.update_replication(&name, settings.clone()).await?;
+                    repo.update_replication(&name, settings.clone())?;
                 } else {
                     error!("Failed to provision replication '{}': {}", name, e);
                     continue;

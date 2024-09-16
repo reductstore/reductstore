@@ -33,12 +33,11 @@ pub(crate) async fn remove_record(
     let entry_name = path.get("entry_name").unwrap();
     let err_map = components
         .storage
-        .write()
-        .await
-        .get_bucket_mut(bucket)?
-        .get_entry_mut(entry_name)?
-        .remove_records(vec![ts])
-        .await?;
+        .get_bucket(bucket)?
+        .upgrade()?
+        .get_entry(entry_name)?
+        .upgrade()?
+        .remove_records(vec![ts])?;
 
     // We don't replicate the deletion of records
 

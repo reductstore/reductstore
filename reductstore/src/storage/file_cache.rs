@@ -1,14 +1,11 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::io::SeekFrom;
+use std::fs::{remove_dir_all, remove_file, rename, File};
+use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, LazyLock, RwLock, Weak};
 use std::time::Duration;
-
-use tokio::fs::File;
-use tokio::io::AsyncSeekExt;
-use tokio::sync::RwLock;
 
 use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
@@ -88,12 +85,12 @@ impl FileCache {
     /// # Returns
     ///
     /// A file reference
-    pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
-        let mut cache = self.cache.write().await;
+    pub fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
+        let mut cache = self.cache.write()?;
         let file = if let Some(desc) = cache.get_mut(path) {
             Arc::clone(&desc.file_ref)
         } else {
-            let file = File::options().read(true).open(path).await?;
+            let file = File::options().read(true).open(path)?;
             let file = Arc::new(RwLock::new(file));
             cache.insert(
                 path.clone(),
@@ -106,7 +103,7 @@ impl FileCache {
         };
 
         if pos != SeekFrom::Current(0) {
-            file.write().await.seek(pos).await?;
+            file.write()?.seek(pos)?;
         }
         Ok(FileWeak::new(file, path.clone()))
     }
@@ -124,18 +121,14 @@ impl FileCache {
     /// # Returns
     ///
     /// A file reference
-    pub async fn write_or_create(
-        &self,
-        path: &PathBuf,
-        pos: SeekFrom,
-    ) -> Result<FileWeak, ReductError> {
-        let mut cache = self.cache.write().await;
+    pub fn write_or_create(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
+        let mut cache = self.cache.write()?;
 
         let file = if let Some(desc) = cache.get_mut(path) {
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
-                let rw_file = File::options().write(true).read(true).open(path).await?;
+                let rw_file = File::options().write(true).read(true).open(path)?;
                 desc.file_ref = Arc::new(RwLock::new(rw_file));
                 desc.mode = AccessMode::ReadWrite;
 
@@ -146,8 +139,7 @@ impl FileCache {
                 .create(true)
                 .write(true)
                 .read(true)
-                .open(path)
-                .await?;
+                .open(path)?;
             let file = Arc::new(RwLock::new(file));
             cache.insert(
                 path.clone(),
@@ -160,7 +152,7 @@ impl FileCache {
         };
 
         if pos != SeekFrom::Current(0) {
-            file.write().await.seek(pos).await?;
+            file.write()?.seek(pos)?;
         }
         Ok(FileWeak::new(file, path.clone()))
     }
@@ -184,22 +176,22 @@ impl FileCache {
     ///
     /// This function will return an error if the file does not exist or if there is an issue
     /// removing the file from the file system.
-    pub async fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+    pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         if path.try_exists()? {
-            tokio::fs::remove_file(path).await?;
+            remove_file(path)?;
         }
-        let mut cache = self.cache.write().await;
+        let mut cache = self.cache.write()?;
 
         cache.remove(path);
         Ok(())
     }
 
-    pub async fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
+    pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
         if path.try_exists()? {
-            tokio::fs::remove_dir_all(path).await?;
+            remove_dir_all(path)?;
         }
 
-        let mut cache = self.cache.write().await;
+        let mut cache = self.cache.write()?;
 
         let files_to_remove = cache
             .keys()
@@ -227,9 +219,9 @@ impl FileCache {
     /// # Returns
     ///
     /// A `Result` which is `Ok` if the file was successfully renamed, or an `Err` containing
-    pub async fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
-        tokio::fs::rename(old_path, new_path).await?;
-        let mut cache = self.cache.write().await;
+    pub fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
+        rename(old_path, new_path)?;
+        let mut cache = self.cache.write()?;
         cache.remove(old_path);
         Ok(())
     }

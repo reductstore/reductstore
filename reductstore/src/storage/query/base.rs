@@ -9,12 +9,10 @@ use std::collections::HashMap;
 use axum::async_trait;
 
 use crate::storage::entry::RecordReader;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 /// Query is used to iterate over the records among multiple blocks.
-#[async_trait]
 pub(in crate::storage) trait Query {
     ///  Get next record
     ///
@@ -32,7 +30,7 @@ pub(in crate::storage) trait Query {
     ///
     /// * `HTTPError` - If the record cannot be read.
     /// * `HTTPError(NoContent)` - If all records have been read.
-    async fn next(
+    fn next(
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError>;

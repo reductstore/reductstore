@@ -5,14 +5,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use bytes::Bytes;
 use bytesize::ByteSize;
 use log::{debug, error, trace, warn};
 use prost::Message;
-use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 
@@ -28,25 +27,21 @@ pub(super) struct EntryLoader {}
 
 impl EntryLoader {
     // Restore the entry from the given path
-    pub async fn restore_entry(
-        path: PathBuf,
-        options: EntrySettings,
-    ) -> Result<Entry, ReductError> {
+    pub fn restore_entry(path: PathBuf, options: EntrySettings) -> Result<Entry, ReductError> {
         let start_time = Instant::now();
 
-        let mut entry =
-            match Self::try_restore_entry_from_index(path.clone(), options.clone()).await {
-                Ok(entry) => Ok(entry),
-                Err(err) => {
-                    error!("{:}", err);
-                    Self::restore_entry_from_blocks(path.clone(), options).await
-                }
-            }?;
+        let mut entry = match Self::try_restore_entry_from_index(path.clone(), options.clone()) {
+            Ok(entry) => Ok(entry),
+            Err(err) => {
+                error!("{:}", err);
+                Self::restore_entry_from_blocks(path.clone(), options)
+            }
+        }?;
 
-        Self::restore_uncommitted_changes(path, &mut entry).await?;
+        Self::restore_uncommitted_changes(path, &mut entry)?;
 
         {
-            let bm = entry.block_manager.read().await;
+            let bm = entry.block_manager.read()?;
             debug!(
                 "Restored entry `{}` in {}ms: size={}, records={}",
                 entry.name,
@@ -59,7 +54,7 @@ impl EntryLoader {
     }
 
     /// Restore the entry from blocks and create a new block index
-    async fn restore_entry_from_blocks(
+    fn restore_entry_from_blocks(
         path: PathBuf,
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
@@ -130,7 +125,7 @@ impl EntryLoader {
             block_index.insert_or_update(block);
         }
 
-        block_index.save().await?;
+        block_index.save()?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
         let bucket_name = path
             .parent()
@@ -144,18 +139,18 @@ impl EntryLoader {
         Ok(Entry {
             name,
             bucket_name,
-            settings: options,
+            settings: RwLock::new(options),
             block_manager: Arc::new(RwLock::new(BlockManager::new(path, block_index))),
-            queries: HashMap::new(),
+            queries: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
     /// Try to restore the entry from the block index
-    async fn try_restore_entry_from_index(
+    fn try_restore_entry_from_index(
         path: PathBuf,
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
-        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
+        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))?;
 
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
         let bucket_name = path
@@ -169,40 +164,40 @@ impl EntryLoader {
         Ok(Entry {
             name,
             bucket_name,
-            settings: options,
+            settings: RwLock::new(options),
             block_manager: Arc::new(RwLock::new(BlockManager::new(path, block_index))),
-            queries: HashMap::new(),
+            queries: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
-    async fn restore_uncommitted_changes(
+    fn restore_uncommitted_changes(
         entry_path: PathBuf,
         entry: &mut Entry,
     ) -> Result<(), ReductError> {
         let wal = create_wal(entry_path.clone());
         // There are uncommitted changes in the WALs
-        let wal_blocks = wal.list().await?;
+        let wal_blocks = wal.list()?;
         if !wal_blocks.is_empty() {
             warn!(
                 "Recovering uncommitted changes from WALs for entry: {:?}",
                 entry_path
             );
 
-            let mut block_manager = entry.block_manager.write().await;
+            let mut block_manager = entry.block_manager.write()?;
             for block_id in wal_blocks {
-                let wal_entries = wal.read(block_id).await;
+                let wal_entries = wal.read(block_id);
                 if let Err(err) = wal_entries {
                     error!("Failed to read WAL for block {}: {}", block_id, err);
-                    wal.remove(block_id).await?;
+                    wal.remove(block_id)?;
                     continue;
                 }
 
-                let block_ref = if block_manager.exist(block_id).await? {
+                let block_ref = if block_manager.exist(block_id)? {
                     debug!(
                         "Loading block {}/{} from block manager",
                         entry.name, block_id
                     );
-                    block_manager.load_block(block_id).await?
+                    block_manager.load_block(block_id)?
                 } else {
                     debug!("Creating block {}/{} from WAL", entry.name, block_id);
                     Arc::new(RwLock::new(
@@ -212,7 +207,7 @@ impl EntryLoader {
 
                 let mut block_removed = false;
                 {
-                    let mut block = block_ref.write().await;
+                    let mut block = block_ref.write()?;
                     for wal_entry in wal_entries? {
                         match wal_entry {
                             WalEntry::WriteRecord(record) => {
@@ -252,14 +247,14 @@ impl EntryLoader {
                 }
 
                 if block_removed {
-                    block_manager.remove_block(block_id).await?;
+                    block_manager.remove_block(block_id)?;
                 } else {
-                    block_manager.save_block(block_ref.clone()).await?;
-                    block_manager.finish_block(block_ref).await?;
+                    block_manager.save_block(block_ref.clone())?;
+                    block_manager.finish_block(block_ref)?;
                 }
             }
 
-            block_manager.save_cache_on_disk().await?;
+            block_manager.save_cache_on_disk()?;
         }
 
         Ok(())

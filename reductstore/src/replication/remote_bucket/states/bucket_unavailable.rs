@@ -22,19 +22,18 @@ pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     last_result: Result<ErrorRecordMap, ReductError>,
 }
 
-#[async_trait]
 impl RemoteBucketState for BucketUnavailableState {
-    async fn write_batch(
+    fn write_batch(
         self: Box<Self>,
         entry: &str,
         records: Vec<(RecordReader, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
-            let bucket = self.client.get_bucket(&self.bucket_name).await;
+            let bucket = self.client.get_bucket(&self.bucket_name);
             return match bucket {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                    new_state.write_batch(entry, records).await
+                    new_state.write_batch(entry, records)
                 }
                 Err(err) => {
                     error!(

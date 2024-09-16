@@ -1,6 +1,13 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 //
+mod bucket;
+mod entry;
+mod middleware;
+mod replication;
+mod server;
+mod token;
+mod ui;
 
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
@@ -18,29 +25,21 @@ pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
-use crate::api::bucket::create_bucket_api_routes;
-use crate::api::entry::create_entry_api_routes;
-use crate::api::middleware::{default_headers, print_statuses};
-use crate::api::replication::create_replication_api_routes;
-use crate::api::server::create_server_api_routes;
-use crate::api::token::create_token_api_routes;
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
-
-mod bucket;
-mod entry;
-mod middleware;
-mod replication;
-mod server;
-mod token;
-mod ui;
+use bucket::create_bucket_api_routes;
+use entry::create_entry_api_routes;
+use middleware::{default_headers, print_statuses};
+use replication::create_replication_api_routes;
+use server::create_server_api_routes;
+use token::create_token_api_routes;
 
 pub struct Components {
-    pub storage: Arc<RwLock<Storage>>,
+    pub storage: Arc<Storage>,
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,

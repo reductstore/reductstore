@@ -54,9 +54,8 @@ impl BucketAvailableState {
     }
 }
 
-#[async_trait]
 impl RemoteBucketState for BucketAvailableState {
-    async fn write_batch(
+    fn write_batch(
         mut self: Box<Self>,
         entry_name: &str,
         records: Vec<(RecordReader, Transaction)>,
@@ -75,11 +74,7 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         let error_map = if !records_to_update.is_empty() {
-            match self
-                .bucket
-                .update_batch(entry_name, &records_to_update)
-                .await
-            {
+            match self.bucket.update_batch(entry_name, &records_to_update) {
                 Ok(error_map) => {
                     // all good keep the state
                     error_map
@@ -117,7 +112,7 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         if !records_to_write.is_empty() {
-            match self.bucket.write_batch(entry_name, records_to_write).await {
+            match self.bucket.write_batch(entry_name, records_to_write) {
                 Ok(error_map) => {
                     self.last_result = Ok(error_map);
                     self

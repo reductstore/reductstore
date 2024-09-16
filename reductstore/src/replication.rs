@@ -1,10 +1,9 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use tokio::sync::RwLock;
 
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
@@ -73,8 +72,6 @@ pub struct TransactionNotification {
     pub labels: Vec<Label>,
     pub event: Transaction,
 }
-
-#[async_trait]
 pub trait ManageReplications {
     /// Create a new replication.
     ///
@@ -87,7 +84,7 @@ pub trait ManageReplications {
     /// * `ReductError::Conflict` - Replication already exists.
     /// * `ReductError::BadRequest` - Invalid destination host.
     /// * `ReductError::NotFound` - Source bucket does not exist.
-    async fn create_replication(
+    fn create_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -103,17 +100,17 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the update fails.
-    async fn update_replication(
+    fn update_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
 
     /// List all replications.
-    async fn replications(&self) -> Vec<ReplicationInfo>;
+    fn replications(&self) -> Vec<ReplicationInfo>;
 
     /// Get replication information.
-    async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
+    fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
     /// Get replication task.
     fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError>;
@@ -133,13 +130,13 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the notification fails.
-    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
+    fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
 /// Create a new replication repository
 /// A fabric method to create a new replication repository and return it as a trait object.
-pub(crate) async fn create_replication_repo(
-    storage: Arc<RwLock<Storage>>,
+pub(crate) fn create_replication_repo(
+    storage: Arc<Storage>,
 ) -> Box<dyn ManageReplications + Send + Sync> {
-    Box::new(replication_repository::ReplicationRepository::load_or_create(storage).await)
+    Box::new(replication_repository::ReplicationRepository::load_or_create(storage))
 }

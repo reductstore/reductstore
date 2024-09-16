@@ -19,6 +19,7 @@ use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry/batch
+
 pub(crate) async fn update_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
@@ -70,11 +71,13 @@ pub(crate) async fn update_batched_records(
     }
 
     let result = {
-        let mut storage = components.storage.write().await;
-        let entry = storage
-            .get_bucket_mut(bucket_name)?
-            .get_entry_mut(entry_name)?;
-        entry.update_labels(records_to_update).await?
+        let entry = components
+            .storage
+            .get_bucket(bucket_name)?
+            .upgrade()?
+            .get_entry(entry_name)?
+            .upgrade()?;
+        entry.update_labels(records_to_update)?
     };
 
     let mut headers = HeaderMap::new();
@@ -85,14 +88,12 @@ pub(crate) async fn update_batched_records(
             }
             Ok(new_labels) => {
                 let mut replication_repo = components.replication_repo.write().await;
-                replication_repo
-                    .notify(TransactionNotification {
-                        bucket: bucket_name.clone(),
-                        entry: entry_name.clone(),
-                        labels: new_labels,
-                        event: Transaction::UpdateRecord(time),
-                    })
-                    .await?;
+                replication_repo.notify(TransactionNotification {
+                    bucket: bucket_name.clone(),
+                    entry: entry_name.clone(),
+                    labels: new_labels,
+                    event: Transaction::UpdateRecord(time),
+                })?;
             }
         };
     }

@@ -21,29 +21,33 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
-use tokio::time::Instant;
+use std::sync::{Arc, RwLock};
+use std::thread::JoinHandle;
+use std::time::Instant;
+use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
 
+use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
 
 struct QueryHandle {
-    rx: QueryRx,
+    rx: Arc<AsyncRwLock<QueryRx>>,
     options: QueryOptions,
     last_access: Instant,
     query_task_handle: JoinHandle<()>,
 }
 
+type QueryHandleMap = HashMap<u64, QueryHandle>;
+type QueryHandleMapRef = Arc<RwLock<QueryHandleMap>>;
+
 /// Entry is a time series in a bucket.
 pub(crate) struct Entry {
     name: String,
     bucket_name: String,
-    settings: EntrySettings,
+    settings: RwLock<EntrySettings>,
     block_manager: Arc<RwLock<BlockManager>>,
-    queries: HashMap<u64, QueryHandle>,
+    queries: QueryHandleMapRef,
 }
 
 #[derive(PartialEq)]
@@ -61,26 +65,27 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub fn new(name: &str, path: PathBuf, settings: EntrySettings) -> Result<Self, ReductError> {
+    pub fn try_new(
+        name: &str,
+        path: PathBuf,
+        settings: EntrySettings,
+    ) -> Result<Self, ReductError> {
         fs::create_dir_all(path.join(name))?;
 
         Ok(Self {
             name: name.to_string(),
             bucket_name: path.file_name().unwrap().to_str().unwrap().to_string(),
-            settings,
+            settings: RwLock::new(settings),
             block_manager: Arc::new(RwLock::new(BlockManager::new(
                 path.join(name),
                 BlockIndex::new(path.join(name).join(BLOCK_INDEX_FILE)),
             ))),
-            queries: HashMap::new(),
+            queries: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
-    pub(crate) async fn restore(
-        path: PathBuf,
-        options: EntrySettings,
-    ) -> Result<Entry, ReductError> {
-        EntryLoader::restore_entry(path, options).await
+    pub(crate) fn restore(path: PathBuf, options: EntrySettings) -> Result<Entry, ReductError> {
+        EntryLoader::restore_entry(path, options)
     }
 
     /// Query records for a time range.
@@ -95,12 +100,7 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(
-        &mut self,
-        start: u64,
-        end: u64,
-        options: QueryOptions,
-    ) -> Result<u64, ReductError> {
+    pub fn query(&self, start: u64, end: u64, options: QueryOptions) -> Result<u64, ReductError> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
@@ -112,10 +112,10 @@ impl Entry {
         if task_handle.is_finished() {
             panic!("Query task finished immediately");
         }
-        self.queries.insert(
+        self.queries.write()?.insert(
             id,
             QueryHandle {
-                rx,
+                rx: Arc::new(AsyncRwLock::new(rx)),
                 options,
                 last_access: Instant::now(),
                 query_task_handle: task_handle,
@@ -135,22 +135,34 @@ impl Entry {
     ///
     /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub async fn get_query_receiver(&mut self, query_id: u64) -> Result<&mut QueryRx, ReductError> {
-        self.remove_expired_query();
-        let query = self
-            .queries
-            .get_mut(&query_id)
+    pub fn get_query_receiver(
+        &self,
+        query_id: u64,
+    ) -> Result<Weak<AsyncRwLock<QueryRx>>, ReductError> {
+        let entry_path = format!("{}/{}", self.bucket_name, self.name);
+        let queries = Arc::clone(&self.queries);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            Self::remove_expired_query(queries, entry_path);
+            tx.send(()).unwrap();
+        });
+
+        rx.recv().unwrap();
+
+        let mut queries = self.queries.write()?;
+
+        let query = queries.get_mut(&query_id)
             .ok_or_else(||
                 ReductError::not_found(
                     &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
 
         query.last_access = Instant::now();
-        Ok(&mut query.rx)
+        Ok(Weak::new(Arc::clone(&query.rx)))
     }
 
     /// Returns stats about the entry.
-    pub async fn info(&self) -> Result<EntryInfo, ReductError> {
-        let bm = self.block_manager.read().await;
+    pub fn info(&self) -> Result<EntryInfo, ReductError> {
+        let bm = self.block_manager.read()?;
         let index_tree = bm.index().tree();
         let (oldest_record, latest_record) = if index_tree.is_empty() {
             (0, 0)
@@ -178,47 +190,48 @@ impl Entry {
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub async fn try_remove_oldest_block(&mut self) -> Result<(), ReductError> {
-        let mut bm = self.block_manager.write().await;
+    pub fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
+        let mut bm = self.block_manager.write()?;
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
             return Err(ReductError::internal_server_error("No block to remove"));
         }
 
         let oldest_block_id = *index_tree.first().unwrap();
-        bm.remove_block(oldest_block_id).await?;
+        bm.remove_block(oldest_block_id)?;
 
         Ok(())
     }
 
-    pub async fn sync_fs(&self) -> Result<(), ReductError> {
-        let mut bm = self.block_manager.write().await;
-        bm.save_cache_on_disk().await
+    pub fn sync_fs(&self) -> Result<(), ReductError> {
+        let mut bm = self.block_manager.write()?;
+        bm.save_cache_on_disk()
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn settings(&self) -> &EntrySettings {
-        &self.settings
+    pub fn settings(&self) -> EntrySettings {
+        self.settings.read().unwrap().clone()
     }
 
-    pub fn set_settings(&mut self, settings: EntrySettings) {
-        self.settings = settings;
+    pub fn bucket_name(&self) -> &str {
+        &self.bucket_name
     }
 
-    fn remove_expired_query(&mut self) {
-        let entry_path = format!("{}/{}", self.bucket_name, self.name);
+    pub fn set_settings(&self, settings: EntrySettings) {
+        *self.settings.write().unwrap() = settings;
+    }
 
-        self.queries.retain(|id, handle| {
+    fn remove_expired_query(queries: QueryHandleMapRef, entry_path: String) {
+        queries.write().unwrap().retain(|id, handle| {
             if handle.last_access.elapsed() >= handle.options.ttl {
                 debug!("Query {}/{} expired", entry_path, id);
-                handle.query_task_handle.abort();
                 return false;
             }
 
-            if handle.rx.is_empty() && handle.query_task_handle.is_finished() {
+            if handle.rx.blocking_read().is_empty() && handle.query_task_handle.is_finished() {
                 debug!("Query {}/{} finished", entry_path, id);
                 return false;
             }
@@ -460,7 +473,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_size_counting(path: PathBuf) {
-            let mut entry = Entry::new(
+            let mut entry = Entry::try_new(
                 "entry",
                 path.clone(),
                 EntrySettings {
@@ -501,7 +514,7 @@ mod tests {
 
     #[fixture]
     pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
-        Entry::new("entry", path.clone(), entry_settings).unwrap()
+        Entry::try_new("entry", path.clone(), entry_settings).unwrap()
     }
 
     #[fixture]

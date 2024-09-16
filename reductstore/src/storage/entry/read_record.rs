@@ -18,13 +18,13 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
+    pub(crate) fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
         debug!("Reading record for ts={}", time);
 
         let (block_ref, record) = {
-            let bm = self.block_manager.read().await;
-            let block_ref = bm.find_block(time).await?;
-            let block = block_ref.read().await;
+            let bm = self.block_manager.read()?;
+            let block_ref = bm.find_block(time)?;
+            let block = block_ref.read()?;
             let record = block
                 .get_record(time)
                 .ok_or_else(|| not_found!("No record with timestamp {}", time))?
@@ -46,7 +46,7 @@ impl Entry {
             ));
         }
 
-        RecordReader::try_new(self.block_manager.clone(), block_ref, time, true).await
+        RecordReader::try_new(self.block_manager.clone(), block_ref, time, true)
     }
 }
 

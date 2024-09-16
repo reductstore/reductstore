@@ -8,9 +8,10 @@ use bytes::Bytes;
 use futures_util::Stream;
 use std::collections::BTreeMap;
 
-use std::str::FromStr;
-
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
+use std::str::FromStr;
+use std::sync::{Arc, RwLock};
+use std::thread::spawn;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
@@ -18,11 +19,11 @@ use crate::storage::proto::ts_to_us;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
+use tokio::task::{block_in_place, spawn_blocking};
 
 // A wrapper around the Reduct client API to make it easier to mock.
-#[async_trait]
 pub(super) trait ReductClientApi {
-    async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+    fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
     fn url(&self) -> &str;
 }
@@ -30,15 +31,14 @@ pub(super) trait ReductClientApi {
 pub(super) type BoxedClientApi = Box<dyn ReductClientApi + Sync + Send>;
 
 // A wrapper around the Reduct bucket API to make it easier to mock.
-#[async_trait]
 pub(super) trait ReductBucketApi {
-    async fn write_batch(
+    fn write_batch(
         &self,
         entry: &str,
         records: Vec<RecordReader>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
-    async fn update_batch(
+    fn update_batch(
         &self,
         entry: &str,
         records: &Vec<RecordReader>,
@@ -244,18 +244,20 @@ fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> 
     Err(ReductError::new(status, &error_msg))
 }
 
-#[async_trait]
 impl ReductClientApi for ReductClient {
-    async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
-        let resp = self
-            .client
-            .head(&format!(
-                "{}{}/b/{}",
-                self.server_url, API_PATH, bucket_name
-            ))
-            .send()
-            .await;
-        check_response(resp)?;
+    fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let request = self.client.request(
+            Method::GET,
+            &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
+        );
+
+        tokio::spawn(async move {
+            let resp = request.send().await;
+            tx.send(resp).await.unwrap();
+        });
+
+        check_response(rx.blocking_recv().unwrap())?;
 
         Ok(Box::new(BucketWrapper::new(
             self.server_url.clone(),
@@ -269,9 +271,8 @@ impl ReductClientApi for ReductClient {
     }
 }
 
-#[async_trait]
 impl ReductBucketApi for BucketWrapper {
-    async fn write_batch(
+    fn write_batch(
         &self,
         entry: &str,
         records: Vec<RecordReader>,
@@ -284,17 +285,22 @@ impl ReductBucketApi for BucketWrapper {
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
         );
-        let response = request
-            .headers(headers)
-            .body(Body::wrap_stream(stream))
-            .send()
-            .await;
-        let failed_records = Self::parse_record_errors(response)?;
 
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            let response = request
+                .headers(headers)
+                .body(Body::wrap_stream(stream))
+                .send()
+                .await;
+            tx.send(response).await.unwrap();
+        });
+
+        let failed_records = Self::parse_record_errors(rx.blocking_recv().unwrap())?;
         Ok(failed_records)
     }
 
-    async fn update_batch(
+    fn update_batch(
         &self,
         entry: &str,
         records: &Vec<RecordReader>,
@@ -307,8 +313,13 @@ impl ReductBucketApi for BucketWrapper {
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
         );
-        let response = request.headers(headers).send().await;
-        let failed_records = Self::parse_record_errors(response)?;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            let response = request.headers(headers).send().await;
+            tx.send(response).await.unwrap();
+        });
+
+        let failed_records = Self::parse_record_errors(rx.blocking_recv().unwrap())?;
 
         Ok(failed_records)
     }

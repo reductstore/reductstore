@@ -14,6 +14,7 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::core::weak::Weak;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
 use log::{debug, warn};
@@ -21,9 +22,10 @@ use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::timeout;
 
 // GET /:bucket/:entry/batch?q=<number>
@@ -59,11 +61,7 @@ pub(crate) async fn read_batched_records(
     };
 
     fetch_and_response_batched_records(
-        components
-            .storage
-            .write()
-            .await
-            .get_bucket_mut(bucket_name)?,
+        components.storage.get_bucket(bucket_name)?.upgrade()?,
         entry_name,
         query_id,
         method.name == "HEAD",
@@ -72,7 +70,7 @@ pub(crate) async fn read_batched_records(
 }
 
 async fn fetch_and_response_batched_records(
-    bucket: &mut Bucket,
+    bucket: Arc<Bucket>,
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
@@ -115,10 +113,10 @@ async fn fetch_and_response_batched_records(
     let mut last = false;
     let bucket_name = bucket.name().to_string();
     let rx = bucket
-        .get_entry_mut(entry_name)
+        .get_entry(entry_name)
         .unwrap()
-        .get_query_receiver(query_id)
-        .await?;
+        .upgrade()?
+        .get_query_receiver(query_id)?;
 
     loop {
         let timeout = if readers.is_empty() {
@@ -127,7 +125,7 @@ async fn fetch_and_response_batched_records(
             None
         };
         let reader = match next_record_reader(
-            rx,
+            rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
             timeout,
         )
@@ -187,20 +185,20 @@ async fn fetch_and_response_batched_records(
 // This function is used to get the next record from the query receiver
 // created for better testing
 async fn next_record_reader(
-    rx: &mut QueryRx,
+    rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
     recv_timeout: Option<Duration>,
 ) -> Option<Result<RecordReader, ReductError>> {
     // we need to wait for the first record
     let result = if let Some(recv_timeout) = recv_timeout {
-        if let Ok(result) = timeout(recv_timeout, rx.recv()).await {
+        if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
             result
         } else {
             debug!("Timeout while waiting for record from query {}", query_path);
             return None;
         }
     } else {
-        rx.recv().await
+        rx.write().await.recv().await
     };
 
     let reader = match result {

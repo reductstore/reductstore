@@ -8,8 +8,7 @@ use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState}
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
@@ -22,9 +21,8 @@ struct RemoteBucketImpl {
 
 pub(super) type ErrorRecordMap = BTreeMap<u64, ReductError>;
 
-#[async_trait]
 pub(crate) trait RemoteBucket {
-    async fn write_batch(
+    fn write_batch(
         &mut self,
         entry_name: &str,
         records: Vec<(RecordReader, Transaction)>,
@@ -42,20 +40,13 @@ impl RemoteBucketImpl {
     }
 }
 
-#[async_trait]
 impl RemoteBucket for RemoteBucketImpl {
-    async fn write_batch(
+    fn write_batch(
         &mut self,
         entry_name: &str,
         records: Vec<(RecordReader, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError> {
-        self.state = Some(
-            self.state
-                .take()
-                .unwrap()
-                .write_batch(entry_name, records)
-                .await,
-        );
+        self.state = Some(self.state.take().unwrap().write_batch(entry_name, records));
 
         let state = self.state.as_ref().unwrap();
         self.is_active = state.is_available();

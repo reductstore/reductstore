@@ -67,17 +67,14 @@ pub(crate) async fn write_record(
         }
 
         let sender = {
-            let mut storage = components.storage.write().await;
-            let bucket = storage.get_bucket_mut(bucket)?;
-            bucket
-                .write_record(
-                    path.get("entry_name").unwrap(),
-                    ts,
-                    content_size,
-                    content_type,
-                    labels.clone(),
-                )
-                .await?
+            let bucket = components.storage.get_bucket(bucket)?.upgrade()?;
+            bucket.write_record(
+                path.get("entry_name").unwrap(),
+                ts,
+                content_size,
+                content_type,
+                labels.clone(),
+            )?
         };
         Ok((ts, labels, sender))
     };
@@ -133,8 +130,7 @@ pub(crate) async fn write_record(
                         .map(|(k, v)| Label { name: k, value: v })
                         .collect(),
                     event: WriteRecord(ts),
-                })
-                .await?;
+                })?;
             Ok(())
         }
         Err(e) => {

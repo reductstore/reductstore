@@ -21,8 +21,7 @@ pub(crate) async fn get_replication(
         .replication_repo
         .read()
         .await
-        .get_info(&replication_name)
-        .await?;
+        .get_info(&replication_name)?;
     Ok(info.into())
 }
 

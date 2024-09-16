@@ -21,7 +21,7 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the remove operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    pub async fn remove_records(
+    pub fn remove_records(
         &self,
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
@@ -29,14 +29,14 @@ impl Entry {
         let mut records_per_block = BTreeMap::new();
 
         {
-            let bm = self.block_manager.read().await;
+            let bm = self.block_manager.read()?;
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match bm.find_block(time).await {
+                match bm.find_block(time) {
                     Ok(block_ref) => {
                         // Check if the record exists
-                        let block = block_ref.read().await;
+                        let block = block_ref.read()?;
                         if let Some(_) = block.get_record(time) {
                             records_per_block
                                 .entry(block.block_id())
@@ -55,8 +55,8 @@ impl Entry {
 
         // Remove the records
         for (block_id, timestamps) in records_per_block {
-            let mut bm = self.block_manager.write().await;
-            bm.remove_records(block_id, timestamps).await?;
+            let mut bm = self.block_manager.write()?;
+            bm.remove_records(block_id, timestamps)?;
         }
 
         Ok(error_map)
@@ -77,8 +77,8 @@ impl Entry {
     /// # Errors
     ///
     /// * If the query fails.
-    pub async fn query_remove_records(
-        &mut self,
+    pub fn query_remove_records(
+        &self,
         start: u64,
         end: u64,
         mut options: QueryOptions,
@@ -92,13 +92,13 @@ impl Entry {
         // Loop until the query is done
         let mut continue_query = true;
         while continue_query {
-            let rx = self.get_query_receiver(query_id).await?;
+            let rx = self.get_query_receiver(query_id)?;
             let mut records_to_remove = vec![];
             records_to_remove.reserve(max_block_records as usize);
 
             // Receive a batch of records to remove
             while records_to_remove.len() < max_block_records as usize && continue_query {
-                let result = rx.recv().await;
+                let result = rx.upgrade()?.blocking_write().blocking_recv();
                 match result {
                     Some(Ok(rec)) => {
                         records_to_remove.push(rec.timestamp());
@@ -118,7 +118,7 @@ impl Entry {
 
             // Remove the records
             total_records += records_to_remove.len() as u64;
-            self.remove_records(records_to_remove).await?;
+            self.remove_records(records_to_remove)?;
         }
 
         Ok(total_records)

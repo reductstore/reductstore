@@ -5,12 +5,13 @@ use log::{debug, info};
 use std::collections::BTreeMap;
 
 use std::path::PathBuf;
-
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
+use crate::core::weak::Weak;
 use crate::storage::file_cache::FILE_CACHE;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
@@ -23,7 +24,7 @@ pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Storage {
     data_path: PathBuf,
     start_time: Instant,
-    buckets: BTreeMap<String, Bucket>,
+    buckets: RwLock<BTreeMap<String, Arc<Bucket>>>,
     license: Option<License>,
 }
 
@@ -43,7 +44,7 @@ impl Storage {
     /// # Panics
     ///
     /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
-    pub async fn load(data_path: PathBuf, license: Option<License>) -> Storage {
+    pub fn load(data_path: PathBuf, license: Option<License>) -> Storage {
         if !data_path.try_exists().unwrap_or(false) {
             info!("Folder '{:?}' doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
@@ -55,9 +56,8 @@ impl Storage {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 let bucket = Bucket::restore(path.clone())
-                    .await
                     .expect(format!("Failed to restore bucket '{:?}'", path).as_str());
-                buckets.insert(bucket.name().to_string(), bucket);
+                buckets.insert(bucket.name().to_string(), Arc::new(bucket));
             }
         }
 
@@ -66,7 +66,7 @@ impl Storage {
         Storage {
             data_path,
             start_time: Instant::now(),
-            buckets,
+            buckets: RwLock::new(buckets),
             license,
         }
     }
@@ -76,13 +76,14 @@ impl Storage {
     /// # Returns
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
-    pub async fn info(&self) -> Result<ServerInfo, ReductError> {
+    pub fn info(&self) -> Result<ServerInfo, ReductError> {
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
-        for bucket in self.buckets.values() {
-            let bucket = bucket.info().await?.info;
+        let buckets = self.buckets.read().unwrap();
+        for bucket in buckets.values() {
+            let bucket = bucket.info()?.info;
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
             latest_record = latest_record.max(bucket.latest_record);
@@ -92,7 +93,7 @@ impl Storage {
             version: option_env!("CARGO_PKG_VERSION")
                 .unwrap_or("unknown")
                 .to_string(),
-            bucket_count: self.buckets.len() as u64,
+            bucket_count: buckets.len() as u64,
             usage,
             uptime: self.start_time.elapsed().as_secs(),
             oldest_record,
@@ -106,10 +107,10 @@ impl Storage {
 
     /// Creat a new bucket.
     pub(crate) fn create_bucket(
-        &mut self,
+        &self,
         name: &str,
         settings: BucketSettings,
-    ) -> Result<&mut Bucket, ReductError> {
+    ) -> Result<Weak<Bucket>, ReductError> {
         let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
         if !regex.is_match(name) {
             return Err(ReductError::unprocessable_entity(
@@ -117,16 +118,17 @@ impl Storage {
             ));
         }
 
-        if self.buckets.contains_key(name) {
+        let mut buckets = self.buckets.write().unwrap();
+        if buckets.contains_key(name) {
             return Err(ReductError::conflict(
                 format!("Bucket '{}' already exists", name).as_str(),
             ));
         }
 
-        let bucket = Bucket::new(name, &self.data_path, settings)?;
-        self.buckets.insert(name.to_string(), bucket);
+        let bucket = Arc::new(Bucket::new(name, &self.data_path, settings)?);
+        buckets.insert(name.to_string(), Arc::clone(&bucket));
 
-        Ok(self.buckets.get_mut(name).unwrap())
+        Ok(bucket.into())
     }
 
     /// Get a bucket by name
@@ -138,27 +140,10 @@ impl Storage {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) fn get_bucket(&self, name: &str) -> Result<&Bucket, ReductError> {
-        match self.buckets.get(name) {
-            Some(bucket) => Ok(bucket),
-            None => Err(ReductError::not_found(
-                format!("Bucket '{}' is not found", name).as_str(),
-            )),
-        }
-    }
-
-    /// Get a bucket by name.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the bucket
-    ///
-    /// # Returns
-    ///
-    /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) fn get_bucket_mut(&mut self, name: &str) -> Result<&mut Bucket, ReductError> {
-        match self.buckets.get_mut(name) {
-            Some(bucket) => Ok(bucket),
+    pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
+        let buckets = self.buckets.read().unwrap();
+        match buckets.get(name) {
+            Some(bucket) => Ok(Arc::clone(bucket).into()),
             None => Err(ReductError::not_found(
                 format!("Bucket '{}' is not found", name).as_str(),
             )),
@@ -174,8 +159,9 @@ impl Storage {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub(crate) async fn remove_bucket(&mut self, name: &str) -> Result<(), ReductError> {
-        if let Some(bucket) = self.buckets.get(name) {
+    pub(crate) fn remove_bucket(&self, name: &str) -> Result<(), ReductError> {
+        let mut buckets = self.buckets.write().unwrap();
+        if let Some(bucket) = buckets.get(name) {
             if bucket.is_provisioned() {
                 return Err(ReductError::conflict(&format!(
                     "Can't remove provisioned bucket '{}'",
@@ -184,10 +170,10 @@ impl Storage {
             }
         }
 
-        match self.buckets.remove(name) {
+        match buckets.remove(name) {
             Some(_) => {
                 let path = self.data_path.join(name);
-                FILE_CACHE.remove_dir(&path).await?;
+                FILE_CACHE.remove_dir(&path)?;
                 debug!("Bucket '{}' and folder {:?} are removed", name, path);
                 Ok(())
             }
@@ -197,18 +183,18 @@ impl Storage {
         }
     }
 
-    pub(crate) async fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
+    pub(crate) fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
         let mut buckets = Vec::new();
-        for bucket in self.buckets.values() {
-            buckets.push(bucket.info().await?.info);
+        for bucket in self.buckets.read().unwrap().values() {
+            buckets.push(bucket.info()?.info);
         }
 
         Ok(BucketInfoList { buckets })
     }
 
-    pub async fn sync_fs(&self) -> Result<(), ReductError> {
-        for bucket in self.buckets.values() {
-            bucket.sync_fs().await?;
+    pub fn sync_fs(&self) -> Result<(), ReductError> {
+        for bucket in self.buckets.read().unwrap().values() {
+            bucket.sync_fs()?;
         }
 
         Ok(())

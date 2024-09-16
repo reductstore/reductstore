@@ -10,8 +10,7 @@ use log::info;
 use reductstore::cfg::Cfg;
 use reductstore::core::env::StdEnvGetter;
 use std::str::FromStr;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use reductstore::api::create_axum_app;
 use reductstore::core::logger::Logger;
@@ -38,13 +37,10 @@ async fn launch_server() {
     Logger::init(&cfg.log_level);
     info!("Configuration: \n {}", cfg);
 
-    let components = cfg.build().await.expect("Failed to build components");
+    let components = cfg.build().expect("Failed to build components");
     let info = components
         .storage
-        .read()
-        .await
         .info()
-        .await
         .expect("Failed to get server info");
     if let Some(license) = &info.license {
         info!("License Information: {}", license);
@@ -112,34 +108,29 @@ async fn launch_server() {
     };
 }
 
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     launch_server().await;
 }
 
-async fn shutdown_ctrl_c(handle: Handle, storage: Arc<RwLock<Storage>>) {
+async fn shutdown_ctrl_c(handle: Handle, storage: Arc<Storage>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
-    shutdown_app(handle, storage).await;
+    shutdown_app(handle, storage)
 }
 
 #[cfg(unix)]
-async fn shutdown_signal(handle: Handle, storage: Arc<RwLock<Storage>>) {
+async fn shutdown_signal(handle: Handle, storage: Arc<Storage>) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
         .await;
     info!("SIGTERM received, shutting down...");
-    shutdown_app(handle, storage).await;
+    shutdown_app(handle, storage);
 }
 
-async fn shutdown_app(handle: Handle, storage: Arc<RwLock<Storage>>) {
-    storage
-        .write()
-        .await
-        .sync_fs()
-        .await
-        .expect("Failed to shutdown storage");
+fn shutdown_app(handle: Handle, storage: Arc<Storage>) {
+    storage.sync_fs().expect("Failed to shutdown storage");
     handle.shutdown();
 }
 

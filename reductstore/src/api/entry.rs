@@ -71,12 +71,9 @@ where
         Ok(MethodExtractor { name: method })
     }
 }
-
-async fn check_and_extract_ts_or_query_id(
-    storage: &Storage,
+fn check_and_extract_ts_or_query_id(
     params: HashMap<String, String>,
-    bucket_name: &String,
-    entry_name: &String,
+    last_record: u64,
 ) -> Result<(Option<u64>, Option<u64>), HttpError> {
     let ts = match params.get("ts") {
         Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
@@ -96,14 +93,7 @@ async fn check_and_extract_ts_or_query_id(
     };
 
     let ts = if ts.is_none() && query_id.is_none() {
-        Some(
-            storage
-                .get_bucket(bucket_name)?
-                .get_entry(entry_name)?
-                .info()
-                .await?
-                .latest_record,
-        )
+        Some(last_record)
     } else {
         ts
     };

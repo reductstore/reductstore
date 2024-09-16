@@ -8,8 +8,7 @@ use async_trait::async_trait;
 
 use crate::storage::entry::RecordReader;
 use reduct_base::error::{ErrorCode, ReductError};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// A query that is limited to a certain number of records.
 pub(crate) struct LimitedQuery {
@@ -26,9 +25,8 @@ impl LimitedQuery {
     }
 }
 
-#[async_trait]
 impl Query for LimitedQuery {
-    async fn next(
+    fn next(
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
@@ -40,7 +38,7 @@ impl Query for LimitedQuery {
         }
 
         self.limit_count -= 1;
-        let reader = self.query.next(block_manager).await;
+        let reader = self.query.next(block_manager);
         if self.limit_count == 0 {
             reader.map(|mut r| {
                 r.set_last(true);

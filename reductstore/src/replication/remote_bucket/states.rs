@@ -11,10 +11,9 @@ pub(super) use initial_state::InitialState;
 use reduct_base::error::ReductError;
 
 /// A state of the remote bucket.
-#[async_trait]
 pub(super) trait RemoteBucketState {
     /// Write a record to the remote bucket.
-    async fn write_batch(
+    fn write_batch(
         self: Box<Self>,
         entry_name: &str,
         records: Vec<(RecordReader, Transaction)>,
