@@ -2,24 +2,20 @@
 // Licensed under the Business Source License 1.1
 
 use async_stream::stream;
-use async_trait::async_trait;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
 use std::collections::BTreeMap;
 
-use reduct_base::error::{ErrorCode, IntEnum, ReductError};
-use std::str::FromStr;
-use std::sync::{Arc, RwLock};
-use std::thread::spawn;
-
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::ts_to_us;
+use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
-use tokio::task::{block_in_place, spawn_blocking};
+use std::str::FromStr;
+use std::sync::Arc;
 
 // A wrapper around the Reduct client API to make it easier to mock.
 pub(super) trait ReductClientApi {
@@ -54,6 +50,7 @@ pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 struct ReductClient {
     client: Client,
     server_url: String,
+    rt: Arc<tokio::runtime::Runtime>,
 }
 
 static API_PATH: &str = "api/v1";
@@ -81,7 +78,12 @@ impl ReductClient {
             url.to_string()
         };
 
-        Self { client, server_url }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        Self {
+            client,
+            server_url,
+            rt: Arc::new(rt),
+        }
     }
 }
 
@@ -89,17 +91,10 @@ struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
+    rt: Arc<tokio::runtime::Runtime>,
 }
 
 impl BucketWrapper {
-    fn new(server_url: String, bucket_name: String, client: Client) -> Self {
-        Self {
-            server_url,
-            bucket_name,
-            client,
-        }
-    }
-
     fn build_headers(records: &Vec<RecordReader>, update_only: bool) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let content_length: u64 = if update_only {
@@ -252,18 +247,19 @@ impl ReductClientApi for ReductClient {
             &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
         );
 
-        tokio::spawn(async move {
+        self.rt.block_on(async move {
             let resp = request.send().await;
             tx.send(resp).await.unwrap();
         });
 
         check_response(rx.blocking_recv().unwrap())?;
 
-        Ok(Box::new(BucketWrapper::new(
-            self.server_url.clone(),
-            bucket_name.to_string(),
-            self.client.clone(),
-        )))
+        Ok(Box::new(BucketWrapper {
+            server_url: self.server_url.clone(),
+            bucket_name: bucket_name.to_string(),
+            client: self.client.clone(),
+            rt: self.rt.clone(),
+        }))
     }
 
     fn url(&self) -> &str {
@@ -287,7 +283,7 @@ impl ReductBucketApi for BucketWrapper {
         );
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        tokio::spawn(async move {
+        self.rt.block_on(async move {
             let response = request
                 .headers(headers)
                 .body(Body::wrap_stream(stream))
@@ -314,7 +310,7 @@ impl ReductBucketApi for BucketWrapper {
             ),
         );
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        tokio::spawn(async move {
+        self.rt.block_on(async move {
             let response = request.headers(headers).send().await;
             tx.send(response).await.unwrap();
         });
