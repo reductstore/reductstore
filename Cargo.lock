@@ -132,9 +132,9 @@ checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.8.1"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae74d9bd0a7530e8afd1770739ad34b36838829d6ad61818f9230f683f5ad77"
+checksum = "2f95446d919226d587817a7d21379e6eb099b97b45110a7f272a444ca5c54070"
 dependencies = [
  "aws-lc-sys",
  "mirai-annotations",
@@ -144,9 +144,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.20.1"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f0e249228c6ad2d240c2dc94b714d711629d52bad946075d8e9b2f5391f0703"
+checksum = "234314bd569802ec87011d653d6815c6d7b9ffb969e9fee5b8b20ef860e8dce9"
 dependencies = [
  "bindgen",
  "cc",
@@ -1818,7 +1818,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tower 0.5.0",
+ "tower 0.5.1",
  "tower-http",
  "url",
  "zip",
@@ -1991,9 +1991,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.12"
+version = "0.23.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c58f8c84392efc0a126acce10fa59ff7b3d2ac06ab451a33f2741989b806b044"
+checksum = "f2dabaac7466917e566adb06783a81ca48944c6898a1b08b9374106dd671f4c8"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -2023,9 +2023,9 @@ checksum = "fc0a2ce646f8655401bb81e7927b812614bd5d91dbc968696be50603510fcaf0"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.102.6"
+version = "0.102.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e6b52d4fda176fd835fdc55a835d4a89b8499cad995885a21149d5ad62f852e"
+checksum = "64ca1bc8749bd4cf37b5ce386cc146580777b4e8572c7b97baf22c83f444bee9"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -2474,9 +2474,9 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36b837f86b25d7c0d7988f00a54e74739be6477f2aac6201b8f429a7569991b7"
+checksum = "2873938d487c3cfb9aed7546dc9f2711d867c9f90c46b889989a2cb84eba6b4f"
 dependencies = [
  "tower-layer",
  "tower-service",
