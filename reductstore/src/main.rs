@@ -10,7 +10,7 @@ use log::info;
 use reductstore::cfg::Cfg;
 use reductstore::core::env::StdEnvGetter;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use reductstore::api::create_axum_app;
 use reductstore::core::logger::Logger;

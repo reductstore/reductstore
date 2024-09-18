@@ -7,7 +7,6 @@ use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
-use async_trait::async_trait;
 use log::{debug, error, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
 use reduct_base::error::{IntEnum, ReductError};

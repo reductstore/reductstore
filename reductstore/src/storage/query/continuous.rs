@@ -6,8 +6,6 @@ use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use reduct_base::error::{ErrorCode, ReductError};
 
-use async_trait::async_trait;
-
 use std::sync::{Arc, RwLock};
 
 use crate::storage::entry::RecordReader;

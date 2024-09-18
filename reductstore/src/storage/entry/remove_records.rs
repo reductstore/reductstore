@@ -9,7 +9,6 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::not_found;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-use tokio::fs::read_to_string;
 
 impl Entry {
     /// Remove multiple records.

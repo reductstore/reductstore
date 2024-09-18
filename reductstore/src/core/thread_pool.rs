@@ -5,21 +5,14 @@ mod task_group;
 mod task_handle;
 
 use crossbeam_channel::internal::SelectHandle;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Sender};
 use futures_util::{FutureExt, StreamExt};
 use log::{error, trace};
-use reduct_base::error::ReductError;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::future::Future;
 use std::num::NonZero;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
-use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread::{available_parallelism, sleep, JoinHandle};
 use std::time::Duration;
-use tokio::sync::oneshot::Receiver as AsyncReceiver;
-use tokio::time::Instant;
 
 /// Spawn a unique task for a task group.
 ///
@@ -188,7 +181,7 @@ struct ThreadPool {
 impl ThreadPool {
     pub fn new(size: usize) -> Self {
         let mut threads = Vec::with_capacity(size);
-        let (task_queue, mut task_queue_rc) = unbounded::<Task>();
+        let (task_queue, task_queue_rc) = unbounded::<Task>();
         let task_group_global = Arc::new(Mutex::new(TaskGroup::new("".to_string())));
         let state = Arc::new(Mutex::new(ThreadPoolState::Running));
 

@@ -22,7 +22,6 @@ use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;
 use crate::api::Components;
 use crate::api::HttpError;
-use crate::storage::storage::Storage;
 use axum::async_trait;
 use axum::extract::{FromRequest, Path, Query, State};
 

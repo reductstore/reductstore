@@ -19,7 +19,7 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// Database configuration
 pub struct Cfg<EnvGetter: GetEnv> {
@@ -116,7 +116,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
     fn provision_storage(&self) -> Storage {
         let license = parse_license(self.license_path.clone());
-        let mut storage = Storage::load(PathBuf::from(self.data_path.clone()), license);
+        let storage = Storage::load(PathBuf::from(self.data_path.clone()), license);
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {

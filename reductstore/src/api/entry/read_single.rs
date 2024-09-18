@@ -20,10 +20,9 @@ use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
 use axum::debug_handler;
 use reduct_base::bad_request;
-use reduct_base::error::ErrorCode;
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::RwLock as AsyncRwLock;
 

@@ -8,7 +8,6 @@ use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::format;
 
 /// A struct that contains the timestamp of the record to update, the labels to update and the labels to remove.
 pub(crate) struct UpdateLabels {
@@ -37,7 +36,7 @@ impl Entry {
         &self,
         updates: Vec<UpdateLabels>,
     ) -> TaskHandle<Result<UpdateResult, ReductError>> {
-        let mut block_manager = self.block_manager.clone();
+        let block_manager = self.block_manager.clone();
         let bucket_name = self.bucket_name.clone();
         let entry_name = self.name.clone();
         unique(["storage", &self.bucket_name, &self.name], move || {

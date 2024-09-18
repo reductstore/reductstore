@@ -5,7 +5,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use crc64fast::Digest;
 use prost::Message;
 

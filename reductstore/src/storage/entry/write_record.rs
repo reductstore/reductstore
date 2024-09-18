@@ -9,7 +9,6 @@ use crate::storage::proto::{record, us_to_ts, Record};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
-use std::fmt::format;
 use std::sync::Arc;
 
 impl Entry {

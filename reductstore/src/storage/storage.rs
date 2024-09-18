@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::storage::bucket::Bucket;

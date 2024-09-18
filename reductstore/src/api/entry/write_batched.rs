@@ -16,7 +16,7 @@ use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::{RecordDrainer, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
-use log::{debug, error, trace};
+use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
 use reduct_base::{bad_request, internal_server_error};
@@ -169,9 +169,9 @@ fn spawn_getting_writers(
     components: &Arc<Components>,
     bucket_name: &String,
     entry_name: &String,
-    mut timed_headers: Vec<(u64, RecordHeader)>,
+    timed_headers: Vec<(u64, RecordHeader)>,
 ) -> (Receiver<WriteContext>, JoinHandle<ErrorMap>) {
-    let (tx_writer, mut rx_writer) = tokio::sync::mpsc::channel(1);
+    let (tx_writer, rx_writer) = tokio::sync::mpsc::channel(1);
     let copy_components = Arc::clone(&components);
     let copy_bucket_name = bucket_name.clone();
     let copy_entry_name = entry_name.clone();
@@ -267,7 +267,7 @@ async fn start_writing(
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
 ) -> Box<dyn WriteRecordContent + Sync + Send> {
-    let mut get_writer = async {
+    let get_writer = async {
         let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
 
         bucket

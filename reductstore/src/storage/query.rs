@@ -11,13 +11,12 @@ use crate::core::thread_pool::{shared, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
-use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::sync::{Arc, RwLock};
-use std::thread::{sleep, JoinHandle};
+use std::thread::sleep;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 

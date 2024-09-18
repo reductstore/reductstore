@@ -2,8 +2,6 @@ mod bucket_available;
 mod bucket_unavailable;
 mod initial_state;
 
-use async_trait::async_trait;
-
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;

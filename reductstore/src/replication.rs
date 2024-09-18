@@ -1,9 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::sync::{Arc, RwLock};
-
-use async_trait::async_trait;
+use std::sync::Arc;
 
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{

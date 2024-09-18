@@ -4,7 +4,6 @@
 use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
-use async_trait::async_trait;
 
 use crate::storage::entry::RecordReader;
 use reduct_base::error::{ErrorCode, ReductError};

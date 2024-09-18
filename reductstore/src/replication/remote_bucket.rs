@@ -7,7 +7,6 @@ mod states;
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
 use std::collections::BTreeMap;
 
-use async_trait::async_trait;
 use std::sync::{Arc, RwLock};
 
 use crate::replication::Transaction;

@@ -6,7 +6,7 @@ use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
+use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use bytes::Bytes;
 use log::debug;
 use reduct_base::error::ReductError;
@@ -15,10 +15,8 @@ use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
-use std::thread::JoinHandle;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::error::SendTimeoutError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 /// RecordReader is responsible for reading the content of a record from the storage.
@@ -59,7 +57,7 @@ impl RecordReader {
         last: bool,
     ) -> Result<Self, ReductError> {
         let (record, ctx) = {
-            let mut bm = block_manager.write()?;
+            let bm = block_manager.write()?;
             let block = block_ref.read()?;
 
             let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;

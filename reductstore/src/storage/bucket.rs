@@ -5,10 +5,9 @@ use crate::core::thread_pool::{unique, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
-use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
+use crate::storage::entry::{Entry, EntrySettings, WriteRecordContent};
 use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
-use axum_server::Handle;
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
@@ -16,15 +15,11 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{bad_request, conflict, internal_server_error, Labels};
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
-use std::thread::JoinHandle;
-use tokio::task::JoinSet;
+use std::sync::{Arc, RwLock};
 
 const DEFAULT_MAX_RECORDS: u64 = 1024;
 const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -417,7 +412,7 @@ impl Bucket {
 
         {
             let mut my_settings = self.settings.write().unwrap();
-            let mut entries = self.entries.write().unwrap();
+            let entries = self.entries.write().unwrap();
 
             *my_settings = Self::fill_settings(settings, my_settings.clone());
             for entry in entries.values() {

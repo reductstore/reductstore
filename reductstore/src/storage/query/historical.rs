@@ -4,8 +4,6 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
-
 use reduct_base::error::ReductError;
 
 use crate::storage::block_manager::{BlockManager, BlockRef};

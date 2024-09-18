@@ -67,7 +67,7 @@ impl TaskGroup {
     }
 
     pub fn unlock(&mut self, path: &Vec<&str>, unique: bool) {
-        let mut group = self.find_mut(path).unwrap();
+        let group = self.find_mut(path).unwrap();
         if unique {
             group.unique_lock = false;
         }

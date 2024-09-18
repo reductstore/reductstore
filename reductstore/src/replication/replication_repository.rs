@@ -9,7 +9,6 @@ use crate::replication::proto::{
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::storage::Storage;
-use async_trait::async_trait;
 use bytes::Bytes;
 use log::{debug, error};
 use prost::Message;
@@ -19,7 +18,7 @@ use reduct_base::msg::replication_api::{
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use url::Url;
 
 const REPLICATION_REPO_FILE_NAME: &str = ".replications";

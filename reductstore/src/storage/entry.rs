@@ -22,7 +22,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::thread::JoinHandle;
 use std::time::Instant;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -208,7 +207,7 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub fn try_remove_oldest_block(&self) -> TaskHandle<Result<(), ReductError>> {
-        let mut bm = self.block_manager.read().unwrap();
+        let bm = self.block_manager.read().unwrap();
 
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {

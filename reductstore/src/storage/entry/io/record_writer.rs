@@ -5,11 +5,11 @@ use crate::core::thread_pool::shared_child;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record;
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT};
+use crate::storage::storage::CHANNEL_BUFFER_SIZE;
 use bytes::Bytes;
 use log::error;
+use reduct_base::bad_request;
 use reduct_base::error::ReductError;
-use reduct_base::{bad_request, internal_server_error};
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
@@ -17,7 +17,6 @@ use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::time::timeout;
 
 pub(crate) trait WriteRecordContent {
     fn tx(&self) -> &RecordTx;
@@ -83,7 +82,7 @@ impl RecordWriter {
 
         let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
 
-        let mut me = RecordWriter { tx };
+        let me = RecordWriter { tx };
 
         let ctx = WriteContext {
             bucket_name,
