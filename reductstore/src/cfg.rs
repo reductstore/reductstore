@@ -128,7 +128,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                     if e.status() == ErrorCode::Conflict {
                         let bucket = storage.get_bucket(&name).unwrap().upgrade().unwrap();
                         bucket.set_provisioned(false);
-                        bucket.set_settings(settings.clone()).unwrap();
+                        bucket.set_settings(settings.clone()).wait().unwrap();
                         bucket.set_provisioned(true);
 
                         Ok(bucket.settings().clone())

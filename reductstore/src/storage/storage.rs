@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use log::{debug, info};
+use log::{debug, error, info};
 use std::collections::BTreeMap;
 
 use std::path::PathBuf;
@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
+use crate::core::thread_pool::{ThreadPool, THREAD_POOL};
 use crate::core::weak::Weak;
 use crate::storage::file_cache::FILE_CACHE;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -193,8 +194,18 @@ impl Storage {
     }
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {
+        let mut handlers = vec![];
         for bucket in self.buckets.read().unwrap().values() {
-            bucket.sync_fs()?;
+            handlers.push(bucket.sync_fs());
+        }
+
+        for handler in handlers {
+            match handler.wait() {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Failed to sync bucket: {}", e);
+                }
+            }
         }
 
         Ok(())

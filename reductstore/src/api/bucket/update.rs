@@ -22,7 +22,8 @@ pub(crate) async fn update_bucket(
         .storage
         .get_bucket(&bucket_name)?
         .upgrade()?
-        .set_settings(settings.into())?)
+        .set_settings(settings.into())
+        .await?)
 }
 
 #[cfg(test)]

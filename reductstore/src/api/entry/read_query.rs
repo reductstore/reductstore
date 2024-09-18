@@ -38,7 +38,9 @@ pub(crate) async fn read_query(
 
     let (start, stop) =
         parse_time_range(&params, entry_info.oldest_record, entry_info.latest_record)?;
-    let id = entry.query(start, stop, parse_query_params(params, false)?)?;
+    let id = entry
+        .query(start, stop, parse_query_params(params, false)?)
+        .await?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }

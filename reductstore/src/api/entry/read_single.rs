@@ -99,7 +99,7 @@ async fn fetch_and_response_single_record(
 
     let entry = entry.upgrade()?;
     let reader = if let Some(ts) = ts {
-        entry.begin_read(ts)?
+        entry.begin_read(ts).await?
     } else {
         let query_id = query_id.unwrap();
         let rx = entry.get_query_receiver(query_id)?;

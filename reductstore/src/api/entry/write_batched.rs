@@ -16,14 +16,24 @@ use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::{RecordDrainer, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
-use log::debug;
+use log::{debug, error, trace};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
+use reduct_base::{bad_request, internal_server_error};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
+
+struct WriteContext {
+    time: u64,
+    header: RecordHeader,
+    writer: Box<dyn WriteRecordContent + Sync + Send>,
+}
+
+type ErrorMap = BTreeMap<u64, ReductError>;
 
 // POST /:bucket/:entry/batch
 pub(crate) async fn write_batched_records(
@@ -32,7 +42,7 @@ pub(crate) async fn write_batched_records(
     Path(path): Path<HashMap<String, String>>,
     body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
-    let bucket_name = path.get("bucket_name").unwrap();
+    let bucket_name = path.get("bucket_name").unwrap().clone();
     check_permissions(
         &components,
         headers.clone(),
@@ -42,9 +52,8 @@ pub(crate) async fn write_batched_records(
     )
     .await?;
 
-    let entry_name = path.get("entry_name").unwrap();
+    let entry_name = path.get("entry_name").unwrap().clone();
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
-    let mut error_map = BTreeMap::new();
     let mut stream = body.into_data_stream();
 
     let process_stream = async {
@@ -56,23 +65,14 @@ pub(crate) async fn write_batched_records(
 
         check_content_length(&headers, &timed_headers)?;
 
-        let mut senders = Vec::new();
-        for (time, header) in &timed_headers {
-            senders.push(
-                start_writing(
-                    &components,
-                    bucket_name,
-                    entry_name,
-                    *time,
-                    header,
-                    &mut error_map,
-                )
-                .await,
-            );
-        }
-
-        let mut index = 0;
+        let mut record_count = timed_headers.len();
         let mut written = 0;
+        let (mut rx_writer, prepare_write_stream) =
+            spawn_getting_writers(&components, &bucket_name, &entry_name, timed_headers);
+        let mut ctx = rx_writer
+            .recv()
+            .await
+            .ok_or(internal_server_error!("No writer found"))?;
 
         while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
             .await
@@ -82,10 +82,10 @@ pub(crate) async fn write_batched_records(
 
             while !chunk.is_empty() {
                 match write_chunk(
-                    &senders[index].tx(),
+                    ctx.writer.tx(),
                     chunk,
                     &mut written,
-                    timed_headers[index].1.content_length.clone(),
+                    ctx.header.content_length.clone(),
                 )
                 .await
                 {
@@ -95,21 +95,22 @@ pub(crate) async fn write_batched_records(
                     }
                     Ok(Some(rest)) => {
                         // finish writing the current record and start a new one
-                        if let Err(_) = senders[index]
+                        if let Err(_) = ctx
+                            .writer
                             .tx()
                             .send_timeout(Ok(None), Duration::from_millis(1))
                             .await
                         {
                             debug!("Failed to sync the channel - it may be already closed");
                         }
-                        senders[index].tx().closed().await;
+                        ctx.writer.tx().closed().await;
 
                         components.replication_repo.write().await.notify(
                             TransactionNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),
-                                labels: timed_headers[index]
-                                    .1
+                                labels: ctx
+                                    .header
                                     .labels
                                     .iter()
                                     .map(|(k, v)| Label {
@@ -117,42 +118,89 @@ pub(crate) async fn write_batched_records(
                                         value: v.clone(),
                                     })
                                     .collect::<Vec<Label>>(), // TODO: find a way to avoid cloning
-                                event: Transaction::WriteRecord(timed_headers[index].0),
+                                event: Transaction::WriteRecord(ctx.time),
                             },
                         )?;
 
                         chunk = rest;
-                        index += 1;
+                        record_count -= 1;
                         written = 0;
+
+                        ctx = match rx_writer.recv().await {
+                            Some(ctx) => ctx,
+                            None => break, // no more writers - stop the loop
+                        };
                     }
                     Err(err) => {
-                        return Err::<(), HttpError>(err.into());
+                        return Err::<ErrorMap, HttpError>(err.into());
                     }
                 }
             }
         }
 
-        if senders.len() < index {
-            return Err(ReductError::bad_request("Content is shorter than expected").into());
+        if record_count != 0 {
+            return Err(bad_request!("Content is shorter than expected").into());
         }
 
-        Ok(())
+        Ok(prepare_write_stream.await.unwrap())
     };
 
-    if let Err(err) = process_stream.await {
-        if !headers.contains_key(Expect::name()) {
-            debug!("draining the stream");
-            while let Some(_) = stream.next().await {}
+    match process_stream.await {
+        Ok(error_map) => {
+            let mut headers = HeaderMap::new();
+            error_map.iter().for_each(|(time, err)| {
+                err_to_batched_header(&mut headers, *time, err);
+            });
+
+            Ok(headers.into())
         }
-        return Err::<HeaderMap, HttpError>(err);
+
+        Err(err) => {
+            if !headers.contains_key(Expect::name()) {
+                debug!("draining the stream");
+                while let Some(_) = stream.next().await {}
+            }
+            Err::<HeaderMap, HttpError>(err)
+        }
     }
+}
 
-    let mut headers = HeaderMap::new();
-    error_map.iter().for_each(|(time, err)| {
-        err_to_batched_header(&mut headers, *time, err);
+fn spawn_getting_writers(
+    components: &Arc<Components>,
+    bucket_name: &String,
+    entry_name: &String,
+    mut timed_headers: Vec<(u64, RecordHeader)>,
+) -> (Receiver<WriteContext>, JoinHandle<ErrorMap>) {
+    let (tx_writer, mut rx_writer) = tokio::sync::mpsc::channel(1);
+    let copy_components = Arc::clone(&components);
+    let copy_bucket_name = bucket_name.clone();
+    let copy_entry_name = entry_name.clone();
+    let prepare_write_stream = tokio::spawn(async move {
+        let mut error_map = BTreeMap::new();
+        for (time, header) in timed_headers {
+            let writer = start_writing(
+                copy_components.clone(),
+                &copy_bucket_name,
+                &copy_entry_name,
+                time,
+                &header,
+                &mut error_map,
+            )
+            .await;
+
+            tx_writer
+                .send(WriteContext {
+                    time,
+                    header,
+                    writer,
+                })
+                .await
+                .map_err(|err| error!("Failed to send the writer: {}", err))
+                .unwrap_or(());
+        }
+        error_map
     });
-
-    Ok(headers.into())
+    (rx_writer, prepare_write_stream)
 }
 
 async fn write_chunk(
@@ -212,26 +260,28 @@ fn check_content_length(
 }
 
 async fn start_writing(
-    components: &Arc<Components>,
+    components: Arc<Components>,
     bucket_name: &str,
     entry_name: &str,
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
 ) -> Box<dyn WriteRecordContent + Sync + Send> {
-    let mut get_writer = || {
+    let mut get_writer = async {
         let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
 
-        bucket.write_record(
-            entry_name,
-            time,
-            record_header.content_length.clone(),
-            record_header.content_type.clone(),
-            record_header.labels.clone(),
-        )
+        bucket
+            .write_record(
+                entry_name,
+                time,
+                record_header.content_length.clone(),
+                record_header.content_type.clone(),
+                record_header.labels.clone(),
+            )
+            .await
     };
 
-    match get_writer() {
+    match get_writer.await {
         Ok(writer) => writer,
         Err(err) => {
             error_map.insert(time, err);

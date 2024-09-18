@@ -163,7 +163,10 @@ impl ReplicationSender {
                     self.storage
                         .get_bucket(&self.config.src_bucket)?
                         .upgrade()?
-                        .begin_read(&entry_name, *transaction.timestamp())
+                        .get_entry(&entry_name)?
+                        .upgrade()?
+                        .begin_read(*transaction.timestamp())
+                        .wait()
                 };
                 let record = read_record();
                 match record {

@@ -28,6 +28,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
 
+use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
 use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
 
@@ -35,7 +36,7 @@ struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
     options: QueryOptions,
     last_access: Instant,
-    query_task_handle: JoinHandle<()>,
+    query_task_handle: TaskHandle<()>,
 }
 
 type QueryHandleMap = HashMap<u64, QueryHandle>;
@@ -84,8 +85,16 @@ impl Entry {
         })
     }
 
-    pub(crate) fn restore(path: PathBuf, options: EntrySettings) -> Result<Entry, ReductError> {
-        EntryLoader::restore_entry(path, options)
+    pub(crate) fn restore(
+        path: PathBuf,
+        options: EntrySettings,
+    ) -> TaskHandle<Result<Entry, ReductError>> {
+        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        THREAD_POOL.unique(&format!("{}/{}", bucket_name, name), move || {
+            let entry = EntryLoader::restore_entry(path, options)?;
+            Ok(entry)
+        })
     }
 
     /// Query records for a time range.
@@ -100,19 +109,27 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(&self, start: u64, end: u64, options: QueryOptions) -> Result<u64, ReductError> {
+    pub fn query(
+        &self,
+        start: u64,
+        end: u64,
+        options: QueryOptions,
+    ) -> TaskHandle<Result<u64, ReductError>> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
-        let query = build_query(start, end, options.clone())?;
         let block_manager = Arc::clone(&self.block_manager);
+        let entry_path = format!("{}/{}", self.bucket_name, self.name);
 
-        let (rx, task_handle) = spawn_query_task(query, options.clone(), block_manager);
-
-        if task_handle.is_finished() {
-            panic!("Query task finished immediately");
+        let query = build_query(start, end, options.clone());
+        if let Err(e) = query {
+            return e.into();
         }
-        self.queries.write()?.insert(
+
+        let (rx, task_handle) =
+            spawn_query_task(entry_path, query.unwrap(), options.clone(), block_manager);
+
+        self.queries.write().unwrap().insert(
             id,
             QueryHandle {
                 rx: Arc::new(AsyncRwLock::new(rx)),
@@ -122,7 +139,7 @@ impl Entry {
             },
         );
 
-        Ok(id)
+        Ok(id).into()
     }
 
     /// Returns the next record for a query.
@@ -142,7 +159,7 @@ impl Entry {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        std::thread::spawn(move || {
+        THREAD_POOL.unique(&entry_path.clone(), move || {
             Self::remove_expired_query(queries, entry_path);
             tx.send(()).unwrap();
         });
@@ -190,17 +207,24 @@ impl Entry {
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
-        let mut bm = self.block_manager.write()?;
+    pub fn try_remove_oldest_block(&self) -> TaskHandle<Result<(), ReductError>> {
+        let mut bm = self.block_manager.read().unwrap();
+
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
-            return Err(ReductError::internal_server_error("No block to remove"));
+            return Err(ReductError::internal_server_error("No block to remove")).into();
         }
 
         let oldest_block_id = *index_tree.first().unwrap();
-        bm.remove_block(oldest_block_id)?;
-
-        Ok(())
+        let block_manager = Arc::clone(&self.block_manager);
+        THREAD_POOL.unique(
+            &format!("{}/{}/{}", self.bucket_name, self.name, oldest_block_id),
+            move || {
+                let mut bm = block_manager.write().unwrap();
+                bm.remove_block(oldest_block_id)?;
+                Ok(())
+            },
+        )
     }
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {

@@ -1,12 +1,14 @@
 // Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
 use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
 use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
+use axum_server::Handle;
 use log::debug;
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
@@ -62,7 +64,7 @@ impl Into<BucketSettings> for ProtoBucketSettings {
 pub(crate) struct Bucket {
     name: String,
     path: PathBuf,
-    entries: RwLock<BTreeMap<String, Arc<Entry>>>,
+    entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
     settings: RwLock<BucketSettings>,
     is_provisioned: AtomicBool,
 }
@@ -92,12 +94,12 @@ impl Bucket {
         let bucket = Bucket {
             name: name.to_string(),
             path,
-            entries: RwLock::new(BTreeMap::new()),
+            entries: Arc::new(RwLock::new(BTreeMap::new())),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
         };
 
-        bucket.save_settings()?;
+        bucket.save_settings().wait()?;
         Ok(bucket)
     }
 
@@ -125,28 +127,30 @@ impl Bucket {
         for entry in std::fs::read_dir(&path)? {
             let path = entry?.path();
             if path.is_dir() {
-                let handler: JoinHandle<Result<Entry, ReductError>> = thread::spawn(move || {
-                    Entry::restore(
-                        path,
-                        EntrySettings {
-                            max_block_size: settings.max_block_size.unwrap(),
-                            max_block_records: settings.max_block_records.unwrap(),
-                        },
-                    )
-                });
+                let entry_name = path.file_name().unwrap().to_str().unwrap();
+                let handler = Entry::restore(
+                    path,
+                    EntrySettings {
+                        max_block_size: settings.max_block_size.unwrap(),
+                        max_block_records: settings.max_block_records.unwrap(),
+                    },
+                );
+
                 task_set.push(handler);
             }
         }
 
         for task in task_set {
-            let entry = task.join()??;
+            let entry = task.wait()?;
             entries.insert(entry.name().to_string(), entry);
         }
 
         Ok(Bucket {
             name: bucket_name,
             path,
-            entries: RwLock::new(entries.into_iter().map(|(k, v)| (k, Arc::new(v))).collect()),
+            entries: Arc::new(RwLock::new(
+                entries.into_iter().map(|(k, v)| (k, Arc::new(v))).collect(),
+            )),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
         })
@@ -261,26 +265,20 @@ impl Bucket {
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
-        self.keep_quota_for(content_size)?;
-        let entry = self.get_or_create_entry(name)?.upgrade()?;
-        entry.begin_write(time, content_size, content_type, labels)
-    }
+    ) -> TaskHandle<Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError>> {
+        let get_entry = || {
+            self.keep_quota_for(content_size)?;
+            self.get_or_create_entry(name)?.upgrade()
+        };
 
-    /// Starts a new record read with
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Entry name.
-    /// * `time` - The timestamp of the record.
-    ///
-    /// # Returns
-    ///
-    /// * `RecordReader` - The record reader to read the record content in chunks.
-    /// * `HTTPError` - The error if any.
-    pub fn begin_read(&self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
-        let entry = self.get_entry(name)?.upgrade()?;
-        entry.begin_read(time)
+        let entry = match get_entry() {
+            Ok(entry) => entry,
+            Err(e) => {
+                return Err(e).into();
+            }
+        };
+
+        entry.begin_write(time, content_size, content_type, labels)
     }
 
     /// Remove entry from the bucket
@@ -348,7 +346,7 @@ impl Bucket {
             let mut success = false;
             for name in candidates {
                 debug!("Remove an oldest block from entry '{}'", name);
-                match entries.get(&name).unwrap().try_remove_oldest_block() {
+                match entries.get(&name).unwrap().try_remove_oldest_block().wait() {
                     Ok(_) => {
                         success = true;
                         break;
@@ -386,12 +384,16 @@ impl Bucket {
     }
 
     /// Sync all entries to the file system
-    pub fn sync_fs(&self) -> Result<(), ReductError> {
-        let entries = self.entries.read()?;
-        for entry in entries.values() {
-            entry.sync_fs()?;
-        }
-        Ok(())
+    pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
+        let entries = self.entries.clone();
+
+        THREAD_POOL.unique(self.name(), move || {
+            let entries = entries.read().unwrap();
+            for entry in entries.values() {
+                entry.sync_fs()?;
+            }
+            Ok(())
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -402,7 +404,7 @@ impl Bucket {
         self.settings.read().unwrap().clone()
     }
 
-    pub fn set_settings(&self, settings: BucketSettings) -> Result<(), ReductError> {
+    pub fn set_settings(&self, settings: BucketSettings) -> TaskHandle<Result<(), ReductError>> {
         if self
             .is_provisioned
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -410,7 +412,8 @@ impl Bucket {
             return Err(conflict!(
                 "Can't change settings of provisioned bucket '{}'",
                 self.name()
-            ));
+            ))
+            .into();
         }
 
         {
@@ -425,8 +428,7 @@ impl Bucket {
                 });
             }
         }
-        self.save_settings()?;
-        Ok(())
+        self.save_settings()
     }
 
     /// Mark bucket as provisioned to protect
@@ -459,20 +461,20 @@ impl Bucket {
         settings
     }
 
-    fn save_settings(&self) -> Result<(), ReductError> {
+    fn save_settings(&self) -> TaskHandle<Result<(), ReductError>> {
+        let settings = self.settings.read().unwrap().clone();
         let path = self.path.join(SETTINGS_NAME);
-        let mut buf = BytesMut::new();
-        ProtoBucketSettings::from(self.settings.read()?.clone())
-            .encode(&mut buf)
-            .map_err(|e| {
-                ReductError::internal_server_error(
-                    format!("Failed to encode bucket settings: {}", e).as_str(),
-                )
-            })?;
 
-        let mut file = std::fs::File::create(path)?;
-        file.write(&buf)?;
-        Ok(())
+        THREAD_POOL.unique(self.name(), move || {
+            let mut buf = BytesMut::new();
+            ProtoBucketSettings::from(settings)
+                .encode(&mut buf)
+                .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
+
+            let mut file = std::fs::File::create(path)?;
+            file.write(&buf)?;
+            Ok(())
+        })
     }
 }
 

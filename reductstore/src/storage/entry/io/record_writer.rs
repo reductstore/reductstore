@@ -1,6 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::THREAD_POOL;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record;
@@ -24,7 +25,6 @@ pub(crate) trait WriteRecordContent {
 
 /// RecordWriter is responsible for writing the content of a record to the storage.
 pub(crate) struct RecordWriter {
-    io_task_handle: Option<JoinHandle<()>>,
     tx: RecordTx,
 }
 
@@ -58,9 +58,9 @@ impl RecordWriter {
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
-        let block = block_ref.read()?;
         let (file_ref, offset, bucket_name, entry_name) = {
             let mut bm = block_manager.write()?;
+            let block = block_ref.read()?;
 
             let (file, offset) = {
                 bm.index_mut().insert_or_update(block.to_owned());
@@ -76,16 +76,14 @@ impl RecordWriter {
             )
         };
 
+        let block = block_ref.read()?;
         let block_id = block.block_id();
         let record_index = block.get_record(time).unwrap();
         let content_size = record_index.end - record_index.begin;
 
         let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
 
-        let mut me = RecordWriter {
-            io_task_handle: None,
-            tx,
-        };
+        let mut me = RecordWriter { tx };
 
         let ctx = WriteContext {
             bucket_name,
@@ -98,12 +96,10 @@ impl RecordWriter {
             block_manager,
         };
 
-        // Spawn a task to write the record if it is bigger than the buffer size
-        let handle = spawn(move || {
+        let block_path = format!("{}/{}/{}", ctx.bucket_name, ctx.entry_name, ctx.block_id);
+        THREAD_POOL.shared_child(&block_path, move || {
             Self::receive(rx, ctx);
         });
-
-        me.io_task_handle = Some(handle);
 
         Ok(me)
     }
@@ -137,11 +133,6 @@ impl RecordWriter {
                 if written_bytes >= ctx.content_size {
                     break;
                 }
-
-                ctx.block_manager
-                    .write()?
-                    .use_counter_mut()
-                    .update(ctx.block_id);
             }
 
             if written_bytes < ctx.content_size {

@@ -7,6 +7,7 @@ pub mod filters;
 mod historical;
 mod limited;
 
+use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -14,6 +15,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
+use reduct_base::unprocessable_entity;
 use std::sync::{Arc, RwLock};
 use std::thread::{sleep, JoinHandle};
 use std::time::Duration;
@@ -30,9 +32,7 @@ pub(in crate::storage) fn build_query(
     options: QueryOptions,
 ) -> Result<Box<dyn Query + Send + Sync>, ReductError> {
     if start > stop && !options.continuous {
-        return Err(ReductError::unprocessable_entity(
-            "Start time must be before stop time",
-        ));
+        return Err(unprocessable_entity!("Start time must be before stop time",));
     }
 
     Ok(if let Some(_) = options.limit {
@@ -45,26 +45,27 @@ pub(in crate::storage) fn build_query(
 }
 
 pub(super) fn spawn_query_task(
+    entry_path: String,
     mut query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<RwLock<BlockManager>>,
-) -> (QueryRx, JoinHandle<()>) {
+) -> (QueryRx, TaskHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
-    let handle = std::thread::spawn(move || {
+    let handle = THREAD_POOL.shared(&entry_path.clone(), move || {
         loop {
             let next_result = query.next(block_manager.clone());
             let query_err = next_result.as_ref().err().cloned();
 
             if tx.is_closed() {
-                trace!("Query task channel closed");
+                trace!("Query '{}' task channel closed", entry_path);
                 break;
             }
 
             let send_result = tx.blocking_send(next_result);
 
             if let Err(err) = send_result {
-                warn!("Error sending query result: {}", err);
+                warn!("Error sending query '{}' result: {}", entry_path, err);
                 break;
             }
 
@@ -76,7 +77,7 @@ pub(super) fn spawn_query_task(
                         sleep(Duration::from_millis(10));
                     }
                 } else {
-                    trace!("Query task done: {:?}", err);
+                    trace!("Query task done for '{}'", entry_path);
                     break;
                 }
             }

@@ -1,12 +1,14 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
 use std::collections::{BTreeMap, HashSet};
+use std::fmt::format;
 
 /// A struct that contains the timestamp of the record to update, the labels to update and the labels to remove.
 pub(crate) struct UpdateLabels {
@@ -14,6 +16,8 @@ pub(crate) struct UpdateLabels {
     pub update: Labels,
     pub remove: HashSet<String>,
 }
+
+type UpdateResult = BTreeMap<u64, Result<Vec<Label>, ReductError>>;
 
 impl Entry {
     /// Update labels for multiple records.
@@ -32,49 +36,71 @@ impl Entry {
     pub fn update_labels(
         &self,
         updates: Vec<UpdateLabels>,
-    ) -> Result<BTreeMap<u64, Result<Vec<Label>, ReductError>>, ReductError> {
-        let mut result = BTreeMap::new();
-        let mut records_per_block = BTreeMap::new();
+    ) -> TaskHandle<Result<UpdateResult, ReductError>> {
+        let mut block_manager = self.block_manager.clone();
+        let bucket_name = self.bucket_name.clone();
+        let entry_name = self.name.clone();
+        THREAD_POOL.unique(&format!("{}/{}", bucket_name, entry_name), move || {
+            let mut result = UpdateResult::new();
+            let mut records_per_block = BTreeMap::new();
 
-        {
-            let bm = self.block_manager.read()?;
-            for UpdateLabels {
-                time,
-                update,
-                remove,
-            } in updates
             {
-                // Find the block that contains the record
-                // TODO: Try to avoid the lookup for each record
-                match bm.find_block(time) {
-                    Ok(block_ref) => {
-                        let block = block_ref.read()?;
-                        if let Some(record) = block.get_record(time) {
-                            let record = Self::update_single_label(record.clone(), update, remove);
-                            records_per_block
-                                .entry(block.block_id())
-                                .or_insert_with(Vec::new)
-                                .push(record.clone());
-                            result.insert(time, Ok(record.labels.clone()));
-                        } else {
-                            result
-                                .insert(time, Err(not_found!("No record with timestamp {}", time)));
+                let bm = block_manager.read()?;
+                for UpdateLabels {
+                    time,
+                    update,
+                    remove,
+                } in updates
+                {
+                    // Find the block that contains the record
+                    // TODO: Try to avoid the lookup for each record
+                    match bm.find_block(time) {
+                        Ok(block_ref) => {
+                            let block = block_ref.read()?;
+                            if let Some(record) = block.get_record(time) {
+                                let record =
+                                    Self::update_single_label(record.clone(), update, remove);
+                                records_per_block
+                                    .entry(block.block_id())
+                                    .or_insert_with(Vec::new)
+                                    .push(record.clone());
+                                result.insert(time, Ok(record.labels.clone()));
+                            } else {
+                                result.insert(
+                                    time,
+                                    Err(not_found!("No record with timestamp {}", time)),
+                                );
+                            }
                         }
-                    }
-                    Err(err) => {
-                        result.insert(time, Err(err));
+                        Err(err) => {
+                            result.insert(time, Err(err));
+                        }
                     }
                 }
             }
-        }
 
-        // Update blocks
-        for (block_id, records) in records_per_block.into_iter() {
-            let mut bm = self.block_manager.write()?;
-            bm.update_records(block_id, records)?;
-        }
+            // Update blocks
+            let mut handlers = Vec::new();
+            for (block_id, records) in records_per_block.into_iter() {
+                let local_block_manager = block_manager.clone();
+                let handler: TaskHandle<Result<(), ReductError>> = THREAD_POOL.unique(
+                    &format!("{}/{}/{}", bucket_name, entry_name, block_id),
+                    move || {
+                        let mut bm = local_block_manager.write().unwrap();
+                        bm.update_records(block_id, records)?;
+                        Ok(())
+                    },
+                );
 
-        Ok(result)
+                handlers.push(handler);
+            }
+
+            // Wait for all handlers to finish
+            for handler in handlers {
+                handler.wait()?;
+            }
+            Ok(result)
+        })
     }
 
     fn update_single_label(

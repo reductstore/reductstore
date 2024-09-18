@@ -37,7 +37,6 @@ pub(crate) type BlockRef = Arc<RwLock<Block>>;
 /// because it does not lock the block descriptor file. Use it with RwLock<BlockManager>
 pub(in crate::storage) struct BlockManager {
     path: PathBuf,
-    use_counter: UseCounter,
     bucket: String,
     entry: String,
     block_index: BlockIndex,
@@ -66,7 +65,6 @@ impl BlockManager {
 
         Self {
             path: path.clone(),
-            use_counter: UseCounter::new(IO_OPERATION_TIMEOUT),
             bucket,
             entry,
             block_index: index,
@@ -206,13 +204,6 @@ impl BlockManager {
     ///
     /// * `ReductError` - If the block is still in use or file system operation failed.
     pub fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
-        if !self.use_counter.clean_stale_and_check(block_id) {
-            return Err(internal_server_error!(
-                "Cannot remove block {} because it is still in use",
-                block_id
-            ));
-        }
-
         self.wal.append(block_id, WalEntry::RemoveBlock)?;
 
         self.save_block_on_disk(self.load_block(block_id)?)?;
@@ -390,12 +381,10 @@ impl BlockManager {
     ///
     /// * `Ok(file)` - File to write to.
     pub fn begin_write_record(
-        &mut self,
+        &self,
         block: &Block,
         record_timestamp: u64,
     ) -> Result<(FileWeak, u64), ReductError> {
-        self.use_counter.increment(block.block_id());
-
         let path = self.path_to_data(block.block_id());
         let offset = block.get_record(record_timestamp).unwrap().begin;
         let file = FILE_CACHE.write_or_create(&path, SeekFrom::Start(offset))?;
@@ -435,7 +424,6 @@ impl BlockManager {
         {
             let mut block = block_ref.write()?;
             block.change_record_state(record_timestamp, i32::from(state))?;
-            self.use_counter.decrement(block_id);
 
             // write to WAL
             self.wal.append(
@@ -469,28 +457,14 @@ impl BlockManager {
     ///
     /// * `ReductError` - If file system operation failed.
     pub(crate) fn begin_read_record(
-        &mut self,
+        &self,
         block: &Block,
         record_timestamp: u64,
     ) -> Result<(FileWeak, u64), ReductError> {
-        self.use_counter.increment(block.block_id());
-
         let path = self.path_to_data(block.block_id());
         let offset = block.get_record(record_timestamp).unwrap().begin;
         let file = FILE_CACHE.read(&path, SeekFrom::Start(offset))?;
         Ok((file, offset))
-    }
-
-    /// Finish reading a record from a block.
-    ///
-    /// This method will decrement the use counter of the block.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_id` - ID of the block to read from.
-    ///
-    pub(crate) fn finish_read_record(&mut self, block_id: u64) {
-        self.use_counter.decrement(block_id);
     }
 
     pub fn index_mut(&mut self) -> &mut BlockIndex {
@@ -499,14 +473,6 @@ impl BlockManager {
 
     pub fn index(&self) -> &BlockIndex {
         &self.block_index
-    }
-
-    pub fn use_counter(&self) -> &UseCounter {
-        &self.use_counter
-    }
-
-    pub fn use_counter_mut(&mut self) -> &mut UseCounter {
-        &mut self.use_counter
     }
 
     pub fn bucket_name(&self) -> &String {

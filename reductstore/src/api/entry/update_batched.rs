@@ -77,7 +77,7 @@ pub(crate) async fn update_batched_records(
             .upgrade()?
             .get_entry(entry_name)?
             .upgrade()?;
-        entry.update_labels(records_to_update)?
+        entry.update_labels(records_to_update).await?
     };
 
     let mut headers = HeaderMap::new();

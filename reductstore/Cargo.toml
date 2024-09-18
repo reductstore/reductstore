@@ -65,6 +65,8 @@ tower-http = { version = "0.5.2", features = ["cors"] }
 crc64fast = "1.1.0"
 rustls = "0.23.12"
 byteorder = "1.5.0"
+crossbeam-channel = "0.5.0"
+num_cpus = "1.16.0"
 
 [build-dependencies]
 prost-build = "0.13.1"

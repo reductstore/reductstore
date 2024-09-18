@@ -68,13 +68,15 @@ pub(crate) async fn write_record(
 
         let sender = {
             let bucket = components.storage.get_bucket(bucket)?.upgrade()?;
-            bucket.write_record(
-                path.get("entry_name").unwrap(),
-                ts,
-                content_size,
-                content_type,
-                labels.clone(),
-            )?
+            bucket
+                .write_record(
+                    path.get("entry_name").unwrap(),
+                    ts,
+                    content_size,
+                    content_type,
+                    labels.clone(),
+                )
+                .await?
         };
         Ok((ts, labels, sender))
     };

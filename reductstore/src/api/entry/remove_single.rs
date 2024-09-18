@@ -37,7 +37,8 @@ pub(crate) async fn remove_record(
         .upgrade()?
         .get_entry(entry_name)?
         .upgrade()?
-        .remove_records(vec![ts])?;
+        .remove_records(vec![ts])
+        .await?;
 
     // We don't replicate the deletion of records
 

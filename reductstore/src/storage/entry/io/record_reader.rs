@@ -1,6 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::THREAD_POOL;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
@@ -23,7 +24,6 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
-    io_task_handle: Option<JoinHandle<()>>,
     record: Record,
     last: bool,
 }
@@ -36,7 +36,6 @@ struct ReadContext {
     file_ref: FileWeak,
     offset: u64,
     content_size: u64,
-    block_manager: Arc<RwLock<BlockManager>>,
 }
 
 impl RecordReader {
@@ -82,27 +81,25 @@ impl RecordReader {
                     file_ref,
                     offset,
                     content_size,
-                    block_manager,
                 },
             ))
         }?;
 
         let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
 
-        let io_task_handle = if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
+        if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
             Self::read(tx, ctx);
-            None
         } else {
-            Some(std::thread::spawn(move || {
+            let block_path = format!("{}/{}/{}", ctx.bucket_name, ctx.entry_name, ctx.block_id);
+            THREAD_POOL.shared_child(&block_path, move || {
                 Self::read(tx, ctx);
-            }))
+            });
         };
 
         Ok(RecordReader {
             rx: Some(rx),
             record,
             last,
-            io_task_handle,
         })
     }
 
@@ -123,7 +120,6 @@ impl RecordReader {
             rx: None,
             record,
             last,
-            io_task_handle: None,
         }
     }
 
@@ -133,7 +129,6 @@ impl RecordReader {
             rx: Some(rx),
             record,
             last,
-            io_task_handle: None,
         }
     }
 
@@ -199,11 +194,6 @@ impl RecordReader {
                 tx.blocking_send(Ok(buf.into()))?;
 
                 read_bytes += read as u64;
-                ctx.block_manager
-                    .write()
-                    .unwrap()
-                    .use_counter_mut()
-                    .update(ctx.block_id);
             }
 
             Ok::<(), SendError<_>>(())
@@ -215,11 +205,6 @@ impl RecordReader {
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
             )
         }
-
-        ctx.block_manager
-            .write()
-            .unwrap()
-            .finish_read_record(ctx.block_id);
     }
 }
 

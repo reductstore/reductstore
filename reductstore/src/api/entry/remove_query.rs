@@ -38,8 +38,9 @@ pub(crate) async fn remove_query(
 
     let (start, stop) =
         parse_time_range(&params, entry_info.oldest_record, entry_info.latest_record)?;
-    let removed_records =
-        entry.query_remove_records(start, stop, parse_query_params(params, true)?)?;
+    let removed_records = entry
+        .query_remove_records(start, stop, parse_query_params(params, true)?)
+        .await?;
 
     Ok(RemoveQueryInfoAxum::from(RemoveQueryInfo {
         removed_records,

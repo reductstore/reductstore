@@ -42,7 +42,9 @@ pub(crate) async fn remove_batched_records(
             .upgrade()?
             .get_entry(entry_name)?
             .upgrade()?;
-        entry.remove_records(record_headers.iter().map(|(time, _)| *time).collect())?
+        entry
+            .remove_records(record_headers.iter().map(|(time, _)| *time).collect())
+            .await?
     };
 
     let mut headers = HeaderMap::new();

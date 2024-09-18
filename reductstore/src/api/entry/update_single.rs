@@ -81,7 +81,8 @@ pub(crate) async fn update_record(
             time: ts,
             update: labels_to_update,
             remove: labels_to_remove,
-        }])?;
+        }])
+        .await?;
 
     components
         .replication_repo
