@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
+use crate::core::thread_pool::{shared, unique, unique_child, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
 use crate::storage::query::base::QueryOptions;
@@ -32,7 +32,7 @@ impl Entry {
         let block_manager = self.block_manager.clone();
         let bucket_name = self.bucket_name.clone();
         let entry_name = self.name.clone();
-        THREAD_POOL.unique(&format!("{}/{}", self.bucket_name, self.name), move || {
+        unique(["storage", &self.bucket_name, &self.name], move || {
             Self::inner_remove_records(timestamps, block_manager, &bucket_name, &entry_name)?
         })
     }
@@ -75,7 +75,7 @@ impl Entry {
         let entry_name = self.name.clone();
 
         let max_block_records = self.settings().max_block_records; // max records per block
-        THREAD_POOL.shared(&format!("{}/{}", self.bucket_name, self.name), move || {
+        shared(["storage", &self.bucket_name, &self.name], move || {
             // Loop until the query is done
             let mut continue_query = true;
             let mut handlers = vec![];
@@ -110,17 +110,14 @@ impl Entry {
                 let copy_bucket_name = bucket_name.clone();
                 let copy_entry_name = entry_name.clone();
                 let copy_block_manager = block_manager.clone();
-                let handler = THREAD_POOL.unique(
-                    &format!("{}/{}/remove", bucket_name, entry_name),
-                    move || {
-                        Self::inner_remove_records(
-                            records_to_remove,
-                            copy_block_manager,
-                            &copy_bucket_name,
-                            &copy_entry_name,
-                        )
-                    },
-                );
+                let handler = unique(["storage", &bucket_name, &entry_name], move || {
+                    Self::inner_remove_records(
+                        records_to_remove,
+                        copy_block_manager,
+                        &copy_bucket_name,
+                        &copy_entry_name,
+                    )
+                });
 
                 handlers.push(handler);
             }
@@ -172,8 +169,8 @@ impl Entry {
         let mut handlers = vec![];
         for (block_id, timestamps) in records_per_block {
             let local_block_manager = block_manager.clone();
-            let handler = THREAD_POOL.unique(
-                &format!("{}/{}/{}", bucket_name, entry_name, block_id),
+            let handler = unique_child(
+                ["storage", bucket_name, entry_name, &block_id.to_string()],
                 move || {
                     // TODO: we don't parallelize the removal of records in different blocks
                     let mut bm = local_block_manager.write().unwrap();

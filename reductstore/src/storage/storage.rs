@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
-use crate::core::thread_pool::{ThreadPool, THREAD_POOL};
 use crate::core::weak::Weak;
 use crate::storage::file_cache::FILE_CACHE;
 use reduct_base::msg::bucket_api::BucketSettings;

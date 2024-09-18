@@ -1,7 +1,7 @@
 // Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
+use crate::core::thread_pool::{unique, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -386,8 +386,7 @@ impl Bucket {
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
         let entries = self.entries.clone();
-
-        THREAD_POOL.unique(self.name(), move || {
+        unique(["storage", self.name()], move || {
             let entries = entries.read().unwrap();
             for entry in entries.values() {
                 entry.sync_fs()?;
@@ -465,7 +464,7 @@ impl Bucket {
         let settings = self.settings.read().unwrap().clone();
         let path = self.path.join(SETTINGS_NAME);
 
-        THREAD_POOL.unique(self.name(), move || {
+        unique(["storage", &self.name], move || {
             let mut buf = BytesMut::new();
             ProtoBucketSettings::from(settings)
                 .encode(&mut buf)

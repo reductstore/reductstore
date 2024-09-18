@@ -28,7 +28,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
 
-use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
+use crate::core::thread_pool::{unique, TaskHandle};
 use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
 
@@ -91,7 +91,7 @@ impl Entry {
     ) -> TaskHandle<Result<Entry, ReductError>> {
         let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        THREAD_POOL.unique(&format!("{}/{}", bucket_name, name), move || {
+        unique(["storage", &bucket_name, &name], move || {
             let entry = EntryLoader::restore_entry(path, options)?;
             Ok(entry)
         })
@@ -159,7 +159,7 @@ impl Entry {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        THREAD_POOL.unique(&entry_path.clone(), move || {
+        unique(["storage", &self.bucket_name, &self.name], move || {
             Self::remove_expired_query(queries, entry_path);
             tx.send(()).unwrap();
         });
@@ -217,8 +217,13 @@ impl Entry {
 
         let oldest_block_id = *index_tree.first().unwrap();
         let block_manager = Arc::clone(&self.block_manager);
-        THREAD_POOL.unique(
-            &format!("{}/{}/{}", self.bucket_name, self.name, oldest_block_id),
+        unique(
+            [
+                "storage",
+                &self.bucket_name,
+                &self.name,
+                &oldest_block_id.to_string(),
+            ],
             move || {
                 let mut bm = block_manager.write().unwrap();
                 bm.remove_block(oldest_block_id)?;

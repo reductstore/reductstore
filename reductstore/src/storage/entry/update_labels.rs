@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
+use crate::core::thread_pool::{shared_child, unique, TaskHandle};
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
@@ -40,7 +40,7 @@ impl Entry {
         let mut block_manager = self.block_manager.clone();
         let bucket_name = self.bucket_name.clone();
         let entry_name = self.name.clone();
-        THREAD_POOL.unique(&format!("{}/{}", bucket_name, entry_name), move || {
+        unique(["storage", &self.bucket_name, &self.name], move || {
             let mut result = UpdateResult::new();
             let mut records_per_block = BTreeMap::new();
 
@@ -83,8 +83,8 @@ impl Entry {
             let mut handlers = Vec::new();
             for (block_id, records) in records_per_block.into_iter() {
                 let local_block_manager = block_manager.clone();
-                let handler: TaskHandle<Result<(), ReductError>> = THREAD_POOL.unique(
-                    &format!("{}/{}/{}", bucket_name, entry_name, block_id),
+                let handler: TaskHandle<Result<(), ReductError>> = shared_child(
+                    ["storage", &bucket_name, &entry_name, &block_id.to_string()],
                     move || {
                         let mut bm = local_block_manager.write().unwrap();
                         bm.update_records(block_id, records)?;

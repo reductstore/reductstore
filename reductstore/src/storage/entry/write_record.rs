@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{TaskHandle, THREAD_POOL};
+use crate::core::thread_pool::{unique, TaskHandle};
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::io::record_writer::WriteRecordContent;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
@@ -35,8 +35,8 @@ impl Entry {
     ) -> TaskHandle<Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError>> {
         let block_manager = self.block_manager.clone();
         let settings = self.settings.read().unwrap().clone();
-        THREAD_POOL.unique(
-            &format!("{}/{}", self.bucket_name, self.name),
+        unique(
+            ["storage", &self.bucket_name, &self.name],
             move || -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
                 let mut bm = block_manager.write().unwrap();
                 // When we write, the likely case is that we are writing the latest record

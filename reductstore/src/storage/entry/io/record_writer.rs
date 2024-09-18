@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::THREAD_POOL;
+use crate::core::thread_pool::shared_child;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record;
@@ -96,10 +96,17 @@ impl RecordWriter {
             block_manager,
         };
 
-        let block_path = format!("{}/{}/{}", ctx.bucket_name, ctx.entry_name, ctx.block_id);
-        THREAD_POOL.shared_child(&block_path, move || {
-            Self::receive(rx, ctx);
-        });
+        let (bucket_name, entry_name, block_id) = (
+            ctx.bucket_name.clone(),
+            ctx.entry_name.clone(),
+            ctx.block_id.to_string(),
+        );
+        shared_child(
+            ["storage", &bucket_name, &entry_name, &block_id],
+            move || {
+                Self::receive(rx, ctx);
+            },
+        );
 
         Ok(me)
     }

@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::THREAD_POOL;
+use crate::core::thread_pool::shared_child;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
@@ -90,10 +90,17 @@ impl RecordReader {
         if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
             Self::read(tx, ctx);
         } else {
-            let block_path = format!("{}/{}/{}", ctx.bucket_name, ctx.entry_name, ctx.block_id);
-            THREAD_POOL.shared_child(&block_path, move || {
-                Self::read(tx, ctx);
-            });
+            let (bucket_name, entry_name, block_id) = (
+                ctx.bucket_name.clone(),
+                ctx.entry_name.clone(),
+                ctx.block_id.to_string(),
+            );
+            shared_child(
+                ["storage", &bucket_name, &entry_name, &block_id],
+                move || {
+                    Self::read(tx, ctx);
+                },
+            );
         };
 
         Ok(RecordReader {
