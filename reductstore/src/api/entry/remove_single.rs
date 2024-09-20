@@ -82,11 +82,13 @@ mod tests {
 
         let err = components
             .storage
-            .read()
-            .await
             .get_bucket("bucket-1")
             .unwrap()
-            .begin_read("entry-1", 0)
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .unwrap()
+            .upgrade_and_unwrap()
+            .begin_read(0)
             .await
             .err()
             .unwrap();

@@ -33,7 +33,8 @@ pub(crate) async fn remove_entry(
         .storage
         .get_bucket(bucket_name)?
         .upgrade()?
-        .remove_entry(entry_name)?;
+        .remove_entry(entry_name)
+        .await?;
     Ok(())
 }
 
@@ -59,10 +60,9 @@ mod tests {
         assert_eq!(
             components
                 .storage
-                .read()
-                .await
                 .get_bucket("bucket-1")
                 .unwrap()
+                .upgrade_and_unwrap()
                 .get_entry("entry-1")
                 .err()
                 .unwrap()

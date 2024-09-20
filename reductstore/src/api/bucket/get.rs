@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 // GET /b/:bucket_name
 
-#[axum::debug_handler]
 pub(crate) async fn get_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,

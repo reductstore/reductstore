@@ -20,6 +20,14 @@ impl<T> Weak<T> {
             .upgrade()
             .ok_or(internal_server_error!("Weak reference is no longer valid"))
     }
+
+    pub fn upgrade_opt(&self) -> Option<Arc<T>> {
+        self.weak.upgrade()
+    }
+
+    pub fn upgrade_and_unwrap(&self) -> Arc<T> {
+        self.weak.upgrade().unwrap()
+    }
 }
 
 impl<T> From<Arc<T>> for Weak<T> {

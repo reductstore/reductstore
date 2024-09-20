@@ -205,23 +205,26 @@ impl ReplicationSender {
 #[cfg(target_os = "linux")] // we need precise timing
 mod tests {
     use super::*;
+    use crate::core::logger::Logger;
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
+    use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
     use async_trait::async_trait;
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::error::ErrorCode;
+    use reduct_base::error::ErrorCode::LoopDetected;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
     use reduct_base::Labels;
     use rstest::*;
+    use std::thread::spawn;
 
     mock! {
         RmBucket {}
 
-        #[async_trait]
         impl RemoteBucket for RmBucket {
-            async fn write_batch(
+            fn write_batch(
                 &mut self,
                 entry_name: &str,
                 record: Vec<(RecordReader, Transaction)>,
@@ -233,8 +236,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_ok_not_active(
+    fn test_replication_ok_not_active(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -242,28 +244,27 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(false);
-        let sender = build_sender(remote_bucket, settings).await;
+        let sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5).await;
+        imitate_write_record(&sender, &transaction, 5);
 
-        assert_eq!(sender.run().await, SyncState::NotAvailable);
+        assert_eq!(sender.run(), SyncState::NotAvailable);
         assert_eq!(
             sender
                 .log_map
                 .read()
-                .await
+                .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
-                .await
-                .front(1)
-                .await,
+                .unwrap()
+                .front(1),
             Ok(vec![transaction]),
         );
 
         assert_eq!(
-            sender.hourly_diagnostics.read().await.diagnostics(),
+            sender.hourly_diagnostics.read().unwrap().diagnostics(),
             DiagnosticsItem {
                 ok: 0,
                 errored: 0,
@@ -274,34 +275,32 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_comm_err(mut remote_bucket: MockRmBucket) {
+    fn test_replication_comm_err(mut remote_bucket: MockRmBucket) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
         remote_bucket.expect_is_active().return_const(false);
-        let sender = build_sender(remote_bucket, settings()).await;
+        let sender = build_sender(remote_bucket, settings());
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5).await;
+        imitate_write_record(&sender, &transaction, 5);
 
-        assert_eq!(sender.run().await, SyncState::NotAvailable);
+        assert_eq!(sender.run(), SyncState::NotAvailable);
 
         assert_eq!(
             sender
                 .log_map
                 .read()
-                .await
+                .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
-                .await
-                .front(1)
-                .await,
+                .unwrap()
+                .front(1),
             Ok(vec![transaction]),
         );
 
-        let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
+        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
         assert_eq!(diagnostics.ok, 0);
         assert!(
             diagnostics.errored > 0,
@@ -318,44 +317,39 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_not_found(
-        mut remote_bucket: MockRmBucket,
-        settings: ReplicationSettings,
-    ) {
+    fn test_replication_not_found(mut remote_bucket: MockRmBucket, settings: ReplicationSettings) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings).await;
+        let sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5).await;
+        imitate_write_record(&sender, &transaction, 5);
         sender
             .storage
-            .write()
-            .await
-            .get_bucket_mut("src")
+            .get_bucket("src")
             .unwrap()
+            .upgrade_and_unwrap()
             .remove_entry("test")
-            .await
+            .wait()
             .unwrap();
 
-        assert_eq!(sender.run().await, SyncState::SyncedOrRemoved);
+        assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
         assert!(
             sender
                 .log_map
                 .read()
-                .await
+                .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
-                .await
+                .unwrap()
                 .is_empty(),
             "We don't keep the transaction for a non existing record"
         );
 
-        let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
+        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
         assert_eq!(
             diagnostics,
             DiagnosticsItem {
@@ -373,8 +367,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_too_early_ok(
+    fn test_replication_too_early_ok(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -382,45 +375,42 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings).await;
+        let sender = build_sender(remote_bucket, settings);
 
         sender
             .log_map
             .read()
-            .await
+            .unwrap()
             .get("test")
             .unwrap()
             .write()
-            .await
+            .unwrap()
             .push_back(Transaction::WriteRecord(20))
-            .await
             .unwrap();
 
         let writer = sender
             .storage
-            .write()
-            .await
             .create_bucket("src", BucketSettings::default())
             .unwrap()
-            .write_record("test", 20, 4, "".to_string(), Labels::new())
-            .await
+            .upgrade_and_unwrap()
+            .begin_write("test", 20, 4, "".to_string(), Labels::new())
+            .wait()
             .unwrap();
 
         let hourly_diagnostics = sender.hourly_diagnostics.clone();
 
-        tokio::spawn(async move {
+        spawn(move || {
             // we need to spawn a task to check the state in the attempt loop
-            sender.run().await
+            sender.run()
         });
 
         writer
             .tx()
-            .send(Ok(Some(Bytes::from("xxxx"))))
-            .await
+            .blocking_send(Ok(Some(Bytes::from("xxxx"))))
             .unwrap();
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(100));
 
-        let diagnostics = hourly_diagnostics.read().await.diagnostics();
+        let diagnostics = hourly_diagnostics.read().unwrap().diagnostics();
         assert_eq!(
             diagnostics,
             DiagnosticsItem {
@@ -432,42 +422,46 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_too_early_err(
+    fn test_replication_too_early_err(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
+        Logger::init("TRACE");
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings).await;
+        let sender = build_sender(remote_bucket, settings);
 
         sender
             .log_map
             .read()
-            .await
+            .unwrap()
             .get("test")
             .unwrap()
             .write()
-            .await
+            .unwrap()
             .push_back(Transaction::WriteRecord(20))
-            .await
             .unwrap();
 
         let _tx = sender
             .storage
-            .write()
-            .await
             .create_bucket("src", BucketSettings::default())
             .unwrap()
-            .write_record("test", 20, 4, "".to_string(), Labels::new())
-            .await
+            .upgrade_and_unwrap()
+            .begin_write(
+                "test",
+                20,
+                MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1,
+                "".to_string(),
+                Labels::new(),
+            )
+            .wait()
             .unwrap();
 
-        sender.run().await;
+        sender.run();
 
-        let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
+        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
         assert_eq!(
             diagnostics,
             DiagnosticsItem {
@@ -485,8 +479,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_not_all_records_ok(
+    fn test_replication_not_all_records_ok(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -497,29 +490,29 @@ mod tests {
             )]))
         });
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings).await;
+        let sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5).await;
+        imitate_write_record(&sender, &transaction, 5);
 
         let transaction = Transaction::WriteRecord(20);
-        imitate_write_record(&sender, &transaction, 5).await;
+        imitate_write_record(&sender, &transaction, 5);
 
-        assert_eq!(sender.run().await, SyncState::SyncedOrRemoved);
+        assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
         assert!(
             sender
                 .log_map
                 .read()
-                .await
+                .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
-                .await
+                .unwrap()
                 .is_empty(),
             "We remove all errored transactions"
         );
 
-        let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
+        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
         assert_eq!(
             diagnostics,
             DiagnosticsItem {
@@ -537,8 +530,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_record_large_payload(
+    fn test_replication_record_large_payload(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -546,93 +538,84 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings).await;
+        let sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, (MAX_PAYLOAD_SIZE + 1) as usize).await;
+        imitate_write_record(&sender, &transaction, (MAX_PAYLOAD_SIZE + 1) as usize);
 
-        assert_eq!(sender.run().await, SyncState::SyncedOrRemoved);
+        assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
         assert!(
             sender
                 .log_map
                 .read()
-                .await
+                .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
-                .await
+                .unwrap()
                 .is_empty(),
             "We remove all errored transactions"
         );
 
-        let diagnostics = sender.hourly_diagnostics.read().await.diagnostics();
+        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
         assert!(diagnostics.ok > 0, "records were replicated");
         assert_eq!(diagnostics.errored, 0, "no errors happened");
     }
 
-    async fn imitate_write_record(
-        sender: &ReplicationSender,
-        transaction: &Transaction,
-        size: usize,
-    ) {
+    fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction, size: usize) {
         sender
             .log_map
             .read()
-            .await
+            .unwrap()
             .get("test")
             .unwrap()
             .write()
-            .await
+            .unwrap()
             .push_back(transaction.clone())
-            .await
             .unwrap();
 
-        let mut storage = sender.storage.write().await;
-        let bucket = match storage.create_bucket("src", BucketSettings::default()) {
+        let bucket = match sender
+            .storage
+            .create_bucket("src", BucketSettings::default())
+        {
             Ok(bucket) => bucket,
-            Err(_err) => storage.get_bucket_mut("src").unwrap(),
+            Err(_err) => sender.storage.get_bucket("src").unwrap(),
         };
 
         let writer = bucket
-            .write_record(
+            .upgrade_and_unwrap()
+            .begin_write(
                 "test",
                 transaction.timestamp().clone(),
                 size,
                 "text/plain".to_string(),
                 Labels::new(),
             )
-            .await
+            .wait()
             .unwrap();
         writer
             .tx()
-            .send(Ok(Some(Bytes::from(
+            .blocking_send(Ok(Some(Bytes::from(
                 (0..size).map(|_| 'x').collect::<String>(),
             ))))
-            .await
             .unwrap();
-        writer.tx().send(Ok(None)).await.unwrap();
-        writer.tx().closed().await;
+        writer.tx().blocking_send(Ok(None)).unwrap_or(());
     }
 
-    async fn build_sender(
+    fn build_sender(
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationSender {
         let tmp_dir = tempfile::tempdir().unwrap().into_path();
 
-        let storage = Arc::new(RwLock::new(Storage::load(tmp_dir, None).await));
+        let storage = Arc::new((Storage::load(tmp_dir, None)));
 
         let log_map = Arc::new(RwLock::new(HashMap::new()));
         let log = RwLock::new(
-            TransactionLog::try_load_or_create(
-                storage.read().await.data_path().join("test.log"),
-                1000,
-            )
-            .await
-            .unwrap(),
+            TransactionLog::try_load_or_create(storage.data_path().join("test.log"), 1000).unwrap(),
         );
 
-        log_map.write().await.insert("test".to_string(), log);
+        log_map.write().unwrap().insert("test".to_string(), log);
 
         ReplicationSender {
             log_map,

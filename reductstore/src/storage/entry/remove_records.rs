@@ -5,6 +5,7 @@ use crate::core::thread_pool::{shared, unique, unique_child, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
 use crate::storage::query::base::QueryOptions;
+use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::not_found;
 use std::collections::BTreeMap;
@@ -29,10 +30,9 @@ impl Entry {
         timestamps: Vec<u64>,
     ) -> TaskHandle<Result<BTreeMap<u64, ReductError>, ReductError>> {
         let block_manager = self.block_manager.clone();
-        let bucket_name = self.bucket_name.clone();
-        let entry_name = self.name.clone();
-        unique(["storage", &self.bucket_name, &self.name], move || {
-            Self::inner_remove_records(timestamps, block_manager, &bucket_name, &entry_name)?
+        let task_group = self.task_group();
+        unique(&task_group.clone(), "remove records", move || {
+            Self::inner_remove_records(timestamps, block_manager, task_group)
         })
     }
 
@@ -70,14 +70,12 @@ impl Entry {
         };
 
         let block_manager = self.block_manager.clone();
-        let bucket_name = self.bucket_name.clone();
-        let entry_name = self.name.clone();
-
         let max_block_records = self.settings().max_block_records; // max records per block
-        shared(["storage", &self.bucket_name, &self.name], move || {
+        let task_group = self.task_group();
+
+        shared(&task_group.clone(), "query remove records", move || {
             // Loop until the query is done
             let mut continue_query = true;
-            let mut handlers = vec![];
             let mut total_records = 0;
 
             while continue_query {
@@ -106,24 +104,26 @@ impl Entry {
 
                 // Send the records to remove
                 total_records += records_to_remove.len() as u64;
-                let copy_bucket_name = bucket_name.clone();
-                let copy_entry_name = entry_name.clone();
                 let copy_block_manager = block_manager.clone();
-                let handler = unique(["storage", &bucket_name, &entry_name], move || {
-                    Self::inner_remove_records(
-                        records_to_remove,
-                        copy_block_manager,
-                        &copy_bucket_name,
-                        &copy_entry_name,
-                    )
-                });
 
-                handlers.push(handler);
-            }
+                match Self::inner_remove_records(
+                    records_to_remove,
+                    copy_block_manager,
+                    task_group.clone(),
+                ) {
+                    Ok(error_map) => {
+                        for (timestamp, error) in error_map {
+                            // TODO: send the error to the client
+                            warn!(
+                                "Failed to remove record with timestamp {}: {}",
+                                timestamp, error
+                            );
 
-            // Wait for all handlers to finish
-            for handler in handlers {
-                handler.wait()??;
+                            total_records -= 1;
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
             }
 
             Ok(total_records)
@@ -133,9 +133,8 @@ impl Entry {
     fn inner_remove_records(
         timestamps: Vec<u64>,
         block_manager: Arc<RwLock<BlockManager>>,
-        bucket_name: &String,
-        entry_name: &String,
-    ) -> Result<Result<BTreeMap<u64, ReductError>, ReductError>, ReductError> {
+        task_group: String,
+    ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut error_map = BTreeMap::new();
         let mut records_per_block = BTreeMap::new();
 
@@ -169,7 +168,8 @@ impl Entry {
         for (block_id, timestamps) in records_per_block {
             let local_block_manager = block_manager.clone();
             let handler = unique_child(
-                ["storage", bucket_name, entry_name, &block_id.to_string()],
+                &format!("{}/{}", task_group, block_id),
+                "remove records from block",
                 move || {
                     // TODO: we don't parallelize the removal of records in different blocks
                     let mut bm = local_block_manager.write().unwrap();
@@ -183,7 +183,7 @@ impl Entry {
             handler.wait()?;
         }
 
-        Ok(Ok(error_map))
+        Ok(error_map)
     }
 }
 
@@ -191,6 +191,7 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::entry::tests::{entry, write_stub_record};
+    use crate::storage::entry::EntrySettings;
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -243,7 +244,10 @@ mod tests {
 
     #[fixture]
     async fn entry_with_data(mut entry: Entry) -> Entry {
-        entry.settings.max_block_records = 2;
+        entry.set_settings(EntrySettings {
+            max_block_records: 2,
+            ..entry.settings()
+        });
 
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2).await.unwrap();

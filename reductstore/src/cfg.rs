@@ -673,10 +673,13 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_buckets);
-            let components = cfg.build().await.unwrap();
+            let components = cfg.build().unwrap();
 
-            let storage = components.storage.read().await;
-            let bucket1 = storage.get_bucket("bucket1").unwrap();
+            let bucket1 = components
+                .storage
+                .get_bucket("bucket1")
+                .unwrap()
+                .upgrade_and_unwrap();
 
             assert!(bucket1.is_provisioned());
             assert_eq!(bucket1.settings().quota_type, Some(FIFO));
@@ -693,14 +696,16 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_buckets);
-            let components = cfg.build().await.unwrap();
-
-            let storage = components.storage.read().await;
-            let bucket1 = storage.get_bucket("bucket1").unwrap();
+            let components = cfg.build().unwrap();
+            let bucket1 = components
+                .storage
+                .get_bucket("bucket1")
+                .unwrap()
+                .upgrade_and_unwrap();
 
             assert_eq!(
                 bucket1.settings(),
-                &Bucket::defaults(),
+                Bucket::defaults(),
                 "use defaults if env vars are not set"
             );
         }
@@ -729,7 +734,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_tokens);
-            let components = cfg.build().await.unwrap();
+            let components = cfg.build().unwrap();
 
             let repo = components.token_repo.read().await;
             let token1 = repo.get_token("token1").unwrap().clone();
@@ -754,7 +759,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_tokens);
-            let components = cfg.build().await.unwrap();
+            let components = cfg.build().unwrap();
 
             let repo = components.token_repo.read().await;
             let err = repo.get_token("token1").err().unwrap();
@@ -808,7 +813,7 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_replications);
-            let components = cfg.build().await.unwrap();
+            let components = cfg.build().unwrap();
 
             let repo = components.replication_repo.read().await;
             let replication = repo.get_replication("replication1").unwrap();
@@ -878,10 +883,10 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_replications);
-            let components = cfg.build().await.unwrap();
+            let components = cfg.build().unwrap();
 
             let repo = components.replication_repo.read().await;
-            assert_eq!(repo.replications().await.len(), 0);
+            assert_eq!(repo.replications().len(), 0);
         }
 
         #[rstest]
@@ -910,10 +915,10 @@ mod tests {
                 .return_const(Err(VarError::NotPresent));
 
             let cfg = Cfg::from_env(env_with_replications);
-            let components = cfg.build().await.unwrap();
+            let components = cfg.build().unwrap();
 
             let repo = components.replication_repo.read().await;
-            assert_eq!(repo.replications().await.len(), 0);
+            assert_eq!(repo.replications().len(), 0);
         }
     }
 }

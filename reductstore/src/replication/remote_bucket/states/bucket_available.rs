@@ -177,7 +177,7 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record_to_write]).await;
+        let state = state.write_batch("test_entry", vec![record_to_write]);
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -204,9 +204,7 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state
-            .write_batch("test_entry", vec![record_to_update])
-            .await;
+        let state = state.write_batch("test_entry", vec![record_to_update]);
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -228,7 +226,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]).await;
+        let state = state.write_batch("test", vec![record_to_write]);
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::Timeout, ""))
@@ -253,7 +251,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update]).await;
+        let state = state.write_batch("test", vec![record_to_update]);
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::Timeout, ""))
@@ -277,7 +275,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]).await;
+        let state = state.write_batch("test", vec![record_to_write]);
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::InternalServerError, ""))
@@ -304,7 +302,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]).await;
+        let state = state.write_batch("test", vec![record_to_write]);
         let error_map = state.last_result().as_ref().unwrap();
 
         assert_eq!(error_map.len(), 1);
@@ -336,9 +334,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state
-            .write_batch("test", vec![record_to_update, record_to_write()])
-            .await;
+        let state = state.write_batch("test", vec![record_to_update, record_to_write()]);
         assert!(
             state.last_result().is_ok(),
             "we should not have any errors because wrote error records"

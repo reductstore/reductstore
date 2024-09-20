@@ -1,11 +1,11 @@
 // Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{unique, TaskHandle};
+use crate::core::thread_pool::{shared, shared_child, unique, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
-use crate::storage::entry::{Entry, EntrySettings, WriteRecordContent};
+use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
 use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
@@ -253,7 +253,7 @@ impl Bucket {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn write_record(
+    pub fn begin_write(
         &self,
         name: &str,
         time: u64,
@@ -276,6 +276,20 @@ impl Bucket {
         entry.begin_write(time, content_size, content_type, labels)
     }
 
+    /// Starts a new record read with
+    pub fn begin_read(
+        &self,
+        name: &str,
+        time: u64,
+    ) -> TaskHandle<Result<RecordReader, ReductError>> {
+        let entry = || self.get_entry(name)?.upgrade();
+
+        match entry() {
+            Ok(entry) => entry.begin_read(time),
+            Err(e) => Err(e).into(),
+        }
+    }
+
     /// Remove entry from the bucket
     ///
     /// # Arguments
@@ -285,20 +299,28 @@ impl Bucket {
     /// # Returns
     ///
     /// * `HTTPError` - The error if any.
-    pub fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
-        _ = self.get_entry(name)?;
+    pub fn remove_entry(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(e) = self.get_entry(name) {
+            return Err(e).into();
+        }
 
+        let entries = self.entries.clone();
         let path = self.path.join(name);
-        FILE_CACHE.remove_dir(&path)?;
-        debug!(
-            "Remove entry '{}' from bucket '{}' and folder '{}'",
-            name,
-            self.name,
-            path.display()
-        );
+        let bucket_name = self.name.clone();
+        let entry_name = name.to_string();
 
-        self.entries.write()?.remove(name);
-        Ok(())
+        unique(&self.task_group(), "remove entry", move || {
+            FILE_CACHE.remove_dir(&path)?;
+            debug!(
+                "Remove entry '{}' from bucket '{}' and folder '{}'",
+                entry_name,
+                bucket_name,
+                path.display()
+            );
+
+            entries.write()?.remove(&entry_name);
+            Ok(())
+        })
     }
 
     fn keep_quota_for(&self, content_size: usize) -> Result<(), ReductError> {
@@ -381,7 +403,8 @@ impl Bucket {
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
         let entries = self.entries.clone();
-        unique(["storage", self.name()], move || {
+
+        unique(&self.task_group(), "sync entires", move || {
             let entries = entries.read().unwrap();
             for entry in entries.values() {
                 entry.sync_fs()?;
@@ -459,7 +482,7 @@ impl Bucket {
         let settings = self.settings.read().unwrap().clone();
         let path = self.path.join(SETTINGS_NAME);
 
-        unique(["storage", &self.name], move || {
+        unique(&self.task_group(), "save settings", move || {
             let mut buf = BytesMut::new();
             ProtoBucketSettings::from(settings)
                 .encode(&mut buf)
@@ -470,6 +493,21 @@ impl Bucket {
             Ok(())
         })
     }
+
+    fn task_group(&self) -> String {
+        // use folder hierarchy as task group to protect resources
+        [
+            self.path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            &self.path.file_name().unwrap().to_str().unwrap(),
+        ]
+        .join("/")
+    }
 }
 
 #[cfg(test)]
@@ -479,13 +517,12 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
-        assert_eq!(bucket.settings(), &settings);
+    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
+        assert_eq!(bucket.settings(), settings);
 
-        let bucket = Bucket::restore(bucket.path.clone()).await.unwrap();
+        let bucket = Bucket::restore(bucket.path.clone()).unwrap();
         assert_eq!(bucket.name(), "test");
-        assert_eq!(bucket.settings(), &settings);
+        assert_eq!(bucket.settings(), settings);
     }
 
     #[rstest]
@@ -511,7 +548,7 @@ mod tests {
             max_block_records: None,
         };
 
-        bucket.set_settings(new_settings).unwrap();
+        bucket.set_settings(new_settings).wait().unwrap();
         assert_eq!(bucket.settings().max_block_size.unwrap(), 100);
         assert_eq!(bucket.settings().quota_type, settings.quota_type);
         assert_eq!(bucket.settings().quota_size, settings.quota_size);
@@ -529,9 +566,9 @@ mod tests {
         let mut new_settings = settings.clone();
         new_settings.max_block_size = Some(200);
         new_settings.max_block_records = Some(200);
-        bucket.set_settings(new_settings).unwrap();
+        bucket.set_settings(new_settings).wait().unwrap();
 
-        for entry in bucket.entries.values() {
+        for entry in bucket.entries.read().unwrap().values() {
             assert_eq!(entry.settings().max_block_size, 200);
             assert_eq!(entry.settings().max_block_records, 200);
         }
@@ -553,13 +590,13 @@ mod tests {
         let blob: &[u8] = &[0u8; 40];
 
         write(&mut bucket, "test-1", 0, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 44);
+        assert_eq!(bucket.info().unwrap().info.size, 44);
 
         write(&mut bucket, "test-2", 1, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 91);
+        assert_eq!(bucket.info().unwrap().info.size, 91);
 
         write(&mut bucket, "test-3", 2, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 94);
+        assert_eq!(bucket.info().unwrap().info.size, 94);
 
         assert_eq!(
             read(&mut bucket, "test-1", 0).await.err(),
@@ -604,7 +641,7 @@ mod tests {
 
         write(&mut bucket, "test-1", 0, b"test").await.unwrap();
         bucket.sync_fs().await.unwrap(); // we need to sync to get the correct size
-        assert_eq!(bucket.info().await.unwrap().info.size, 22);
+        assert_eq!(bucket.info().unwrap().info.size, 22);
 
         let result = write(&mut bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(
@@ -641,9 +678,8 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_provisioned_info(provisioned_bucket: Bucket) {
-        let info = provisioned_bucket.info().await.unwrap().info;
+    fn test_provisioned_info(provisioned_bucket: Bucket) {
+        let info = provisioned_bucket.info().unwrap().info;
         assert_eq!(info.is_provisioned, true);
     }
 
@@ -651,6 +687,7 @@ mod tests {
     fn test_provisioned_settings(mut provisioned_bucket: Bucket) {
         let err = provisioned_bucket
             .set_settings(BucketSettings::default())
+            .wait()
             .err()
             .unwrap();
         assert_eq!(
@@ -666,7 +703,7 @@ mod tests {
         content: &'static [u8],
     ) -> Result<(), ReductError> {
         let sender = bucket
-            .write_record(
+            .begin_write(
                 entry_name,
                 time,
                 content.len(),

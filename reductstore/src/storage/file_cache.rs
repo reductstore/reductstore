@@ -229,67 +229,59 @@ impl FileCache {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use std::fs;
     use std::io::Write;
 
     use rstest::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::time::sleep;
 
-    use super::*;
+    use std::io::Read;
+    use std::thread::sleep;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_read(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_read(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_read.txt");
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
         file.sync_all().unwrap();
         drop(file);
 
-        let file_ref = cache.read(&file_path, SeekFrom::Start(0)).await.unwrap();
+        let file_ref = cache.read(&file_path, SeekFrom::Start(0)).unwrap();
         let mut data = String::new();
         file_ref
             .upgrade()
             .unwrap()
             .write()
-            .await
+            .unwrap()
             .read_to_string(&mut data)
-            .await
             .unwrap();
         assert_eq!(data, "test", "should read from beginning");
 
         let file_ref = cache
             .read(&file_path, SeekFrom::End(-2))
-            .await
             .unwrap()
             .upgrade()
             .unwrap();
         let mut data = String::new();
-        file_ref
-            .write()
-            .await
-            .read_to_string(&mut data)
-            .await
-            .unwrap();
+        file_ref.write().unwrap().read_to_string(&mut data).unwrap();
         assert_eq!(data, "st", "should read last 2 bytes");
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_write_or_create(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_write_or_create(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_write_or_create.txt");
 
         let file_ref = cache
             .write_or_create(&file_path, SeekFrom::Start(0))
-            .await
             .unwrap()
             .upgrade()
             .unwrap();
         {
-            let mut file = file_ref.write().await;
-            file.write_all(b"test").await.unwrap();
-            file.sync_all().await.unwrap();
+            let mut file = file_ref.write().unwrap();
+            file.write_all(b"test").unwrap();
+            file.sync_all().unwrap();
         };
 
         assert_eq!(
@@ -300,14 +292,13 @@ mod tests {
 
         let file_ref = cache
             .write_or_create(&file_path, SeekFrom::End(-2))
-            .await
             .unwrap()
             .upgrade()
             .unwrap();
         {
-            let mut file = file_ref.write().await;
-            file.write_all(b"xx").await.unwrap();
-            file.sync_all().await.unwrap();
+            let mut file = file_ref.write().unwrap();
+            file.write_all(b"xx").unwrap();
+            file.sync_all().unwrap();
         }
 
         assert_eq!(
@@ -318,84 +309,72 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_remove(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_remove.txt");
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
         file.sync_all().unwrap();
         drop(file);
 
-        cache.remove(&file_path).await.unwrap();
+        cache.remove(&file_path).unwrap();
         assert_eq!(file_path.exists(), false);
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_cache_max_size(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_cache_max_size(cache: FileCache, tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
 
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
-            .await
             .unwrap();
         cache
             .write_or_create(&file_path2, SeekFrom::Start(0))
-            .await
             .unwrap();
         cache
             .write_or_create(&file_path3, SeekFrom::Start(0))
-            .await
             .unwrap();
 
-        let mut inner_cache = cache.cache.write().await;
+        let mut inner_cache = cache.cache.write().unwrap();
         assert_eq!(inner_cache.len(), 2);
         assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_cache_ttl(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_cache_ttl(cache: FileCache, tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
 
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
-            .await
             .unwrap();
         cache
             .write_or_create(&file_path2, SeekFrom::Start(0))
-            .await
             .unwrap();
 
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(200));
 
         cache
             .write_or_create(&file_path3, SeekFrom::Start(0))
-            .await
             .unwrap(); // should remove the file_path1 descriptor
 
-        let mut inner_cache = cache.cache.write().await;
+        let mut inner_cache = cache.cache.write().unwrap();
         assert_eq!(inner_cache.len(), 1);
         assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove_dir(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_remove_dir(cache: FileCache, tmp_dir: PathBuf) {
         let file_1 = cache
             .write_or_create(&tmp_dir.join("test_remove_dir.txt"), SeekFrom::Start(0))
-            .await
             .unwrap();
         let file_2 = cache
             .write_or_create(&tmp_dir.join("test_remove_dir.txt"), SeekFrom::Start(0))
-            .await
             .unwrap();
 
-        cache.remove_dir(&tmp_dir).await.unwrap();
+        cache.remove_dir(&tmp_dir).unwrap();
 
         assert!(file_1.upgrade().is_err());
         assert!(file_2.upgrade().is_err());

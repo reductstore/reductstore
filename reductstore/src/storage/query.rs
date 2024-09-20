@@ -7,7 +7,7 @@ pub mod filters;
 mod historical;
 mod limited;
 
-use crate::core::thread_pool::{shared, TaskHandle};
+use crate::core::thread_pool::{shared, TaskGroup, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -44,29 +44,27 @@ pub(in crate::storage) fn build_query(
 }
 
 pub(super) fn spawn_query_task(
-    entry_path: String,
+    task_group: String,
     mut query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<RwLock<BlockManager>>,
 ) -> (QueryRx, TaskHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
-    let bucket_name = entry_path.split('/').nth(1).unwrap().to_string();
-    let entry_name = entry_path.split('/').last().unwrap().to_string();
-    let handle = shared(["storage", &bucket_name, &entry_name], move || {
+    let handle = shared(&task_group.clone(), "spawn query task", move || {
         loop {
             let next_result = query.next(block_manager.clone());
             let query_err = next_result.as_ref().err().cloned();
 
             if tx.is_closed() {
-                trace!("Query '{}' task channel closed", entry_path);
+                trace!("Query '{}' task channel closed", task_group);
                 break;
             }
 
             let send_result = tx.blocking_send(next_result);
 
             if let Err(err) = send_result {
-                warn!("Error sending query '{}' result: {}", entry_path, err);
+                warn!("Error sending query '{}' result: {}", task_group, err);
                 break;
             }
 
@@ -78,7 +76,7 @@ pub(super) fn spawn_query_task(
                         sleep(Duration::from_millis(10));
                     }
                 } else {
-                    trace!("Query task done for '{}'", entry_path);
+                    trace!("Query task done for '{}'", task_group);
                     break;
                 }
             }
@@ -94,6 +92,7 @@ mod tests {
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
     use rstest::*;
+    use tokio::time::timeout;
 
     #[rstest]
     fn test_bad_start_stop() {
@@ -118,27 +117,38 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_query_task_expired(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_expired(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             ..Default::default()
         };
 
         let query = build_query(0, 5, options.clone()).unwrap();
-        sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
 
-        let (rx, handle) = spawn_query_task(query, options, block_manager.await.clone());
+        let (rx, handle) = spawn_query_task(
+            "bucket/entry".to_string(),
+            query,
+            options,
+            block_manager.clone(),
+        );
         assert!(rx.is_empty());
-        assert!(handle.await.is_ok());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(handle.is_finished());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_query_task_ok(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query = build_query(0, 5, options.clone()).unwrap();
 
-        let (mut rx, handle) = spawn_query_task(query, options, block_manager.await.clone());
+        let (mut rx, handle) = spawn_query_task(
+            "bucket/entry".to_string(),
+            query,
+            options,
+            block_manager.clone(),
+        );
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
@@ -147,27 +157,30 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_query_task_continuous_ok(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             continuous: true,
             ..Default::default()
         };
         let query = build_query(0, 5, options.clone()).unwrap();
-        let block_manager = block_manager.await;
-        let (mut rx, handle) = spawn_query_task(query, options, block_manager.clone());
+        let (mut rx, handle) = spawn_query_task(
+            "bucket/entry".to_string(),
+            query,
+            options,
+            block_manager.clone(),
+        );
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
 
         block_manager
             .write()
-            .await
+            .unwrap()
             .load_block(0)
-            .await
             .unwrap()
             .write()
-            .await
+            .unwrap()
             .insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
                     seconds: 0,
@@ -190,23 +203,32 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_query_task_err(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_err(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query = build_query(0, 10, options.clone()).unwrap();
 
-        let (rx, handle) = spawn_query_task(query, options, block_manager.await.clone());
+        let (rx, handle) = spawn_query_task(
+            "bucket/entry".to_string(),
+            query,
+            options,
+            block_manager.clone(),
+        );
         drop(rx); // drop the receiver to simulate a closed channel
         assert!(timeout(Duration::from_millis(1000), handle).await.is_ok());
     }
 
     #[fixture]
-    async fn block_manager() -> Arc<RwLock<BlockManager>> {
-        let path = tempfile::tempdir().unwrap().into_path();
+    fn block_manager() -> Arc<RwLock<BlockManager>> {
+        let path = tempfile::tempdir()
+            .unwrap()
+            .into_path()
+            .join("bucket")
+            .join("entry");
 
         let mut block_manager =
             BlockManager::new(path.clone(), BlockIndex::new(path.join("index")));
-        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
-        block_ref.write().await.insert_or_update_record(Record {
+        let block_ref = block_manager.start_new_block(0, 10).unwrap();
+        block_ref.write().unwrap().insert_or_update_record(Record {
             timestamp: Some(Timestamp {
                 seconds: 0,
                 nanos: 0,
@@ -218,7 +240,7 @@ mod tests {
             content_type: "".to_string(),
         });
 
-        block_ref.write().await.insert_or_update_record(Record {
+        block_ref.write().unwrap().insert_or_update_record(Record {
             timestamp: Some(Timestamp {
                 seconds: 0,
                 nanos: 1000,
@@ -230,7 +252,7 @@ mod tests {
             content_type: "".to_string(),
         });
 
-        block_manager.finish_block(block_ref).await.unwrap();
+        block_manager.finish_block(block_ref).unwrap();
         Arc::new(RwLock::new(block_manager))
     }
 }

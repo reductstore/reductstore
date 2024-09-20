@@ -49,7 +49,6 @@ mod tests {
             .write()
             .await
             .create_replication("test", settings)
-            .await
             .unwrap();
 
         let info = get_replication(
@@ -66,9 +65,9 @@ mod tests {
         assert_eq!(
             info.0,
             FullReplicationInfo {
-                info: repl.info().await,
+                info: repl.info(),
                 settings: repl.masked_settings().clone(),
-                diagnostics: repl.diagnostics().await,
+                diagnostics: repl.diagnostics(),
             }
         );
     }

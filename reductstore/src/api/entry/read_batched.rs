@@ -258,8 +258,8 @@ mod tests {
 
     use axum::body::to_bytes;
 
+    use crate::api::entry::tests::query;
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use crate::storage::query::base::QueryOptions;
     use rstest::*;
 
     #[rstest]
@@ -274,21 +274,10 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
-        let query_id = {
-            components
-                .storage
-                .write()
-                .await
-                .get_bucket_mut(path_to_entry_1.get("bucket_name").unwrap())
-                .unwrap()
-                .get_entry_mut(path_to_entry_1.get("entry_name").unwrap())
-                .unwrap()
-                .query(0, u64::MAX, QueryOptions::default())
-                .unwrap()
-        };
+        let query_id = query(&path_to_entry_1, components.clone()).await;
 
         let response = read_batched_records(
-            State(Arc::clone(&components)),
+            State(components.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "q".to_string(),
@@ -319,11 +308,12 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_next_record_reader_timeout() {
-            let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            let rx = Arc::new(AsyncRwLock::new(rx));
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(&mut rx, "", Some(Duration::from_millis(10)))
+                    next_record_reader(rx.clone(), "", Some(Duration::from_millis(10)))
                 )
                 .await
                 .unwrap()
@@ -333,7 +323,7 @@ mod tests {
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(&mut rx, "", None)
+                    next_record_reader(rx.clone(), "", None)
                 )
                 .await
                 .is_err(),
@@ -344,12 +334,13 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_next_record_reader_closed_tx() {
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(&mut rx, "", None)
+                    next_record_reader(rx.clone(), "", None)
                 )
                 .await
                 .unwrap()

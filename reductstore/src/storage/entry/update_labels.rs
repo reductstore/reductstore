@@ -37,9 +37,8 @@ impl Entry {
         updates: Vec<UpdateLabels>,
     ) -> TaskHandle<Result<UpdateResult, ReductError>> {
         let block_manager = self.block_manager.clone();
-        let bucket_name = self.bucket_name.clone();
-        let entry_name = self.name.clone();
-        unique(["storage", &self.bucket_name, &self.name], move || {
+        let task_group = self.task_group();
+        unique(&task_group.clone(), "update labels", move || {
             let mut result = UpdateResult::new();
             let mut records_per_block = BTreeMap::new();
 
@@ -83,7 +82,8 @@ impl Entry {
             for (block_id, records) in records_per_block.into_iter() {
                 let local_block_manager = block_manager.clone();
                 let handler: TaskHandle<Result<(), ReductError>> = shared_child(
-                    ["storage", &bucket_name, &entry_name, &block_id.to_string()],
+                    &format!("{}/{}", task_group, block_id),
+                    "update labels in block",
                     move || {
                         let mut bm = local_block_manager.write().unwrap();
                         bm.update_records(block_id, records)?;
@@ -143,12 +143,16 @@ mod tests {
     use super::*;
     use crate::storage::entry::tests::{entry, write_record_with_labels};
 
+    use crate::storage::entry::EntrySettings;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
     async fn test_update_labels(mut entry: Entry) {
-        entry.settings.max_block_records = 2;
+        entry.set_settings(EntrySettings {
+            max_block_records: 2,
+            ..entry.settings()
+        });
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2).await.unwrap();
         write_stub_record(&mut entry, 3).await.unwrap();
@@ -242,14 +246,8 @@ mod tests {
         assert!(updated_labels.contains(&expected_labels[0]));
         assert!(updated_labels.contains(&expected_labels[1]));
 
-        let block = entry
-            .block_manager
-            .write()
-            .await
-            .load_block(1)
-            .await
-            .unwrap();
-        let record = block.read().await.get_record(1).unwrap().clone();
+        let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
+        let record = block.read().unwrap().get_record(1).unwrap().clone();
         assert_eq!(record.labels.len(), 2);
         assert!(updated_labels.contains(&expected_labels[0]));
         assert!(updated_labels.contains(&expected_labels[1]));

@@ -21,7 +21,7 @@ impl Entry {
     /// * `HTTPError` - The error if any.
     pub(crate) fn begin_read(&self, time: u64) -> TaskHandle<Result<RecordReader, ReductError>> {
         let block_manager = self.block_manager.clone();
-        shared(["storage", &self.bucket_name, &self.name], move || {
+        shared(&self.task_group(), "begin read", move || {
             debug!("Reading record for ts={}", time);
 
             let (block_ref, record) = {

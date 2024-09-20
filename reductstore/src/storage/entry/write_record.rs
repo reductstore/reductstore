@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{unique, TaskHandle};
+use crate::core::thread_pool::{shared, unique, TaskHandle};
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::io::record_writer::WriteRecordContent;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
@@ -34,8 +34,9 @@ impl Entry {
     ) -> TaskHandle<Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError>> {
         let block_manager = self.block_manager.clone();
         let settings = self.settings.read().unwrap().clone();
-        unique(
-            ["storage", &self.bucket_name, &self.name],
+        shared(
+            &self.task_group(),
+            "begin write",
             move || -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
                 let mut bm = block_manager.write().unwrap();
                 // When we write, the likely case is that we are writing the latest record
@@ -189,14 +190,13 @@ mod tests {
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
 
         assert_eq!(
             bm.load_block(1)
-                .await
                 .unwrap()
                 .read()
-                .await
+                .unwrap()
                 .get_record(1)
                 .unwrap()
                 .clone(),
@@ -212,10 +212,9 @@ mod tests {
 
         assert_eq!(
             bm.load_block(2000010)
-                .await
                 .unwrap()
                 .read()
-                .await
+                .unwrap()
                 .get_record(2000010)
                 .unwrap()
                 .clone(),
@@ -245,13 +244,12 @@ mod tests {
         write_stub_record(&mut entry, 2).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
         let records = bm
             .load_block(1)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(
@@ -268,10 +266,9 @@ mod tests {
 
         let records = bm
             .load_block(2000010)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(
@@ -294,13 +291,12 @@ mod tests {
         write_stub_record(&mut entry, 3000000).await.unwrap();
         write_stub_record(&mut entry, 2000000).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
         let records = bm
             .load_block(1000000)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(records.len(), 3);
@@ -324,13 +320,12 @@ mod tests {
         write_stub_record(&mut entry, 3000000).await.unwrap();
         write_stub_record(&mut entry, 1000000).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
         let records = bm
             .load_block(1000000)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(records.len(), 1);
@@ -397,12 +392,11 @@ mod tests {
         let record = entry
             .block_manager
             .write()
-            .await
+            .unwrap()
             .load_block(1000000)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .get_record(1000000)
             .unwrap()
             .clone();

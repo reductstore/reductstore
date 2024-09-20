@@ -268,22 +268,20 @@ mod tests {
     use super::*;
     use reduct_base::error::ErrorCode;
     use rstest::*;
+    use std::fs::OpenOptions;
     use tokio::fs;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_read(mut wal: WalImpl) {
+    fn test_read(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
-            .await
             .unwrap();
         wal.append(1, WalEntry::UpdateRecord(Record::default()))
-            .await
             .unwrap();
-        wal.append(1, WalEntry::RemoveBlock).await.unwrap();
-        wal.append(1, WalEntry::RemoveRecord(1)).await.unwrap();
+        wal.append(1, WalEntry::RemoveBlock).unwrap();
+        wal.append(1, WalEntry::RemoveRecord(1)).unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let entries = wal.read(1).await.unwrap();
+        let entries = wal.read(1).unwrap();
 
         assert_eq!(
             entries,
@@ -297,57 +295,45 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove(mut wal: WalImpl) {
+
+    fn test_remove(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
-            .await
             .unwrap();
 
-        assert_eq!(wal.read(1).await.unwrap().len(), 1);
-        wal.remove(1).await.unwrap();
+        assert_eq!(wal.read(1).unwrap().len(), 1);
+        wal.remove(1).unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let err = wal.read(1).await.err().unwrap();
+        let err = wal.read(1).err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_list(mut wal: WalImpl) {
+    fn test_list(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
-            .await
             .unwrap();
         wal.append(2, WalEntry::WriteRecord(Record::default()))
-            .await
             .unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let blocks = wal.list().await.unwrap();
+        let blocks = wal.list().unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains(&1));
         assert!(blocks.contains(&2));
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_crc_error(mut wal: WalImpl) {
+    fn test_crc_error(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
-            .await
             .unwrap();
 
         let path = wal.block_wal_path(1);
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .await
-            .unwrap();
-        file.seek(SeekFrom::Start(0)).await.unwrap();
-        file.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
-            .await
-            .unwrap();
+        let mut file = OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        file.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 1]).unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let err = wal.read(1).await.err().unwrap();
+        let err = wal.read(1).err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 

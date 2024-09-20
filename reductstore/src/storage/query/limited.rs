@@ -57,9 +57,7 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_limit(#[future] block_manager: Arc<RwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
+    fn test_limit(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = LimitedQuery::new(
             0,
             u64::MAX,
@@ -69,12 +67,12 @@ mod tests {
             },
         );
 
-        let reader = query.next(block_manager.clone()).await.unwrap();
+        let reader = query.next(block_manager.clone()).unwrap();
         assert_eq!(reader.timestamp(), 0);
         assert!(reader.last());
 
         assert_eq!(
-            query.next(block_manager).await.err(),
+            query.next(block_manager).err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

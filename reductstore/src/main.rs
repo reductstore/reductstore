@@ -222,10 +222,8 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown() {
         let handle = Handle::new();
-        let storage = Arc::new(RwLock::new(
-            Storage::load(tempdir().unwrap().into_path(), None).await,
-        ));
-        shutdown_app(handle.clone(), storage.clone()).await;
+        let storage = Arc::new(Storage::load(tempdir().unwrap().into_path(), None));
+        shutdown_app(handle.clone(), storage.clone());
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {

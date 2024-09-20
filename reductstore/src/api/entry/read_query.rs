@@ -72,15 +72,23 @@ mod tests {
         .await;
 
         let query: QueryInfo = result.unwrap().into();
-
-        let mut storage = components.storage.write().await;
-        let entry = storage
-            .get_bucket_mut("bucket-1")
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
             .unwrap()
-            .get_entry_mut("entry-1")
+            .upgrade()
+            .unwrap()
+            .get_entry("entry-1")
+            .unwrap()
+            .upgrade()
             .unwrap();
 
-        let rx = entry.get_query_receiver(query.id).await.unwrap();
+        let rx = entry
+            .get_query_receiver(query.id)
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut rx = rx.write().await;
         assert!(rx.recv().await.unwrap().unwrap().last());
 
         assert_eq!(

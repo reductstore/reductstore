@@ -282,9 +282,8 @@ mod tests {
     mock! {
         RmBucket {}
 
-        #[async_trait]
         impl RemoteBucket for RmBucket {
-            async fn write_batch(
+            fn write_batch(
                 &mut self,
                 entry_name: &str,
                 record: Vec<(RecordReader, Transaction)>,
@@ -296,23 +295,21 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_transaction_log_init(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
-        let replication = build_replication(remote_bucket, settings).await;
-        assert_eq!(replication.log_map.read().await.len(), 2);
+    fn test_transaction_log_init(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+        let replication = build_replication(remote_bucket, settings);
+        assert_eq!(replication.log_map.read().unwrap().len(), 2);
         assert!(
-            replication.log_map.read().await.contains_key("test1"),
+            replication.log_map.read().unwrap().contains_key("test1"),
             "Transaction log is initialized"
         );
         assert!(
-            replication.log_map.read().await.contains_key("test2"),
+            replication.log_map.read().unwrap().contains_key("test2"),
             "Transaction log is initialized"
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_ok_active(
+    fn test_replication_ok_active(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -321,13 +318,13 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings).await;
+        let mut replication = build_replication(remote_bucket, settings);
 
-        replication.notify(notification).await.unwrap();
-        sleep(Duration::from_millis(250)).await;
-        assert!(transaction_log_is_empty(&replication).await);
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(250));
+        assert!(transaction_log_is_empty(&replication));
         assert_eq!(
-            replication.info().await,
+            replication.info(),
             ReplicationInfo {
                 name: "test".to_string(),
                 is_active: true,
@@ -336,7 +333,7 @@ mod tests {
             }
         );
         assert_eq!(
-            replication.diagnostics().await,
+            replication.diagnostics(),
             Diagnostics {
                 hourly: DiagnosticsItem {
                     ok: 60,
@@ -348,8 +345,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_filter_each_entry(
+    fn test_replication_filter_each_entry(
         mut notification: TransactionNotification,
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
@@ -363,32 +359,31 @@ mod tests {
             ..settings
         };
 
-        let mut replication = build_replication(MockRmBucket::new(), settings.clone()).await;
+        let mut replication = build_replication(MockRmBucket::new(), settings.clone());
 
         let mut time = 10;
         for entry in &["test1", "test2"] {
             for _ in 0..3 {
                 notification.entry = entry.to_string();
                 notification.event = Transaction::WriteRecord(time.clone());
-                replication.notify(notification.clone()).await.unwrap();
+                replication.notify(notification.clone()).unwrap();
                 time += 10;
             }
         }
 
-        assert_eq!(replication.log_map.read().await.len(), 2);
+        assert_eq!(replication.log_map.read().unwrap().len(), 2);
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test1").await,
+            get_entries_from_transaction_log(&mut replication, "test1"),
             vec![Transaction::WriteRecord(10), Transaction::WriteRecord(30)]
         );
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test2").await,
+            get_entries_from_transaction_log(&mut replication, "test2"),
             vec![Transaction::WriteRecord(40), Transaction::WriteRecord(60)]
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_broken_transaction_log(
+    fn test_broken_transaction_log(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -397,61 +392,56 @@ mod tests {
             .expect_write_batch()
             .return_const(Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings.clone()).await;
+        let mut replication = build_replication(remote_bucket, settings.clone());
 
-        replication.notify(notification.clone()).await.unwrap();
-        assert!(!transaction_log_is_empty(&replication).await);
+        replication.notify(notification.clone()).unwrap();
+        assert!(!transaction_log_is_empty(&replication));
 
         let path = ReplicationTask::build_path_to_transaction_log(
-            replication.storage.read().await.data_path(),
+            replication.storage.data_path(),
             &settings.src_bucket,
             &notification.entry,
             &replication.name,
         );
-        fs::write(path.clone(), "broken").await.unwrap();
-        sleep(Duration::from_millis(500)).await;
+        fs::write(path.clone(), "broken").unwrap();
+        sleep(Duration::from_millis(500));
 
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test1").await,
+            get_entries_from_transaction_log(&mut replication, "test1"),
             vec![],
             "Transaction log is empty"
         );
     }
 
-    async fn build_replication(
+    fn build_replication(
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationTask {
         let tmp_dir = tempfile::tempdir().unwrap().into_path();
 
-        let storage = Arc::new(RwLock::new(Storage::load(tmp_dir, None).await));
+        let storage = Arc::new(Storage::load(tmp_dir, None));
 
-        {
-            let mut lock = storage.write().await;
+        let bucket = storage
+            .create_bucket("src", BucketSettings::default())
+            .unwrap()
+            .upgrade_and_unwrap();
 
-            let bucket = lock
-                .create_bucket("src", BucketSettings::default())
-                .unwrap();
-
-            let mut time = 10;
-            for entry in ["test1", "test2"] {
-                for _ in 0..3 {
-                    let writer = bucket
-                        .write_record(entry, time, 4, "text/plain".to_string(), Labels::new())
-                        .await
-                        .unwrap();
-                    writer
-                        .tx()
-                        .send(Ok(Some(Bytes::from("test"))))
-                        .await
-                        .unwrap();
-                    writer.tx().send(Ok(None)).await.unwrap_or(());
-                    writer.tx().closed().await;
-                    time += 10;
-                }
-
+        let mut time = 10;
+        for entry in ["test1", "test2"] {
+            for _ in 0..3 {
+                let writer = bucket
+                    .begin_write(entry, time, 4, "text/plain".to_string(), Labels::new())
+                    .wait()
+                    .unwrap();
+                writer
+                    .tx()
+                    .blocking_send(Ok(Some(Bytes::from("test"))))
+                    .unwrap();
+                writer.tx().blocking_send(Ok(None)).unwrap_or(());
                 time += 10;
             }
+
+            time += 10;
         }
 
         let repl = ReplicationTask::build(
@@ -462,7 +452,7 @@ mod tests {
             storage,
         );
 
-        sleep(Duration::from_millis(10)).await; // wait for the transaction log to be initialized in worker
+        sleep(Duration::from_millis(10)); // wait for the transaction log to be initialized in worker
         repl
     }
 
@@ -497,35 +487,34 @@ mod tests {
         }
     }
 
-    async fn transaction_log_is_empty(replication: &ReplicationTask) -> bool {
-        sleep(Duration::from_millis(50)).await;
-        sleep(Duration::from_millis(50)).await;
+    fn transaction_log_is_empty(replication: &ReplicationTask) -> bool {
+        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(50));
 
         replication
             .log_map
             .read()
-            .await
+            .unwrap()
             .get("test1")
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .is_empty()
     }
 
-    async fn get_entries_from_transaction_log(
+    fn get_entries_from_transaction_log(
         replication: &mut ReplicationTask,
         entry: &str,
     ) -> Vec<Transaction> {
         replication
             .log_map
             .read()
-            .await
+            .unwrap()
             .get(entry)
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .front(10)
-            .await
             .unwrap()
     }
 }

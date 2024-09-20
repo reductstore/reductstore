@@ -14,35 +14,22 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::thread::{available_parallelism, sleep, JoinHandle};
 use std::time::Duration;
 
+pub(crate) use task_group::TaskGroup;
+pub(crate) use task_handle::TaskHandle;
+
 /// Spawn a unique task for a task group.
 ///
 /// The task will wait until the task group  and all parent groups are unlocked and no other shared
 /// tasks are running for same group including parent groups.
-///
-/// # Arguments
-///
-/// * `group_path` - A vector of strings that represents the path to the task group.
-/// * `task` - A closure that returns the result of the task.
-///
-/// # Returns
-///
-/// A handle to the task that can be used to wait for the result.
-pub fn unique<T, Str, const N: usize>(
-    group_path: [Str; N],
+pub(crate) fn unique<T>(
+    group_path: &str,
+    description: &str,
     task: impl FnOnce() -> T + Send + 'static,
 ) -> TaskHandle<T>
 where
-    Str: ToString + Sized,
     T: Send + 'static,
 {
-    THREAD_POOL.unique(
-        &group_path
-            .iter()
-            .map(|el| el.to_string())
-            .reduce(|a, b| a + "/" + &b)
-            .unwrap(),
-        task,
-    )
+    THREAD_POOL.unique(group_path, description, task)
 }
 
 /// Spawn a unique task for a task group.
@@ -50,65 +37,31 @@ where
 /// The task will wait until the task group is unlocked and no unique tasks are running for the same
 /// group. It will not wait for parent groups to be unlocked.
 ///
-/// Use this method for tasks  which is spawned from a unique task:
-///
-/// ```rust
-/// use crate::reductstore::core::thread_pool::{unique, unique_child};
-///
-/// unique(["group1"], || {
-///     unique_child(["group1", "group2"], || {
-///        // shared task
-///    });
-/// });
-///
-pub fn unique_child<T, Str, const N: usize>(
-    group_path: [Str; N],
+/// Use this method for tasks  which is spawned from a unique task
+pub(crate) fn unique_child<T>(
+    group_path: &str,
+    description: &str,
     task: impl FnOnce() -> T + Send + 'static,
 ) -> TaskHandle<T>
 where
-    Str: ToString + Sized,
     T: Send + 'static,
 {
-    THREAD_POOL.unique_child(
-        &group_path
-            .iter()
-            .map(|el| el.to_string())
-            .reduce(|a, b| a + "/" + &b)
-            .unwrap(),
-        task,
-    )
+    THREAD_POOL.unique_child(group_path, description, task)
 }
 
 /// Spawn a shared task for a task group.
 ///
 /// The task will wait until the task group  and all parent groups, but it will not wait for other shared tasks
 /// to finish.
-///
-/// # Arguments
-///
-/// * `group_path` - A vector of strings that represents the path to the task group.
-/// * `task` - A closure that returns the result of the task.
-///
-/// # Returns
-///
-/// A handle to the task that can be used to wait for the result.
-
-pub fn shared<T, Str, const N: usize>(
-    group_path: [Str; N],
+pub(crate) fn shared<T>(
+    group_path: &str,
+    description: &str,
     task: impl FnOnce() -> T + Send + 'static,
 ) -> TaskHandle<T>
 where
-    Str: ToString + Sized,
     T: Send + 'static,
 {
-    THREAD_POOL.shared(
-        &group_path
-            .iter()
-            .map(|el| el.to_string())
-            .reduce(|a, b| a + "/" + &b)
-            .unwrap(),
-        task,
-    )
+    THREAD_POOL.shared(group_path, description, task)
 }
 
 /// Spawn a shared task for a task group.
@@ -117,31 +70,39 @@ where
 /// group. It will not wait for parent groups to be unlocked.
 ///
 /// Use this method for tasks  which is spawned from a shared task:
-///
-/// ```rust
-/// use crate::reductstore::core::thread_pool::{unique, shared_child};
-///
-/// unique(["group1"], || {
-///    shared_child(["group1", "group2"], || {
-///       // shared task
-///     });
-/// });
-pub fn shared_child<T, Str, const N: usize>(
-    group_path: [Str; N],
+pub(crate) fn shared_child<T>(
+    group_path: &str,
+    description: &str,
     task: impl FnOnce() -> T + Send + 'static,
 ) -> TaskHandle<T>
 where
-    Str: ToString + Sized,
     T: Send + 'static,
 {
-    THREAD_POOL.shared_child(
-        &group_path
-            .iter()
-            .map(|el| el.to_string())
-            .reduce(|a, b| a + "/" + &b)
-            .unwrap(),
-        task,
-    )
+    THREAD_POOL.shared_child(group_path, description, task)
+}
+
+pub(crate) fn try_unique<T>(
+    group_path: &str,
+    description: &str,
+    task: impl FnOnce() -> T + Send + 'static,
+) -> Option<TaskHandle<T>>
+where
+    T: Send + 'static,
+{
+    let path = group_path.split('/').collect::<Vec<&str>>();
+    if THREAD_POOL.task_group.lock().unwrap().is_ready(&path, true) {
+        Some(unique(group_path, description, task))
+    } else {
+        None
+    }
+}
+
+/// Find a task group by path.
+pub(crate) fn find_task_group(group_path: &str) -> Option<TaskGroup> {
+    let mut group = THREAD_POOL.task_group.lock().unwrap();
+    group
+        .find(&group_path.to_string().split("/").collect())
+        .cloned()
 }
 
 type Func = Box<dyn FnOnce() + Send>;
@@ -153,16 +114,13 @@ enum Task {
     ChildShared(String, Func),
 }
 
-use crate::core::thread_pool::task_group::TaskGroup;
-pub(crate) use task_handle::TaskHandle;
-
 #[derive(PartialEq)]
 enum ThreadPoolState {
     Running,
     Stopped,
 }
 
-static THREAD_POOL_TICK: Duration = Duration::from_micros(10);
+static THREAD_POOL_TICK: Duration = Duration::from_micros(5);
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPool::new(
@@ -176,6 +134,7 @@ struct ThreadPool {
     threads: Vec<JoinHandle<()>>,
     task_queue: Sender<Task>,
     state: Arc<Mutex<ThreadPoolState>>,
+    task_group: Arc<Mutex<TaskGroup>>,
 }
 
 impl ThreadPool {
@@ -250,25 +209,32 @@ impl ThreadPool {
             threads,
             task_queue,
             state,
+            task_group: task_group_global,
         }
     }
 
     pub fn unique<T: Send + 'static>(
         &self,
         group: &str,
+        description: &str,
         task: impl FnOnce() -> T + Send + 'static,
     ) -> TaskHandle<T> {
         self.check_current_thread();
 
-        trace!("Spawn unique task: {}", group);
+        trace!("Spawn unique task '{}: {}", group, description);
+        let group = group.to_string();
+        let description = description.to_string();
 
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.task_queue
             .send(Task::Unique(
-                group.to_string(),
+                group.clone(),
                 Box::new(move || {
+                    trace!("Task '{}' started: {}", group, description);
+
                     let result = task();
                     tx.send(result).unwrap_or(());
+                    trace!("Task '{}' completed: {}", group, description);
                 }),
             ))
             .unwrap();
@@ -279,17 +245,23 @@ impl ThreadPool {
     pub fn unique_child<T: Send + 'static>(
         &self,
         group: &str,
+        description: &str,
         task: impl FnOnce() -> T + Send + 'static,
     ) -> TaskHandle<T> {
-        trace!("Spawn unique child task: {}", group);
+        trace!("Spawn unique child task '{}: {}", group, description);
+        let group = group.to_string();
+        let description = description.to_string();
 
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.task_queue
             .send(Task::ChildUnique(
-                group.to_string(),
+                group.clone(),
                 Box::new(move || {
+                    trace!("Task '{}' started: {}", group, description);
+
                     let result = task();
                     tx.send(result).unwrap_or(());
+                    trace!("Task '{}' completed: {}", group, description);
                 }),
             ))
             .unwrap();
@@ -300,19 +272,25 @@ impl ThreadPool {
     pub fn shared<T: Send + 'static>(
         &self,
         group: &str,
+        description: &str,
         task: impl FnOnce() -> T + Send + 'static,
     ) -> TaskHandle<T> {
         self.check_current_thread();
 
-        trace!("Spawn shared task: {}", group);
+        trace!("Spawn shared task '{}: {}", group, description);
+        let group = group.to_string();
+        let description = description.to_string();
 
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.task_queue
             .send(Task::Shared(
-                group.to_string(),
+                group.clone(),
                 Box::new(move || {
+                    trace!("Task '{}' started: {}", group, description);
+
                     let result = task();
                     tx.send(result).unwrap_or(());
+                    trace!("Task '{}' completed: {}", group, description);
                 }),
             ))
             .unwrap();
@@ -323,17 +301,24 @@ impl ThreadPool {
     pub fn shared_child<T: Send + 'static>(
         &self,
         group: &str,
+        description: &str,
         task: impl FnOnce() -> T + Send + 'static,
     ) -> TaskHandle<T> {
-        trace!("Spawn shared child task: {}", group);
+        trace!("Spawn shared child task '{}: {}", group, description);
+        let group = group.to_string();
+        let description = description.to_string();
 
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.task_queue
             .send(Task::ChildShared(
                 group.to_string(),
                 Box::new(move || {
+                    trace!("Task '{}' started: {}", group, description);
+
                     let result = task();
                     tx.send(result).unwrap_or(());
+
+                    trace!("Task '{}' completed: {}", group, description);
                 }),
             ))
             .unwrap();

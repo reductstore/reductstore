@@ -285,22 +285,15 @@ mod tests {
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
+    use std::thread::sleep;
     use std::time::Duration;
-    use tokio::sync::RwLock;
-    use tokio::time::sleep;
 
     #[rstest]
-    #[tokio::test]
-    async fn create_replication(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn create_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
 
-        let repls = repo.replications().await;
+        let repls = repo.replications();
         assert_eq!(repls.len(), 1);
         assert_eq!(repls[0].name, "test");
         assert_eq!(
@@ -311,35 +304,25 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn create_replication_with_same_name(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn create_replication_with_same_name(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
 
         assert_eq!(
-            repo.create_replication("test", settings).await,
+            repo.create_replication("test", settings),
             Err(ReductError::conflict("Replication 'test' already exists")),
             "Should not create replication with the same name"
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn create_replication_with_invalid_url(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
+    fn create_replication_with_invalid_url(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
         let mut settings = settings;
         settings.dst_host = "invalid_url".to_string();
 
         assert_eq!(
-            repo.create_replication("test", settings).await,
+            repo.create_replication("test", settings),
             Err(ReductError::unprocessable_entity(
                 "Invalid destination host 'invalid_url'"
             )),
@@ -348,19 +331,12 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn create_and_load_replications(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let storage = storage.await;
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
 
-        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
-        assert_eq!(repo.replications().await.len(), 1);
+        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        assert_eq!(repo.replications().len(), 1);
         assert_eq!(
             repo.get_replication("test").unwrap().settings(),
             &settings,
@@ -369,42 +345,28 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_update_replication(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn test_update_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
 
         let mut settings = settings;
         settings.dst_bucket = "bucket-3".to_string();
-        repo.update_replication("test", settings.clone())
-            .await
-            .unwrap();
+        repo.update_replication("test", settings.clone()).unwrap();
 
         let replication = repo.get_replication("test").unwrap();
         assert_eq!(replication.settings().dst_bucket, "bucket-3");
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_update_provisioned_replication(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn test_update_provisioned_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
 
         let replication = repo.get_mut_replication("test").unwrap();
         replication.set_provisioned(true);
 
         assert_eq!(
-            repo.update_replication("test", settings).await,
+            repo.update_replication("test", settings),
             Err(ReductError::conflict(
                 "Can't update provisioned replication 'test'"
             )),
@@ -413,33 +375,25 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove_replication(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let storage = storage.await;
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn test_remove_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
 
         repo.remove_replication("test").unwrap();
-        assert_eq!(repo.replications().await.len(), 0);
+        assert_eq!(repo.replications().len(), 0);
 
         // check if replication is removed from file
-        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage)).await;
+        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
         assert_eq!(
-            repo.replications().await.len(),
+            repo.replications().len(),
             0,
             "Should remove replication permanently"
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove_non_existing_replication(#[future] storage: Arc<RwLock<Storage>>) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
+    fn test_remove_non_existing_replication(storage: Arc<Storage>) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
         assert_eq!(
             repo.remove_replication("test-2"),
             Err(ReductError::not_found(
@@ -450,15 +404,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove_provioned_replication(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn test_remove_provisioned_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
 
         let replication = repo.get_mut_replication("test").unwrap();
         replication.set_provisioned(true);
@@ -473,15 +421,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_get_replication(
-        #[future] storage: Arc<RwLock<Storage>>,
-        settings: ReplicationSettings,
-    ) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage.await)).await;
-        repo.create_replication("test", settings.clone())
-            .await
-            .unwrap();
+    fn test_get_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
+        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
+        repo.create_replication("test", settings.clone()).unwrap();
         {
             let repl = repo.get_mut_replication("test").unwrap();
             repl.notify(TransactionNotification {
@@ -490,16 +432,15 @@ mod tests {
                 labels: Vec::new(),
                 event: WriteRecord(0),
             })
-            .await
             .unwrap();
-            sleep(Duration::from_millis(100)).await;
+            sleep(Duration::from_millis(100));
         }
 
-        let info = repo.get_info("test").await.unwrap();
+        let info = repo.get_info("test").unwrap();
         let repl = repo.get_replication("test").unwrap();
         assert_eq!(info.settings, repl.masked_settings().clone());
-        assert_eq!(info.info, repl.info().await);
-        assert_eq!(info.diagnostics, repl.diagnostics().await);
+        assert_eq!(info.info, repl.info());
+        assert_eq!(info.diagnostics, repl.diagnostics());
     }
 
     #[fixture]
@@ -518,13 +459,14 @@ mod tests {
     }
 
     #[fixture]
-    async fn storage() -> Arc<RwLock<Storage>> {
+    fn storage() -> Arc<Storage> {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let mut storage = Storage::load(tmp_dir.into_path(), None).await;
+        let mut storage = Storage::load(tmp_dir.into_path(), None);
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
-            .unwrap();
+            .unwrap()
+            .upgrade_and_unwrap();
         let _ = bucket.get_or_create_entry("entry-1").unwrap();
-        Arc::new(RwLock::new(storage))
+        Arc::new(storage)
     }
 }

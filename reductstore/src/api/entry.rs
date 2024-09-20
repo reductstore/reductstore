@@ -145,3 +145,30 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
         )
         .route("/:bucket_name/:entry_name/q", delete(remove_query))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::query::base::QueryOptions;
+    pub async fn query(
+        path_to_entry_1: &Path<HashMap<String, String>>,
+        components: Arc<Components>,
+    ) -> u64 {
+        let query_id = {
+            components
+                .storage
+                .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .get_entry(path_to_entry_1.get("entry_name").unwrap())
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .query(0, u64::MAX, QueryOptions::default())
+                .await
+                .unwrap()
+        };
+        query_id
+    }
+}

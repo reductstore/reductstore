@@ -181,7 +181,7 @@ mod tests {
     pub(crate) async fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut storage = Storage::load(data_path.clone(), None).await;
+        let mut storage = Storage::load(data_path.clone(), None);
         let mut token_repo = create_token_repository(data_path.clone(), "init-token");
 
         storage
@@ -197,9 +197,10 @@ mod tests {
         ]);
 
         let sender = storage
-            .get_bucket_mut("bucket-1")
+            .get_bucket("bucket-1")
             .unwrap()
-            .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)
+            .upgrade_and_unwrap()
+            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
             .await
             .unwrap();
         sender
@@ -216,8 +217,8 @@ mod tests {
 
         token_repo.generate_token("test", permissions).unwrap();
 
-        let storage = Arc::new(RwLock::new(storage));
-        let mut replication_repo = create_replication_repo(Arc::clone(&storage)).await;
+        let storage = Arc::new(storage);
+        let mut replication_repo = create_replication_repo(Arc::clone(&storage));
         replication_repo
             .create_replication(
                 "api-test",
@@ -233,7 +234,6 @@ mod tests {
                     each_s: None,
                 },
             )
-            .await
             .unwrap();
 
         let components = Components {

@@ -79,20 +79,20 @@ pub(crate) mod tests {
     use crate::storage::block_manager::block_index::BlockIndex;
     use prost_wkt_types::Timestamp;
     use rstest::fixture;
+    use std::io::Write;
     use tempfile::tempdir;
-    use tokio::io::AsyncWriteExt;
 
     #[fixture]
-    pub(crate) async fn block_manager() -> Arc<RwLock<BlockManager>> {
+    pub(crate) fn block_manager() -> Arc<RwLock<BlockManager>> {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
-        let dir = tempdir().unwrap().into_path();
+        let dir = tempdir().unwrap().into_path().join("bucket").join("entry");
         let mut block_manager = BlockManager::new(dir.clone(), BlockIndex::new(dir.join("index")));
-        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
+        let block_ref = block_manager.start_new_block(0, 10).unwrap();
 
         {
-            let mut block = block_ref.write().await;
+            let mut block = block_ref.write().unwrap();
             block.insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
                     seconds: 0,
@@ -136,29 +136,26 @@ pub(crate) mod tests {
             });
         }
 
-        block_manager.save_block(block_ref.clone()).await.unwrap();
+        block_manager.save_block(block_ref.clone()).unwrap();
 
         macro_rules! write_record {
             ($block:expr, $index:expr, $content:expr) => {{
-                let blk = $block.read().await;
-                let (file, _) = block_manager
-                    .begin_write_record(&blk, $index)
-                    .await
-                    .unwrap();
+                let blk = $block.read().unwrap();
+                let (file, _) = block_manager.begin_write_record(&blk, $index).unwrap();
                 let rc = file.upgrade().unwrap();
-                let mut file = rc.write().await;
-                file.write($content).await.unwrap();
-                file.flush().await.unwrap();
+                let mut file = rc.write().unwrap();
+                file.write($content).unwrap();
+                file.flush().unwrap();
             }};
         }
 
         write_record!(block_ref, 0, b"0123456789");
         write_record!(block_ref, 5, b"0123456789");
 
-        block_manager.finish_block(block_ref).await.unwrap();
-        let block_ref = block_manager.start_new_block(1000, 10).await.unwrap();
+        block_manager.finish_block(block_ref).unwrap();
+        let block_ref = block_manager.start_new_block(1000, 10).unwrap();
         {
-            let mut block = block_ref.write().await;
+            let mut block = block_ref.write().unwrap();
 
             block.insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
@@ -181,11 +178,11 @@ pub(crate) mod tests {
                 content_type: "".to_string(),
             });
         }
-        block_manager.save_block(block_ref.clone()).await.unwrap();
+        block_manager.save_block(block_ref.clone()).unwrap();
 
         write_record!(block_ref, 1000, b"0123456789");
 
-        block_manager.finish_block(block_ref).await.unwrap();
+        block_manager.finish_block(block_ref).unwrap();
         let block_manager = Arc::new(RwLock::new(block_manager));
         block_manager
     }

@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::shared_child;
+use crate::core::thread_pool::{shared_child, TaskGroup};
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record;
@@ -36,6 +36,7 @@ struct WriteContext {
     offset: u64,
     content_size: u64,
     block_manager: Arc<RwLock<BlockManager>>,
+    task_group: String,
 }
 
 impl RecordWriter {
@@ -57,7 +58,7 @@ impl RecordWriter {
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
-        let (file_ref, offset, bucket_name, entry_name) = {
+        let (file_ref, offset, bucket_name, entry_name, task_group) = {
             let mut bm = block_manager.write()?;
             let block = block_ref.read()?;
 
@@ -67,11 +68,24 @@ impl RecordWriter {
             };
 
             bm.save_block(block_ref.clone())?;
+
+            let entry_path = bm.path();
+            let bucket_path = entry_path.parent().unwrap();
+            let storage_path = bucket_path.parent().unwrap();
+
+            let task_group = [
+                storage_path.file_name().unwrap().to_str().unwrap(),
+                bucket_path.file_name().unwrap().to_str().unwrap(),
+                entry_path.file_name().unwrap().to_str().unwrap(),
+                &block.block_id().to_string(),
+            ]
+            .join("/");
             (
                 file,
                 offset,
                 bm.bucket_name().to_string(),
                 bm.entry_name().to_string(),
+                task_group,
             )
         };
 
@@ -93,19 +107,12 @@ impl RecordWriter {
             offset,
             content_size,
             block_manager,
+            task_group,
         };
 
-        let (bucket_name, entry_name, block_id) = (
-            ctx.bucket_name.clone(),
-            ctx.entry_name.clone(),
-            ctx.block_id.to_string(),
-        );
-        shared_child(
-            ["storage", &bucket_name, &entry_name, &block_id],
-            move || {
-                Self::receive(rx, ctx);
-            },
-        );
+        shared_child(&ctx.task_group.clone(), "write record content", move || {
+            Self::receive(rx, ctx);
+        });
 
         Ok(me)
     }
@@ -219,7 +226,9 @@ mod tests {
 
     mod record_writer {
         use super::*;
+        use crate::core::thread_pool::find_task_group;
         use crate::storage::block_manager::block_index::BlockIndex;
+        use crate::storage::entry::tests::get_task_group;
         use crate::storage::proto::{us_to_ts, Record};
         use rstest::fixture;
         use std::fs;
@@ -227,33 +236,38 @@ mod tests {
         use std::path::PathBuf;
         use std::time::Duration;
         use tempfile::tempdir;
+        use tokio::time::sleep;
 
         #[rstest]
         #[tokio::test]
-        async fn test_ok(block_manager: Arc<RwLock<BlockManager>>, #[future] block_ref: BlockRef) {
-            let block_ref = block_ref.await;
+        async fn test_ok(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1).unwrap();
 
-            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1)
-                .await
-                .unwrap();
+            sleep(Duration::from_millis(100)).await;
+            let path = block_manager.read().unwrap().path().clone();
+            assert!(
+                find_task_group(&get_task_group(&path, 1)).is_some(),
+                "task is running"
+            );
+
             writer.tx().send(Ok(Some(Bytes::from("te")))).await.unwrap();
             writer.tx().send(Ok(Some(Bytes::from("st")))).await.unwrap();
             writer.tx().send(Ok(None)).await.unwrap();
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            sleep(Duration::from_millis(100)).await;
             assert!(
-                writer.io_task_handle.as_ref().unwrap().is_finished(),
+                find_task_group(&get_task_group(&path, 1)).is_none(),
                 "task is finished"
             );
 
-            let block_ref = block_manager.read().await.load_block(1).await.unwrap();
+            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
             assert_eq!(
-                block_ref.read().await.get_record(1).unwrap().state,
+                block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Finished as i32
             );
 
             let mut content = vec![0u8; 4];
-            fs::File::open(block_manager.read().await.path().join("1.blk"))
+            fs::File::open(block_manager.read().unwrap().path().join("1.blk"))
                 .unwrap()
                 .read(&mut content)
                 .unwrap();
@@ -263,15 +277,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_too_long(
-            block_manager: Arc<RwLock<BlockManager>>,
-            #[future] block_ref: BlockRef,
-        ) {
-            let block_ref = block_ref.await;
-
-            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1)
-                .await
-                .unwrap();
+        async fn test_too_long(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1).unwrap();
             writer
                 .tx()
                 .send(Ok(Some(Bytes::from("xxxxxxxxx"))))
@@ -280,76 +287,33 @@ mod tests {
             writer.tx().send(Ok(None)).await.unwrap();
 
             tokio::time::sleep(Duration::from_millis(100)).await;
-            assert!(
-                writer.io_task_handle.as_ref().unwrap().is_finished(),
-                "task is finished"
-            );
 
-            let block_ref = block_manager.read().await.load_block(1).await.unwrap();
+            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
             assert_eq!(
-                block_ref.read().await.get_record(1).unwrap().state,
+                block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
             );
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_too_short(
-            block_manager: Arc<RwLock<BlockManager>>,
-            #[future] block_ref: BlockRef,
-        ) {
-            let block_ref = block_ref.await;
-
-            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1)
-                .await
-                .unwrap();
+        async fn test_too_short(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1).unwrap();
             writer.tx().send(Ok(Some(Bytes::from("xx")))).await.unwrap();
             writer.tx().send(Ok(None)).await.unwrap();
 
             tokio::time::sleep(Duration::from_millis(100)).await;
-            assert!(
-                writer.io_task_handle.as_ref().unwrap().is_finished(),
-                "task is finished"
-            );
 
-            let block_ref = block_manager.read().await.load_block(1).await.unwrap();
+            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
             assert_eq!(
-                block_ref.read().await.get_record(1).unwrap().state,
-                record::State::Errored as i32
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_io_timeout(
-            block_manager: Arc<RwLock<BlockManager>>,
-            #[future] block_ref: BlockRef,
-        ) {
-            let block_ref = block_ref.await;
-
-            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1)
-                .await
-                .unwrap();
-            writer.tx().send(Ok(Some(Bytes::from("te")))).await.unwrap();
-
-            tokio::time::sleep(IO_OPERATION_TIMEOUT).await;
-            tokio::time::sleep(Duration::from_millis(100)).await;
-
-            assert!(
-                writer.io_task_handle.as_ref().unwrap().is_finished(),
-                "task is finished"
-            );
-
-            let block_ref = block_manager.read().await.load_block(1).await.unwrap();
-            assert_eq!(
-                block_ref.read().await.get_record(1).unwrap().state,
+                block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
             );
         }
 
         #[fixture]
         fn path() -> PathBuf {
-            tempdir().unwrap().into_path()
+            tempdir().unwrap().into_path().join("bucket").join("entry")
         }
 
         #[fixture]
@@ -361,14 +325,13 @@ mod tests {
         }
 
         #[fixture]
-        async fn block_ref(block_manager: Arc<RwLock<BlockManager>>) -> BlockRef {
+        fn block_ref(block_manager: Arc<RwLock<BlockManager>>) -> BlockRef {
             let block_ref = block_manager
                 .write()
-                .await
+                .unwrap()
                 .start_new_block(1, 1000)
-                .await
                 .unwrap();
-            block_ref.write().await.insert_or_update_record(Record {
+            block_ref.write().unwrap().insert_or_update_record(Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
                 end: 4,

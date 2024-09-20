@@ -114,11 +114,17 @@ mod tests {
         .await
         .unwrap();
 
-        let storage = components.storage.read().await;
-        let bucket = storage.get_bucket("bucket-1").unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade()
+            .unwrap();
 
         let err = bucket
             .get_entry("entry-1")
+            .unwrap()
+            .upgrade()
             .unwrap()
             .begin_read(0)
             .await

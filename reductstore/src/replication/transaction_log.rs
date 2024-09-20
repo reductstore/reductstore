@@ -234,20 +234,17 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_new_transaction_log(path: PathBuf) {
-        let transaction_log = TransactionLog::try_load_or_create(path, 100).await.unwrap();
+    fn test_new_transaction_log(path: PathBuf) {
+        let transaction_log = TransactionLog::try_load_or_create(path, 100).unwrap();
         assert_eq!(transaction_log.is_empty(), true);
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_write_read_transaction_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 100).await.unwrap();
+    fn test_write_read_transaction_log(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path, 100).unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
-                .await
                 .unwrap(),
             None
         );
@@ -257,38 +254,34 @@ mod tests {
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(2))
-                .await
                 .unwrap(),
             None
         );
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(transaction_log.is_empty(), false);
         assert_eq!(
-            transaction_log.front(2).await.unwrap(),
+            transaction_log.front(2).unwrap(),
             vec![Transaction::WriteRecord(1), Transaction::WriteRecord(2),]
         );
 
-        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
+        assert_eq!(transaction_log.pop_front(2).unwrap(), 2);
         assert_eq!(transaction_log.is_empty(), true);
 
-        assert_eq!(transaction_log.pop_front(1).await.unwrap(), 0);
+        assert_eq!(transaction_log.pop_front(1).unwrap(), 0);
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_out_of_range(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 100).await.unwrap();
+    fn test_out_of_range(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path, 100).unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
-                .await
                 .unwrap(),
             None
         );
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(2))
-                .await
                 .unwrap(),
             None
         );
@@ -296,13 +289,13 @@ mod tests {
         assert_eq!(transaction_log.is_empty(), false);
 
         assert_eq!(
-            transaction_log.front(3).await.unwrap(),
+            transaction_log.front(3).unwrap(),
             vec![Transaction::WriteRecord(1), Transaction::WriteRecord(2),],
             "We return only the available transactions."
         );
 
         assert_eq!(
-            transaction_log.pop_front(3).await.unwrap(),
+            transaction_log.pop_front(3).unwrap(),
             2,
             "We pop only the available transactions."
         );
@@ -310,60 +303,50 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_overflow(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
+    fn test_overflow(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
-                .await
                 .unwrap();
         }
 
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front(2).await.unwrap(),
+            transaction_log.front(2).unwrap(),
             vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_recovery(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3)
-            .await
-            .unwrap();
+    fn test_recovery(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
-                .await
                 .unwrap();
         }
 
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front(2).await.unwrap(),
+            transaction_log.front(2).unwrap(),
             vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
 
-        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
+        assert_eq!(transaction_log.pop_front(2).unwrap(), 2);
         assert_eq!(transaction_log.is_empty(), true);
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_recovery_init(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3)
-            .await
-            .unwrap();
+    fn test_recovery_init(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
-            .await
             .unwrap();
         drop(transaction_log);
 
-        let transaction_log = TransactionLog::try_load_or_create(path, 3).await.unwrap();
+        let transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
         assert_eq!(transaction_log.write_pos, HEADER_SIZE + ENTRY_SIZE);
         assert_eq!(transaction_log.read_pos, HEADER_SIZE);
     }

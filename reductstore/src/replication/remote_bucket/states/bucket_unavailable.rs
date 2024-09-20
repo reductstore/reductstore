@@ -100,7 +100,7 @@ mod tests {
             error.clone(),
         ));
 
-        let state = state.write_batch("entry", vec![]).await;
+        let state = state.write_batch("entry", vec![]);
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
         assert!(!state.is_available());
     }
@@ -114,7 +114,7 @@ mod tests {
             .return_once(move |_| Err(ReductError::not_found("")));
 
         let state = state_without_timeout(client);
-        let state = state.write_batch("test_entry", vec![]).await;
+        let state = state.write_batch("test_entry", vec![]);
         assert_eq!(state.last_result(), &Err(ReductError::not_found("")));
         assert!(!state.is_available());
     }
@@ -135,7 +135,7 @@ mod tests {
             .return_once(move |_| Ok(Box::new(bucket)));
 
         let state = state_without_timeout(client);
-        let state = state.write_batch("test_entry", vec![]).await;
+        let state = state.write_batch("test_entry", vec![]);
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }

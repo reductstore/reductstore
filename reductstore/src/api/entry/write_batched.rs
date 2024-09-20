@@ -271,7 +271,7 @@ async fn start_writing(
         let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
 
         bucket
-            .write_record(
+            .begin_write(
                 entry_name,
                 time,
                 record_header.content_length.clone(),
@@ -386,11 +386,20 @@ mod tests {
         .await
         .unwrap();
 
-        let storage = components.storage.read().await;
-        let bucket = storage.get_bucket("bucket-1").unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
 
         {
-            let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(1)
+                .await
+                .unwrap();
             assert_eq!(
                 reader.labels()[0],
                 Label {
@@ -406,7 +415,13 @@ mod tests {
             );
         }
         {
-            let mut reader = bucket.begin_read("entry-1", 2).await.unwrap();
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(2)
+                .await
+                .unwrap();
             assert_eq!(
                 reader.labels()[0],
                 Label {
@@ -422,7 +437,13 @@ mod tests {
             );
         }
         {
-            let mut reader = bucket.begin_read("entry-1", 10).await.unwrap();
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(10)
+                .await
+                .unwrap();
             assert!(reader.labels().is_empty());
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 18);
@@ -437,7 +458,6 @@ mod tests {
             .read()
             .await
             .get_info("api-test")
-            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 3);
     }
@@ -452,11 +472,12 @@ mod tests {
     ) {
         let components = components.await;
         {
-            let mut storage = components.storage.write().await;
-            let writer = storage
-                .get_bucket_mut("bucket-1")
+            let writer = components
+                .storage
+                .get_bucket("bucket-1")
                 .unwrap()
-                .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
+                .upgrade_and_unwrap()
+                .begin_write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await
                 .unwrap();
             writer
@@ -491,8 +512,11 @@ mod tests {
             &HeaderValue::from_static("409,A record with timestamp 2 already exists")
         );
 
-        let storage = components.storage.read().await;
-        let bucket = storage.get_bucket("bucket-1").unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
         {
             let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
             assert_eq!(reader.content_length(), 10);

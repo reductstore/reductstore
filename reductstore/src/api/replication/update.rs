@@ -99,7 +99,6 @@ mod tests {
             .write()
             .await
             .create_replication("test", settings)
-            .await
             .unwrap();
         components
     }
