@@ -342,7 +342,6 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_with_task(mut entry: Entry) {
-            Logger::init("TRACE");
             write_record(
                 &mut entry,
                 1000,

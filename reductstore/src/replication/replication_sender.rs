@@ -426,7 +426,6 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
-        Logger::init("TRACE");
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));

@@ -525,8 +525,6 @@ mod tests {
 
         #[rstest]
         fn test_entry_which_has_writer(entry: Entry) {
-            Logger::init("TRACE");
-
             let sender = entry
                 .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
                 .wait()
