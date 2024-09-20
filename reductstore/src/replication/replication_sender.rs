@@ -209,11 +209,11 @@ mod tests {
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
     use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
-    use async_trait::async_trait;
+
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::error::ErrorCode;
-    use reduct_base::error::ErrorCode::LoopDetected;
+
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
     use reduct_base::Labels;
@@ -608,7 +608,7 @@ mod tests {
     ) -> ReplicationSender {
         let tmp_dir = tempfile::tempdir().unwrap().into_path();
 
-        let storage = Arc::new((Storage::load(tmp_dir, None)));
+        let storage = Arc::new(Storage::load(tmp_dir, None));
 
         let log_map = Arc::new(RwLock::new(HashMap::new()));
         let log = RwLock::new(

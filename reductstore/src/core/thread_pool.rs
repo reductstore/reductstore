@@ -99,7 +99,7 @@ where
 
 /// Find a task group by path.
 pub(crate) fn find_task_group(group_path: &str) -> Option<TaskGroup> {
-    let mut group = THREAD_POOL.task_group.lock().unwrap();
+    let group = THREAD_POOL.task_group.lock().unwrap();
     group
         .find(&group_path.to_string().split("/").collect())
         .cloned()

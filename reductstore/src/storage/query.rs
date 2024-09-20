@@ -7,7 +7,7 @@ pub mod filters;
 mod historical;
 mod limited;
 
-use crate::core::thread_pool::{shared, TaskGroup, TaskHandle};
+use crate::core::thread_pool::{shared, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};

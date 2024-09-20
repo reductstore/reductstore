@@ -77,7 +77,7 @@ pub(super) mod tests {
     };
 
     use crate::storage::proto::Record;
-    use async_trait::async_trait;
+
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;

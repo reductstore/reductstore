@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{shared, unique, TaskHandle};
+use crate::core::thread_pool::{shared, TaskHandle};
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::io::record_writer::WriteRecordContent;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};

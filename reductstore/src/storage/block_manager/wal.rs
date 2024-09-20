@@ -269,7 +269,6 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::*;
     use std::fs::OpenOptions;
-    use tokio::fs;
 
     #[rstest]
     fn test_read(mut wal: WalImpl) {

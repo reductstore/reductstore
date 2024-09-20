@@ -167,7 +167,7 @@ mod tests {
 
     use crate::api::entry::tests::query;
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use crate::storage::query::base::QueryOptions;
+
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ErrorCode::NotFound;
     use rstest::*;
@@ -360,7 +360,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_next_record_reader_err() {
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert_eq!(

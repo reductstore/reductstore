@@ -1,7 +1,7 @@
 // Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{shared, shared_child, unique, TaskHandle};
+use crate::core::thread_pool::{unique, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -540,7 +540,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_set_settings_partially(settings: BucketSettings, mut bucket: Bucket) {
+    fn test_set_settings_partially(settings: BucketSettings, bucket: Bucket) {
         let new_settings = BucketSettings {
             max_block_size: Some(100),
             quota_type: None,
@@ -559,7 +559,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_apply_settings_to_entries(settings: BucketSettings, mut bucket: Bucket) {
+    fn test_apply_settings_to_entries(settings: BucketSettings, bucket: Bucket) {
         bucket.get_or_create_entry("entry-1").unwrap();
         bucket.get_or_create_entry("entry-2").unwrap();
 
@@ -668,7 +668,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_entry_not_found(mut bucket: Bucket) {
+    async fn test_remove_entry_not_found(bucket: Bucket) {
         assert_eq!(
             bucket.remove_entry("test-1").await.err(),
             Some(ReductError::not_found(
@@ -684,7 +684,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_settings(mut provisioned_bucket: Bucket) {
+    fn test_provisioned_settings(provisioned_bucket: Bucket) {
         let err = provisioned_bucket
             .set_settings(BucketSettings::default())
             .wait()
@@ -754,7 +754,7 @@ mod tests {
 
     #[fixture]
     fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
-        let mut bucket = Bucket::new("test", &path, settings).unwrap();
+        let bucket = Bucket::new("test", &path, settings).unwrap();
         bucket.set_provisioned(true);
         bucket
     }

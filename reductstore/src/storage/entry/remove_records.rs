@@ -223,7 +223,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_query_remove_records(#[future] mut entry_with_data: Entry) {
-        let mut entry = entry_with_data.await;
+        let entry = entry_with_data.await;
         let removed_records = entry
             .query_remove_records(2, 4, QueryOptions::default())
             .await

@@ -110,7 +110,7 @@ impl TaskGroup {
         while path.len() > 0 && group.use_count == 0 && group.children.is_empty() {
             let name = path.last().unwrap().to_string();
             path = path[..path.len() - 1].to_vec();
-            let mut parent = self
+            let parent = self
                 .find_mut(&path)
                 .expect(format!("Parent group not found: {}", path.join("/")).as_str());
             parent.children.remove(&name);

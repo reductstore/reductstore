@@ -8,7 +8,7 @@ use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use bytes::Bytes;
-use log::{debug, trace};
+use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::cmp::min;
@@ -317,7 +317,6 @@ mod tests {
     mod reader {
         use super::*;
         use crate::storage::entry::Entry;
-        use std::path::PathBuf;
 
         use crate::core::logger::Logger;
         use crate::core::thread_pool::find_task_group;

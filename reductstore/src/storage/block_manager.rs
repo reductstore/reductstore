@@ -562,11 +562,9 @@ mod tests {
     use std::time::Duration;
     use tempfile::tempdir;
     use tokio::io::AsyncWriteExt;
-    use tokio::time::sleep;
 
     mod block_operations {
         use super::*;
-        use std::thread::sleep;
 
         #[rstest]
         fn test_starting_block(mut block_manager: BlockManager) {

@@ -492,7 +492,7 @@ mod tests {
         use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
         #[rstest]
-        fn test_empty_entry(mut entry: Entry) {
+        fn test_empty_entry(entry: Entry) {
             assert_eq!(
                 entry.try_remove_oldest_block().wait(),
                 Err(internal_server_error!("No block to remove"))
@@ -524,7 +524,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_entry_which_has_writer(mut entry: Entry) {
+        fn test_entry_which_has_writer(entry: Entry) {
             Logger::init("TRACE");
 
             let sender = entry
