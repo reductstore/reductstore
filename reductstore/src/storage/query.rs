@@ -7,7 +7,7 @@ pub mod filters;
 mod historical;
 mod limited;
 
-use crate::core::thread_pool::{shared, TaskHandle};
+use crate::core::thread_pool::{shared, shared_isolated, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -51,7 +51,7 @@ pub(super) fn spawn_query_task(
 ) -> (QueryRx, TaskHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
-    let handle = shared(&task_group.clone(), "spawn query task", move || {
+    let handle = shared_isolated(&task_group.clone(), "spawn query task", move || {
         loop {
             let next_result = query.next(block_manager.clone());
             let query_err = next_result.as_ref().err().cloned();

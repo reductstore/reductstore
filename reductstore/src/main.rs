@@ -108,7 +108,7 @@ async fn launch_server() {
     };
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     launch_server().await;
 }
