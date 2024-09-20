@@ -182,6 +182,9 @@ jobs:
     needs:
       - unit_tests
       - build
+    strategy:
+      matrix:
+        version: [ 'latest', 'v1.10.1', 'v1.9.5', 'v1.8.2', 'v1.7.3']
     env:
       RS_API_TOKEN: XXXX
     steps:
@@ -189,7 +192,7 @@ jobs:
 
       - name: Run latest stable ReductStore
         run: |
-          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:latest
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:${{matrix.version}}
           sleep 5
           docker logs latest
 
