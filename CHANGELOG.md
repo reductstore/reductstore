@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-470: Fix WAL overwrite due to infrequent writing, [PR-576](https://github.com/reductstore/reductstore/pull/576)
+
 ## [1.11.1] - 2024-08-23
 
 ### Fixed
