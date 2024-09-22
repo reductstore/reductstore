@@ -1,11 +1,14 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::HashMap;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
 use crc64fast::Digest;
+use log::warn;
 use prost::Message;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -114,13 +117,14 @@ pub(in crate::storage) trait Wal {
 
 struct WalImpl {
     root_path: PathBuf,
+    file_positions: HashMap<u64, u64>,
 }
 
 impl WalImpl {
     pub fn new(path_buf: PathBuf) -> Self {
-        // preallocate file
         WalImpl {
             root_path: path_buf,
+            file_positions: HashMap::new(), // we need to keep track of the file positions for each block because of file cache
         }
     }
 
@@ -139,9 +143,23 @@ impl Wal for WalImpl {
             let file = get_global_file_cache().write_or_create(&path).await?;
             // preallocate file to speed up writes
             file.write().await.set_len(WAL_FILE_SIZE).await?;
+            self.file_positions.insert(block_id, 0);
             file
         } else {
-            get_global_file_cache().write_or_create(&path).await?
+            let mut file = get_global_file_cache().write_or_create(&path).await?;
+            let pos = match self.file_positions.entry(block_id) {
+                Occupied(e) => e.get().clone(),
+                Vacant(e) => {
+                    warn!(
+                        "File position for block {} not found. Overwrite WAL",
+                        block_id
+                    );
+                    e.insert(0).clone()
+                }
+            };
+
+            file.write().await.seek(SeekFrom::Start(pos)).await?;
+            file
         };
 
         let mut lock = file.write().await;
@@ -159,6 +177,8 @@ impl Wal for WalImpl {
         lock.write(&crc.sum64().to_be_bytes()).await?;
         // write stop marker
         lock.write_u8(STOP_MARKER).await?;
+        self.file_positions
+            .insert(block_id, lock.stream_position().await?);
         Ok(())
     }
 
