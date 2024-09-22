@@ -146,7 +146,7 @@ impl Wal for WalImpl {
             self.file_positions.insert(block_id, 0);
             file
         } else {
-            let mut file = get_global_file_cache().write_or_create(&path).await?;
+            let file = get_global_file_cache().write_or_create(&path).await?;
             let pos = match self.file_positions.entry(block_id) {
                 Occupied(e) => e.get().clone(),
                 Vacant(e) => {
