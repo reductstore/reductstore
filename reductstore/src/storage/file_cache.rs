@@ -122,6 +122,7 @@ impl FileCache {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn discard(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write().await;
         cache.remove(path);
