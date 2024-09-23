@@ -378,6 +378,31 @@ mod tests {
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn cache_invalidation(mut wal: WalImpl) {
+        wal.append(1, WalEntry::UpdateRecord(Record::default()))
+            .await
+            .unwrap();
+        get_global_file_cache()
+            .discard(&wal.root_path.join("1.wal"))
+            .await
+            .unwrap();
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+
+        let entries = wal.read(1).await.unwrap();
+        assert_eq!(
+            entries,
+            vec![
+                WalEntry::UpdateRecord(Record::default()),
+                WalEntry::WriteRecord(Record::default())
+            ],
+            "We keep entry after cache invalidation"
+        );
+    }
+
     #[fixture]
     fn wal() -> WalImpl {
         let path = tempfile::tempdir().unwrap().into_path();
