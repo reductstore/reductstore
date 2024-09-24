@@ -139,11 +139,15 @@ pub(crate) fn find_task_group(group_path: &str) -> Option<TaskGroup> {
         .cloned()
 }
 
+/// Boxed function to wrap a function for exicution in thread pool.
 type BoxedFunc = Box<dyn FnOnce() + Send>;
 
 #[derive(PartialEq, Debug)]
 enum TaskMode {
+    /// Lock the task group for unique execution
     Unique,
+
+    /// Lock the task group for shared execution
     Shared,
 }
 
@@ -184,6 +188,7 @@ static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPool::new(thread_pool_size)
 });
 
+/// A thread pool for executing tasks with shared and unique locks of task groups.
 struct ThreadPool {
     threads: Vec<JoinHandle<()>>,
     task_queue: Sender<Task>,
@@ -192,6 +197,7 @@ struct ThreadPool {
 }
 
 impl ThreadPool {
+    /// Create a new thread pool with a given size.
     pub fn new(size: usize) -> Self {
         let mut threads = Vec::with_capacity(size);
         let (task_queue, task_queue_rc) = unbounded::<Task>();
@@ -211,7 +217,6 @@ impl ThreadPool {
                         break;
                     }
                 }
-
                 let task = task_rx.try_recv();
                 if task.is_err() {
                     sleep(THREAD_POOL_TICK);
@@ -245,6 +250,8 @@ impl ThreadPool {
                     let mut lock = task_group.lock().unwrap();
                     lock.unlock(&group_path, unique);
                 } else {
+                    // Run the task in a separate thread and unlock the group after completion
+                    // we need it for blocking operations or loops, however, we want to control task groups
                     let task_group = task_group.clone();
                     let group_path = group_path
                         .iter()
