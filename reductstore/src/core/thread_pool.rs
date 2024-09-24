@@ -176,13 +176,13 @@ enum ThreadPoolState {
 static THREAD_POOL_TICK: Duration = Duration::from_micros(5);
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
-    let mut thread_pool_size = max(
+    let thread_pool_size = max(
         available_parallelism()
             .unwrap_or(NonZero::new(2).unwrap())
-            .get(),
+            .get()
+            / 2,
         2,
     );
-    thread_pool_size = 1;
     ThreadPool::new(thread_pool_size)
 });
 
