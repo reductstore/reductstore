@@ -235,8 +235,6 @@ mod tests {
     use std::io::Write;
 
     use rstest::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
     use std::io::Read;
     use std::thread::sleep;
 

@@ -4,9 +4,7 @@
 mod task_group;
 mod task_handle;
 
-use crossbeam_channel::internal::SelectHandle;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use futures_util::{FutureExt, StreamExt};
 use log::trace;
 use std::cmp::max;
 use std::fmt::Display;
@@ -133,6 +131,7 @@ where
 }
 
 /// Find a task group by path.
+#[allow(dead_code)]
 pub(crate) fn find_task_group(group_path: &str) -> Option<TaskGroup> {
     let group = THREAD_POOL.task_group.lock().unwrap();
     group

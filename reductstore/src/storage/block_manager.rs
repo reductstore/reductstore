@@ -6,7 +6,6 @@ pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod wal;
 
 mod block_cache;
-mod use_counter;
 use log::{debug, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
@@ -561,7 +560,6 @@ mod tests {
     use rand::{thread_rng, Rng};
     use std::time::Duration;
     use tempfile::tempdir;
-    use tokio::io::AsyncWriteExt;
 
     mod block_operations {
         use super::*;

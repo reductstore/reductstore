@@ -14,18 +14,22 @@ pub(crate) struct TaskGroup {
 }
 
 impl TaskGroup {
+    #[allow(dead_code)]
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    #[allow(dead_code)]
     pub fn children(&self) -> &HashMap<String, TaskGroup> {
         &self.children
     }
 
+    #[allow(dead_code)]
     pub fn unique_locked(&self) -> bool {
         self.unique_locked
     }
 
+    #[cfg(test)]
     pub fn use_count(&self) -> i32 {
         self.use_count
     }
@@ -43,7 +47,7 @@ impl TaskGroup {
     }
 
     /// Lock a task group for a unique execution.
-    pub fn lock(&mut self, path: &Vec<&str>, unique: bool) {
+    pub(super) fn lock(&mut self, path: &Vec<&str>, unique: bool) {
         let group = self.find_or_create(path);
         group.unique_locked = unique;
         group.use_count += 1;
@@ -118,6 +122,17 @@ impl TaskGroup {
         }
     }
 
+    pub(super) fn find(&self, path: &Vec<&str>) -> Option<&TaskGroup> {
+        if path.is_empty() {
+            return Some(self);
+        }
+
+        let name = path[0];
+        let path = path[1..].to_vec();
+
+        self.children.get(name).and_then(|group| group.find(&path))
+    }
+
     fn find_or_create(&mut self, path: &Vec<&str>) -> &mut TaskGroup {
         if path.is_empty() {
             return self;
@@ -132,17 +147,6 @@ impl TaskGroup {
                 .insert(TaskGroup::new(name.to_string()))
                 .find_or_create(&path),
         }
-    }
-
-    pub(super) fn find(&self, path: &Vec<&str>) -> Option<&TaskGroup> {
-        if path.is_empty() {
-            return Some(self);
-        }
-
-        let name = path[0];
-        let path = path[1..].to_vec();
-
-        self.children.get(name).and_then(|group| group.find(&path))
     }
 
     fn find_mut(&mut self, path: &Vec<&str>) -> Option<&mut TaskGroup> {

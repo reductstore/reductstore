@@ -15,7 +15,6 @@ use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -29,7 +28,6 @@ pub(crate) struct RecordReader {
 struct ReadContext {
     bucket_name: String,
     entry_name: String,
-    block_id: u64,
     record_timestamp: u64,
     file_ref: FileWeak,
     offset: u64,
@@ -87,7 +85,6 @@ impl RecordReader {
                 ReadContext {
                     bucket_name,
                     entry_name,
-                    block_id,
                     record_timestamp,
                     file_ref,
                     offset,
@@ -159,10 +156,6 @@ impl RecordReader {
         self.record.end - self.record.begin
     }
 
-    pub fn only_metadata(&self) -> bool {
-        self.rx.is_none()
-    }
-
     /// Get the receiver to read the record content
     ///
     /// # Returns
@@ -230,7 +223,7 @@ impl RecordReader {
 /// # Returns
 ///
 /// * `Result<(Vec<u8>, usize), ReductError>` - The read buffer and the number of bytes read
-pub fn read_in_chunks(
+pub(in crate::storage) fn read_in_chunks(
     file: &FileWeak,
     offset: u64,
     content_size: u64,
@@ -280,10 +273,10 @@ mod tests {
         async fn test_ok(file_to_read: PathBuf, content_size: usize) {
             let file_ref = FILE_CACHE.read(&file_to_read, SeekFrom::Start(0)).unwrap();
             let content_size = content_size as u64;
-            let (data, len) = read_in_chunks(&file_ref, 0, content_size, 0).unwrap();
+            let (_data, len) = read_in_chunks(&file_ref, 0, content_size, 0).unwrap();
             assert_eq!(len, MAX_IO_BUFFER_SIZE);
 
-            let (data, len) = read_in_chunks(&file_ref, 0, content_size, len as u64).unwrap();
+            let (_data, len) = read_in_chunks(&file_ref, 0, content_size, len as u64).unwrap();
             assert_eq!(len, content_size as usize - MAX_IO_BUFFER_SIZE);
         }
 

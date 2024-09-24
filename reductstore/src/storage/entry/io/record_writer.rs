@@ -15,7 +15,6 @@ use std::io::SeekFrom;
 use std::io::Write;
 use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver};
 
 pub(crate) trait WriteRecordContent {
@@ -185,6 +184,8 @@ impl RecordWriter {
 /// Drains the record content and discards it.
 pub(crate) struct RecordDrainer {
     tx: RecordTx,
+
+    #[allow(dead_code)]
     io_task_handle: JoinHandle<()>,
 }
 

@@ -271,6 +271,7 @@ impl Entry {
         *self.settings.write().unwrap() = settings;
     }
 
+    #[cfg(test)]
     pub fn path(&self) -> &PathBuf {
         &self.path
     }

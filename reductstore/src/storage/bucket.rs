@@ -122,7 +122,6 @@ impl Bucket {
         for entry in std::fs::read_dir(&path)? {
             let path = entry?.path();
             if path.is_dir() {
-                let entry_name = path.file_name().unwrap().to_str().unwrap();
                 let handler = Entry::restore(
                     path,
                     EntrySettings {
@@ -277,6 +276,7 @@ impl Bucket {
     }
 
     /// Starts a new record read with
+    #[allow(dead_code)]
     pub fn begin_read(
         &self,
         name: &str,

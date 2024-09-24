@@ -117,7 +117,7 @@ impl From<ParseError> for ReductError {
 }
 
 impl<T> From<PoisonError<T>> for ReductError {
-    fn from(err: PoisonError<T>) -> Self {
+    fn from(_: PoisonError<T>) -> Self {
         // A poison error is an internal reductstore error
         ReductError {
             status: ErrorCode::InternalServerError,
