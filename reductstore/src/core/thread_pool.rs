@@ -175,7 +175,7 @@ enum ThreadPoolState {
     Stopped,
 }
 
-static THREAD_POOL_TICK: Duration = Duration::from_micros(5);
+static THREAD_POOL_TASK_TIMEOUT: Duration = Duration::from_millis(5);
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     let thread_pool_size = max(
@@ -217,9 +217,8 @@ impl ThreadPool {
                         break;
                     }
                 }
-                let task = task_rx.try_recv();
+                let task = task_rx.recv_timeout(THREAD_POOL_TASK_TIMEOUT);
                 if task.is_err() {
-                    sleep(THREAD_POOL_TICK);
                     continue;
                 }
 
@@ -235,7 +234,6 @@ impl ThreadPool {
 
                 if !ready {
                     trace!("Group '{}' is not ready for {}", task.task_group, task);
-                    sleep(THREAD_POOL_TICK);
                     task_tx.send(task).unwrap_or(());
                     continue;
                 }
@@ -431,10 +429,6 @@ impl ThreadPool {
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
-        while !self.task_queue.is_empty() {
-            sleep(THREAD_POOL_TICK);
-        }
-
         *self.state.lock().unwrap() = ThreadPoolState::Stopped;
 
         for thread in self.threads.drain(..) {
