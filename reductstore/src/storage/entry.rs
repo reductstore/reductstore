@@ -610,6 +610,7 @@ mod tests {
         let x = sender.tx().send(Ok(Some(Bytes::from(data)))).await;
         sender.tx().closed().await;
         drop(sender);
+        sleep(Duration::from_millis(10)).await; // let the record be written
         match x {
             Ok(_) => Ok(()),
             Err(_) => Err(ReductError::internal_server_error("Error sending data")),
