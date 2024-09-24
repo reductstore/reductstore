@@ -44,7 +44,7 @@ serde_json = "1.0.128"
 regex = "1.10.6"
 bytes = "1.7.2"
 axum = { version = "0.7.6", features = ["default"] }
-axum-extra = { version = "0.9.2", features = ["default", "typed-header"] }
+axum-extra = { version = "0.9.4", features = ["default", "typed-header"] }
 tokio = { version = "1.40.0", features = ["full"] }
 tokio-util = "0.7.12"
 tokio-stream = "0.1.16"
