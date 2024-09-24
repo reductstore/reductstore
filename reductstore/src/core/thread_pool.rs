@@ -11,7 +11,7 @@ use std::fmt::Display;
 use std::num::NonZero;
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock, Mutex};
-use std::thread::{available_parallelism, sleep, JoinHandle};
+use std::thread::{available_parallelism, JoinHandle};
 use std::time::Duration;
 pub(crate) use task_group::TaskGroup;
 pub(crate) use task_handle::TaskHandle;
