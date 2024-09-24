@@ -1,6 +1,13 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 //
+mod bucket;
+mod entry;
+mod middleware;
+mod replication;
+mod server;
+mod token;
+mod ui;
 
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
@@ -18,29 +25,21 @@ pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 
-use crate::api::bucket::create_bucket_api_routes;
-use crate::api::entry::create_entry_api_routes;
-use crate::api::middleware::{default_headers, print_statuses};
-use crate::api::replication::create_replication_api_routes;
-use crate::api::server::create_server_api_routes;
-use crate::api::token::create_token_api_routes;
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
-
-mod bucket;
-mod entry;
-mod middleware;
-mod replication;
-mod server;
-mod token;
-mod ui;
+use bucket::create_bucket_api_routes;
+use entry::create_entry_api_routes;
+use middleware::{default_headers, print_statuses};
+use replication::create_replication_api_routes;
+use server::create_server_api_routes;
+use token::create_token_api_routes;
 
 pub struct Components {
-    pub storage: Arc<RwLock<Storage>>,
+    pub storage: Arc<Storage>,
     pub auth: TokenAuthorization,
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
@@ -182,7 +181,7 @@ mod tests {
     pub(crate) async fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().into_path();
 
-        let mut storage = Storage::load(data_path.clone(), None).await;
+        let storage = Storage::load(data_path.clone(), None);
         let mut token_repo = create_token_repository(data_path.clone(), "init-token");
 
         storage
@@ -198,9 +197,10 @@ mod tests {
         ]);
 
         let sender = storage
-            .get_bucket_mut("bucket-1")
+            .get_bucket("bucket-1")
             .unwrap()
-            .write_record("entry-1", 0, 6, "text/plain".to_string(), labels)
+            .upgrade_and_unwrap()
+            .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
             .await
             .unwrap();
         sender
@@ -217,8 +217,8 @@ mod tests {
 
         token_repo.generate_token("test", permissions).unwrap();
 
-        let storage = Arc::new(RwLock::new(storage));
-        let mut replication_repo = create_replication_repo(Arc::clone(&storage)).await;
+        let storage = Arc::new(storage);
+        let mut replication_repo = create_replication_repo(Arc::clone(&storage));
         replication_repo
             .create_replication(
                 "api-test",
@@ -234,7 +234,6 @@ mod tests {
                     each_s: None,
                 },
             )
-            .await
             .unwrap();
 
         let components = Components {

@@ -22,8 +22,7 @@ pub(crate) async fn update_replication(
         .replication_repo
         .write()
         .await
-        .update_replication(&replication_name, settings.into())
-        .await?;
+        .update_replication(&replication_name, settings.into())?;
     Ok(())
 }
 
@@ -100,7 +99,6 @@ mod tests {
             .write()
             .await
             .create_replication("test", settings)
-            .await
             .unwrap();
         components
     }

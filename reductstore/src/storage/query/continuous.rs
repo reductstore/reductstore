@@ -6,12 +6,9 @@ use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use reduct_base::error::{ErrorCode, ReductError};
 
-use async_trait::async_trait;
-
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::storage::entry::RecordReader;
-use tokio::sync::RwLock;
 
 pub struct ContinuousQuery {
     query: HistoricalQuery,
@@ -34,14 +31,12 @@ impl ContinuousQuery {
         }
     }
 }
-
-#[async_trait]
 impl Query for ContinuousQuery {
-    async fn next(
+    fn next(
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        match self.query.next(block_manager).await {
+        match self.query.next(block_manager) {
             Ok(reader) => {
                 self.next_start = reader.timestamp() + 1;
                 self.count += 1;
@@ -72,9 +67,7 @@ mod tests {
     use crate::storage::query::base::tests::block_manager;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query(#[future] block_manager: Arc<RwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
+    fn test_query(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = ContinuousQuery::new(
             900,
             QueryOptions {
@@ -84,18 +77,18 @@ mod tests {
             },
         );
         {
-            let reader = query.next(block_manager.clone()).await.unwrap();
+            let reader = query.next(block_manager.clone()).unwrap();
             assert_eq!(reader.timestamp(), 1000);
         }
         assert_eq!(
-            query.next(block_manager.clone()).await.err(),
+            query.next(block_manager.clone()).err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
         assert_eq!(
-            query.next(block_manager).await.err(),
+            query.next(block_manager).err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

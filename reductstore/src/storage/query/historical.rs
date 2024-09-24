@@ -2,10 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::VecDeque;
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use reduct_base::error::ReductError;
 
@@ -82,25 +79,24 @@ impl HistoricalQuery {
     }
 }
 
-#[async_trait]
 impl Query for HistoricalQuery {
-    async fn next(
+    fn next(
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_block.is_empty() {
             let start = if let Some(block) = &self.current_block {
-                let block = block.read().await;
+                let block = block.read()?;
                 block.latest_record_time()
             } else {
                 self.start_time
             };
 
             let block_range = {
-                let bm = block_manager.read().await;
+                let bm = block_manager.read()?;
                 let first_block = {
-                    if let Ok(block) = bm.find_block(start).await {
-                        block.read().await.block_id()
+                    if let Ok(block) = bm.find_block(start) {
+                        block.read()?.block_id()
                     } else {
                         0
                     }
@@ -113,11 +109,11 @@ impl Query for HistoricalQuery {
             };
 
             for block_id in block_range {
-                let bm = block_manager.read().await;
-                let block_ref = bm.load_block(block_id).await?;
+                let bm = block_manager.read()?;
+                let block_ref = bm.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
-                let mut found_records = self.filter_records_from_current_block().await;
+                let mut found_records = self.filter_records_from_current_block();
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
                 self.records_from_current_block.extend(found_records);
                 if !self.records_from_current_block.is_empty() {
@@ -142,14 +138,13 @@ impl Query for HistoricalQuery {
                 ts_to_us(&record.timestamp.unwrap()),
                 false,
             )
-            .await
         }
     }
 }
 
 impl HistoricalQuery {
-    async fn filter_records_from_current_block(&mut self) -> Vec<Record> {
-        let block = self.current_block.as_ref().unwrap().read().await;
+    fn filter_records_from_current_block(&mut self) -> Vec<Record> {
+        let block = self.current_block.as_ref().unwrap().read().unwrap();
         block
             .record_index()
             .values()
@@ -174,10 +169,9 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_ok_1_rec(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_ok_1_rec(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
-        let records = read_to_vector(&mut query, block_manager.await).await;
+        let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
@@ -185,10 +179,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_ok_2_recs(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_ok_2_recs(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
-        let records = read_to_vector(&mut query, block_manager.await).await;
+        let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
@@ -198,10 +191,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_ok_3_recs(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_ok_3_recs(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
-        let records = read_to_vector(&mut query, block_manager.await).await;
+        let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
@@ -213,8 +205,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_include(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_include(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -226,7 +217,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let records = read_to_vector(&mut query, block_manager.await).await;
+        let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&1000)));
@@ -247,8 +238,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_exclude(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_exclude(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -261,7 +251,7 @@ mod tests {
             },
         );
 
-        let records = read_to_vector(&mut query, block_manager.await).await;
+        let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&5)));
@@ -282,28 +272,25 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_ignoring_errored_records(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_ignoring_errored_records(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
-        let block_manager = block_manager.await;
         {
-            let block_ref = block_manager.write().await.load_block(0).await.unwrap();
+            let block_ref = block_manager.write().unwrap().load_block(0).unwrap();
             {
-                let mut block = block_ref.write().await;
+                let mut block = block_ref.write().unwrap();
                 let mut record = block.get_record(0).unwrap().clone();
                 record.state = record::State::Errored as i32;
                 block.insert_or_update_record(record);
             }
             block_manager
                 .write()
-                .await
+                .unwrap()
                 .save_block(block_ref)
-                .await
                 .unwrap();
         }
 
         assert_eq!(
-            query.next(block_manager.clone()).await.err(),
+            query.next(block_manager.clone()).err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
@@ -312,8 +299,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_each_s_filter(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_each_s_filter(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -322,7 +308,7 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let records = read_to_vector(&mut query, block_manager.await).await;
+        let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
@@ -330,8 +316,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_each_n_records(#[future] block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_each_n_records(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = HistoricalQuery::new(
             0,
             1001,
@@ -340,23 +325,23 @@ mod tests {
                 ..QueryOptions::default()
             },
         );
-        let records = read_to_vector(&mut query, block_manager.await).await;
+        let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
         assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
     }
 
-    async fn read_to_vector(
+    fn read_to_vector(
         query: &mut HistoricalQuery,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Vec<(Record, String)> {
         let mut records = Vec::new();
         loop {
-            match query.next(block_manager.clone()).await {
+            match query.next(block_manager.clone()) {
                 Ok(mut reader) => {
                     let mut content = String::new();
-                    while let Some(chunk) = reader.rx().recv().await {
+                    while let Some(chunk) = reader.rx().blocking_recv() {
                         content
                             .push_str(String::from_utf8(chunk.unwrap().to_vec()).unwrap().as_str())
                     }

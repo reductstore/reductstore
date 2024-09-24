@@ -6,6 +6,7 @@
 pub use int_enum::IntEnum;
 use std::error::Error;
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
+use std::sync::PoisonError;
 use std::time::SystemTimeError;
 use url::ParseError;
 
@@ -115,6 +116,26 @@ impl From<ParseError> for ReductError {
     }
 }
 
+impl<T> From<PoisonError<T>> for ReductError {
+    fn from(_: PoisonError<T>) -> Self {
+        // A poison error is an internal reductstore error
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: "Poison error".to_string(),
+        }
+    }
+}
+
+impl From<Box<dyn std::any::Any + Send>> for ReductError {
+    fn from(err: Box<dyn std::any::Any + Send>) -> Self {
+        // A box error is an internal reductstore error
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: format!("{:?}", err),
+        }
+    }
+}
+
 impl Error for ReductError {
     fn description(&self) -> &str {
         &self.message
@@ -216,6 +237,8 @@ impl ReductError {
         }
     }
 }
+
+// Macros for creating errors with a message.
 #[macro_export]
 macro_rules! no_content {
     ($msg:expr, $($arg:tt)*) => {

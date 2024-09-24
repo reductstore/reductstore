@@ -73,10 +73,10 @@ pub(crate) async fn update_record(
     let entry_name = path.get("entry_name").unwrap();
     let batched_result = components
         .storage
-        .write()
-        .await
-        .get_bucket_mut(bucket)?
-        .get_entry_mut(entry_name)?
+        .get_bucket(bucket)?
+        .upgrade()?
+        .get_entry(entry_name)?
+        .upgrade()?
         .update_labels(vec![UpdateLabels {
             time: ts,
             update: labels_to_update,
@@ -93,8 +93,7 @@ pub(crate) async fn update_record(
             entry: entry_name.clone(),
             labels: batched_result.get(&ts).unwrap().clone()?,
             event: Transaction::UpdateRecord(ts),
-        })
-        .await?;
+        })?;
 
     Ok(())
 }
@@ -134,11 +133,13 @@ mod tests {
 
         let record = components
             .storage
-            .read()
-            .await
             .get_bucket("bucket-1")
             .unwrap()
-            .begin_read("entry-1", 0)
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .unwrap()
+            .upgrade_and_unwrap()
+            .begin_read(0)
             .await
             .unwrap();
 
@@ -163,7 +164,6 @@ mod tests {
             .read()
             .await
             .get_info("api-test")
-            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 1);
     }

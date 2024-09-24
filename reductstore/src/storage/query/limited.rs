@@ -4,12 +4,10 @@
 use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
-use async_trait::async_trait;
 
 use crate::storage::entry::RecordReader;
 use reduct_base::error::{ErrorCode, ReductError};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// A query that is limited to a certain number of records.
 pub(crate) struct LimitedQuery {
@@ -26,9 +24,8 @@ impl LimitedQuery {
     }
 }
 
-#[async_trait]
 impl Query for LimitedQuery {
-    async fn next(
+    fn next(
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
@@ -40,7 +37,7 @@ impl Query for LimitedQuery {
         }
 
         self.limit_count -= 1;
-        let reader = self.query.next(block_manager).await;
+        let reader = self.query.next(block_manager);
         if self.limit_count == 0 {
             reader.map(|mut r| {
                 r.set_last(true);
@@ -60,9 +57,7 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_limit(#[future] block_manager: Arc<RwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
+    fn test_limit(block_manager: Arc<RwLock<BlockManager>>) {
         let mut query = LimitedQuery::new(
             0,
             u64::MAX,
@@ -72,12 +67,12 @@ mod tests {
             },
         );
 
-        let reader = query.next(block_manager.clone()).await.unwrap();
+        let reader = query.next(block_manager.clone()).unwrap();
         assert_eq!(reader.timestamp(), 0);
         assert!(reader.last());
 
         assert_eq!(
-            query.next(block_manager).await.err(),
+            query.next(block_manager).err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

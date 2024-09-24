@@ -32,10 +32,9 @@ pub(crate) async fn remove_query(
     )
     .await?;
 
-    let mut storage = components.storage.write().await;
-    let bucket = storage.get_bucket_mut(bucket_name)?;
-    let entry_info = bucket.get_entry(entry_name)?.info().await?;
-    let entry = bucket.get_or_create_entry(entry_name)?;
+    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+    let entry = bucket.get_or_create_entry(entry_name)?.upgrade()?;
+    let entry_info = entry.info()?;
 
     let (start, stop) =
         parse_time_range(&params, entry_info.oldest_record, entry_info.latest_record)?;

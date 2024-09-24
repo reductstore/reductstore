@@ -1,6 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::{shared_child, unique, TaskHandle};
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
@@ -14,6 +15,8 @@ pub(crate) struct UpdateLabels {
     pub update: Labels,
     pub remove: HashSet<String>,
 }
+
+type UpdateResult = BTreeMap<u64, Result<Vec<Label>, ReductError>>;
 
 impl Entry {
     /// Update labels for multiple records.
@@ -29,52 +32,74 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the update operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    pub async fn update_labels(
+    pub fn update_labels(
         &self,
         updates: Vec<UpdateLabels>,
-    ) -> Result<BTreeMap<u64, Result<Vec<Label>, ReductError>>, ReductError> {
-        let mut result = BTreeMap::new();
-        let mut records_per_block = BTreeMap::new();
+    ) -> TaskHandle<Result<UpdateResult, ReductError>> {
+        let block_manager = self.block_manager.clone();
+        let task_group = self.task_group();
+        unique(&task_group.clone(), "update labels", move || {
+            let mut result = UpdateResult::new();
+            let mut records_per_block = BTreeMap::new();
 
-        {
-            let bm = self.block_manager.read().await;
-            for UpdateLabels {
-                time,
-                update,
-                remove,
-            } in updates
             {
-                // Find the block that contains the record
-                // TODO: Try to avoid the lookup for each record
-                match bm.find_block(time).await {
-                    Ok(block_ref) => {
-                        let block = block_ref.read().await;
-                        if let Some(record) = block.get_record(time) {
-                            let record = Self::update_single_label(record.clone(), update, remove);
-                            records_per_block
-                                .entry(block.block_id())
-                                .or_insert_with(Vec::new)
-                                .push(record.clone());
-                            result.insert(time, Ok(record.labels.clone()));
-                        } else {
-                            result
-                                .insert(time, Err(not_found!("No record with timestamp {}", time)));
+                let bm = block_manager.read()?;
+                for UpdateLabels {
+                    time,
+                    update,
+                    remove,
+                } in updates
+                {
+                    // Find the block that contains the record
+                    // TODO: Try to avoid the lookup for each record
+                    match bm.find_block(time) {
+                        Ok(block_ref) => {
+                            let block = block_ref.read()?;
+                            if let Some(record) = block.get_record(time) {
+                                let record =
+                                    Self::update_single_label(record.clone(), update, remove);
+                                records_per_block
+                                    .entry(block.block_id())
+                                    .or_insert_with(Vec::new)
+                                    .push(record.clone());
+                                result.insert(time, Ok(record.labels.clone()));
+                            } else {
+                                result.insert(
+                                    time,
+                                    Err(not_found!("No record with timestamp {}", time)),
+                                );
+                            }
                         }
-                    }
-                    Err(err) => {
-                        result.insert(time, Err(err));
+                        Err(err) => {
+                            result.insert(time, Err(err));
+                        }
                     }
                 }
             }
-        }
 
-        // Update blocks
-        for (block_id, records) in records_per_block.into_iter() {
-            let mut bm = self.block_manager.write().await;
-            bm.update_records(block_id, records).await?;
-        }
+            // Update blocks
+            let mut handlers = Vec::new();
+            for (block_id, records) in records_per_block.into_iter() {
+                let local_block_manager = block_manager.clone();
+                let handler: TaskHandle<Result<(), ReductError>> = shared_child(
+                    &format!("{}/{}", task_group, block_id),
+                    "update labels in block",
+                    move || {
+                        let mut bm = local_block_manager.write().unwrap();
+                        bm.update_records(block_id, records)?;
+                        Ok(())
+                    },
+                );
 
-        Ok(result)
+                handlers.push(handler);
+            }
+
+            // Wait for all handlers to finish
+            for handler in handlers {
+                handler.wait()?;
+            }
+            Ok(result)
+        })
     }
 
     fn update_single_label(
@@ -118,12 +143,16 @@ mod tests {
     use super::*;
     use crate::storage::entry::tests::{entry, write_record_with_labels};
 
+    use crate::storage::entry::EntrySettings;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
     async fn test_update_labels(mut entry: Entry) {
-        entry.settings.max_block_records = 2;
+        entry.set_settings(EntrySettings {
+            max_block_records: 2,
+            ..entry.settings()
+        });
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2).await.unwrap();
         write_stub_record(&mut entry, 3).await.unwrap();
@@ -217,14 +246,8 @@ mod tests {
         assert!(updated_labels.contains(&expected_labels[0]));
         assert!(updated_labels.contains(&expected_labels[1]));
 
-        let block = entry
-            .block_manager
-            .write()
-            .await
-            .load_block(1)
-            .await
-            .unwrap();
-        let record = block.read().await.get_record(1).unwrap().clone();
+        let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
+        let record = block.read().unwrap().get_record(1).unwrap().clone();
         assert_eq!(record.labels.len(), 2);
         assert!(updated_labels.contains(&expected_labels[0]));
         assert!(updated_labels.contains(&expected_labels[1]));

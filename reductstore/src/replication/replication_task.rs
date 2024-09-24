@@ -2,14 +2,13 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::thread::{sleep, spawn};
 use std::time::Duration;
 
 use log::{error, info};
-use tokio::fs;
-use tokio::sync::RwLock;
-use tokio::time::sleep;
 
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -29,7 +28,7 @@ pub struct ReplicationTask {
     settings: ReplicationSettings,
     filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
-    storage: Arc<RwLock<Storage>>,
+    storage: Arc<Storage>,
     remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
 }
@@ -38,11 +37,7 @@ const TRANSACTION_LOG_SIZE: usize = 1000_000;
 
 impl ReplicationTask {
     /// Create a new replication task.
-    pub(super) fn new(
-        name: String,
-        settings: ReplicationSettings,
-        storage: Arc<RwLock<Storage>>,
-    ) -> Self {
+    pub(super) fn new(name: String, settings: ReplicationSettings, storage: Arc<Storage>) -> Self {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
             dst_host: remote_host,
@@ -70,7 +65,7 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
         filter: Arc<RwLock<HashMap<String, TransactionFilter>>>,
-        storage: Arc<RwLock<Storage>>,
+        storage: Arc<Storage>,
     ) -> Self {
         let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
 
@@ -85,32 +80,29 @@ impl ReplicationTask {
         let thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
 
-        tokio::spawn(async move {
-            let init_transaction_logs = async {
-                let mut logs = thr_log_map.write().await;
-                let storage = thr_storage.read().await;
-                for entry in storage
+        spawn(move || {
+            let init_transaction_logs = || {
+                let mut logs = thr_log_map.write()?;
+                for entry in thr_storage
                     .get_bucket(&config.src_bucket)?
-                    .info()
-                    .await?
+                    .upgrade()?
+                    .info()?
                     .entries
                 {
                     let path = Self::build_path_to_transaction_log(
-                        storage.data_path(),
+                        thr_storage.data_path(),
                         &config.src_bucket,
                         &entry.name,
                         &replication_name,
                     );
-                    let log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                        .await
-                        .unwrap();
+                    let log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)?;
                     logs.insert(entry.name, RwLock::new(log));
                 }
 
                 Ok::<(), ReductError>(())
             };
 
-            if let Err(err) = init_transaction_logs.await {
+            if let Err(err) = init_transaction_logs() {
                 error!("Failed to initialize transaction logs: {:?}", err);
             }
 
@@ -123,33 +115,32 @@ impl ReplicationTask {
             );
 
             loop {
-                match sender.run().await {
+                match sender.run() {
                     SyncState::SyncedOrRemoved => {}
                     SyncState::NotAvailable => {
-                        sleep(Duration::from_secs(5)).await;
+                        sleep(Duration::from_secs(5));
                     }
                     SyncState::NoTransactions => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
-                        sleep(Duration::from_millis(250)).await;
+                        sleep(Duration::from_millis(250));
                     }
                     SyncState::BrokenLog(entry_name) => {
                         info!("Transaction log is corrupted, dropping the whole log");
                         let path = ReplicationTask::build_path_to_transaction_log(
-                            thr_storage.read().await.data_path(),
+                            thr_storage.data_path(),
                             &config.src_bucket,
                             &entry_name,
                             &replication_name,
                         );
-                        if let Err(err) = fs::remove_file(&path).await {
+                        if let Err(err) = fs::remove_file(&path) {
                             error!("Failed to remove transaction log: {:?}", err);
                         }
 
                         info!("Creating a new transaction log");
-                        thr_log_map.write().await.insert(
+                        thr_log_map.write().unwrap().insert(
                             entry_name,
                             RwLock::new(
                                 TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                                    .await
                                     .unwrap(),
                             ),
                         );
@@ -170,13 +161,10 @@ impl ReplicationTask {
         }
     }
 
-    pub async fn notify(
-        &mut self,
-        notification: TransactionNotification,
-    ) -> Result<(), ReductError> {
+    pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         // We need to have a filter for each entry
         {
-            let mut lock = self.filter_map.write().await;
+            let mut lock = self.filter_map.write()?;
             if !lock.contains_key(&notification.entry) {
                 lock.insert(
                     notification.entry.clone(),
@@ -192,34 +180,26 @@ impl ReplicationTask {
 
         // NOTE: very important not to lock the log_map for too long
         // because it is used by the replication thread
-        if !self.log_map.read().await.contains_key(&notification.entry) {
-            let mut map = self.log_map.write().await;
+        if !self.log_map.read()?.contains_key(&notification.entry) {
+            let mut map = self.log_map.write()?;
             map.insert(
                 notification.entry.clone(),
-                RwLock::new(
-                    TransactionLog::try_load_or_create(
-                        Self::build_path_to_transaction_log(
-                            self.storage.read().await.data_path(),
-                            &self.settings.src_bucket,
-                            &notification.entry,
-                            &self.name,
-                        ),
-                        TRANSACTION_LOG_SIZE,
-                    )
-                    .await?,
-                ),
+                RwLock::new(TransactionLog::try_load_or_create(
+                    Self::build_path_to_transaction_log(
+                        self.storage.data_path(),
+                        &self.settings.src_bucket,
+                        &notification.entry,
+                        &self.name,
+                    ),
+                    TRANSACTION_LOG_SIZE,
+                )?),
             );
         };
 
-        let log_map = self.log_map.read().await;
+        let log_map = self.log_map.read()?;
         let log = log_map.get(&notification.entry).unwrap();
 
-        if let Some(_) = log
-            .write()
-            .await
-            .push_back(notification.event.clone())
-            .await?
-        {
+        if let Some(_) = log.write()?.push_back(notification.event.clone())? {
             error!("Transaction log is full, dropping the oldest transaction without replication");
         }
 
@@ -250,22 +230,22 @@ impl ReplicationTask {
         self.is_provisioned = provisioned;
     }
 
-    pub async fn info(&self) -> ReplicationInfo {
+    pub fn info(&self) -> ReplicationInfo {
         let mut pending_records = 0;
-        for (_, log) in self.log_map.read().await.iter() {
-            pending_records += log.read().await.len() as u64;
+        for (_, log) in self.log_map.read().unwrap().iter() {
+            pending_records += log.read().unwrap().len() as u64;
         }
         ReplicationInfo {
             name: self.name.clone(),
-            is_active: self.remote_bucket.read().await.is_active(),
+            is_active: self.remote_bucket.read().unwrap().is_active(),
             is_provisioned: self.is_provisioned,
             pending_records,
         }
     }
 
-    pub async fn diagnostics(&self) -> Diagnostics {
+    pub fn diagnostics(&self) -> Diagnostics {
         Diagnostics {
-            hourly: self.hourly_diagnostics.read().await.diagnostics(),
+            hourly: self.hourly_diagnostics.read().unwrap().diagnostics(),
         }
     }
 
@@ -284,8 +264,6 @@ impl ReplicationTask {
 mod tests {
     use super::*;
 
-    use async_trait::async_trait;
-
     use bytes::Bytes;
 
     use mockall::mock;
@@ -302,9 +280,8 @@ mod tests {
     mock! {
         RmBucket {}
 
-        #[async_trait]
         impl RemoteBucket for RmBucket {
-            async fn write_batch(
+            fn write_batch(
                 &mut self,
                 entry_name: &str,
                 record: Vec<(RecordReader, Transaction)>,
@@ -316,23 +293,21 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_transaction_log_init(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
-        let replication = build_replication(remote_bucket, settings).await;
-        assert_eq!(replication.log_map.read().await.len(), 2);
+    fn test_transaction_log_init(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+        let replication = build_replication(remote_bucket, settings);
+        assert_eq!(replication.log_map.read().unwrap().len(), 2);
         assert!(
-            replication.log_map.read().await.contains_key("test1"),
+            replication.log_map.read().unwrap().contains_key("test1"),
             "Transaction log is initialized"
         );
         assert!(
-            replication.log_map.read().await.contains_key("test2"),
+            replication.log_map.read().unwrap().contains_key("test2"),
             "Transaction log is initialized"
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_ok_active(
+    fn test_replication_ok_active(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -341,13 +316,13 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings).await;
+        let mut replication = build_replication(remote_bucket, settings);
 
-        replication.notify(notification).await.unwrap();
-        sleep(Duration::from_millis(250)).await;
-        assert!(transaction_log_is_empty(&replication).await);
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(250));
+        assert!(transaction_log_is_empty(&replication));
         assert_eq!(
-            replication.info().await,
+            replication.info(),
             ReplicationInfo {
                 name: "test".to_string(),
                 is_active: true,
@@ -356,7 +331,7 @@ mod tests {
             }
         );
         assert_eq!(
-            replication.diagnostics().await,
+            replication.diagnostics(),
             Diagnostics {
                 hourly: DiagnosticsItem {
                     ok: 60,
@@ -368,8 +343,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_replication_filter_each_entry(
+    fn test_replication_filter_each_entry(
         mut notification: TransactionNotification,
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
@@ -383,32 +357,31 @@ mod tests {
             ..settings
         };
 
-        let mut replication = build_replication(MockRmBucket::new(), settings.clone()).await;
+        let mut replication = build_replication(MockRmBucket::new(), settings.clone());
 
         let mut time = 10;
         for entry in &["test1", "test2"] {
             for _ in 0..3 {
                 notification.entry = entry.to_string();
                 notification.event = Transaction::WriteRecord(time.clone());
-                replication.notify(notification.clone()).await.unwrap();
+                replication.notify(notification.clone()).unwrap();
                 time += 10;
             }
         }
 
-        assert_eq!(replication.log_map.read().await.len(), 2);
+        assert_eq!(replication.log_map.read().unwrap().len(), 2);
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test1").await,
+            get_entries_from_transaction_log(&mut replication, "test1"),
             vec![Transaction::WriteRecord(10), Transaction::WriteRecord(30)]
         );
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test2").await,
+            get_entries_from_transaction_log(&mut replication, "test2"),
             vec![Transaction::WriteRecord(40), Transaction::WriteRecord(60)]
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_broken_transaction_log(
+    fn test_broken_transaction_log(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -417,61 +390,56 @@ mod tests {
             .expect_write_batch()
             .return_const(Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings.clone()).await;
+        let mut replication = build_replication(remote_bucket, settings.clone());
 
-        replication.notify(notification.clone()).await.unwrap();
-        assert!(!transaction_log_is_empty(&replication).await);
+        replication.notify(notification.clone()).unwrap();
+        assert!(!transaction_log_is_empty(&replication));
 
         let path = ReplicationTask::build_path_to_transaction_log(
-            replication.storage.read().await.data_path(),
+            replication.storage.data_path(),
             &settings.src_bucket,
             &notification.entry,
             &replication.name,
         );
-        fs::write(path.clone(), "broken").await.unwrap();
-        sleep(Duration::from_millis(500)).await;
+        fs::write(path.clone(), "broken").unwrap();
+        sleep(Duration::from_millis(500));
 
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test1").await,
+            get_entries_from_transaction_log(&mut replication, "test1"),
             vec![],
             "Transaction log is empty"
         );
     }
 
-    async fn build_replication(
+    fn build_replication(
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationTask {
         let tmp_dir = tempfile::tempdir().unwrap().into_path();
 
-        let storage = Arc::new(RwLock::new(Storage::load(tmp_dir, None).await));
+        let storage = Arc::new(Storage::load(tmp_dir, None));
 
-        {
-            let mut lock = storage.write().await;
+        let bucket = storage
+            .create_bucket("src", BucketSettings::default())
+            .unwrap()
+            .upgrade_and_unwrap();
 
-            let bucket = lock
-                .create_bucket("src", BucketSettings::default())
-                .unwrap();
-
-            let mut time = 10;
-            for entry in ["test1", "test2"] {
-                for _ in 0..3 {
-                    let writer = bucket
-                        .write_record(entry, time, 4, "text/plain".to_string(), Labels::new())
-                        .await
-                        .unwrap();
-                    writer
-                        .tx()
-                        .send(Ok(Some(Bytes::from("test"))))
-                        .await
-                        .unwrap();
-                    writer.tx().send(Ok(None)).await.unwrap_or(());
-                    writer.tx().closed().await;
-                    time += 10;
-                }
-
+        let mut time = 10;
+        for entry in ["test1", "test2"] {
+            for _ in 0..3 {
+                let writer = bucket
+                    .begin_write(entry, time, 4, "text/plain".to_string(), Labels::new())
+                    .wait()
+                    .unwrap();
+                writer
+                    .tx()
+                    .blocking_send(Ok(Some(Bytes::from("test"))))
+                    .unwrap();
+                writer.tx().blocking_send(Ok(None)).unwrap_or(());
                 time += 10;
             }
+
+            time += 10;
         }
 
         let repl = ReplicationTask::build(
@@ -482,7 +450,7 @@ mod tests {
             storage,
         );
 
-        sleep(Duration::from_millis(10)).await; // wait for the transaction log to be initialized in worker
+        sleep(Duration::from_millis(10)); // wait for the transaction log to be initialized in worker
         repl
     }
 
@@ -517,35 +485,34 @@ mod tests {
         }
     }
 
-    async fn transaction_log_is_empty(replication: &ReplicationTask) -> bool {
-        sleep(Duration::from_millis(50)).await;
-        sleep(Duration::from_millis(50)).await;
+    fn transaction_log_is_empty(replication: &ReplicationTask) -> bool {
+        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(50));
 
         replication
             .log_map
             .read()
-            .await
+            .unwrap()
             .get("test1")
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .is_empty()
     }
 
-    async fn get_entries_from_transaction_log(
+    fn get_entries_from_transaction_log(
         replication: &mut ReplicationTask,
         entry: &str,
     ) -> Vec<Transaction> {
         replication
             .log_map
             .read()
-            .await
+            .unwrap()
             .get(entry)
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .front(10)
-            .await
             .unwrap()
     }
 }

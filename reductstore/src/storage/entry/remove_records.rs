@@ -1,11 +1,15 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::{shared, unique, unique_child, TaskHandle};
+use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
 use crate::storage::query::base::QueryOptions;
+use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::not_found;
 use std::collections::BTreeMap;
+use std::sync::{Arc, RwLock};
 
 impl Entry {
     /// Remove multiple records.
@@ -21,45 +25,15 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the remove operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    pub async fn remove_records(
+    pub fn remove_records(
         &self,
         timestamps: Vec<u64>,
-    ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
-        let mut error_map = BTreeMap::new();
-        let mut records_per_block = BTreeMap::new();
-
-        {
-            let bm = self.block_manager.read().await;
-            for time in timestamps {
-                // Find the block that contains the record
-                // TODO: Try to avoid the lookup for each record
-                match bm.find_block(time).await {
-                    Ok(block_ref) => {
-                        // Check if the record exists
-                        let block = block_ref.read().await;
-                        if let Some(_) = block.get_record(time) {
-                            records_per_block
-                                .entry(block.block_id())
-                                .or_insert_with(Vec::new)
-                                .push(time);
-                        } else {
-                            error_map.insert(time, not_found!("No record with timestamp {}", time));
-                        }
-                    }
-                    Err(e) => {
-                        error_map.insert(time, e);
-                    }
-                }
-            }
-        }
-
-        // Remove the records
-        for (block_id, timestamps) in records_per_block {
-            let mut bm = self.block_manager.write().await;
-            bm.remove_records(block_id, timestamps).await?;
-        }
-
-        Ok(error_map)
+    ) -> TaskHandle<Result<BTreeMap<u64, ReductError>, ReductError>> {
+        let block_manager = self.block_manager.clone();
+        let task_group = self.task_group();
+        unique(&task_group.clone(), "remove records", move || {
+            Self::inner_remove_records(timestamps, block_manager, task_group)
+        })
     }
 
     /// Query and remove multiple records over a range of timestamps.
@@ -77,51 +51,139 @@ impl Entry {
     /// # Errors
     ///
     /// * If the query fails.
-    pub async fn query_remove_records(
-        &mut self,
+    pub fn query_remove_records(
+        &self,
         start: u64,
         end: u64,
         mut options: QueryOptions,
-    ) -> Result<u64, ReductError> {
+    ) -> TaskHandle<Result<u64, ReductError>> {
         options.continuous = false; // force non-continuous query
-        let query_id = self.query(start, end, options)?;
 
-        let mut total_records = 0;
+        let rx = || {
+            let query_id = self.query(start, end, options).wait()?;
+            self.get_query_receiver(query_id)
+        };
+
+        let rx = match rx() {
+            Ok(rx) => rx,
+            Err(e) => return Err(e).into(),
+        };
+
+        let block_manager = self.block_manager.clone();
         let max_block_records = self.settings().max_block_records; // max records per block
+        let task_group = self.task_group();
 
-        // Loop until the query is done
-        let mut continue_query = true;
-        while continue_query {
-            let rx = self.get_query_receiver(query_id).await?;
-            let mut records_to_remove = vec![];
-            records_to_remove.reserve(max_block_records as usize);
+        shared(&task_group.clone(), "query remove records", move || {
+            // Loop until the query is done
+            let mut continue_query = true;
+            let mut total_records = 0;
 
-            // Receive a batch of records to remove
-            while records_to_remove.len() < max_block_records as usize && continue_query {
-                let result = rx.recv().await;
-                match result {
-                    Some(Ok(rec)) => {
-                        records_to_remove.push(rec.timestamp());
+            while continue_query {
+                let mut records_to_remove = vec![];
+                records_to_remove.reserve(max_block_records as usize);
+
+                // Receive a batch of records to remove
+                while records_to_remove.len() < max_block_records as usize && continue_query {
+                    let result = rx.upgrade()?.blocking_write().blocking_recv();
+                    match result {
+                        Some(Ok(rec)) => {
+                            records_to_remove.push(rec.timestamp());
+                        }
+                        Some(Err(ReductError {
+                            status: ErrorCode::NoContent,
+                            ..
+                        })) => {
+                            continue_query = false;
+                        }
+                        None => {
+                            continue_query = false;
+                        }
+                        Some(Err(e)) => return Err(e),
                     }
-                    Some(Err(ReductError {
-                        status: ErrorCode::NoContent,
-                        ..
-                    })) => {
-                        continue_query = false;
+                }
+
+                // Send the records to remove
+                total_records += records_to_remove.len() as u64;
+                let copy_block_manager = block_manager.clone();
+
+                match Self::inner_remove_records(
+                    records_to_remove,
+                    copy_block_manager,
+                    task_group.clone(),
+                ) {
+                    Ok(error_map) => {
+                        for (timestamp, error) in error_map {
+                            // TODO: send the error to the client
+                            warn!(
+                                "Failed to remove record with timestamp {}: {}",
+                                timestamp, error
+                            );
+
+                            total_records -= 1;
+                        }
                     }
-                    None => {
-                        continue_query = false;
-                    }
-                    Some(Err(e)) => return Err(e),
+                    Err(e) => return Err(e),
                 }
             }
 
-            // Remove the records
-            total_records += records_to_remove.len() as u64;
-            self.remove_records(records_to_remove).await?;
+            Ok(total_records)
+        })
+    }
+
+    fn inner_remove_records(
+        timestamps: Vec<u64>,
+        block_manager: Arc<RwLock<BlockManager>>,
+        task_group: String,
+    ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
+        let mut error_map = BTreeMap::new();
+        let mut records_per_block = BTreeMap::new();
+
+        {
+            let bm = block_manager.read()?;
+            for time in timestamps {
+                // Find the block that contains the record
+                // TODO: Try to avoid the lookup for each record
+                match bm.find_block(time) {
+                    Ok(block_ref) => {
+                        // Check if the record exists
+                        let block = block_ref.read()?;
+                        if let Some(_) = block.get_record(time) {
+                            records_per_block
+                                .entry(block.block_id())
+                                .or_insert_with(Vec::new)
+                                .push(time);
+                        } else {
+                            error_map.insert(time, not_found!("No record with timestamp {}", time));
+                        }
+                    }
+                    Err(e) => {
+                        error_map.insert(time, e);
+                    }
+                }
+            }
         }
 
-        Ok(total_records)
+        // Remove the records
+        let mut handlers = vec![];
+        for (block_id, timestamps) in records_per_block {
+            let local_block_manager = block_manager.clone();
+            let handler = unique_child(
+                &format!("{}/{}", task_group, block_id),
+                "remove records from block",
+                move || {
+                    // TODO: we don't parallelize the removal of records in different blocks
+                    let mut bm = local_block_manager.write().unwrap();
+                    bm.remove_records(block_id, timestamps)
+                },
+            );
+            handlers.push(handler);
+        }
+
+        for handler in handlers {
+            handler.wait()?;
+        }
+
+        Ok(error_map)
     }
 }
 
@@ -129,6 +191,7 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::entry::tests::{entry, write_stub_record};
+    use crate::storage::entry::EntrySettings;
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -160,7 +223,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_query_remove_records(#[future] mut entry_with_data: Entry) {
-        let mut entry = entry_with_data.await;
+        let entry = entry_with_data.await;
         let removed_records = entry
             .query_remove_records(2, 4, QueryOptions::default())
             .await
@@ -181,7 +244,10 @@ mod tests {
 
     #[fixture]
     async fn entry_with_data(mut entry: Entry) -> Entry {
-        entry.settings.max_block_records = 2;
+        entry.set_settings(EntrySettings {
+            max_block_records: 2,
+            ..entry.settings()
+        });
 
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2).await.unwrap();

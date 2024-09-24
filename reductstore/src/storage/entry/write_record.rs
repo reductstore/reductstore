@@ -1,6 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::{shared, TaskHandle};
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::io::record_writer::WriteRecordContent;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
@@ -24,122 +25,129 @@ impl Entry {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) async fn begin_write(
+    pub fn begin_write(
         &self,
         time: u64,
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
-        // When we write, the likely case is that we are writing the latest record
-        // in the entry. In this case, we can just append to the latest block.
-        let mut bm = self.block_manager.write().await;
-
-        let mut block_ref = if bm.index().tree().is_empty() {
-            bm.start_new_block(time, self.settings.max_block_size)
-                .await?
-        } else {
-            let block_id = *bm.index().tree().last().unwrap();
-            bm.load_block(block_id).await?
-        };
-
-        let record_type = {
-            let is_belated = {
-                let block = block_ref.write().await;
-                block.record_count() > 0 && block.latest_record_time() >= time
-            };
-            if is_belated {
-                debug!("Timestamp {} is belated. Looking for a block", time);
-                // The timestamp is belated. We need to find the proper block to write to.
-                let index_tree = bm.index().tree();
-                if *index_tree.first().unwrap() > time {
-                    // The timestamp is the earliest. We need to create a new block.
-                    debug!("Timestamp {} is the earliest. Creating a new block", time);
-                    block_ref = bm
-                        .start_new_block(time, self.settings.max_block_size)
-                        .await?;
-                    RecordType::BelatedFirst
+    ) -> TaskHandle<Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError>> {
+        let block_manager = self.block_manager.clone();
+        let settings = self.settings.read().unwrap().clone();
+        shared(
+            &self.task_group(),
+            "begin write",
+            move || -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
+                let mut bm = block_manager.write().unwrap();
+                // When we write, the likely case is that we are writing the latest record
+                // in the entry. In this case, we can just append to the latest block.
+                let mut block_ref = if bm.index().tree().is_empty() {
+                    bm.start_new_block(time, settings.max_block_size)?
                 } else {
-                    block_ref = bm.find_block(time).await?;
-                    let record = block_ref.read().await.get_record(time).map(|r| r.clone());
-                    // check if the record already exists
-                    if let Some(mut record) = record {
-                        // We overwrite the record if it is errored and the size is the same.
-                        return if record.state != record::State::Errored as i32
-                            || record.end - record.begin != content_size as u64
-                        {
-                            Err(ReductError::conflict(&format!(
-                                "A record with timestamp {} already exists",
-                                time
-                            )))
+                    let block_id = *bm.index().tree().last().unwrap();
+                    bm.load_block(block_id)?
+                };
+
+                let record_type = {
+                    let is_belated = {
+                        let block = block_ref.write()?;
+                        block.record_count() > 0 && block.latest_record_time() >= time
+                    };
+                    if is_belated {
+                        debug!("Timestamp {} is belated. Looking for a block", time);
+                        // The timestamp is belated. We need to find the proper block to write to.
+                        let index_tree = bm.index().tree();
+                        if *index_tree.first().unwrap() > time {
+                            // The timestamp is the earliest. We need to create a new block.
+                            debug!("Timestamp {} is the earliest. Creating a new block", time);
+                            block_ref = bm.start_new_block(time, settings.max_block_size)?;
+                            RecordType::BelatedFirst
                         } else {
-                            {
-                                let mut block = block_ref.write().await;
-                                record.labels = labels
-                                    .into_iter()
-                                    .map(|(name, value)| record::Label { name, value })
-                                    .collect();
-                                record.state = record::State::Started as i32;
-                                record.content_type = content_type;
-                                block.insert_or_update_record(record);
+                            block_ref = bm.find_block(time)?;
+                            let record = block_ref.read()?.get_record(time).map(|r| r.clone());
+                            // check if the record already exists
+                            if let Some(mut record) = record {
+                                // We overwrite the record if it is errored and the size is the same.
+                                return if record.state != record::State::Errored as i32
+                                    || record.end - record.begin != content_size as u64
+                                {
+                                    Err(ReductError::conflict(&format!(
+                                        "A record with timestamp {} already exists",
+                                        time
+                                    )))
+                                } else {
+                                    {
+                                        let mut block = block_ref.write()?;
+                                        record.labels = labels
+                                            .into_iter()
+                                            .map(|(name, value)| record::Label { name, value })
+                                            .collect();
+                                        record.state = record::State::Started as i32;
+                                        record.content_type = content_type;
+                                        block.insert_or_update_record(record);
+                                    }
+
+                                    drop(bm); // drop the lock to avoid deadlock
+                                    let writer = RecordWriter::try_new(
+                                        Arc::clone(&block_manager),
+                                        block_ref,
+                                        time,
+                                    )?;
+
+                                    return Ok(Box::new(writer));
+                                };
                             }
-
-                            drop(bm); // drop the lock to avoid deadlock
-                            let writer = RecordWriter::try_new(
-                                Arc::clone(&self.block_manager),
-                                block_ref,
-                                time,
-                            )
-                            .await?;
-                            return Ok(Box::new(writer));
-                        };
+                            RecordType::Belated
+                        }
+                    } else {
+                        // The timestamp is the latest. We can just append to the latest block.
+                        RecordType::Latest
                     }
-                    RecordType::Belated
-                }
-            } else {
-                // The timestamp is the latest. We can just append to the latest block.
-                RecordType::Latest
-            }
-        };
+                };
 
-        let mut block_ref = {
-            let block = block_ref.read().await;
-            // Check if the block has enough space for the record.
-            let has_no_space = block.size() + content_size as u64 > self.settings.max_block_size;
-            let has_too_many_records = block.record_count() + 1 > self.settings.max_block_records;
+                let mut block_ref = {
+                    let block = block_ref.read()?;
+                    // Check if the block has enough space for the record.
+                    let has_no_space = block.size() + content_size as u64 > settings.max_block_size;
+                    let has_too_many_records =
+                        block.record_count() + 1 > settings.max_block_records;
 
-            drop(block);
-            if record_type == RecordType::Latest && (has_no_space || has_too_many_records) {
-                // We need to create a new block.
-                debug!("Creating a new block");
-                bm.finish_block(block_ref.clone()).await?;
-                bm.start_new_block(time, self.settings.max_block_size)
-                    .await?
-            } else {
-                // We can just append to the latest block.
-                block_ref.clone()
-            }
-        };
+                    drop(block);
+                    if record_type == RecordType::Latest && (has_no_space || has_too_many_records) {
+                        // We need to create a new block.
+                        debug!("Creating a new block");
+                        bm.finish_block(block_ref.clone())?;
+                        bm.start_new_block(time, settings.max_block_size)?
+                    } else {
+                        // We can just append to the latest block.
+                        block_ref.clone()
+                    }
+                };
 
-        drop(bm);
+                drop(bm);
 
-        self.prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
-            .await?;
+                Self::prepare_block_for_writing(
+                    &mut block_ref,
+                    time,
+                    content_size,
+                    content_type,
+                    labels,
+                )?;
 
-        let writer =
-            RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
-        Ok(Box::new(writer))
+                let writer = RecordWriter::try_new(Arc::clone(&block_manager), block_ref, time)?;
+                Ok(Box::new(writer))
+            },
+        )
     }
 
-    async fn prepare_block_for_writing(
-        &self,
+    fn prepare_block_for_writing(
         block: &mut BlockRef,
         time: u64,
         content_size: usize,
         content_type: String,
         labels: Labels,
     ) -> Result<(), ReductError> {
-        let mut block = block.write().await;
+        let mut block = block.write()?;
         let record = Record {
             timestamp: Some(us_to_ts(&time)),
             begin: block.size(),
@@ -182,14 +190,13 @@ mod tests {
         write_stub_record(&mut entry, 1).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
 
         assert_eq!(
             bm.load_block(1)
-                .await
                 .unwrap()
                 .read()
-                .await
+                .unwrap()
                 .get_record(1)
                 .unwrap()
                 .clone(),
@@ -205,10 +212,9 @@ mod tests {
 
         assert_eq!(
             bm.load_block(2000010)
-                .await
                 .unwrap()
                 .read()
-                .await
+                .unwrap()
                 .get_record(2000010)
                 .unwrap()
                 .clone(),
@@ -238,13 +244,12 @@ mod tests {
         write_stub_record(&mut entry, 2).await.unwrap();
         write_stub_record(&mut entry, 2000010).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
         let records = bm
             .load_block(1)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(
@@ -261,10 +266,9 @@ mod tests {
 
         let records = bm
             .load_block(2000010)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(
@@ -287,13 +291,12 @@ mod tests {
         write_stub_record(&mut entry, 3000000).await.unwrap();
         write_stub_record(&mut entry, 2000000).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
         let records = bm
             .load_block(1000000)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(records.len(), 3);
@@ -317,13 +320,12 @@ mod tests {
         write_stub_record(&mut entry, 3000000).await.unwrap();
         write_stub_record(&mut entry, 1000000).await.unwrap();
 
-        let bm = entry.block_manager.read().await;
+        let bm = entry.block_manager.read().unwrap();
         let records = bm
             .load_block(1000000)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .record_index()
             .clone();
         assert_eq!(records.len(), 1);
@@ -390,12 +392,11 @@ mod tests {
         let record = entry
             .block_manager
             .write()
-            .await
+            .unwrap()
             .load_block(1000000)
-            .await
             .unwrap()
             .read()
-            .await
+            .unwrap()
             .get_record(1000000)
             .unwrap()
             .clone();

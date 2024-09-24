@@ -19,6 +19,7 @@ use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry/batch
+
 pub(crate) async fn update_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
@@ -70,10 +71,12 @@ pub(crate) async fn update_batched_records(
     }
 
     let result = {
-        let mut storage = components.storage.write().await;
-        let entry = storage
-            .get_bucket_mut(bucket_name)?
-            .get_entry_mut(entry_name)?;
+        let entry = components
+            .storage
+            .get_bucket(bucket_name)?
+            .upgrade()?
+            .get_entry(entry_name)?
+            .upgrade()?;
         entry.update_labels(records_to_update).await?
     };
 
@@ -85,14 +88,12 @@ pub(crate) async fn update_batched_records(
             }
             Ok(new_labels) => {
                 let mut replication_repo = components.replication_repo.write().await;
-                replication_repo
-                    .notify(TransactionNotification {
-                        bucket: bucket_name.clone(),
-                        entry: entry_name.clone(),
-                        labels: new_labels,
-                        event: Transaction::UpdateRecord(time),
-                    })
-                    .await?;
+                replication_repo.notify(TransactionNotification {
+                    bucket: bucket_name.clone(),
+                    entry: entry_name.clone(),
+                    labels: new_labels,
+                    event: Transaction::UpdateRecord(time),
+                })?;
             }
         };
     }
@@ -189,11 +190,20 @@ mod tests {
         .await
         .unwrap();
 
-        let storage = components.storage.read().await;
-        let bucket = storage.get_bucket("bucket-1").unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
 
         {
-            let reader = bucket.begin_read("entry-1", 0).await.unwrap();
+            let reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(0)
+                .await
+                .unwrap();
             assert_eq!(reader.labels().len(), 2);
             assert_eq!(
                 reader.labels()[0],
@@ -217,7 +227,6 @@ mod tests {
             .read()
             .await
             .get_info("api-test")
-            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 1);
     }
@@ -232,11 +241,12 @@ mod tests {
     ) {
         let components = components.await;
         {
-            let mut storage = components.storage.write().await;
-            let writer = storage
-                .get_bucket_mut("bucket-1")
+            let writer = components
+                .storage
+                .get_bucket("bucket-1")
                 .unwrap()
-                .write_record("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
+                .upgrade_and_unwrap()
+                .begin_write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
                 .await
                 .unwrap();
             writer

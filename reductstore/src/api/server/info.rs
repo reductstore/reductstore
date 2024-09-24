@@ -17,9 +17,7 @@ pub(crate) async fn info(
 ) -> Result<ServerInfoAxum, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
 
-    Ok(ServerInfoAxum::from(
-        components.storage.read().await.info().await?,
-    ))
+    Ok(components.storage.info()?.into())
 }
 
 #[cfg(test)]

@@ -22,7 +22,6 @@ use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;
 use crate::api::Components;
 use crate::api::HttpError;
-use crate::storage::storage::Storage;
 use axum::async_trait;
 use axum::extract::{FromRequest, Path, Query, State};
 
@@ -71,12 +70,9 @@ where
         Ok(MethodExtractor { name: method })
     }
 }
-
-async fn check_and_extract_ts_or_query_id(
-    storage: &Storage,
+fn check_and_extract_ts_or_query_id(
     params: HashMap<String, String>,
-    bucket_name: &String,
-    entry_name: &String,
+    last_record: u64,
 ) -> Result<(Option<u64>, Option<u64>), HttpError> {
     let ts = match params.get("ts") {
         Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
@@ -96,14 +92,7 @@ async fn check_and_extract_ts_or_query_id(
     };
 
     let ts = if ts.is_none() && query_id.is_none() {
-        Some(
-            storage
-                .get_bucket(bucket_name)?
-                .get_entry(entry_name)?
-                .info()
-                .await?
-                .latest_record,
-        )
+        Some(last_record)
     } else {
         ts
     };
@@ -155,4 +144,31 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
             delete(remove_batched_records),
         )
         .route("/:bucket_name/:entry_name/q", delete(remove_query))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::query::base::QueryOptions;
+    pub async fn query(
+        path_to_entry_1: &Path<HashMap<String, String>>,
+        components: Arc<Components>,
+    ) -> u64 {
+        let query_id = {
+            components
+                .storage
+                .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .get_entry(path_to_entry_1.get("entry_name").unwrap())
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .query(0, u64::MAX, QueryOptions::default())
+                .await
+                .unwrap()
+        };
+        query_id
+    }
 }

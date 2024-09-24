@@ -2,27 +2,24 @@
 // Licensed under the Business Source License 1.1
 
 use async_stream::stream;
-use async_trait::async_trait;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
 use std::collections::BTreeMap;
 
-use std::str::FromStr;
-
-use reduct_base::error::{ErrorCode, IntEnum, ReductError};
-
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::ts_to_us;
+use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
+use std::str::FromStr;
+use std::sync::Arc;
 
 // A wrapper around the Reduct client API to make it easier to mock.
-#[async_trait]
 pub(super) trait ReductClientApi {
-    async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+    fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
     fn url(&self) -> &str;
 }
@@ -30,15 +27,14 @@ pub(super) trait ReductClientApi {
 pub(super) type BoxedClientApi = Box<dyn ReductClientApi + Sync + Send>;
 
 // A wrapper around the Reduct bucket API to make it easier to mock.
-#[async_trait]
 pub(super) trait ReductBucketApi {
-    async fn write_batch(
+    fn write_batch(
         &self,
         entry: &str,
         records: Vec<RecordReader>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
-    async fn update_batch(
+    fn update_batch(
         &self,
         entry: &str,
         records: &Vec<RecordReader>,
@@ -54,6 +50,7 @@ pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 struct ReductClient {
     client: Client,
     server_url: String,
+    rt: Arc<tokio::runtime::Runtime>,
 }
 
 static API_PATH: &str = "api/v1";
@@ -81,7 +78,12 @@ impl ReductClient {
             url.to_string()
         };
 
-        Self { client, server_url }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        Self {
+            client,
+            server_url,
+            rt: Arc::new(rt),
+        }
     }
 }
 
@@ -89,17 +91,10 @@ struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
+    rt: Arc<tokio::runtime::Runtime>,
 }
 
 impl BucketWrapper {
-    fn new(server_url: String, bucket_name: String, client: Client) -> Self {
-        Self {
-            server_url,
-            bucket_name,
-            client,
-        }
-    }
-
     fn build_headers(records: &Vec<RecordReader>, update_only: bool) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let content_length: u64 = if update_only {
@@ -244,24 +239,27 @@ fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> 
     Err(ReductError::new(status, &error_msg))
 }
 
-#[async_trait]
 impl ReductClientApi for ReductClient {
-    async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
-        let resp = self
-            .client
-            .head(&format!(
-                "{}{}/b/{}",
-                self.server_url, API_PATH, bucket_name
-            ))
-            .send()
-            .await;
-        check_response(resp)?;
+    fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let request = self.client.request(
+            Method::GET,
+            &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
+        );
 
-        Ok(Box::new(BucketWrapper::new(
-            self.server_url.clone(),
-            bucket_name.to_string(),
-            self.client.clone(),
-        )))
+        self.rt.block_on(async move {
+            let resp = request.send().await;
+            tx.send(resp).await.unwrap();
+        });
+
+        check_response(rx.blocking_recv().unwrap())?;
+
+        Ok(Box::new(BucketWrapper {
+            server_url: self.server_url.clone(),
+            bucket_name: bucket_name.to_string(),
+            client: self.client.clone(),
+            rt: self.rt.clone(),
+        }))
     }
 
     fn url(&self) -> &str {
@@ -269,9 +267,8 @@ impl ReductClientApi for ReductClient {
     }
 }
 
-#[async_trait]
 impl ReductBucketApi for BucketWrapper {
-    async fn write_batch(
+    fn write_batch(
         &self,
         entry: &str,
         records: Vec<RecordReader>,
@@ -284,17 +281,22 @@ impl ReductBucketApi for BucketWrapper {
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
         );
-        let response = request
-            .headers(headers)
-            .body(Body::wrap_stream(stream))
-            .send()
-            .await;
-        let failed_records = Self::parse_record_errors(response)?;
 
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        self.rt.block_on(async move {
+            let response = request
+                .headers(headers)
+                .body(Body::wrap_stream(stream))
+                .send()
+                .await;
+            tx.send(response).await.unwrap();
+        });
+
+        let failed_records = Self::parse_record_errors(rx.blocking_recv().unwrap())?;
         Ok(failed_records)
     }
 
-    async fn update_batch(
+    fn update_batch(
         &self,
         entry: &str,
         records: &Vec<RecordReader>,
@@ -307,8 +309,13 @@ impl ReductBucketApi for BucketWrapper {
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
         );
-        let response = request.headers(headers).send().await;
-        let failed_records = Self::parse_record_errors(response)?;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        self.rt.block_on(async move {
+            let response = request.headers(headers).send().await;
+            tx.send(response).await.unwrap();
+        });
+
+        let failed_records = Self::parse_record_errors(rx.blocking_recv().unwrap())?;
 
         Ok(failed_records)
     }

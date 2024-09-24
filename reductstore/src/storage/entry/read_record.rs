@@ -1,6 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::{shared, TaskHandle};
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::proto::record;
 use log::debug;
@@ -18,35 +19,38 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
-        debug!("Reading record for ts={}", time);
+    pub(crate) fn begin_read(&self, time: u64) -> TaskHandle<Result<RecordReader, ReductError>> {
+        let block_manager = self.block_manager.clone();
+        shared(&self.task_group(), "begin read", move || {
+            debug!("Reading record for ts={}", time);
 
-        let (block_ref, record) = {
-            let bm = self.block_manager.read().await;
-            let block_ref = bm.find_block(time).await?;
-            let block = block_ref.read().await;
-            let record = block
-                .get_record(time)
-                .ok_or_else(|| not_found!("No record with timestamp {}", time))?
-                .clone();
-            (block_ref.clone(), record)
-        };
+            let (block_ref, record) = {
+                let bm = block_manager.read()?;
+                let block_ref = bm.find_block(time)?;
+                let block = block_ref.read()?;
+                let record = block
+                    .get_record(time)
+                    .ok_or_else(|| not_found!("No record with timestamp {}", time))?
+                    .clone();
+                (block_ref.clone(), record)
+            };
 
-        if record.state == record::State::Started as i32 {
-            return Err(too_early!(
-                "Record with timestamp {} is still being written",
-                time
-            ));
-        }
+            if record.state == record::State::Started as i32 {
+                return Err(too_early!(
+                    "Record with timestamp {} is still being written",
+                    time
+                ));
+            }
 
-        if record.state == record::State::Errored as i32 {
-            return Err(internal_server_error!(
-                "Record with timestamp {} is broken",
-                time
-            ));
-        }
+            if record.state == record::State::Errored as i32 {
+                return Err(internal_server_error!(
+                    "Record with timestamp {} is broken",
+                    time
+                ));
+            }
 
-        RecordReader::try_new(self.block_manager.clone(), block_ref, time, true).await
+            RecordReader::try_new(block_manager, block_ref, time, true)
+        })
     }
 }
 

@@ -22,8 +22,7 @@ pub(crate) async fn create_replication(
         .replication_repo
         .write()
         .await
-        .create_replication(&replication_name, settings.into())
-        .await?;
+        .create_replication(&replication_name, settings.into())?;
     Ok(())
 }
 

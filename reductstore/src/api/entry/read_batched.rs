@@ -24,6 +24,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::timeout;
 
 // GET /:bucket/:entry/batch?q=<number>
@@ -59,11 +60,7 @@ pub(crate) async fn read_batched_records(
     };
 
     fetch_and_response_batched_records(
-        components
-            .storage
-            .write()
-            .await
-            .get_bucket_mut(bucket_name)?,
+        components.storage.get_bucket(bucket_name)?.upgrade()?,
         entry_name,
         query_id,
         method.name == "HEAD",
@@ -72,7 +69,7 @@ pub(crate) async fn read_batched_records(
 }
 
 async fn fetch_and_response_batched_records(
-    bucket: &mut Bucket,
+    bucket: Arc<Bucket>,
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
@@ -115,10 +112,10 @@ async fn fetch_and_response_batched_records(
     let mut last = false;
     let bucket_name = bucket.name().to_string();
     let rx = bucket
-        .get_entry_mut(entry_name)
+        .get_entry(entry_name)
         .unwrap()
-        .get_query_receiver(query_id)
-        .await?;
+        .upgrade()?
+        .get_query_receiver(query_id)?;
 
     loop {
         let timeout = if readers.is_empty() {
@@ -127,7 +124,7 @@ async fn fetch_and_response_batched_records(
             None
         };
         let reader = match next_record_reader(
-            rx,
+            rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
             timeout,
         )
@@ -187,20 +184,20 @@ async fn fetch_and_response_batched_records(
 // This function is used to get the next record from the query receiver
 // created for better testing
 async fn next_record_reader(
-    rx: &mut QueryRx,
+    rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
     recv_timeout: Option<Duration>,
 ) -> Option<Result<RecordReader, ReductError>> {
     // we need to wait for the first record
     let result = if let Some(recv_timeout) = recv_timeout {
-        if let Ok(result) = timeout(recv_timeout, rx.recv()).await {
+        if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
             result
         } else {
             debug!("Timeout while waiting for record from query {}", query_path);
             return None;
         }
     } else {
-        rx.recv().await
+        rx.write().await.recv().await
     };
 
     let reader = match result {
@@ -261,8 +258,8 @@ mod tests {
 
     use axum::body::to_bytes;
 
+    use crate::api::entry::tests::query;
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use crate::storage::query::base::QueryOptions;
     use rstest::*;
 
     #[rstest]
@@ -277,21 +274,10 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
-        let query_id = {
-            components
-                .storage
-                .write()
-                .await
-                .get_bucket_mut(path_to_entry_1.get("bucket_name").unwrap())
-                .unwrap()
-                .get_entry_mut(path_to_entry_1.get("entry_name").unwrap())
-                .unwrap()
-                .query(0, u64::MAX, QueryOptions::default())
-                .unwrap()
-        };
+        let query_id = query(&path_to_entry_1, components.clone()).await;
 
         let response = read_batched_records(
-            State(Arc::clone(&components)),
+            State(components.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "q".to_string(),
@@ -322,11 +308,12 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_next_record_reader_timeout() {
-            let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            let rx = Arc::new(AsyncRwLock::new(rx));
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(&mut rx, "", Some(Duration::from_millis(10)))
+                    next_record_reader(rx.clone(), "", Some(Duration::from_millis(10)))
                 )
                 .await
                 .unwrap()
@@ -336,7 +323,7 @@ mod tests {
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(&mut rx, "", None)
+                    next_record_reader(rx.clone(), "", None)
                 )
                 .await
                 .is_err(),
@@ -347,12 +334,13 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_next_record_reader_closed_tx() {
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(&mut rx, "", None)
+                    next_record_reader(rx.clone(), "", None)
                 )
                 .await
                 .unwrap()

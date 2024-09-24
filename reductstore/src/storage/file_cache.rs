@@ -1,14 +1,11 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::io::SeekFrom;
+use std::fs::{remove_dir_all, remove_file, rename, File};
+use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, LazyLock, RwLock, Weak};
 use std::time::Duration;
-
-use tokio::fs::File;
-use tokio::io::AsyncSeekExt;
-use tokio::sync::RwLock;
 
 use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
@@ -88,12 +85,12 @@ impl FileCache {
     /// # Returns
     ///
     /// A file reference
-    pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
-        let mut cache = self.cache.write().await;
+    pub fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
+        let mut cache = self.cache.write()?;
         let file = if let Some(desc) = cache.get_mut(path) {
             Arc::clone(&desc.file_ref)
         } else {
-            let file = File::options().read(true).open(path).await?;
+            let file = File::options().read(true).open(path)?;
             let file = Arc::new(RwLock::new(file));
             cache.insert(
                 path.clone(),
@@ -106,7 +103,7 @@ impl FileCache {
         };
 
         if pos != SeekFrom::Current(0) {
-            file.write().await.seek(pos).await?;
+            file.write()?.seek(pos)?;
         }
         Ok(FileWeak::new(file, path.clone()))
     }
@@ -124,18 +121,14 @@ impl FileCache {
     /// # Returns
     ///
     /// A file reference
-    pub async fn write_or_create(
-        &self,
-        path: &PathBuf,
-        pos: SeekFrom,
-    ) -> Result<FileWeak, ReductError> {
-        let mut cache = self.cache.write().await;
+    pub fn write_or_create(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
+        let mut cache = self.cache.write()?;
 
         let file = if let Some(desc) = cache.get_mut(path) {
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
-                let rw_file = File::options().write(true).read(true).open(path).await?;
+                let rw_file = File::options().write(true).read(true).open(path)?;
                 desc.file_ref = Arc::new(RwLock::new(rw_file));
                 desc.mode = AccessMode::ReadWrite;
 
@@ -146,8 +139,7 @@ impl FileCache {
                 .create(true)
                 .write(true)
                 .read(true)
-                .open(path)
-                .await?;
+                .open(path)?;
             let file = Arc::new(RwLock::new(file));
             cache.insert(
                 path.clone(),
@@ -160,7 +152,7 @@ impl FileCache {
         };
 
         if pos != SeekFrom::Current(0) {
-            file.write().await.seek(pos).await?;
+            file.write()?.seek(pos)?;
         }
         Ok(FileWeak::new(file, path.clone()))
     }
@@ -184,22 +176,22 @@ impl FileCache {
     ///
     /// This function will return an error if the file does not exist or if there is an issue
     /// removing the file from the file system.
-    pub async fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+    pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         if path.try_exists()? {
-            tokio::fs::remove_file(path).await?;
+            remove_file(path)?;
         }
-        let mut cache = self.cache.write().await;
+        let mut cache = self.cache.write()?;
 
         cache.remove(path);
         Ok(())
     }
 
-    pub async fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
+    pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
         if path.try_exists()? {
-            tokio::fs::remove_dir_all(path).await?;
+            remove_dir_all(path)?;
         }
 
-        let mut cache = self.cache.write().await;
+        let mut cache = self.cache.write()?;
 
         let files_to_remove = cache
             .keys()
@@ -227,9 +219,9 @@ impl FileCache {
     /// # Returns
     ///
     /// A `Result` which is `Ok` if the file was successfully renamed, or an `Err` containing
-    pub async fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
-        tokio::fs::rename(old_path, new_path).await?;
-        let mut cache = self.cache.write().await;
+    pub fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
+        rename(old_path, new_path)?;
+        let mut cache = self.cache.write()?;
         cache.remove(old_path);
         Ok(())
     }
@@ -237,67 +229,57 @@ impl FileCache {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use std::fs;
     use std::io::Write;
 
     use rstest::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::time::sleep;
-
-    use super::*;
+    use std::io::Read;
+    use std::thread::sleep;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_read(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_read(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_read.txt");
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
         file.sync_all().unwrap();
         drop(file);
 
-        let file_ref = cache.read(&file_path, SeekFrom::Start(0)).await.unwrap();
+        let file_ref = cache.read(&file_path, SeekFrom::Start(0)).unwrap();
         let mut data = String::new();
         file_ref
             .upgrade()
             .unwrap()
             .write()
-            .await
+            .unwrap()
             .read_to_string(&mut data)
-            .await
             .unwrap();
         assert_eq!(data, "test", "should read from beginning");
 
         let file_ref = cache
             .read(&file_path, SeekFrom::End(-2))
-            .await
             .unwrap()
             .upgrade()
             .unwrap();
         let mut data = String::new();
-        file_ref
-            .write()
-            .await
-            .read_to_string(&mut data)
-            .await
-            .unwrap();
+        file_ref.write().unwrap().read_to_string(&mut data).unwrap();
         assert_eq!(data, "st", "should read last 2 bytes");
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_write_or_create(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_write_or_create(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_write_or_create.txt");
 
         let file_ref = cache
             .write_or_create(&file_path, SeekFrom::Start(0))
-            .await
             .unwrap()
             .upgrade()
             .unwrap();
         {
-            let mut file = file_ref.write().await;
-            file.write_all(b"test").await.unwrap();
-            file.sync_all().await.unwrap();
+            let mut file = file_ref.write().unwrap();
+            file.write_all(b"test").unwrap();
+            file.sync_all().unwrap();
         };
 
         assert_eq!(
@@ -308,14 +290,13 @@ mod tests {
 
         let file_ref = cache
             .write_or_create(&file_path, SeekFrom::End(-2))
-            .await
             .unwrap()
             .upgrade()
             .unwrap();
         {
-            let mut file = file_ref.write().await;
-            file.write_all(b"xx").await.unwrap();
-            file.sync_all().await.unwrap();
+            let mut file = file_ref.write().unwrap();
+            file.write_all(b"xx").unwrap();
+            file.sync_all().unwrap();
         }
 
         assert_eq!(
@@ -326,84 +307,72 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_remove(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_remove.txt");
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
         file.sync_all().unwrap();
         drop(file);
 
-        cache.remove(&file_path).await.unwrap();
+        cache.remove(&file_path).unwrap();
         assert_eq!(file_path.exists(), false);
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_cache_max_size(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_cache_max_size(cache: FileCache, tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
 
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
-            .await
             .unwrap();
         cache
             .write_or_create(&file_path2, SeekFrom::Start(0))
-            .await
             .unwrap();
         cache
             .write_or_create(&file_path3, SeekFrom::Start(0))
-            .await
             .unwrap();
 
-        let mut inner_cache = cache.cache.write().await;
+        let mut inner_cache = cache.cache.write().unwrap();
         assert_eq!(inner_cache.len(), 2);
         assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_cache_ttl(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_cache_ttl(cache: FileCache, tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
 
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
-            .await
             .unwrap();
         cache
             .write_or_create(&file_path2, SeekFrom::Start(0))
-            .await
             .unwrap();
 
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(200));
 
         cache
             .write_or_create(&file_path3, SeekFrom::Start(0))
-            .await
             .unwrap(); // should remove the file_path1 descriptor
 
-        let mut inner_cache = cache.cache.write().await;
+        let mut inner_cache = cache.cache.write().unwrap();
         assert_eq!(inner_cache.len(), 1);
         assert!(inner_cache.get(&file_path1).is_none());
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove_dir(cache: FileCache, tmp_dir: PathBuf) {
+    fn test_remove_dir(cache: FileCache, tmp_dir: PathBuf) {
         let file_1 = cache
             .write_or_create(&tmp_dir.join("test_remove_dir.txt"), SeekFrom::Start(0))
-            .await
             .unwrap();
         let file_2 = cache
             .write_or_create(&tmp_dir.join("test_remove_dir.txt"), SeekFrom::Start(0))
-            .await
             .unwrap();
 
-        cache.remove_dir(&tmp_dir).await.unwrap();
+        cache.remove_dir(&tmp_dir).unwrap();
 
         assert!(file_1.upgrade().is_err());
         assert!(file_2.upgrade().is_err());

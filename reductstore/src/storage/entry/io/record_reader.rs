@@ -1,28 +1,26 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
+use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use bytes::Bytes;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::cmp::min;
-use std::io::SeekFrom;
-use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::sync::mpsc::error::SendTimeoutError;
+use std::io::Read;
+use std::io::{Seek, SeekFrom};
+use std::sync::{Arc, RwLock};
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
-    io_task_handle: Option<JoinHandle<()>>,
     record: Record,
     last: bool,
 }
@@ -30,20 +28,11 @@ pub(crate) struct RecordReader {
 struct ReadContext {
     bucket_name: String,
     entry_name: String,
-    block_id: u64,
     record_timestamp: u64,
     file_ref: FileWeak,
     offset: u64,
     content_size: u64,
-    block_manager: Arc<RwLock<BlockManager>>,
-}
-
-impl Drop for RecordReader {
-    fn drop(&mut self) {
-        if let Some(io) = self.io_task_handle.take() {
-            io.abort(); // Abort the task if it is still running
-        }
-    }
+    task_group: String,
 }
 
 impl RecordReader {
@@ -60,17 +49,17 @@ impl RecordReader {
     /// # Returns
     ///
     /// * `Result<RecordReader, ReductError>` - The record reader to read the record content in chunks
-    pub(in crate::storage) async fn try_new(
+    pub(in crate::storage) fn try_new(
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
         record_timestamp: u64,
         last: bool,
     ) -> Result<Self, ReductError> {
-        let (record, ctx) = async move {
-            let mut bm = block_manager.write().await;
-            let block = block_ref.read().await;
+        let (record, ctx) = {
+            let bm = block_manager.write()?;
+            let block = block_ref.read()?;
 
-            let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp).await?;
+            let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;
 
             let record = block.get_record(record_timestamp).unwrap();
             let content_size = record.end - record.begin;
@@ -78,39 +67,47 @@ impl RecordReader {
             let bucket_name = bm.bucket_name().to_string();
             let entry_name = bm.entry_name().to_string();
 
+            let storage = bm
+                .path()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap();
+            let task_group = [storage, &bucket_name, &entry_name, &block_id.to_string()].join("/");
+
             drop(bm);
             Ok::<(Record, ReadContext), ReductError>((
                 record.clone(),
                 ReadContext {
                     bucket_name,
                     entry_name,
-                    block_id,
                     record_timestamp,
                     file_ref,
                     offset,
                     content_size,
-                    block_manager,
+                    task_group,
                 },
             ))
-        }
-        .await?;
+        }?;
 
         let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
 
-        let io_task_handle = if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
-            Self::read(tx, ctx).await;
-            None
+        if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
+            Self::read(tx, ctx);
         } else {
-            Some(tokio::spawn(async move {
-                Self::read(tx, ctx).await;
-            }))
+            shared_child_isolated(&ctx.task_group.clone(), "read record content", move || {
+                Self::read(tx, ctx);
+            });
         };
 
         Ok(RecordReader {
             rx: Some(rx),
             record,
             last,
-            io_task_handle,
         })
     }
 
@@ -131,7 +128,6 @@ impl RecordReader {
             rx: None,
             record,
             last,
-            io_task_handle: None,
         }
     }
 
@@ -141,7 +137,6 @@ impl RecordReader {
             rx: Some(rx),
             record,
             last,
-            io_task_handle: None,
         }
     }
 
@@ -159,10 +154,6 @@ impl RecordReader {
 
     pub fn content_length(&self) -> u64 {
         self.record.end - self.record.begin
-    }
-
-    pub fn only_metadata(&self) -> bool {
-        self.rx.is_none()
     }
 
     /// Get the receiver to read the record content
@@ -190,47 +181,34 @@ impl RecordReader {
         &self.record
     }
 
-    async fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
+    fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
         let mut read_bytes = 0;
 
-        let read_all = async {
+        let mut read_all = || {
             while read_bytes < ctx.content_size {
                 let (buf, read) =
-                    match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes)
-                        .await
-                    {
+                    match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes) {
                         Ok((buf, read)) => (buf, read),
                         Err(e) => {
-                            tx.send_timeout(Err(e), IO_OPERATION_TIMEOUT).await?;
+                            tx.blocking_send(Err(e))?;
                             break;
                         }
                     };
 
-                tx.send_timeout(Ok(buf.into()), IO_OPERATION_TIMEOUT)
-                    .await?;
+                tx.blocking_send(Ok(buf.into()))?;
 
                 read_bytes += read as u64;
-                ctx.block_manager
-                    .write()
-                    .await
-                    .use_counter_mut()
-                    .update(ctx.block_id);
             }
 
-            Ok::<(), SendTimeoutError<_>>(())
+            Ok::<(), SendError<_>>(())
         };
 
-        if let Err(e) = read_all.await {
+        if let Err(e) = read_all() {
             debug!(
                 "Failed to send record {}/{}/{}: {}",
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
             )
         }
-
-        ctx.block_manager
-            .write()
-            .await
-            .finish_read_record(ctx.block_id);
     }
 }
 
@@ -245,7 +223,7 @@ impl RecordReader {
 /// # Returns
 ///
 /// * `Result<(Vec<u8>, usize), ReductError>` - The read buffer and the number of bytes read
-pub async fn read_in_chunks(
+pub(in crate::storage) fn read_in_chunks(
     file: &FileWeak,
     offset: u64,
     content_size: u64,
@@ -254,15 +232,15 @@ pub async fn read_in_chunks(
     let chunk_size = min(content_size - read_bytes, MAX_IO_BUFFER_SIZE as u64);
     let mut buf = vec![0; chunk_size as usize];
 
-    let seek_and_read = async {
+    let seek_and_read = {
         let rc = file.upgrade()?;
-        let mut lock = rc.write().await;
-        lock.seek(SeekFrom::Start(offset + read_bytes)).await?;
-        let read = lock.read(&mut buf).await?;
+        let mut lock = rc.write()?;
+        lock.seek(SeekFrom::Start(offset + read_bytes))?;
+        let read = lock.read(&mut buf)?;
         Ok::<usize, ReductError>(read)
     };
 
-    let read = match seek_and_read.await {
+    let read = match seek_and_read {
         Ok(read) => read,
         Err(e) => {
             return Err(internal_server_error!("Failed to read record chunk: {}", e));
@@ -293,30 +271,21 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_ok(file_to_read: PathBuf, content_size: usize) {
-            let file_ref = FILE_CACHE
-                .read(&file_to_read, SeekFrom::Start(0))
-                .await
-                .unwrap();
+            let file_ref = FILE_CACHE.read(&file_to_read, SeekFrom::Start(0)).unwrap();
             let content_size = content_size as u64;
-            let (data, len) = read_in_chunks(&file_ref, 0, content_size, 0).await.unwrap();
+            let (_data, len) = read_in_chunks(&file_ref, 0, content_size, 0).unwrap();
             assert_eq!(len, MAX_IO_BUFFER_SIZE);
 
-            let (data, len) = read_in_chunks(&file_ref, 0, content_size, len as u64)
-                .await
-                .unwrap();
+            let (_data, len) = read_in_chunks(&file_ref, 0, content_size, len as u64).unwrap();
             assert_eq!(len, content_size as usize - MAX_IO_BUFFER_SIZE);
         }
 
         #[rstest]
         #[tokio::test]
         async fn test_eof(file_to_read: PathBuf, content_size: usize) {
-            let file_ref = FILE_CACHE
-                .read(&file_to_read, SeekFrom::Start(0))
-                .await
-                .unwrap();
+            let file_ref = FILE_CACHE.read(&file_to_read, SeekFrom::Start(0)).unwrap();
             let content_size = content_size as u64;
             let err = read_in_chunks(&file_ref, content_size, content_size, 0)
-                .await
                 .err()
                 .unwrap();
             assert_eq!(
@@ -342,16 +311,18 @@ mod tests {
         use super::*;
         use crate::storage::entry::Entry;
 
+        use crate::core::thread_pool::find_task_group;
+        use crate::storage::entry::tests::get_task_group;
         use std::time::Duration;
 
         #[rstest]
         #[tokio::test]
-        async fn test_no_tokio_task(mut entry: Entry) {
+        async fn test_no_task(mut entry: Entry) {
             write_stub_record(&mut entry, 1000).await.unwrap();
 
             let mut reader = entry.begin_read(1000).await.unwrap();
             assert!(
-                reader.io_task_handle.is_none(),
+                find_task_group(&get_task_group(entry.path(), 1000)).is_none(),
                 "We don't spawn a task for small records"
             );
             assert_eq!(
@@ -362,15 +333,21 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_with_tokio_task(mut entry: Entry) {
-            write_record(&mut entry, 1000, vec![0; MAX_IO_BUFFER_SIZE + 1])
-                .await
-                .unwrap();
+        async fn test_with_task(mut entry: Entry) {
+            write_record(
+                &mut entry,
+                1000,
+                vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
+            )
+            .await
+            .unwrap();
 
             let mut reader = entry.begin_read(1000).await.unwrap();
+            let task_group = get_task_group(entry.path(), 1000);
+            tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to start
 
             assert!(
-                reader.io_task_handle.is_some(),
+                find_task_group(&task_group).is_some(),
                 "We spawn a task for big records"
             );
             assert_eq!(
@@ -381,24 +358,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to finish
 
             assert!(
-                reader.io_task_handle.as_ref().unwrap().is_finished(),
-                "The task should finish after reading the record"
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_with_io_timeout(mut entry: Entry) {
-            write_record(&mut entry, 1000, vec![0; MAX_IO_BUFFER_SIZE + 1])
-                .await
-                .unwrap();
-
-            let reader = entry.begin_read(1000).await.unwrap();
-            tokio::time::sleep(IO_OPERATION_TIMEOUT).await;
-            tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to finish
-
-            assert!(
-                reader.io_task_handle.as_ref().unwrap().is_finished(),
+                find_task_group(&task_group).is_none(),
                 "The task should finish after reading the record"
             );
         }

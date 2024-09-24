@@ -36,10 +36,12 @@ pub(crate) async fn remove_batched_records(
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
 
     let err_map = {
-        let mut storage = components.storage.write().await;
-        let entry = storage
-            .get_bucket_mut(bucket_name)?
-            .get_entry_mut(entry_name)?;
+        let entry = components
+            .storage
+            .get_bucket(bucket_name)?
+            .upgrade()?
+            .get_entry(entry_name)?
+            .upgrade()?;
         entry
             .remove_records(record_headers.iter().map(|(time, _)| *time).collect())
             .await?
@@ -112,11 +114,17 @@ mod tests {
         .await
         .unwrap();
 
-        let storage = components.storage.read().await;
-        let bucket = storage.get_bucket("bucket-1").unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade()
+            .unwrap();
 
         let err = bucket
             .get_entry("entry-1")
+            .unwrap()
+            .upgrade()
             .unwrap()
             .begin_read(0)
             .await

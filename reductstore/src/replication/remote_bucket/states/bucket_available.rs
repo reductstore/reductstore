@@ -7,7 +7,6 @@ use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
-use async_trait::async_trait;
 use log::{debug, error, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
 use reduct_base::error::{IntEnum, ReductError};
@@ -54,9 +53,8 @@ impl BucketAvailableState {
     }
 }
 
-#[async_trait]
 impl RemoteBucketState for BucketAvailableState {
-    async fn write_batch(
+    fn write_batch(
         mut self: Box<Self>,
         entry_name: &str,
         records: Vec<(RecordReader, Transaction)>,
@@ -75,11 +73,7 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         let error_map = if !records_to_update.is_empty() {
-            match self
-                .bucket
-                .update_batch(entry_name, &records_to_update)
-                .await
-            {
+            match self.bucket.update_batch(entry_name, &records_to_update) {
                 Ok(error_map) => {
                     // all good keep the state
                     error_map
@@ -117,7 +111,7 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         if !records_to_write.is_empty() {
-            match self.bucket.write_batch(entry_name, records_to_write).await {
+            match self.bucket.write_batch(entry_name, records_to_write) {
                 Ok(error_map) => {
                     self.last_result = Ok(error_map);
                     self
@@ -183,7 +177,7 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record_to_write]).await;
+        let state = state.write_batch("test_entry", vec![record_to_write]);
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -210,9 +204,7 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state
-            .write_batch("test_entry", vec![record_to_update])
-            .await;
+        let state = state.write_batch("test_entry", vec![record_to_update]);
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -234,7 +226,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]).await;
+        let state = state.write_batch("test", vec![record_to_write]);
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::Timeout, ""))
@@ -259,7 +251,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update]).await;
+        let state = state.write_batch("test", vec![record_to_update]);
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::Timeout, ""))
@@ -283,7 +275,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]).await;
+        let state = state.write_batch("test", vec![record_to_write]);
         assert_eq!(
             state.last_result(),
             &Err(ReductError::new(ErrorCode::InternalServerError, ""))
@@ -310,7 +302,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]).await;
+        let state = state.write_batch("test", vec![record_to_write]);
         let error_map = state.last_result().as_ref().unwrap();
 
         assert_eq!(error_map.len(), 1);
@@ -342,9 +334,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state
-            .write_batch("test", vec![record_to_update, record_to_write()])
-            .await;
+        let state = state.write_batch("test", vec![record_to_update, record_to_write()]);
         assert!(
             state.last_result().is_ok(),
             "we should not have any errors because wrote error records"

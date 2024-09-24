@@ -4,7 +4,6 @@
 use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use async_trait::async_trait;
 
 use log::error;
 
@@ -22,19 +21,18 @@ pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     last_result: Result<ErrorRecordMap, ReductError>,
 }
 
-#[async_trait]
 impl RemoteBucketState for BucketUnavailableState {
-    async fn write_batch(
+    fn write_batch(
         self: Box<Self>,
         entry: &str,
         records: Vec<(RecordReader, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
-            let bucket = self.client.get_bucket(&self.bucket_name).await;
+            let bucket = self.client.get_bucket(&self.bucket_name);
             return match bucket {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                    new_state.write_batch(entry, records).await
+                    new_state.write_batch(entry, records)
                 }
                 Err(err) => {
                     error!(
@@ -102,7 +100,7 @@ mod tests {
             error.clone(),
         ));
 
-        let state = state.write_batch("entry", vec![]).await;
+        let state = state.write_batch("entry", vec![]);
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
         assert!(!state.is_available());
     }
@@ -116,7 +114,7 @@ mod tests {
             .return_once(move |_| Err(ReductError::not_found("")));
 
         let state = state_without_timeout(client);
-        let state = state.write_batch("test_entry", vec![]).await;
+        let state = state.write_batch("test_entry", vec![]);
         assert_eq!(state.last_result(), &Err(ReductError::not_found("")));
         assert!(!state.is_available());
     }
@@ -137,7 +135,7 @@ mod tests {
             .return_once(move |_| Ok(Box::new(bucket)));
 
         let state = state_without_timeout(client);
-        let state = state.write_batch("test_entry", vec![]).await;
+        let state = state.write_batch("test_entry", vec![]);
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }

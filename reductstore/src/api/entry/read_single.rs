@@ -6,7 +6,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::Components;
 use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
-use crate::storage::bucket::Bucket;
+use reduct_base::error::ReductError;
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -15,13 +15,15 @@ use axum_extra::headers::{HeaderMap, HeaderName};
 use bytes::Bytes;
 use futures_util::Stream;
 
-use crate::storage::entry::RecordReader;
+use crate::core::weak::Weak;
+use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
-use reduct_base::error::ErrorCode;
+use reduct_base::bad_request;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use tokio::sync::RwLock as AsyncRwLock;
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub(crate) async fn read_record(
@@ -42,20 +44,20 @@ pub(crate) async fn read_record(
     )
     .await?;
 
-    let storage = components.storage.read().await;
-    let (query_id, ts) =
-        check_and_extract_ts_or_query_id(&storage, params, bucket_name, entry_name).await?;
-    drop(storage); // Release the lock
+    let entry = components
+        .storage
+        .get_bucket(bucket_name)?
+        .upgrade()?
+        .get_entry(entry_name)?;
+    let last_record = entry.upgrade()?.info()?.latest_record;
 
-    let mut storage = components.storage.write().await;
-    let bucket = storage.get_bucket_mut(bucket_name)?;
-    fetch_and_response_single_record(bucket, entry_name, ts, query_id, method.name() == "HEAD")
-        .await
+    let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
+
+    fetch_and_response_single_record(entry, ts, query_id, method.name() == "HEAD").await
 }
 
 async fn fetch_and_response_single_record(
-    bucket: &mut Bucket,
-    entry_name: &str,
+    entry: Weak<Entry>,
     ts: Option<u64>,
     query_id: Option<u64>,
     empty_body: bool,
@@ -92,16 +94,13 @@ async fn fetch_and_response_single_record(
         headers
     };
 
+    let entry = entry.upgrade()?;
     let reader = if let Some(ts) = ts {
-        bucket.begin_read(entry_name, ts).await?
+        entry.begin_read(ts).await?
     } else {
         let query_id = query_id.unwrap();
-        let bucket_name = bucket.name().to_string();
-        let rx = bucket
-            .get_entry_mut(entry_name)?
-            .get_query_receiver(query_id)
-            .await?;
-        let query_path = format!("{}/{}/{}", bucket_name, entry_name, query_id);
+        let rx = entry.get_query_receiver(query_id)?;
+        let query_path = format!("{}/{}/{}", entry.bucket_name(), entry.name(), query_id);
         next_record_reader(rx, &query_path).await?
     };
 
@@ -113,14 +112,18 @@ async fn fetch_and_response_single_record(
     ))
 }
 
-async fn next_record_reader(rx: &mut QueryRx, query_path: &str) -> Result<RecordReader, HttpError> {
+async fn next_record_reader(
+    rx: Weak<AsyncRwLock<QueryRx>>,
+    query_path: &str,
+) -> Result<RecordReader, HttpError> {
+    let rc = rx
+        .upgrade()
+        .map_err(|_| bad_request!("Query '{}' was closed", query_path))?;
+    let mut rx = rc.write().await;
     if let Some(reader) = rx.recv().await {
         reader.map_err(|e| HttpError::from(e))
     } else {
-        Err(HttpError::new(
-            ErrorCode::BadRequest,
-            &format!("Query {} closed before the response was sent", query_path),
-        ))
+        Err(bad_request!("Query'{}' was closed: broken channel", query_path).into())
     }
 }
 
@@ -162,8 +165,9 @@ mod tests {
 
     use axum::body::to_bytes;
 
+    use crate::api::entry::tests::query;
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use crate::storage::query::base::QueryOptions;
+
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ErrorCode::NotFound;
     use rstest::*;
@@ -217,19 +221,7 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
-        let query_id = {
-            components
-                .storage
-                .write()
-                .await
-                .get_bucket_mut(path_to_entry_1.get("bucket_name").unwrap())
-                .unwrap()
-                .get_entry_mut(path_to_entry_1.get("entry_name").unwrap())
-                .unwrap()
-                .query(0, u64::MAX, QueryOptions::default())
-                .unwrap()
-        };
-
+        let query_id = query(&path_to_entry_1, Arc::clone(&components)).await;
         let response = read_record(
             State(Arc::clone(&components)),
             path_to_entry_1,
@@ -368,14 +360,12 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_next_record_reader_err() {
-            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert_eq!(
-                next_record_reader(&mut rx, "test").await.err().unwrap(),
-                HttpError::new(
-                    ErrorCode::BadRequest,
-                    "Query test closed before the response was sent"
-                )
+                next_record_reader(rx.into(), "test").await.err().unwrap(),
+                HttpError::new(ErrorCode::BadRequest, "Query 'test' was closed")
             );
         }
     }

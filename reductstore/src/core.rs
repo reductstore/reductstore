@@ -4,3 +4,5 @@
 pub mod cache;
 pub mod env;
 pub mod logger;
+pub mod thread_pool;
+pub mod weak;

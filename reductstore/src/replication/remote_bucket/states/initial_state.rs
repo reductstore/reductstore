@@ -32,18 +32,18 @@ impl InitialState {
 
 #[async_trait]
 impl RemoteBucketState for InitialState {
-    async fn write_batch(
+    fn write_batch(
         self: Box<Self>,
         entry: &str,
         records: Vec<(RecordReader, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         // Try to get the bucket.
-        let bucket = self.client.get_bucket(&self.bucket_name).await;
+        let bucket = self.client.get_bucket(&self.bucket_name);
         match bucket {
             Ok(bucket) => {
                 // Bucket is available, transition to the available state and write the record.
                 let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                new_state.write_batch(entry, records).await
+                new_state.write_batch(entry, records)
             }
             Err(err) => {
                 // Bucket is unavailable, transition to the unavailable state.
@@ -112,7 +112,7 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.write_batch("test_entry", vec![]).await;
+        let state = state.write_batch("test_entry", vec![]);
 
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
         assert_eq!(state.is_available(), true);
@@ -131,7 +131,7 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.write_batch("test_entry", vec![]).await;
+        let state = state.write_batch("test_entry", vec![]);
 
         assert_eq!(
             state.last_result(),

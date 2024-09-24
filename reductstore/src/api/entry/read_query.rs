@@ -32,14 +32,15 @@ pub(crate) async fn read_query(
     )
     .await?;
 
-    let mut storage = components.storage.write().await;
-    let bucket = storage.get_bucket_mut(bucket_name)?;
-    let entry_info = bucket.get_entry(entry_name)?.info().await?;
-    let entry = bucket.get_or_create_entry(entry_name)?;
+    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+    let entry_info = bucket.get_entry(entry_name)?.upgrade()?.info()?;
+    let entry = bucket.get_or_create_entry(entry_name)?.upgrade()?;
 
     let (start, stop) =
         parse_time_range(&params, entry_info.oldest_record, entry_info.latest_record)?;
-    let id = entry.query(start, stop, parse_query_params(params, false)?)?;
+    let id = entry
+        .query(start, stop, parse_query_params(params, false)?)
+        .await?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }
@@ -71,15 +72,23 @@ mod tests {
         .await;
 
         let query: QueryInfo = result.unwrap().into();
-
-        let mut storage = components.storage.write().await;
-        let entry = storage
-            .get_bucket_mut("bucket-1")
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
             .unwrap()
-            .get_entry_mut("entry-1")
+            .upgrade()
+            .unwrap()
+            .get_entry("entry-1")
+            .unwrap()
+            .upgrade()
             .unwrap();
 
-        let rx = entry.get_query_receiver(query.id).await.unwrap();
+        let rx = entry
+            .get_query_receiver(query.id)
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut rx = rx.write().await;
         assert!(rx.recv().await.unwrap().unwrap().last());
 
         assert_eq!(

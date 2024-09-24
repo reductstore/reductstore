@@ -17,11 +17,13 @@ pub(crate) async fn update_bucket(
     settings: BucketSettingsAxum,
 ) -> Result<(), HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
-    let mut storage = components.storage.write().await;
 
-    Ok(storage
-        .get_bucket_mut(&bucket_name)?
-        .set_settings(settings.into())?)
+    Ok(components
+        .storage
+        .get_bucket(&bucket_name)?
+        .upgrade()?
+        .set_settings(settings.into())
+        .await?)
 }
 
 #[cfg(test)]

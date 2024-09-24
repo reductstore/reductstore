@@ -11,20 +11,15 @@ use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /b/:bucket_name
+
 pub(crate) async fn get_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullBucketInfoAxum, HttpError> {
     check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
-    let bucket_info = components
-        .storage
-        .write()
-        .await
-        .get_bucket_mut(&bucket_name)?
-        .info()
-        .await?;
-    Ok(FullBucketInfoAxum::from(bucket_info))
+    let bucket_info = components.storage.get_bucket(&bucket_name)?.upgrade()?;
+    Ok(bucket_info.info()?.into())
 }
 
 #[cfg(test)]
