@@ -180,10 +180,10 @@ static THREAD_POOL_TICK: Duration = Duration::from_micros(5);
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     let thread_pool_size = max(
         available_parallelism()
-            .unwrap_or(NonZero::new(2).unwrap())
+            .unwrap_or(NonZero::new(1).unwrap())
             .get()
             / 2,
-        2,
+        4,
     );
     ThreadPool::new(thread_pool_size)
 });
