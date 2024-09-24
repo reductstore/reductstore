@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::shared_child;
+use crate::core::thread_pool::{shared_child, shared_child_isolated};
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
@@ -102,7 +102,7 @@ impl RecordReader {
         if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
             Self::read(tx, ctx);
         } else {
-            shared_child(&ctx.task_group.clone(), "read record content", move || {
+            shared_child_isolated(&ctx.task_group.clone(), "read record content", move || {
                 Self::read(tx, ctx);
             });
         };

@@ -5,10 +5,11 @@ mod task_group;
 mod task_handle;
 
 use crossbeam_channel::internal::SelectHandle;
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use futures_util::{FutureExt, StreamExt};
 use log::{error, trace};
 use std::cmp::{max, min};
+use std::fmt::Display;
 use std::num::NonZero;
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -115,6 +116,23 @@ where
     THREAD_POOL.shared_isolated(group_path, description, task)
 }
 
+/// Spawn a shared task as a isolated task outside of thread pool.
+///
+/// Use it for loops or other blocking operations.
+///
+/// The task will wait until the task group is unlocked and no unique tasks are running for the same
+/// group. It will not wait for parent groups to be unlocked.
+pub(crate) fn shared_child_isolated<T>(
+    group_path: &str,
+    description: &str,
+    task: impl FnOnce() -> T + Send + 'static,
+) -> TaskHandle<T>
+where
+    T: Send + 'static,
+{
+    THREAD_POOL.shared_child_isolated(group_path, description, task)
+}
+
 /// Find a task group by path.
 pub(crate) fn find_task_group(group_path: &str) -> Option<TaskGroup> {
     let group = THREAD_POOL.task_group.lock().unwrap();
@@ -123,14 +141,30 @@ pub(crate) fn find_task_group(group_path: &str) -> Option<TaskGroup> {
         .cloned()
 }
 
-type Func = Box<dyn FnOnce() + Send>;
+type BoxedFunc = Box<dyn FnOnce() + Send>;
 
-enum Task {
-    Unique(String, Func),
-    Shared(String, Func),
-    ChildUnique(String, Func),
-    ChildShared(String, Func),
-    IsolatedShared(String, Func),
+#[derive(PartialEq, Debug)]
+enum TaskMode {
+    Unique,
+    Shared,
+}
+
+struct Task {
+    task_group: String,
+    func: BoxedFunc,
+    mode: TaskMode,
+    child: bool,    // Child task, check only current group and children
+    isolated: bool, // Isolated task, run in separate thread
+}
+
+impl Display for Task {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Task({}) mode={:?} child={} isolated={}",
+            self.task_group, self.mode, self.child, self.isolated
+        )
+    }
 }
 
 #[derive(PartialEq)]
@@ -142,12 +176,13 @@ enum ThreadPoolState {
 static THREAD_POOL_TICK: Duration = Duration::from_micros(5);
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
-    let thread_pool_size = max(
+    let mut thread_pool_size = max(
         available_parallelism()
             .unwrap_or(NonZero::new(2).unwrap())
             .get(),
         2,
     );
+    thread_pool_size = 1;
     ThreadPool::new(thread_pool_size)
 });
 
@@ -185,33 +220,21 @@ impl ThreadPool {
                     continue;
                 }
 
-                // TODO: Get rid of paring
-                let (name, func, unique, child, isolated) = match task {
-                    Ok(Task::Unique(name, func)) => (name, func, true, false, false),
-                    Ok(Task::Shared(name, func)) => (name, func, false, false, false),
-                    Ok(Task::ChildUnique(name, func)) => (name, func, true, true, false),
-                    Ok(Task::ChildShared(name, func)) => (name, func, false, true, false),
-                    Ok(Task::IsolatedShared(name, func)) => (name, func, false, false, true),
-                    Err(err) => {
-                        error!("Thread pool receive error: {}", err);
-                        break;
-                    }
+                let task = task.unwrap();
+                let group_path = task.task_group.split('/').collect();
+                let unique = task.mode == TaskMode::Unique;
+
+                let ready = {
+                    let lock = task_group.lock().unwrap();
+                    (task.child && lock.is_ready_current(&group_path, unique))
+                        || (!task.child && lock.is_ready(&group_path, unique))
                 };
 
-                let group_path = name.split('/').collect();
-
-                loop {
-                    let ready = {
-                        let lock = task_group.lock().unwrap();
-                        (child && lock.is_ready_current(&group_path, unique))
-                            || (!child && lock.is_ready(&group_path, unique))
-                    };
-
-                    if !ready {
-                        sleep(THREAD_POOL_TICK);
-                        continue;
-                    }
-                    break;
+                if !ready {
+                    trace!("Group '{}' is not ready for {}", task.task_group, task);
+                    sleep(THREAD_POOL_TICK);
+                    task_tx.send(task).unwrap_or(());
+                    continue;
                 }
 
                 {
@@ -219,8 +242,8 @@ impl ThreadPool {
                     lock.lock(&group_path, unique);
                 }
 
-                if !isolated {
-                    func();
+                if !task.isolated {
+                    (task.func)();
                     let mut lock = task_group.lock().unwrap();
                     lock.unlock(&group_path, unique);
                 } else {
@@ -230,7 +253,7 @@ impl ThreadPool {
                         .map(|s| s.to_string())
                         .collect::<Vec<String>>();
                     std::thread::spawn(move || {
-                        func();
+                        (task.func)();
                         let mut lock = task_group.lock().unwrap();
                         lock.unlock(
                             &group_path.iter().map(|s| s.as_str()).collect::<Vec<&str>>(),
@@ -262,20 +285,10 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        self.task_queue
-            .send(Task::Unique(
-                group.clone(),
-                Box::new(move || {
-                    trace!("Task '{}' started: {}", group, description);
+        let (mut task, rx) = Self::build_task(group, description, task);
+        task.mode = TaskMode::Unique;
 
-                    let result = task();
-                    tx.send(result).unwrap_or(());
-                    trace!("Task '{}' completed: {}", group, description);
-                }),
-            ))
-            .unwrap();
-
+        self.task_queue.send(task).unwrap_or(());
         TaskHandle::new(rx)
     }
 
@@ -289,20 +302,11 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        self.task_queue
-            .send(Task::ChildUnique(
-                group.clone(),
-                Box::new(move || {
-                    trace!("Task '{}' started: {}", group, description);
+        let (mut task, rx) = Self::build_task(group, description, task);
+        task.mode = TaskMode::Unique;
+        task.child = true;
 
-                    let result = task();
-                    tx.send(result).unwrap_or(());
-                    trace!("Task '{}' completed: {}", group, description);
-                }),
-            ))
-            .unwrap();
-
+        self.task_queue.send(task).unwrap_or(());
         TaskHandle::new(rx)
     }
 
@@ -318,20 +322,10 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        self.task_queue
-            .send(Task::Shared(
-                group.clone(),
-                Box::new(move || {
-                    trace!("Task '{}' started: {}", group, description);
+        let (mut task, rx) = Self::build_task(group, description, task);
+        task.mode = TaskMode::Shared;
 
-                    let result = task();
-                    tx.send(result).unwrap_or(());
-                    trace!("Task '{}' completed: {}", group, description);
-                }),
-            ))
-            .unwrap();
-
+        self.task_queue.send(task).unwrap_or(());
         TaskHandle::new(rx)
     }
 
@@ -345,21 +339,11 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        self.task_queue
-            .send(Task::ChildShared(
-                group.to_string(),
-                Box::new(move || {
-                    trace!("Task '{}' started: {}", group, description);
+        let (mut task, rx) = Self::build_task(group, description, task);
+        task.mode = TaskMode::Shared;
+        task.child = true;
 
-                    let result = task();
-                    tx.send(result).unwrap_or(());
-
-                    trace!("Task '{}' completed: {}", group, description);
-                }),
-            ))
-            .unwrap();
-
+        self.task_queue.send(task).unwrap_or(());
         TaskHandle::new(rx)
     }
 
@@ -373,22 +357,59 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        self.task_queue
-            .send(Task::IsolatedShared(
-                group.to_string(),
-                Box::new(move || {
-                    trace!("Task '{}' started: {}", group, description);
+        let (mut task, rx) = Self::build_task(group, description, task);
+        task.mode = TaskMode::Shared;
+        task.isolated = true;
 
-                    let result = task();
-                    tx.send(result).unwrap_or(());
-
-                    trace!("Task '{}' completed: {}", group, description);
-                }),
-            ))
-            .unwrap();
-
+        self.task_queue.send(task).unwrap_or(());
         TaskHandle::new(rx)
+    }
+
+    pub fn shared_child_isolated<T: Send + 'static>(
+        &self,
+        group: &str,
+        description: &str,
+        task: impl FnOnce() -> T + Send + 'static,
+    ) -> TaskHandle<T> {
+        trace!("Spawn isolated child task '{}: {}", group, description);
+        let group = group.to_string();
+        let description = description.to_string();
+
+        let (mut task, rx) = Self::build_task(group, description, task);
+        task.mode = TaskMode::Shared;
+        task.child = true;
+        task.isolated = true;
+
+        self.task_queue.send(task).unwrap_or(());
+        TaskHandle::new(rx)
+    }
+
+    fn build_task<T: Send + 'static>(
+        group: String,
+        description: String,
+        task: impl FnOnce() -> T + Send + 'static,
+    ) -> (Task, Receiver<T>) {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+
+        let copy_group = group.clone();
+        let box_task = Box::new(move || {
+            trace!("Task '{}' started: {}", group, description);
+
+            let result = task();
+            tx.send(result).unwrap_or(());
+
+            trace!("Task '{}' completed: {}", group, description);
+        });
+
+        let task = Task {
+            task_group: copy_group,
+            func: box_task,
+            mode: TaskMode::Shared,
+            child: false,
+            isolated: false,
+        };
+
+        (task, rx)
     }
 
     fn check_current_thread(&self) {
