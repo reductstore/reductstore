@@ -1,11 +1,14 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
 use std::path::PathBuf;
 
 use crc64fast::Digest;
+use log::warn;
 use prost::Message;
 
 use reduct_base::error::ReductError;
@@ -121,13 +124,14 @@ pub(in crate::storage) trait Wal {
 
 struct WalImpl {
     root_path: PathBuf,
+    file_positions: HashMap<u64, u64>,
 }
 
 impl WalImpl {
     pub fn new(path_buf: PathBuf) -> Self {
-        // preallocate file
         WalImpl {
             root_path: path_buf,
+            file_positions: HashMap::new(), // we need to keep track of the file positions for each block because of file cache
         }
     }
 
@@ -146,9 +150,21 @@ impl Wal for WalImpl {
             let file = wk.upgrade()?;
             // preallocate file to speed up writes
             file.write()?.set_len(WAL_FILE_SIZE)?;
+            self.file_positions.insert(block_id, 0);
             wk
         } else {
-            FILE_CACHE.write_or_create(&path, SeekFrom::Current(0))?
+            let pos = match self.file_positions.entry(block_id) {
+                Occupied(e) => e.get().clone(),
+                Vacant(e) => {
+                    warn!(
+                        "File position for block {} not found. Overwrite WAL",
+                        block_id
+                    );
+                    e.insert(0).clone()
+                }
+            };
+
+            FILE_CACHE.write_or_create(&path, SeekFrom::Start(pos))?
         };
 
         let rc = file.upgrade()?;
@@ -167,6 +183,8 @@ impl Wal for WalImpl {
         lock.write(&crc.sum64().to_be_bytes())?;
         // write stop marker
         lock.write_u8(STOP_MARKER)?;
+        self.file_positions
+            .insert(block_id, lock.stream_position()?);
         Ok(())
     }
 
@@ -334,6 +352,25 @@ mod tests {
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
         let err = wal.read(1).err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    fn cache_invalidation(mut wal: WalImpl) {
+        wal.append(1, WalEntry::UpdateRecord(Record::default()))
+            .unwrap();
+        FILE_CACHE.discard(&wal.root_path.join("1.wal")).unwrap();
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .unwrap();
+
+        let entries = wal.read(1).unwrap();
+        assert_eq!(
+            entries,
+            vec![
+                WalEntry::UpdateRecord(Record::default()),
+                WalEntry::WriteRecord(Record::default())
+            ],
+            "We keep entry after cache invalidation"
+        );
     }
 
     #[fixture]

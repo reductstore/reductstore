@@ -206,6 +206,13 @@ impl FileCache {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    pub fn discard(&self, path: &PathBuf) -> Result<(), ReductError> {
+        let mut cache = self.cache.write()?;
+        cache.remove(path);
+        Ok(())
+    }
+
     /// Renames a file in the file system and updates the cache.
     ///
     /// This function attempts to rename a file at the specified old path to the new path.
