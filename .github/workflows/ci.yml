@@ -429,7 +429,7 @@ jobs:
       - name: Save snap name in environment variable
         run: |
           echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
-      - uses: snapcore/action-publish@v1
+      - uses: snapcore/action-publish@master
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
         with:
