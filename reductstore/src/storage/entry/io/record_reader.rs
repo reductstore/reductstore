@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{shared_child, shared_child_isolated};
+use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
@@ -318,7 +318,6 @@ mod tests {
         use super::*;
         use crate::storage::entry::Entry;
 
-        use crate::core::logger::Logger;
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
         use std::time::Duration;

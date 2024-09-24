@@ -7,8 +7,8 @@ mod task_handle;
 use crossbeam_channel::internal::SelectHandle;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use futures_util::{FutureExt, StreamExt};
-use log::{error, trace};
-use std::cmp::{max, min};
+use log::trace;
+use std::cmp::max;
 use std::fmt::Display;
 use std::num::NonZero;
 use std::ops::Deref;
@@ -17,7 +17,6 @@ use std::thread::{available_parallelism, sleep, JoinHandle};
 use std::time::Duration;
 pub(crate) use task_group::TaskGroup;
 pub(crate) use task_handle::TaskHandle;
-use tokio::spawn;
 
 /// Spawn a unique task for a task group.
 ///

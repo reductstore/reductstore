@@ -205,7 +205,7 @@ impl ReplicationSender {
 #[cfg(target_os = "linux")] // we need precise timing
 mod tests {
     use super::*;
-    use crate::core::logger::Logger;
+
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
     use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};

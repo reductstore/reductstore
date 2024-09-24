@@ -488,7 +488,7 @@ mod tests {
 
     mod try_remove_oldest_block {
         use super::*;
-        use crate::core::logger::Logger;
+
         use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
         #[rstest]
