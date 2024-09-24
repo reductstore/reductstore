@@ -328,6 +328,7 @@ jobs:
       - name: Run current ReductStore
         run: |
           docker run --network=host -v ./data:/data \
+            --env RS_LOG_LEVEL=DEBUG \
             --env RS_API_TOKEN=${RS_API_TOKEN} \
             --env RS_BUCKET_1_NAME=src \
             --env RS_BUCKET_2_NAME=dest \
