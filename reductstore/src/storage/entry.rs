@@ -376,7 +376,6 @@ mod tests {
         use super::*;
         use reduct_base::error::ErrorCode;
         use reduct_base::{no_content, not_found};
-        use std::ptr::read;
 
         #[rstest]
         #[tokio::test]

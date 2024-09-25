@@ -118,7 +118,7 @@ impl BlockManager {
             let mut crc = Digest::new();
             crc.write(&buf);
 
-            if (self.block_index.get_block(block_id).unwrap().crc64 != Some(crc.sum64())) {
+            if self.block_index.get_block(block_id).unwrap().crc64 != Some(crc.sum64()) {
                 error!("Block descriptor {:?} is corrupted. Remove it and its data block, then restart the database", path);
                 return Err(internal_server_error!(
                     "Block descriptor {:?} is corrupted",
