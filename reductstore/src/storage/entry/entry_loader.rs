@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use bytes::Bytes;
 use bytesize::ByteSize;
+use crc64fast::Digest;
 use log::{debug, error, trace, warn};
 use prost::Message;
 
@@ -88,6 +89,9 @@ impl EntryLoader {
             }
 
             let buf = fs::read(path.clone())?;
+            let mut crc = Digest::new();
+            crc.write(&buf);
+
             let mut block = match MinimalBlock::decode(Bytes::from(buf)) {
                 Ok(block) => block,
                 Err(err) => {
@@ -113,7 +117,11 @@ impl EntryLoader {
                 block.metadata_size = full_block.metadata_size;
 
                 let mut file = fs::File::create(path.clone())?;
-                file.write_all(&full_block.encode_to_vec())?;
+
+                let buf = full_block.encode_to_vec();
+                crc = Digest::new();
+                crc.write(&buf);
+                file.write_all(&buf)?;
             }
 
             if let Some(begin_time) = block.begin_time {
@@ -122,7 +130,7 @@ impl EntryLoader {
                 remove_bad_block!("begin time mismatch");
             };
 
-            block_index.insert_or_update(block);
+            block_index.insert_or_update_with_crc(block, crc.sum64());
         }
 
         block_index.save()?;
@@ -269,9 +277,9 @@ mod tests {
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
 
-    use rstest::{fixture, rstest};
-
     use super::*;
+    use crate::storage::file_cache::FILE_CACHE;
+    use rstest::{fixture, rstest};
 
     #[rstest]
     #[tokio::test]
@@ -344,8 +352,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
+    fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
         fs::create_dir_all(path.join("entry")).unwrap();
 
         let meta_path = path.join("entry/1.meta");
@@ -363,8 +370,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
+    fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
         let path = path.join("entry");
         fs::create_dir_all(path.clone()).unwrap();
         let mut block_manager = BlockManager::new(
@@ -394,17 +400,18 @@ mod tests {
         block_manager.save_cache_on_disk().unwrap();
 
         // repack the block
+        FILE_CACHE.remove(&path.join(BLOCK_INDEX_FILE)).unwrap();
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings).unwrap();
         let info = entry.info().unwrap();
 
-        assert_eq!(info.size, 88);
+        assert_eq!(info.size, 66);
         assert_eq!(info.record_count, 2);
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1);
         assert_eq!(info.latest_record, 2000010);
 
-        let block_manager =
-            BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE))); // reload the block manager
+        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
+        let block_manager = BlockManager::new(path.clone(), block_index); // reload the block manager
         let block_v19 = block_manager.load_block(1).unwrap().read().unwrap().clone();
         assert_eq!(block_v19.record_count(), 2);
         assert_eq!(block_v19.size(), 20);
@@ -432,7 +439,7 @@ mod tests {
             BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
 
         assert_eq!(block_index.blocks.len(), 1);
-        assert_eq!(block_index.crc64, 5634777224230458447);
+        assert_eq!(block_index.crc64, 4579043244124502122);
         assert_eq!(block_index.blocks[0].block_id, 1);
         assert_eq!(block_index.blocks[0].size, 20);
         assert_eq!(block_index.blocks[0].record_count, 2);

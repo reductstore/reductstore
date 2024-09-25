@@ -6,7 +6,7 @@ pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod wal;
 
 mod block_cache;
-use log::{debug, trace};
+use log::{debug, error, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 
@@ -18,6 +18,7 @@ use crate::storage::file_cache::{FileWeak, FILE_CACHE};
 use crate::storage::proto::{record, ts_to_us, Block as BlockProto, Record};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use block_index::BlockIndex;
+use crc64fast::Digest;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::{Read, SeekFrom, Write};
@@ -112,6 +113,18 @@ impl BlockManager {
             // parse the block descriptor
             let mut lock = file.write()?;
             lock.read_to_end(&mut buf)?;
+
+            // calculate crc of the block descriptor
+            let mut crc = Digest::new();
+            crc.write(&buf);
+
+            if (self.block_index.get_block(block_id).unwrap().crc64 != Some(crc.sum64())) {
+                error!("Block descriptor {:?} is corrupted. Remove it and its data block, then restart the database", path);
+                return Err(internal_server_error!(
+                    "Block descriptor {:?} is corrupted",
+                    path
+                ));
+            }
 
             let block_from_disk = BlockProto::decode(Bytes::from(buf)).map_err(|e| {
                 internal_server_error!("Failed to decode block descriptor {:?}: {}", path, e)
@@ -529,9 +542,12 @@ impl BlockManager {
         };
 
         trace!("Updating block index");
-        // update index
+        // update index with block crc
+        let mut crc = Digest::new();
+        crc.write(&buf);
         proto.metadata_size = len; // update metadata size because it changed
-        self.block_index.insert_or_update(proto);
+        self.block_index
+            .insert_or_update_with_crc(proto, crc.sum64());
         self.block_index.save()?;
 
         trace!("Block {}/{}/{} saved", self.bucket, self.entry, block_id);
@@ -600,6 +616,20 @@ mod tests {
             let block = block_ref.read().unwrap();
             let loaded_block = block_manager.load_block(block.block_id()).unwrap();
             assert_eq!(loaded_block.read().unwrap().block_id(), block.block_id());
+        }
+
+        #[rstest]
+        fn test_loading_corrupted_block(mut block_manager: BlockManager, block_id: u64) {
+            block_manager.start_new_block(block_id, 1024).unwrap();
+            block_manager.save_cache_on_disk().unwrap();
+            block_manager.block_cache.remove(&block_id);
+
+            let path = block_manager.path_to_desc(block_id);
+            std::fs::write(&path, b"corrupted").unwrap();
+
+            let err = block_manager.load_block(block_id).err().unwrap();
+            assert_eq!(err.status(), ErrorCode::InternalServerError);
+            assert!(err.to_string().contains("corrupted"));
         }
 
         #[rstest]
