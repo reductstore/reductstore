@@ -397,14 +397,23 @@ mod tests {
                 labels: vec![],
             });
         }
-        block_manager.save_cache_on_disk().unwrap();
+
+        let mut block_proto: Block = block_manager
+            .load_block(1)
+            .unwrap()
+            .read()
+            .unwrap()
+            .clone()
+            .into();
+        block_proto.record_count = 0;
+        fs::write(path.join("1.meta"), block_proto.encode_to_vec()).unwrap();
 
         // repack the block
         FILE_CACHE.remove(&path.join(BLOCK_INDEX_FILE)).unwrap();
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings).unwrap();
         let info = entry.info().unwrap();
 
-        assert_eq!(info.size, 66);
+        assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 2);
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1);
@@ -415,7 +424,7 @@ mod tests {
         let block_v19 = block_manager.load_block(1).unwrap().read().unwrap().clone();
         assert_eq!(block_v19.record_count(), 2);
         assert_eq!(block_v19.size(), 20);
-        assert_eq!(block_v19.metadata_size(), 46);
+        assert_eq!(block_v19.metadata_size(), 68);
     }
 
     #[rstest]
