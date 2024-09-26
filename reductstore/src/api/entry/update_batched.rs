@@ -121,7 +121,7 @@ mod tests {
         #[future] empty_body: Body,
     ) {
         headers.insert("content-length", "0".parse().unwrap());
-        headers.insert("x-reduct-time-xxx", "10".parse().unwrap());
+        headers.insert("x-reduct-time-yyy", "10".parse().unwrap());
 
         let err = update_batched_records(
             State(components.await),
@@ -137,7 +137,7 @@ mod tests {
             err,
             HttpError::new(
                 ErrorCode::UnprocessableEntity,
-                "Invalid header'x-reduct-time-xxx': must be an unix timestamp in microseconds",
+                "Invalid header 'x-reduct-time-yyy': must be an unix timestamp in microseconds",
             )
         );
     }

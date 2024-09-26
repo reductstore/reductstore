@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::error::ReductError;
-use crate::Labels;
+use crate::{unprocessable_entity, Labels};
 use http::{HeaderMap, HeaderValue};
 
 pub struct RecordHeader {
@@ -27,11 +27,11 @@ pub struct RecordHeader {
 pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
     let (content_length, rest) = header
         .split_once(',')
-        .ok_or(ReductError::unprocessable_entity("Invalid batched header"))?;
+        .ok_or(unprocessable_entity!("Invalid batched header"))?;
     let content_length = content_length
         .trim()
         .parse::<usize>()
-        .map_err(|_| ReductError::unprocessable_entity("Invalid content length"))?;
+        .map_err(|_| unprocessable_entity!("Invalid content length"))?;
 
     let (content_type, rest) = rest
         .split_once(',')
@@ -51,7 +51,7 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
             let value = value[1..].to_string();
             let (value, rest) = value
                 .split_once('\"')
-                .ok_or(ReductError::unprocessable_entity("Invalid batched header"))?;
+                .ok_or(unprocessable_entity!("Invalid batched header"))?;
             labels.insert(key.trim().to_string(), value.trim().to_string());
             rest.trim_start_matches(',').trim().to_string()
         } else if let Some(ret) = value.split_once(',') {
@@ -78,18 +78,21 @@ pub fn sort_headers_by_time(headers: &HeaderMap) -> Result<Vec<(u64, HeaderValue
         .filter(|(name, _)| name.is_some())
         .map(|(name, value)| (name.unwrap().to_string(), value))
         .filter(|(name, _)| name.starts_with("x-reduct-time-"))
-        .map(|(key, value)| (key[14..].parse::<u64>().ok(), value))
+        .map(|(key, value)| (key[14..].parse::<u64>().ok(), (key, value)))
         .collect();
 
-    if sorted_headers.iter().any(|(time, _)| time.is_none()) {
-        return Err(ReductError::unprocessable_entity(
-            "Invalid header'x-reduct-time-xxx': must be an unix timestamp in microseconds",
-        ));
+    for (time, (key, _)) in &sorted_headers {
+        if time.is_none() {
+            return Err(unprocessable_entity!(
+                "Invalid header '{}': must be an unix timestamp in microseconds",
+                key
+            ));
+        }
     }
 
     let mut sorted_headers: Vec<(u64, HeaderValue)> = sorted_headers
         .into_iter()
-        .map(|(time, value)| (time.unwrap(), value))
+        .map(|(time, (_key, value))| (time.unwrap(), value))
         .collect();
     sorted_headers.sort_by(|(ts1, _), (ts2, _)| ts1.cmp(ts2));
     Ok(sorted_headers)
