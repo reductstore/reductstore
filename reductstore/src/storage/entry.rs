@@ -374,6 +374,7 @@ mod tests {
 
     mod query {
         use super::*;
+        use reduct_base::error::ErrorCode;
         use reduct_base::{no_content, not_found};
 
         #[rstest]
@@ -451,7 +452,17 @@ mod tests {
             {
                 let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
                 let mut rx = rx.write().await;
-                let reader = rx.recv().await.unwrap().unwrap();
+                let reader = loop {
+                    let reader = rx.recv().await.unwrap();
+                    match reader {
+                        Ok(reader) => break reader,
+                        Err(ReductError {
+                            status: ErrorCode::NoContent,
+                            ..
+                        }) => continue,
+                        Err(e) => panic!("Unexpected error: {:?}", e),
+                    }
+                };
                 assert_eq!(reader.timestamp(), 2000000);
             }
 

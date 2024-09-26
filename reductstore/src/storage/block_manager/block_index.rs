@@ -32,6 +32,7 @@ impl Into<BlockEntry> for MinimalBlock {
             record_count: self.record_count,
             metadata_size: self.metadata_size,
             latest_record_time: self.latest_record_time,
+            crc64: None,
         }
     }
 }
@@ -44,6 +45,7 @@ impl Into<BlockEntry> for BlockProto {
             record_count: self.record_count,
             metadata_size: self.metadata_size,
             latest_record_time: self.latest_record_time,
+            crc64: None,
         }
     }
 }
@@ -56,6 +58,7 @@ impl Into<BlockEntry> for Block {
             record_count: self.record_count(),
             metadata_size: self.metadata_size(),
             latest_record_time: Some(us_to_ts(&self.latest_record_time())),
+            crc64: None,
         }
     }
 }
@@ -71,11 +74,35 @@ impl BlockIndex {
         index
     }
 
+    /// Insert  or update a new block entry into the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The block entry to insert.
+    ///
     pub fn insert_or_update<T>(&mut self, entry: T)
     where
         T: Into<BlockEntry>,
     {
         self.insert(entry.into());
+    }
+
+    /// Insert or update a new block entry into the index with CRC.
+    ///
+    /// Must be used when the block is written to disk.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The block entry to insert.
+    /// * `crc` - The CRC value.
+    ///
+    pub fn insert_or_update_with_crc<T>(&mut self, entry: T, crc: u64)
+    where
+        T: Into<BlockEntry>,
+    {
+        let mut block = entry.into();
+        block.crc64 = Some(crc);
+        self.insert(block);
     }
 
     pub fn get_block(&self, block_id: u64) -> Option<&BlockEntry> {
@@ -140,6 +167,10 @@ impl BlockIndex {
             crc.write(&block.metadata_size.to_be_bytes());
             crc.write(&ts_to_us(&block.latest_record_time.unwrap()).to_be_bytes());
 
+            if let Some(crc64) = block.crc64 {
+                crc.write(&crc64.to_be_bytes());
+            }
+
             block_index.index.insert(block.block_id);
             block_index.index_info.insert(block.block_id, block);
         });
@@ -170,6 +201,7 @@ impl BlockIndex {
                 block_entry.record_count = block.record_count;
                 block_entry.metadata_size = block.metadata_size;
                 block_entry.latest_record_time = block.latest_record_time;
+                block_entry.crc64 = block.crc64;
                 block_entry
             })
             .collect();
@@ -181,6 +213,10 @@ impl BlockIndex {
             crc.write(&block.record_count.to_be_bytes());
             crc.write(&block.metadata_size.to_be_bytes());
             crc.write(&ts_to_us(&block.latest_record_time.unwrap()).to_be_bytes());
+
+            if let Some(crc64) = block.crc64 {
+                crc.write(&crc64.to_be_bytes());
+            }
         });
 
         block_index_proto.crc64 = crc.sum64();
@@ -217,9 +253,9 @@ impl BlockIndex {
         &self.index
     }
 
-    fn insert(&mut self, new_block: BlockEntry) {
-        self.index_info.insert(new_block.block_id, new_block);
-        self.index.insert(new_block.block_id);
+    fn insert(&mut self, block: BlockEntry) {
+        self.index_info.insert(block.block_id, block);
+        self.index.insert(block.block_id);
     }
 }
 
@@ -250,6 +286,7 @@ mod tests {
                     record_count: 1,
                     metadata_size: 1,
                     latest_record_time: Some(Timestamp::default()),
+                    crc64: None,
                 }],
                 crc64: 294433432134063049,
             };
@@ -283,6 +320,7 @@ mod tests {
                     record_count: 1,
                     metadata_size: 1,
                     latest_record_time: Some(Timestamp::default()),
+                    crc64: None,
                 }],
                 crc64: 0,
             };
@@ -319,6 +357,7 @@ mod tests {
                 record_count: 1,
                 metadata_size: 1,
                 latest_record_time: Some(Timestamp::default()),
+                crc64: None,
             });
 
             block_index.save().unwrap();
