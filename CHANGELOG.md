@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-418: Remove record API, [PR-560](https://github.com/reductstore/reductstore/pull/560)
 - RS-389: Hard bucket quota, [PR-570](https://github.com/reductstore/reductstore/pull/570)
 - RS-413: Block CRC to block index for integrity check, [PR-584](https://github.com/reductstore/reductstore/pull/584)
+- RS-454: Check at least one query param to delete records, [PR-595](https://github.com/reductstore/reductstore/pull/595)
 
 ### Changed
 
