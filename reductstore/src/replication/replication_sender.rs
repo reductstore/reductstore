@@ -408,6 +408,7 @@ mod tests {
             .tx()
             .blocking_send(Ok(Some(Bytes::from("xxxx"))))
             .unwrap();
+        writer.tx().blocking_send(Ok(None)).unwrap_or(());
         sleep(Duration::from_millis(100));
 
         let diagnostics = hourly_diagnostics.read().unwrap().diagnostics();

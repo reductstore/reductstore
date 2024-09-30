@@ -16,7 +16,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::Labels;
+use reduct_base::{bad_request, Labels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::timeout;
@@ -91,17 +91,14 @@ pub(crate) async fn write_record(
                         .map(|_| ())
                         .map_err(|e| {
                             error!("Error while writing data: {}", e);
-                            HttpError::from(ReductError::bad_request(&format!(
-                                "Error while writing data: {}",
-                                e
-                            )))
+                            HttpError::from(bad_request!("Error while writing data: {}", e))
                         })?;
                 };
             }
 
             while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
                 .await
-                .map_err(|_| ReductError::bad_request("Timeout while receiving data"))?
+                .map_err(|_| bad_request!("Timeout while receiving data"))?
             {
                 let chunk = match chunk {
                     Ok(chunk) => Ok(Some(chunk)),
@@ -116,10 +113,12 @@ pub(crate) async fn write_record(
                 send_chunk!(chunk);
             }
 
-            if let Err(_) = tx.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
-                debug!("Failed to sync the channel - it may be already closed");
+            if let Err(err) = tx.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
+                debug!("Timeout while sending EOF: {}", err);
             }
+
             tx.closed().await; //sync with the storage
+
             components
                 .replication_repo
                 .write()

@@ -619,6 +619,11 @@ mod tests {
             .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
             .await?;
         let x = sender.tx().send(Ok(Some(Bytes::from(data)))).await;
+        sender
+            .tx()
+            .send(Ok(None))
+            .await
+            .expect("Failed to send None");
         sender.tx().closed().await;
         drop(sender);
         sleep(Duration::from_millis(10)).await; // let the record be written
@@ -638,10 +643,15 @@ mod tests {
             .begin_write(time, data.len(), "text/plain".to_string(), labels)
             .await?;
         let x = sender.tx().send(Ok(Some(Bytes::from(data)))).await;
+        sender
+            .tx()
+            .send(Ok(None))
+            .await
+            .expect("Failed to send None");
         sender.tx().closed().await;
         match x {
             Ok(_) => Ok(()),
-            Err(_) => Err(ReductError::internal_server_error("Error sending data")),
+            Err(_) => Err(internal_server_error!("Error sending data")),
         }
     }
 

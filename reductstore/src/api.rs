@@ -208,6 +208,7 @@ mod tests {
             .send(Ok(Some(Bytes::from("Hey!!!"))))
             .await
             .unwrap();
+        sender.tx().send(Ok(None)).await.unwrap();
         sender.tx().closed().await;
 
         let permissions = Permissions {

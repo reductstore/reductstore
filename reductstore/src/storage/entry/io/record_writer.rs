@@ -141,16 +141,10 @@ impl RecordWriter {
                         break;
                     }
                 }
-
-                if written_bytes >= ctx.content_size {
-                    break;
-                }
             }
 
             if written_bytes < ctx.content_size {
-                Err(ReductError::bad_request(
-                    "Content is smaller than in content-length",
-                ))
+                Err(bad_request!("Content is smaller than in content-length",))
             } else {
                 ctx.file_ref.upgrade()?.write()?.flush()?;
                 Ok(())

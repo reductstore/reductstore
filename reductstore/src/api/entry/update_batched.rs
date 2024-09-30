@@ -254,6 +254,7 @@ mod tests {
                 .send(Ok(Some(Bytes::from(vec![0; 20]))))
                 .await
                 .unwrap();
+            writer.tx().send(Ok(None)).await.unwrap();
             writer.tx().closed().await;
         }
 

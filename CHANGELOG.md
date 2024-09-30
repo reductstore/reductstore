@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-468: Name of invalid batch header, [PR-586](https://github.com/reductstore/reductstore/pull/586)
 - Server shutdown, [PR-557](https://github.com/reductstore/reductstore/pull/557)
 - Internal 500 error after removing bucket or entry, [PR-565](https://github.com/reductstore/reductstore/pull/565)
+- RS-479: Channel synchronization during write operation in HTTP API, [PR-594](https://github.com/reductstore/reductstore/pull/594)
 
 ### Internal
 

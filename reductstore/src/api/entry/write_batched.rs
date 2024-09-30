@@ -22,7 +22,6 @@ use reduct_base::error::ReductError;
 use reduct_base::{bad_request, internal_server_error};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -76,7 +75,7 @@ pub(crate) async fn write_batched_records(
 
         while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
             .await
-            .map_err(|_| ReductError::internal_server_error("Timeout while receiving data"))?
+            .map_err(|_| internal_server_error!("Timeout while receiving data"))?
         {
             let mut chunk = chunk?;
 
@@ -95,13 +94,13 @@ pub(crate) async fn write_batched_records(
                     }
                     Ok(Some(rest)) => {
                         // finish writing the current record and start a new one
-                        if let Err(_) = ctx
+                        if let Err(err) = ctx
                             .writer
                             .tx()
-                            .send_timeout(Ok(None), Duration::from_millis(1))
+                            .send_timeout(Ok(None), IO_OPERATION_TIMEOUT)
                             .await
                         {
-                            debug!("Failed to sync the channel - it may be already closed");
+                            debug!("Timeout while sending EOF: {}", err);
                         }
                         ctx.writer.tx().closed().await;
 
@@ -485,6 +484,7 @@ mod tests {
                 .send(Ok(Some(Bytes::from(vec![0; 20]))))
                 .await
                 .unwrap();
+            writer.tx().send(Ok(None)).await.unwrap();
             writer.tx().closed().await;
         }
 

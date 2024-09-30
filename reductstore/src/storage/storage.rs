@@ -275,6 +275,8 @@ mod tests {
                     .tx()
                     .blocking_send(Ok(Some(Bytes::from("0123456789"))))
                     .unwrap();
+
+                sender.tx().blocking_send(Ok(None)).unwrap();
             };
         }
 

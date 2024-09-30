@@ -692,7 +692,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             err,
-            ReductError::conflict("Can't change settings of provisioned bucket 'test'")
+            conflict!("Can't change settings of provisioned bucket 'test'")
         );
     }
 
@@ -715,9 +715,12 @@ mod tests {
             .tx()
             .send(Ok(Some(Bytes::from(content))))
             .await
-            .map_err(|e| {
-                ReductError::internal_server_error(format!("Failed to send data: {}", e).as_str())
-            })?;
+            .map_err(|e| internal_server_error!("Failed to send data: {}", e))?;
+        sender
+            .tx()
+            .send(Ok(None))
+            .await
+            .map_err(|e| internal_server_error!("Failed to sync channel: {}", e))?;
         sender.tx().closed().await;
         Ok(())
     }
