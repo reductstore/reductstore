@@ -76,7 +76,7 @@ pub(crate) async fn write_batched_records(
 
         while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
             .await
-            .map_err(|_| ReductError::internal_server_error("Timeout while receiving data"))?
+            .map_err(|_| internal_server_error!("Timeout while receiving data"))?
         {
             let mut chunk = chunk?;
 
@@ -95,13 +95,13 @@ pub(crate) async fn write_batched_records(
                     }
                     Ok(Some(rest)) => {
                         // finish writing the current record and start a new one
-                        if let Err(_) = ctx
+                        if let Err(err) = ctx
                             .writer
                             .tx()
-                            .send_timeout(Ok(None), Duration::from_millis(1))
+                            .send_timeout(Ok(None), IO_OPERATION_TIMEOUT)
                             .await
                         {
-                            debug!("Failed to sync the channel - it may be already closed");
+                            error!("Timeout while sending EOF: {}", err);
                         }
                         ctx.writer.tx().closed().await;
 

@@ -113,8 +113,8 @@ pub(crate) async fn write_record(
                 send_chunk!(chunk);
             }
 
-            if let Err(_) = tx.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
-                error!("Timeout while sending EOF");
+            if let Err(err) = tx.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
+                error!("Timeout while sending EOF: {}", err);
             }
 
             tx.closed().await; //sync with the storage
