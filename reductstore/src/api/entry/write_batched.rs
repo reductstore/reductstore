@@ -22,7 +22,6 @@ use reduct_base::error::ReductError;
 use reduct_base::{bad_request, internal_server_error};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -485,6 +484,7 @@ mod tests {
                 .send(Ok(Some(Bytes::from(vec![0; 20]))))
                 .await
                 .unwrap();
+            writer.tx().send(Ok(None)).await.unwrap();
             writer.tx().closed().await;
         }
 

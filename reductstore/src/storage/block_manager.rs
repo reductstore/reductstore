@@ -713,6 +713,7 @@ mod tests {
                 .send(Ok(Some(Bytes::from("hallo"))))
                 .await
                 .unwrap();
+            writer.tx().send(Ok(None)).await.unwrap();
             sleep(Duration::from_millis(10)); // wait for thread to finish
 
             // must save record in WAL
@@ -979,6 +980,7 @@ mod tests {
             .tx()
             .blocking_send(Ok(Some(Bytes::from(record_body.clone()))))
             .unwrap();
+        writer.tx().blocking_send(Ok(None)).unwrap();
         std::thread::sleep(Duration::from_millis(10)); // wait for thread to finish
         block_manager
             .write()
