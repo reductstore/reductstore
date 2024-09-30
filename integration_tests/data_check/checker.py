@@ -28,18 +28,36 @@ async def check():
                 data = await record.read_all()
                 md5_hash = md5(data).hexdigest()
 
-                assert record.size == len(data)  # Check that the size is correct
-                assert (
-                    record.labels["md5"] == md5_hash
-                )  # Check that the hash is correct
-                assert (
-                    record.labels["entry"] == entry_name
-                )  # Check that the entry name is correct
-                assert (
+                # Check that the data is correct
+                if record.size != len(data):
+                    print(
+                        f"Size mismatch for {entry_name}: expected {len(data)}, got {record.size}"
+                    )
+                    exit(1)
+                if record.labels["md5"] != md5_hash:
+                    print(
+                        f"Hash mismatch for {entry_name}: expected {md5_hash}, got {record.labels['md5']}"
+                    )
+                    exit(1)
+                if record.labels["entry"] != entry_name:
+                    print(
+                        f"Entry mismatch for {entry_name}: expected {entry_name}, got {record.labels['entry']}"
+                    )
+                    exit(1)
+                if (
                     abs(float(record.labels["ts"]) - record.timestamp / 1000_000)
-                    < 0.000001
-                )  # Check that the timestamp is correct
-                assert int(record.labels["record"]) == count
+                    > 0.000001
+                ):
+                    print(
+                        f"Timestamp mismatch for {entry_name}: expected {record.timestamp / 1000_000}, got {record.labels['ts']}"
+                    )
+                    exit(1)
+                if int(record.labels["record"]) != count:
+                    print(
+                        f"Record mismatch for {entry_name}: expected {count}, got {record.labels['record']}"
+                    )
+                    exit(1)
+
                 count += 1
 
                 if count % 32 == 0:
