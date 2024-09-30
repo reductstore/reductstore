@@ -9,7 +9,9 @@ use crate::auth::policy::WriteAccessPolicy;
 use crate::api::entry::common::{parse_query_params, parse_time_range};
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
+use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::RemoveQueryInfo;
+use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -36,6 +38,12 @@ pub(crate) async fn remove_query(
     let entry = bucket.get_or_create_entry(entry_name)?.upgrade()?;
     let entry_info = entry.info()?;
 
+    if params.is_empty() {
+        return Err(
+            unprocessable_entity!("Define at least one query parameter to delete records").into(),
+        );
+    }
+
     let (start, stop) =
         parse_time_range(&params, entry_info.oldest_record, entry_info.latest_record)?;
     let removed_records = entry
@@ -52,7 +60,6 @@ mod tests {
     use super::*;
     use crate::api::tests::{components, headers, path_to_entry_1};
     use reduct_base::error::ReductError;
-    use reduct_base::unprocessable_entity;
     use rstest::*;
     #[rstest]
     #[tokio::test]
@@ -102,6 +109,29 @@ mod tests {
         assert_eq!(
             err,
             unprocessable_entity!("'stop' must be an unix timestamp in microseconds").into()
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_query_at_least_on(
+        #[future] components: Arc<Components>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let params = HashMap::new();
+        let err = remove_query(
+            State(components.await),
+            path_to_entry_1,
+            Query(params),
+            headers,
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(
+            err,
+            unprocessable_entity!("Define at least one query parameter to delete records").into()
         );
     }
 }
