@@ -101,7 +101,7 @@ pub(crate) async fn write_batched_records(
                             .send_timeout(Ok(None), IO_OPERATION_TIMEOUT)
                             .await
                         {
-                            error!("Timeout while sending EOF: {}", err);
+                            debug!("Timeout while sending EOF: {}", err);
                         }
                         ctx.writer.tx().closed().await;
 

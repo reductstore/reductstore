@@ -114,7 +114,7 @@ pub(crate) async fn write_record(
             }
 
             if let Err(err) = tx.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
-                error!("Timeout while sending EOF: {}", err);
+                debug!("Timeout while sending EOF: {}", err);
             }
 
             tx.closed().await; //sync with the storage

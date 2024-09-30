@@ -141,10 +141,6 @@ impl RecordWriter {
                         break;
                     }
                 }
-
-                if written_bytes >= ctx.content_size {
-                    break;
-                }
             }
 
             if written_bytes < ctx.content_size {
