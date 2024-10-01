@@ -190,9 +190,11 @@ impl FileCache {
         if path.try_exists()? {
             remove_dir_all(path)?;
         }
+        self.discard_recursive(path)
+    }
 
+    pub fn discard_recursive(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
-
         let files_to_remove = cache
             .keys()
             .iter()
@@ -202,14 +204,6 @@ impl FileCache {
         for file_path in files_to_remove {
             cache.remove(&file_path);
         }
-
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn discard(&self, path: &PathBuf) -> Result<(), ReductError> {
-        let mut cache = self.cache.write()?;
-        cache.remove(path);
         Ok(())
     }
 

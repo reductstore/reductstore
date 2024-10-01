@@ -273,6 +273,7 @@ impl Bucket {
                 ));
             }
 
+            FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
             std::fs::rename(&old_path, &new_path)?;
 
             let entry = Entry::restore(
