@@ -59,6 +59,8 @@ jobs:
       matrix:
         os: [ ubuntu-latest, macos-latest, windows-latest ]
     runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v3
