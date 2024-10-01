@@ -34,3 +34,9 @@ pub struct RemoveQueryInfo {
     /// Unique query name
     pub removed_records: u64,
 }
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct RenameEnry {
+    /// New entry name
+    pub new_name: String,
+}

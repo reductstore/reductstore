@@ -252,12 +252,18 @@ impl Bucket {
         }
     }
 
-    pub fn rename_entry(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+    pub fn rename_entry(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> TaskHandle<Result<(), ReductError>> {
         let old_path = self.path.join(old_name);
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
         let mut entries = self.entries.clone();
         let old_name = old_name.to_string();
+        let new_name = new_name.to_string();
+        let settings = self.settings();
 
         unique(&self.task_group(), "rename entry", move || {
             if (entries.write().unwrap().remove(&old_name).is_none()) {
@@ -269,31 +275,21 @@ impl Bucket {
             }
 
             std::fs::rename(&old_path, &new_path)?;
+
+            let entry = Entry::restore(
+                new_path,
+                EntrySettings {
+                    max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
+                    max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
+                },
+            )
+            .wait()?;
+
+            entries
+                .write()?
+                .insert(new_name.to_string(), Arc::new(entry));
             Ok(())
         })
-        .wait()?;
-
-        let entry = Entry::restore(
-            self.path.join(new_name.clone()),
-            EntrySettings {
-                max_block_size: self
-                    .settings
-                    .read()?
-                    .max_block_size
-                    .unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
-                max_block_records: self
-                    .settings
-                    .read()?
-                    .max_block_records
-                    .unwrap_or(DEFAULT_MAX_RECORDS),
-            },
-        )
-        .wait()?;
-
-        self.entries
-            .write()?
-            .insert(new_name.to_string(), Arc::new(entry));
-        Ok(())
     }
 
     /// Remove entry from the bucket
@@ -417,7 +413,7 @@ mod tests {
         async fn test_rename_entry(mut bucket: Bucket) {
             write(&mut bucket, "test-1", 1, b"test").await.unwrap();
 
-            bucket.rename_entry("test-1", "test-2").unwrap();
+            bucket.rename_entry("test-1", "test-2").await.unwrap();
             assert_eq!(
                 bucket.get_entry("test-1").err(),
                 Some(ReductError::not_found(
@@ -439,7 +435,7 @@ mod tests {
         #[tokio::test]
         async fn test_rename_entry_not_found(bucket: Bucket) {
             assert_eq!(
-                bucket.rename_entry("test-1", "test-2").err(),
+                bucket.rename_entry("test-1", "test-2").await.err(),
                 Some(not_found!("Entry 'test-1' not found in bucket 'test'"))
             );
         }
@@ -449,7 +445,7 @@ mod tests {
         async fn test_rename_entry_persisted(mut bucket: Bucket) {
             write(&mut bucket, "test-1", 1, b"test").await.unwrap();
             bucket.sync_fs().await.unwrap();
-            bucket.rename_entry("test-1", "test-2").unwrap();
+            bucket.rename_entry("test-1", "test-2").await.unwrap();
 
             let bucket = Bucket::restore(bucket.path.clone()).unwrap();
             assert_eq!(

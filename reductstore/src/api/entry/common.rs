@@ -176,6 +176,35 @@ fn parse_include_exclude_filters(
     (include, exclude)
 }
 
+pub(super) fn check_and_extract_ts_or_query_id(
+    params: HashMap<String, String>,
+    last_record: u64,
+) -> Result<(Option<u64>, Option<u64>), HttpError> {
+    let ts = match params.get("ts") {
+        Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
+            HttpError::new(
+                ErrorCode::UnprocessableEntity,
+                "'ts' must be an unix timestamp in microseconds",
+            )
+        })?),
+        None => None,
+    };
+
+    let query_id = match params.get("q") {
+        Some(query) => Some(query.parse::<u64>().map_err(|_| {
+            HttpError::new(ErrorCode::UnprocessableEntity, "'query' must be a number")
+        })?),
+        None => None,
+    };
+
+    let ts = if ts.is_none() && query_id.is_none() {
+        Some(last_record)
+    } else {
+        ts
+    };
+    Ok((query_id, ts))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

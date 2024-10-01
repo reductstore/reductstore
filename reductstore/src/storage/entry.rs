@@ -27,7 +27,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
 
-use crate::core::thread_pool::{shared, try_unique, unique, TaskHandle};
+use crate::core::thread_pool::{shared, try_unique, unique, unique_child, TaskHandle};
 use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
 use reduct_base::internal_server_error;
@@ -93,7 +93,7 @@ impl Entry {
     ) -> TaskHandle<Result<Entry, ReductError>> {
         let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        unique(
+        unique_child(
             &[
                 path.parent().unwrap().to_str().unwrap(),
                 &bucket_name,
