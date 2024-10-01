@@ -119,7 +119,7 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
             delete(remove_batched_records),
         )
         .route("/:bucket_name/:entry_name/q", delete(remove_query))
-        .route("/:bucket_name/:entry_name", put(rename_entry))
+        .route("/:bucket_name/:entry_name/rename", put(rename_entry))
 }
 
 #[cfg(test)]

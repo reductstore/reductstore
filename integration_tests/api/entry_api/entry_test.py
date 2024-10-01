@@ -52,7 +52,9 @@ def test_rename_entry(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data1")
     assert resp.status_code == 200
 
-    resp = session.put(f"{base_url}/b/{bucket}/entry", data={"new_name": "new_name"})
+    resp = session.put(
+        f"{base_url}/b/{bucket}/entry/rename", data={"new_name": "new_name"}
+    )
     assert resp.status_code == 200
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts}")
@@ -77,21 +79,21 @@ def test_rename_with_bucket_write_permissions(
     assert resp.status_code == 200
 
     resp = session.put(
-        f"{base_url}/b/{bucket}/entry",
+        f"{base_url}/b/{bucket}/entry/rename",
         data={"new_name": "new_name"},
         headers={"Authorization": f"Bearer {token_without_permissions}"},
     )
     assert resp.status_code == 403
 
     resp = session.put(
-        f"{base_url}/b/{bucket}/entry",
+        f"{base_url}/b/{bucket}/entry/rename",
         data={"new_name": "new_name"},
         headers={"Authorization": f"Bearer {token_read_bucket}"},
     )
     assert resp.status_code == 403
 
     resp = session.put(
-        f"{base_url}/b/{bucket}/entry",
+        f"{base_url}/b/{bucket}/entry/rename",
         data={"new_name": "new_name"},
         headers={"Authorization": f"Bearer {token_write_bucket}"},
     )
