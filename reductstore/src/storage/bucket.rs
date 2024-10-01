@@ -15,14 +15,13 @@ use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordConte
 use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
-use prost::bytes::{Bytes, BytesMut};
+use prost::bytes::Bytes;
 use prost::Message;
 use reduct_base::error::ReductError;
-use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo, QuotaType};
+use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{bad_request, conflict, internal_server_error, not_found, Labels};
+use reduct_base::{internal_server_error, not_found, Labels};
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
@@ -260,13 +259,13 @@ impl Bucket {
         let old_path = self.path.join(old_name);
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
-        let mut entries = self.entries.clone();
+        let entries = self.entries.clone();
         let old_name = old_name.to_string();
         let new_name = new_name.to_string();
         let settings = self.settings();
 
         unique(&self.task_group(), "rename entry", move || {
-            if (entries.write().unwrap().remove(&old_name).is_none()) {
+            if entries.write().unwrap().remove(&old_name).is_none() {
                 return Err(not_found!(
                     "Entry '{}' not found in bucket '{}'",
                     old_name,
@@ -373,6 +372,8 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reduct_base::conflict;
+    use reduct_base::msg::bucket_api::QuotaType;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 

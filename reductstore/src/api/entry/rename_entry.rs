@@ -6,22 +6,11 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use std::collections::HashMap;
 
-use axum::extract::{FromRequest, Path, State};
+use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 
-use crate::api::bucket::BucketSettingsAxum;
-use async_trait::async_trait;
-use axum::body::Body;
-use axum::http::{Request, Response};
-use axum::response::IntoResponse;
 use axum::Json;
-use axum_extra::headers::HeaderMapExt;
-use axum_macros::debug_handler;
-use bytes::Bytes;
-use hyper::header::Entry;
-use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::entry_api::RenameEnry;
-use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
 
 // PUT /b/:bucket_name/:entry_name
