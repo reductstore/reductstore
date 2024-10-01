@@ -53,7 +53,7 @@ def test_rename_entry(base_url, session, bucket):
     assert resp.status_code == 200
 
     resp = session.put(
-        f"{base_url}/b/{bucket}/entry/rename", data={"new_name": "new_name"}
+        f"{base_url}/b/{bucket}/entry/rename", json={"new_name": "new_name"}
     )
     assert resp.status_code == 200
 
@@ -94,7 +94,7 @@ def test_rename_with_bucket_write_permissions(
 
     resp = session.put(
         f"{base_url}/b/{bucket}/entry/rename",
-        data={"new_name": "new_name"},
+        json={"new_name": "new_name"},
         headers={"Authorization": f"Bearer {token_write_bucket}"},
     )
     assert resp.status_code == 200
