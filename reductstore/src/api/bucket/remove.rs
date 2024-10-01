@@ -17,7 +17,7 @@ pub(crate) async fn remove_bucket(
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
     check_permissions(&components, headers, FullAccessPolicy {}).await?;
-    components.storage.remove_bucket(&bucket_name)?;
+    components.storage.remove_bucket(&bucket_name).await?;
     components
         .token_repo
         .write()

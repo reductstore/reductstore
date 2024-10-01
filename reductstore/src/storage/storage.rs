@@ -12,9 +12,11 @@ use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::thread_pool::{unique, TaskHandle};
 use crate::core::weak::Weak;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
+use reduct_base::{conflict, not_found};
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -24,7 +26,7 @@ pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Storage {
     data_path: PathBuf,
     start_time: Instant,
-    buckets: RwLock<BTreeMap<String, Arc<Bucket>>>,
+    buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
 }
 
@@ -66,7 +68,7 @@ impl Storage {
         Storage {
             data_path,
             start_time: Instant::now(),
-            buckets: RwLock::new(buckets),
+            buckets: Arc::new(RwLock::new(buckets)),
             license,
         }
     }
@@ -159,28 +161,85 @@ impl Storage {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub(crate) fn remove_bucket(&self, name: &str) -> Result<(), ReductError> {
-        let mut buckets = self.buckets.write().unwrap();
-        if let Some(bucket) = buckets.get(name) {
-            if bucket.is_provisioned() {
-                return Err(ReductError::conflict(&format!(
-                    "Can't remove provisioned bucket '{}'",
-                    bucket.name()
-                )));
-            }
-        }
+    pub(crate) fn remove_bucket(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
+        let task_group = [
+            self.data_path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            name,
+        ]
+        .join("/");
 
-        match buckets.remove(name) {
-            Some(_) => {
-                let path = self.data_path.join(name);
-                FILE_CACHE.remove_dir(&path)?;
-                debug!("Bucket '{}' and folder {:?} are removed", name, path);
-                Ok(())
+        let path = self.data_path.join(name);
+        let buckets = self.buckets.clone();
+        let name = name.to_string();
+        unique(&task_group, "remove bucket", move || {
+            let mut buckets = buckets.write().unwrap();
+            if let Some(bucket) = buckets.get(&name) {
+                if bucket.is_provisioned() {
+                    return Err(conflict!(
+                        "Can't remove provisioned bucket '{}'",
+                        bucket.name()
+                    ));
+                }
             }
-            None => Err(ReductError::not_found(
-                format!("Bucket '{}' is not found", name).as_str(),
-            )),
-        }
+
+            match buckets.remove(&name) {
+                Some(_) => {
+                    FILE_CACHE.remove_dir(&path)?;
+                    debug!("Bucket '{}' and folder {:?} are removed", name, path);
+                    Ok(())
+                }
+                None => Err(not_found!("Bucket '{}' is not found", name)),
+            }
+        })
+    }
+
+    pub(crate) fn rename_bucket(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> TaskHandle<Result<(), ReductError>> {
+        let task_group = [
+            self.data_path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            old_name,
+        ]
+        .join("/");
+
+        let buckets = self.buckets.clone();
+        let path = self.data_path.join(old_name);
+        let new_path = self.data_path.join(new_name);
+        let old_name = old_name.to_string();
+        let new_name = new_name.to_string();
+
+        unique(&task_group, "rename bucket", move || {
+            let mut buckets = buckets.write().unwrap();
+            if let Some(bucket) = buckets.get(&new_name) {
+                return Err(conflict!("Bucket '{}' already exists", bucket.name()));
+            }
+
+            match buckets.remove(&old_name) {
+                Some(_) => {
+                    FILE_CACHE.discard_recursive(&path)?;
+                    std::fs::rename(&path, &new_path)?;
+                    let bucket = Bucket::restore(new_path)?;
+                    buckets.insert(new_name.to_string(), Arc::new(bucket));
+                    debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
+                    Ok(())
+                }
+                None => Err(not_found!("Bucket '{}' is not found", old_name)),
+            }
+        })
     }
 
     pub(crate) fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
@@ -380,50 +439,127 @@ mod tests {
         );
     }
 
-    #[rstest]
-    fn test_remove_bucket(storage: Storage) {
-        let bucket = storage
-            .create_bucket("test", BucketSettings::default())
-            .unwrap()
-            .upgrade_and_unwrap();
-        assert_eq!(bucket.name(), "test");
+    mod remove_bucket {
+        use super::*;
 
-        let result = storage.remove_bucket("test");
-        assert_eq!(result, Ok(()));
+        #[rstest]
+        fn test_remove_bucket(storage: Storage) {
+            let bucket = storage
+                .create_bucket("test", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "test");
 
-        let result = storage.get_bucket("test");
-        assert_eq!(
-            result.err(),
-            Some(ReductError::not_found("Bucket 'test' is not found"))
-        );
+            let result = storage.remove_bucket("test").wait();
+            assert_eq!(result, Ok(()));
+
+            let result = storage.get_bucket("test");
+            assert_eq!(
+                result.err(),
+                Some(ReductError::not_found("Bucket 'test' is not found"))
+            );
+        }
+
+        #[rstest]
+        fn test_remove_bucket_with_non_existing_name(storage: Storage) {
+            let result = storage.remove_bucket("test").wait();
+            assert_eq!(
+                result,
+                Err(ReductError::not_found("Bucket 'test' is not found"))
+            );
+        }
+
+        #[rstest]
+        fn test_remove_bucket_persistent(path: PathBuf, storage: Storage) {
+            let bucket = storage
+                .create_bucket("test", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "test");
+
+            let result = storage.remove_bucket("test").wait();
+            assert_eq!(result, Ok(()));
+
+            let storage = Storage::load(path, None);
+            let result = storage.get_bucket("test");
+            assert_eq!(
+                result.err(),
+                Some(ReductError::not_found("Bucket 'test' is not found"))
+            );
+        }
     }
 
-    #[rstest]
-    fn test_remove_bucket_with_non_existing_name(storage: Storage) {
-        let result = storage.remove_bucket("test");
-        assert_eq!(
-            result,
-            Err(ReductError::not_found("Bucket 'test' is not found"))
-        );
-    }
+    mod rename_bucket {
+        use super::*;
+        use crate::core::logger::Logger;
 
-    #[rstest]
-    fn test_remove_bucket_persistent(path: PathBuf, storage: Storage) {
-        let bucket = storage
-            .create_bucket("test", BucketSettings::default())
-            .unwrap()
-            .upgrade_and_unwrap();
-        assert_eq!(bucket.name(), "test");
+        #[rstest]
+        #[tokio::test]
+        async fn test_rename_bucket(storage: Storage) {
+            Logger::init("TRACE");
+            let bucket = storage
+                .create_bucket("test", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "test");
 
-        let result = storage.remove_bucket("test");
-        assert_eq!(result, Ok(()));
+            let writer = bucket
+                .begin_write("entry-1", 0, 10, "text/plain".to_string(), Labels::new())
+                .wait()
+                .unwrap();
+            writer
+                .tx()
+                .send(Ok(Some(Bytes::from("0123456789"))))
+                .await
+                .unwrap();
+            writer.tx().send(Ok(None)).await.unwrap();
+            writer.tx().closed().await;
+            let result = storage.rename_bucket("test", "new").wait();
+            assert_eq!(result, Ok(()));
 
-        let storage = Storage::load(path, None);
-        let result = storage.get_bucket("test");
-        assert_eq!(
-            result.err(),
-            Some(ReductError::not_found("Bucket 'test' is not found"))
-        );
+            let result = storage.get_bucket("test");
+            assert_eq!(
+                result.err(),
+                Some(ReductError::not_found("Bucket 'test' is not found"))
+            );
+
+            let bucket = storage.get_bucket("new").unwrap().upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "new");
+
+            let mut reader = bucket.begin_read("entry-1", 0).wait().unwrap();
+            let record = reader.rx().recv().await.unwrap().unwrap();
+            assert_eq!(record, Bytes::from("0123456789"));
+        }
+
+        #[rstest]
+        fn test_rename_bucket_with_non_existing_name(storage: Storage) {
+            let result = storage.rename_bucket("test", "new").wait();
+            assert_eq!(
+                result,
+                Err(ReductError::not_found("Bucket 'test' is not found"))
+            );
+        }
+
+        #[rstest]
+        fn test_rename_bucket_with_existing_name(storage: Storage) {
+            let bucket = storage
+                .create_bucket("test", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "test");
+
+            let bucket = storage
+                .create_bucket("new", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "new");
+
+            let result = storage.rename_bucket("test", "new").wait();
+            assert_eq!(
+                result,
+                Err(ReductError::conflict("Bucket 'new' already exists"))
+            );
+        }
     }
 
     #[rstest]
@@ -444,7 +580,7 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap();
         bucket.set_provisioned(true);
-        let err = storage.remove_bucket("test").err().unwrap();
+        let err = storage.remove_bucket("test").wait().err().unwrap();
         assert_eq!(
             err,
             ReductError::conflict("Can't remove provisioned bucket 'test'")
