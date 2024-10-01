@@ -80,14 +80,14 @@ def test_rename_with_bucket_write_permissions(
 
     resp = session.put(
         f"{base_url}/b/{bucket}/entry/rename",
-        data={"new_name": "new_name"},
+        json={"new_name": "new_name"},
         headers={"Authorization": f"Bearer {token_without_permissions}"},
     )
     assert resp.status_code == 403
 
     resp = session.put(
         f"{base_url}/b/{bucket}/entry/rename",
-        data={"new_name": "new_name"},
+        json={"new_name": "new_name"},
         headers={"Authorization": f"Bearer {token_read_bucket}"},
     )
     assert resp.status_code == 403
