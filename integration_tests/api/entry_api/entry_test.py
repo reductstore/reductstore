@@ -1,4 +1,4 @@
-from integration_tests.api.conftest import requires_env
+from ..conftest import requires_env
 
 
 def test_remove_entry(base_url, session, bucket):
