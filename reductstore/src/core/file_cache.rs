@@ -14,10 +14,10 @@ use reduct_base::internal_server_error;
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
-pub(super) static FILE_CACHE: LazyLock<FileCache> =
+pub(crate) static FILE_CACHE: LazyLock<FileCache> =
     LazyLock::new(|| FileCache::new(FILE_CACHE_MAX_SIZE, FILE_CACHE_TIME_TO_LIVE));
 
-pub(super) struct FileWeak {
+pub(crate) struct FileWeak {
     file: Weak<RwLock<File>>,
     path: PathBuf,
 }
@@ -38,7 +38,7 @@ impl FileWeak {
     }
 }
 
-pub(super) type FileRc = Arc<RwLock<File>>;
+pub(crate) type FileRc = Arc<RwLock<File>>;
 
 #[derive(PartialEq)]
 enum AccessMode {
@@ -56,7 +56,7 @@ struct FileDescriptor {
 /// This optimization is needed for network file systems because opening
 /// and closing files for writing causes synchronization overhead.
 #[derive(Clone)]
-pub(in crate::storage) struct FileCache {
+pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
 }
 
@@ -190,9 +190,11 @@ impl FileCache {
         if path.try_exists()? {
             remove_dir_all(path)?;
         }
+        self.discard_recursive(path)
+    }
 
+    pub fn discard_recursive(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
-
         let files_to_remove = cache
             .keys()
             .iter()
@@ -202,14 +204,6 @@ impl FileCache {
         for file_path in files_to_remove {
             cache.remove(&file_path);
         }
-
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn discard(&self, path: &PathBuf) -> Result<(), ReductError> {
-        let mut cache = self.cache.write()?;
-        cache.remove(path);
         Ok(())
     }
 

@@ -278,7 +278,7 @@ mod tests {
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
 
     use super::*;
-    use crate::storage::file_cache::FILE_CACHE;
+    use crate::core::file_cache::FILE_CACHE;
     use rstest::{fixture, rstest};
 
     #[rstest]

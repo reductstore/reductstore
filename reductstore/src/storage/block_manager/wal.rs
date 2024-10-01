@@ -14,7 +14,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 
-use crate::storage::file_cache::FILE_CACHE;
+use crate::core::file_cache::FILE_CACHE;
 use crate::storage::proto::Record;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
@@ -358,7 +358,9 @@ mod tests {
     fn cache_invalidation(mut wal: WalImpl) {
         wal.append(1, WalEntry::UpdateRecord(Record::default()))
             .unwrap();
-        FILE_CACHE.discard(&wal.root_path.join("1.wal")).unwrap();
+        FILE_CACHE
+            .discard_recursive(&wal.root_path.join("1.wal"))
+            .unwrap();
         wal.append(1, WalEntry::WriteRecord(Record::default()))
             .unwrap();
 

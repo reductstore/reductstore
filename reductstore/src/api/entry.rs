@@ -9,6 +9,7 @@ mod remove_batched;
 mod remove_entry;
 mod remove_query;
 mod remove_single;
+mod rename_entry;
 mod update_batched;
 mod update_single;
 mod write_batched;
@@ -30,12 +31,13 @@ use axum_extra::headers::HeaderMapExt;
 use crate::api::entry::remove_batched::remove_batched_records;
 use crate::api::entry::remove_query::remove_query;
 use crate::api::entry::remove_single::remove_record;
+use crate::api::entry::rename_entry::rename_entry;
 use crate::api::entry::update_batched::update_batched_records;
 use crate::api::entry::update_single::update_record;
+
 use axum::body::Body;
 use axum::http::{HeaderMap, Request};
-use axum::routing::{delete, get, head, patch, post};
-use reduct_base::error::ErrorCode;
+use axum::routing::{delete, get, head, patch, post, put};
 use reduct_base::msg::entry_api::{QueryInfo, RemoveQueryInfo};
 use reduct_macros::{IntoResponse, Twin};
 use std::collections::HashMap;
@@ -69,34 +71,6 @@ where
         let method = req.method().to_string();
         Ok(MethodExtractor { name: method })
     }
-}
-fn check_and_extract_ts_or_query_id(
-    params: HashMap<String, String>,
-    last_record: u64,
-) -> Result<(Option<u64>, Option<u64>), HttpError> {
-    let ts = match params.get("ts") {
-        Some(ts) => Some(ts.parse::<u64>().map_err(|_| {
-            HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "'ts' must be an unix timestamp in microseconds",
-            )
-        })?),
-        None => None,
-    };
-
-    let query_id = match params.get("q") {
-        Some(query) => Some(query.parse::<u64>().map_err(|_| {
-            HttpError::new(ErrorCode::UnprocessableEntity, "'query' must be a number")
-        })?),
-        None => None,
-    };
-
-    let ts = if ts.is_none() && query_id.is_none() {
-        Some(last_record)
-    } else {
-        ts
-    };
-    Ok((query_id, ts))
 }
 
 #[derive(IntoResponse, Twin)]
@@ -144,6 +118,7 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
             delete(remove_batched_records),
         )
         .route("/:bucket_name/:entry_name/q", delete(remove_query))
+        .route("/:bucket_name/:entry_name/rename", put(rename_entry))
 }
 
 #[cfg(test)]

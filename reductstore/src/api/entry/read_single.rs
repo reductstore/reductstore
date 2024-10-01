@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::entry::{check_and_extract_ts_or_query_id, MethodExtractor};
+use crate::api::entry::MethodExtractor;
 use crate::api::middleware::check_permissions;
 use crate::api::Components;
 use crate::api::HttpError;
@@ -15,6 +15,7 @@ use axum_extra::headers::{HeaderMap, HeaderName};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;

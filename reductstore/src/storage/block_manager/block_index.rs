@@ -10,8 +10,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 
+use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block::Block;
-use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
