@@ -1,6 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::file_cache::FILE_CACHE;
 use crate::replication::Transaction;
 use log::error;
 use reduct_base::error::ReductError;
@@ -19,7 +20,7 @@ use std::sync::{Arc, RwLock};
 /// | byte - transaction type n | 8 byte - timestamp n |
 ///
 pub(super) struct TransactionLog {
-    file: Arc<RwLock<File>>,
+    file_path: PathBuf,
     capacity_in_bytes: usize,
     write_pos: usize,
     read_pos: usize,
@@ -31,7 +32,13 @@ const ENTRY_SIZE: usize = 9;
 impl Drop for TransactionLog {
     fn drop(&mut self) {
         // Flush and sync the file in a separate thread.
-        let file = Arc::clone(&self.file);
+        let file = FILE_CACHE.write_or_create(&self.file_path, SeekFrom::Current(0));
+        if file.is_err() {
+            error!("Failed to open transaction log: {}", file.err().unwrap());
+            return;
+        }
+
+        let file = file.unwrap().upgrade().unwrap();
         let sync = || {
             let mut file = file.write()?;
             file.flush()?;
@@ -57,11 +64,10 @@ impl TransactionLog {
     /// A new transaction log instance or an error.
     pub fn try_load_or_create(path: PathBuf, capacity: usize) -> Result<Self, ReductError> {
         let instance = if !path.try_exists()? {
-            let mut file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(path)?;
+            let file = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Current(0))?
+                .upgrade()?;
+            let mut file = file.write()?;
 
             let capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
             file.set_len(capacity_in_bytes as u64)?;
@@ -71,14 +77,14 @@ impl TransactionLog {
             file.sync_all()?;
 
             Self {
-                file: Arc::new(RwLock::from(file)),
+                file_path: path,
                 capacity_in_bytes,
                 write_pos: HEADER_SIZE,
                 read_pos: HEADER_SIZE,
             }
         } else {
-            let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-            file.seek(SeekFrom::Start(0))?;
+            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+            let mut file = file.write()?;
 
             let mut buf = [0u8; 16];
             file.read_exact(&mut buf)?;
@@ -86,7 +92,7 @@ impl TransactionLog {
             let read_pos = u64::from_be_bytes(buf[8..16].try_into().unwrap()) as usize;
             let capacity_in_bytes = file.metadata()?.len() as usize;
             Self {
-                file: Arc::new(RwLock::from(file)),
+                file_path: path,
                 capacity_in_bytes,
                 write_pos,
                 read_pos,
@@ -110,9 +116,10 @@ impl TransactionLog {
         transaction: Transaction,
     ) -> Result<Option<Transaction>, ReductError> {
         {
-            let mut file = self.file.write()?;
-
-            file.seek(SeekFrom::Start(self.write_pos as u64))?;
+            let file = FILE_CACHE
+                .read(&self.file_path, SeekFrom::Start(self.write_pos as u64))?
+                .upgrade()?;
+            let mut file = file.write()?;
 
             let mut buf = [0u8; ENTRY_SIZE];
             buf[0] = transaction.clone().into();
@@ -180,7 +187,10 @@ impl TransactionLog {
         let mut buf = [0u8; ENTRY_SIZE];
         let mut read_pos = self.read_pos;
         let mut transactions = Vec::with_capacity(n);
-        let mut file = self.file.write()?;
+        let file = FILE_CACHE
+            .read(&self.file_path, SeekFrom::Start(read_pos as u64))?
+            .upgrade()?;
+        let mut file = file.write()?;
 
         for _ in 0..n {
             file.seek(SeekFrom::Start(read_pos as u64))?;
@@ -218,8 +228,10 @@ impl TransactionLog {
         }
 
         {
-            let mut file = self.file.write()?;
-            file.seek(SeekFrom::Start(8))?;
+            let file = FILE_CACHE
+                .read(&self.file_path, SeekFrom::Start(8))?
+                .upgrade()?;
+            let mut file = file.write()?;
             file.write_all(&self.read_pos.to_be_bytes())?;
         }
 

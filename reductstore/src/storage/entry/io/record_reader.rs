@@ -1,9 +1,9 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::file_cache::FileWeak;
 use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
-use crate::storage::file_cache::FileWeak;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
@@ -256,8 +256,8 @@ pub(in crate::storage) fn read_in_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::file_cache::FILE_CACHE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
-    use crate::storage::file_cache::FILE_CACHE;
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rstest::{fixture, rstest};
 

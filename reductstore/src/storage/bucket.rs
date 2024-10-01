@@ -4,6 +4,7 @@
 mod quotas;
 mod settings;
 
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{unique, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
@@ -12,7 +13,6 @@ use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
 use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
-use crate::storage::file_cache::FILE_CACHE;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
 use prost::bytes::Bytes;

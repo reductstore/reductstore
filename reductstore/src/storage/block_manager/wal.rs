@@ -14,7 +14,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 
-use crate::storage::file_cache::FILE_CACHE;
+use crate::core::file_cache::FILE_CACHE;
 use crate::storage::proto::Record;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 

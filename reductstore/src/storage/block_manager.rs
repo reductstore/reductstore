@@ -10,11 +10,11 @@ use log::{debug, error, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 
+use crate::core::file_cache::{FileWeak, FILE_CACHE};
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
-use crate::storage::file_cache::{FileWeak, FILE_CACHE};
 use crate::storage::proto::{record, ts_to_us, Block as BlockProto, Record};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use block_index::BlockIndex;
