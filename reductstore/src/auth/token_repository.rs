@@ -402,10 +402,21 @@ impl ManageTokens for TokenRepository {
     fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
-                permissions.read.retain(|b| b != old_name);
-                permissions.write.retain(|b| b != old_name);
-                permissions.read.push(new_name.to_string());
-                permissions.write.push(new_name.to_string());
+                permissions
+                    .read
+                    .iter_mut()
+                    .filter(|b| *b == old_name)
+                    .for_each(|b| {
+                        *b = new_name.to_string();
+                    });
+
+                permissions
+                    .write
+                    .iter_mut()
+                    .filter(|b| *b == old_name)
+                    .for_each(|b| {
+                        *b = new_name.to_string();
+                    });
             }
         }
 
@@ -858,12 +869,23 @@ mod tests {
 
     mod rename_bucket {
         use super::*;
+        use std::ops::Deref;
 
         #[rstest]
         fn test_rename_bucket(mut repo: Box<dyn ManageTokens>) {
+            repo.generate_token(
+                "test-2",
+                Permissions {
+                    full_access: true,
+                    read: vec!["bucket-1".to_string()],
+                    write: vec!["bucket-1".to_string()],
+                },
+            )
+            .expect("Failed to generate token");
+
             repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
-            let token = repo.get_token("test").unwrap();
+            let token = repo.get_token("test-2").unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 
             assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
@@ -871,22 +893,33 @@ mod tests {
         }
 
         #[rstest]
+        fn test_rename_bucket_not_exit(mut repo: Box<dyn ManageTokens>) {
+            repo.rename_bucket("bucket-1", "bucket-2").unwrap();
+
+            let token = repo.get_token("test").unwrap();
+            let permissions = token.permissions.as_ref().unwrap();
+
+            assert!(permissions.read.is_empty());
+            assert!(permissions.write.is_empty());
+        }
+
+        #[rstest]
         fn test_rename_bucket_persistent(path: PathBuf, init_token: &str) {
             let mut repo = create_token_repository(path.clone(), init_token);
             repo.generate_token(
-                "test",
+                "test-2",
                 Permissions {
                     full_access: true,
                     read: vec!["bucket-1".to_string()],
                     write: vec!["bucket-1".to_string()],
                 },
             )
-            .unwrap();
+            .expect("Failed to generate token");
 
             repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
             let repo = create_token_repository(path.clone(), init_token);
-            let token = repo.get_token("test").unwrap();
+            let token = repo.get_token("test-2").unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 
             assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
