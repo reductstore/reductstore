@@ -195,7 +195,7 @@ mod tests {
     use rstest::{fixture, rstest};
 
     #[rstest]
-    fn test_remove_records(mut entry_with_data: Entry) {
+    fn test_remove_records(entry_with_data: Entry) {
         let timestamps = vec![0, 2, 4, 5];
         let error_map = entry_with_data.remove_records(timestamps).wait().unwrap();
 
@@ -219,7 +219,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_remove_records(mut entry_with_data: Entry) {
+    fn test_query_remove_records(entry_with_data: Entry) {
         let removed_records = entry_with_data
             .query_remove_records(2, 4, QueryOptions::default())
             .wait()

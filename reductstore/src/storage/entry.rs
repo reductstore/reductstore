@@ -27,9 +27,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
 
-use crate::core::thread_pool::{
-    shared, shared_child, shared_isolated, try_unique, unique_child, TaskHandle,
-};
+use crate::core::thread_pool::{shared, try_unique, unique_child, TaskHandle};
 use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
 use reduct_base::internal_server_error;
@@ -411,6 +409,8 @@ mod tests {
                     Some(no_content!("No content"))
                 );
             }
+
+            sleep(Duration::from_millis(100)); // let query task finish
 
             assert_eq!(
                 entry.get_query_receiver(id).err(),
