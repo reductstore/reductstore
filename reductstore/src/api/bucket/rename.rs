@@ -36,6 +36,7 @@ mod tests {
     use crate::api::tests::{components, headers};
     use crate::api::Components;
     use reduct_base::error::ReductError;
+    use reduct_base::msg::token_api::Permissions;
     use reduct_base::not_found;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
@@ -48,6 +49,20 @@ mod tests {
         request: Json<RenameBucket>,
     ) {
         let components = components.await;
+        components
+            .token_repo
+            .write()
+            .await
+            .generate_token(
+                "test-1",
+                Permissions {
+                    full_access: false,
+                    read: vec!["bucket-1".to_string()],
+                    write: vec!["bucket-1".to_string()],
+                },
+            )
+            .unwrap();
+
         rename_bucket(
             State(components.clone()),
             Path("bucket-1".to_string()),
@@ -70,7 +85,7 @@ mod tests {
             .token_repo
             .read()
             .await
-            .get_token("test")
+            .get_token("test-1")
             .unwrap()
             .clone();
         assert_eq!(
