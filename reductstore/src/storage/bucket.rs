@@ -273,6 +273,14 @@ impl Bucket {
                 ));
             }
 
+            if new_path.exists() {
+                return Err(internal_server_error!(
+                    "Entry '{}' already exists in bucket '{}'",
+                    new_name,
+                    bucket_name
+                ));
+            }
+
             FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
             std::fs::rename(&old_path, &new_path)?;
 
@@ -439,6 +447,20 @@ mod tests {
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2").await.err(),
                 Some(not_found!("Entry 'test-1' not found in bucket 'test'"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rename_entry_already_exists(mut bucket: Bucket) {
+            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+            write(&mut bucket, "test-2", 1, b"test").await.unwrap();
+
+            assert_eq!(
+                bucket.rename_entry("test-1", "test-2").await.err(),
+                Some(internal_server_error!(
+                    "Entry 'test-2' already exists in bucket 'test'"
+                ))
             );
         }
 

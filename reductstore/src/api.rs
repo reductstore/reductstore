@@ -9,34 +9,31 @@ mod server;
 mod token;
 mod ui;
 
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
-
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::{middleware::from_fn, Router};
-use hyper::http::HeaderValue;
-use serde::de::StdError;
-use tokio::sync::RwLock;
-use tower_http::cors::{Any, CorsLayer};
-
-pub use reduct_base::error::ErrorCode;
-use reduct_base::error::ReductError as BaseHttpError;
-use reduct_macros::Twin;
-
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::{middleware::from_fn, Router};
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
+use hyper::http::HeaderValue;
 use middleware::{default_headers, print_statuses};
+pub use reduct_base::error::ErrorCode;
+use reduct_base::error::ReductError as BaseHttpError;
+use reduct_macros::Twin;
 use replication::create_replication_api_routes;
+use serde::de::StdError;
 use server::create_server_api_routes;
+use std::fmt::{Debug, Display, Formatter};
+use std::sync::Arc;
 use token::create_token_api_routes;
+use tokio::sync::RwLock;
+use tower_http::cors::{Any, CorsLayer};
 
 pub struct Components {
     pub storage: Arc<Storage>,

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-413: Block CRC to block index for integrity check, [PR-584](https://github.com/reductstore/reductstore/pull/584)
 - RS-454: Check at least one query param to delete records, [PR-595](https://github.com/reductstore/reductstore/pull/595)
 - RS-388: Rename entry API, [PR-596](https://github.com/reductstore/reductstore/pull/596)
+- RS-419: Rename bucket API, [PR-597](https://github.com/reductstore/reductstore/pull/597)
 
 ### Changed
 

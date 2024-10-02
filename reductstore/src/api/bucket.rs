@@ -5,10 +5,16 @@ mod create;
 mod get;
 mod head;
 mod remove;
+mod rename;
 mod update;
 
-use std::sync::Arc;
-
+use crate::api::bucket::create::create_bucket;
+use crate::api::bucket::get::get_bucket;
+use crate::api::bucket::head::head_bucket;
+use crate::api::bucket::remove::remove_bucket;
+use crate::api::bucket::rename::rename_bucket;
+use crate::api::bucket::update::update_bucket;
+use crate::api::{Components, HttpError};
 use axum::async_trait;
 use axum::body::Body;
 use axum::extract::FromRequest;
@@ -17,16 +23,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, head, post, put};
 use axum_extra::headers::HeaderMapExt;
 use bytes::Bytes;
-
-use crate::api::bucket::create::create_bucket;
-use crate::api::bucket::get::get_bucket;
-use crate::api::bucket::head::head_bucket;
-use crate::api::bucket::remove::remove_bucket;
-use crate::api::bucket::update::update_bucket;
-
-use crate::api::{Components, HttpError};
 use reduct_base::msg::bucket_api::{BucketSettings, FullBucketInfo};
 use reduct_macros::{IntoResponse, Twin};
+use std::sync::Arc;
+
 //
 // BucketSettings wrapper
 //
@@ -72,12 +72,12 @@ pub(crate) fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
         .route("/:bucket_name", post(create_bucket))
         .route("/:bucket_name", put(update_bucket))
         .route("/:bucket_name", delete(remove_bucket))
+        .route("/:bucket_name/rename", put(rename_bucket))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use axum::http::Method;
 
     #[tokio::test]
