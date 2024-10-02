@@ -162,17 +162,7 @@ impl Storage {
     ///
     /// * HTTPError - An error if the bucket doesn't exist
     pub(crate) fn remove_bucket(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
-        let task_group = [
-            self.data_path
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            name,
-        ]
-        .join("/");
+        let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), name].join("/");
 
         let path = self.data_path.join(name);
         let buckets = self.buckets.clone();
@@ -205,13 +195,7 @@ impl Storage {
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
         let task_group = [
-            self.data_path
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap(),
+            self.data_path.file_name().unwrap().to_str().unwrap(),
             old_name,
         ]
         .join("/");
