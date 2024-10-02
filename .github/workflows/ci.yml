@@ -162,12 +162,15 @@ jobs:
         run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
 
       - name: Run Database
-        run: docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}
-          --env RS_CERT_PATH=${{matrix.cert_path}}
-          --env RS_LICENSE_PATH=${{matrix.license_path}}
-          --env RS_CERT_KEY_PATH=/misc/privateKey.key
-          --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"
-          -d ${{github.repository}}
+        run: |
+          docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}  \
+            --name reduct                                     \
+            --env RS_CERT_PATH=${{matrix.cert_path}}          \
+            --env RS_LICENSE_PATH=${{matrix.license_path}}    \
+            --env RS_CERT_KEY_PATH=/misc/privateKey.key       \
+            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"
+            -d ${{github.repository}}
+          sleep 5
 
       - name: Build API tests
         run: docker build -t api ./integration_tests/api
@@ -177,6 +180,11 @@ jobs:
           --env API_TOKEN=${{matrix.token}}
           --env LICENSE_PATH=${{matrix.license_path}}
           --env STORAGE_URL=${{matrix.url}} api
+
+
+      - name: Print docker logs
+        if: always()
+        run: docker logs reduct
 
   migration_test:
     name: Migration Tests
@@ -553,31 +561,6 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
-
-  update_azure_marketplace:
-    runs-on: ubuntu-latest
-    name: Update Azure Marketplace
-    needs:
-      - merge_digests
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - name: Update Azure Marketplace
-        uses: azure/CLI@v1
-        with:
-          azcliversion: 2.30.0
-          inlineScript: |
-            # import standard images
-            VERSION=${GITHUB_REF#refs/*/}
-            az acr import --name reduct --source docker.io/reduct/store:$VERSION --image reduct/store:$VERSION
-            az acr import --name reduct --source docker.io/reduct/store:$VERSION --image reduct/store:latest --force
-
-            # import enterprise images
-            az acr import --name reduct --source docker.io/reduct/store:$VERSION --image reduct/store-enterprise:$VERSION
-            az acr import --name reduct --source docker.io/reduct/store:$VERSION --image reduct/store-enterprise:latest --force
 
   publish_crate:
     runs-on: ubuntu-latest

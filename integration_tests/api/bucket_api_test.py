@@ -278,8 +278,8 @@ def test__rename_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 200
 
     new_bucket_name = "new_bucket_name"
-    resp = session.post(
-        f"{base_url}/b/{bucket_name}/rename", json={"name": new_bucket_name}
+    resp = session.put(
+        f"{base_url}/b/{bucket_name}/rename", json={"new_name": new_bucket_name}
     )
     assert resp.status_code == 200
 
@@ -304,30 +304,30 @@ def test__rename_bucket_with_full_access_token(
     assert resp.status_code == 200
 
     new_bucket_name = "new_bucket_name"
-    resp = session.post(
+    resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
-        json={"name": new_bucket_name},
+        json={"new_name": new_bucket_name},
         headers=auth_headers(""),
     )
     assert resp.status_code == 401
 
-    resp = session.post(
+    resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
-        json={"name": new_bucket_name},
+        json={"new_name": new_bucket_name},
         headers=auth_headers(token_without_permissions),
     )
     assert resp.status_code == 403
 
-    resp = session.post(
+    resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
-        json={"name": new_bucket_name},
+        json={"new_name": new_bucket_name},
         headers=auth_headers(token_read_bucket),
     )
     assert resp.status_code == 403
 
-    resp = session.post(
+    resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
-        json={"name": new_bucket_name},
+        json={"new_name": new_bucket_name},
         headers=auth_headers(token_write_bucket),
     )
     assert resp.status_code == 403
