@@ -307,3 +307,13 @@ macro_rules! internal_server_error {
         ReductError::internal_server_error($msg)
     };
 }
+
+#[macro_export]
+macro_rules! unauthorized {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::unauthorized(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::unauthorized($msg)
+    };
+}

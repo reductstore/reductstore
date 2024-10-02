@@ -1,20 +1,21 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::auth::proto::token::Permissions as ProtoPermissions;
+use crate::auth::proto::{Token as ProtoToken, TokenRepo as ProtoTokenRepo, TokenRepo};
 use chrono::{DateTime, Utc};
-use rand::Rng;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use log::{debug, warn};
 use prost::bytes::Bytes;
 use prost::Message;
 use prost_wkt_types::Timestamp;
-
-use crate::auth::proto::token::Permissions as ProtoPermissions;
-use crate::auth::proto::{Token as ProtoToken, TokenRepo as ProtoTokenRepo, TokenRepo};
+use rand::Rng;
 use reduct_base::error::ReductError;
+use reduct_base::{
+    bad_request, conflict, internal_server_error, not_found, unauthorized, unprocessable_entity,
+};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 
@@ -101,6 +102,18 @@ pub trait ManageTokens {
     /// # Returns
     /// `Ok(())` if the bucket was removed successfully
     fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError>;
+
+    /// Rename a bucket in all tokens
+    ///
+    /// # Arguments
+    ///
+    /// `old_name` - The old name of the bucket
+    /// `new_name` - The new name of the bucket
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the bucket was renamed successfully
+    fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError>;
 }
 
 /// The TokenRepository trait is used to store and retrieve tokens.
@@ -252,13 +265,10 @@ impl TokenRepository {
         repo.encode(&mut buf)
             .map_err(|_| ReductError::internal_server_error("Could not encode token repository"))?;
         std::fs::write(&self.config_path, buf).map_err(|err| {
-            ReductError::internal_server_error(
-                format!(
-                    "Could not write token repository to {}: {}",
-                    self.config_path.as_path().display(),
-                    err
-                )
-                .as_str(),
+            internal_server_error!(
+                "Could not write token repository to {}: {}",
+                self.config_path.as_path().display(),
+                err
             )
         })?;
 
@@ -274,16 +284,12 @@ impl ManageTokens for TokenRepository {
     ) -> Result<TokenCreateResponse, ReductError> {
         // Check if the token isn't empty
         if name.is_empty() {
-            return Err(ReductError::unprocessable_entity(
-                "Token name can't be empty",
-            ));
+            return Err(unprocessable_entity!("Token name can't be empty"));
         }
 
         // Check if the token already exists
         if self.repo.contains_key(name) {
-            return Err(ReductError::conflict(
-                format!("Token '{}' already exists", name).as_str(),
-            ));
+            return Err(conflict!("Token '{}' already exists", name));
         }
 
         let created_at = DateTime::<Utc>::from(SystemTime::now());
@@ -312,9 +318,7 @@ impl ManageTokens for TokenRepository {
         match self.repo.get(name) {
             Some(token) => {
                 if token.is_provisioned {
-                    Err(ReductError::conflict(
-                        format!("Can't update provisioned token '{}'", name).as_str(),
-                    ))
+                    Err(conflict!("Can't update provisioned token '{}'", name))
                 } else {
                     let mut updated_token = token.clone();
                     updated_token.permissions = Some(permissions);
@@ -324,27 +328,21 @@ impl ManageTokens for TokenRepository {
                 }
             }
 
-            None => Err(ReductError::not_found(
-                format!("Token '{}' doesn't exist", name).as_str(),
-            )),
+            None => Err(not_found!("Token '{}' doesn't exist", name)),
         }
     }
 
     fn get_token(&self, name: &str) -> Result<&Token, ReductError> {
         match self.repo.get(name) {
             Some(token) => Ok(token),
-            None => Err(ReductError::not_found(
-                format!("Token '{}' doesn't exist", name).as_str(),
-            )),
+            None => Err(not_found!("Token '{}' doesn't exist", name)),
         }
     }
 
     fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
         match self.repo.get_mut(name) {
             Some(token) => Ok(token),
-            None => Err(ReductError::not_found(
-                format!("Token '{}' doesn't exist", name).as_str(),
-            )),
+            None => Err(not_found!("Token '{}' doesn't exist", name)),
         }
     }
 
@@ -372,23 +370,19 @@ impl ManageTokens for TokenRepository {
                 token.value = "".to_string();
                 Ok(token)
             }
-            None => Err(ReductError::unauthorized("Invalid token")),
+            None => Err(unauthorized!("Invalid token")),
         }
     }
 
     fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
         if let Some(token) = self.repo.get(name) {
             if token.is_provisioned {
-                return Err(ReductError::conflict(
-                    format!("Can't remove provisioned token '{}'", name).as_str(),
-                ));
+                return Err(conflict!("Can't remove provisioned token '{}'", name));
             }
         }
 
         if self.repo.remove(name).is_none() {
-            Err(ReductError::not_found(
-                format!("Token '{}' doesn't exist", name).as_str(),
-            ))
+            Err(not_found!("Token '{}' doesn't exist", name))
         } else {
             self.save_repo()
         }
@@ -399,6 +393,19 @@ impl ManageTokens for TokenRepository {
             if let Some(permissions) = &mut token.permissions {
                 permissions.read.retain(|b| b != bucket);
                 permissions.write.retain(|b| b != bucket);
+            }
+        }
+
+        self.save_repo()
+    }
+
+    fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+        for token in self.repo.values_mut() {
+            if let Some(permissions) = &mut token.permissions {
+                permissions.read.retain(|b| b != old_name);
+                permissions.write.retain(|b| b != old_name);
+                permissions.read.push(new_name.to_string());
+                permissions.write.push(new_name.to_string());
             }
         }
 
@@ -421,19 +428,19 @@ impl ManageTokens for NoAuthRepository {
         _name: &str,
         _permissions: Permissions,
     ) -> Result<TokenCreateResponse, ReductError> {
-        Err(ReductError::bad_request("Authentication is disabled"))
+        Err(bad_request!("Authentication is disabled"))
     }
 
     fn update_token(&mut self, _name: &str, _permissions: Permissions) -> Result<(), ReductError> {
-        Err(ReductError::bad_request("Authentication is disabled"))
+        Err(bad_request!("Authentication is disabled"))
     }
 
     fn get_token(&self, _name: &str) -> Result<&Token, ReductError> {
-        Err(ReductError::bad_request("Authentication is disabled"))
+        Err(bad_request!("Authentication is disabled"))
     }
 
     fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
-        Err(ReductError::bad_request("Authentication is disabled"))
+        Err(bad_request!("Authentication is disabled"))
     }
 
     fn get_token_list(&self) -> Result<Vec<Token>, ReductError> {
@@ -461,6 +468,10 @@ impl ManageTokens for NoAuthRepository {
     fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Ok(())
     }
+
+    fn rename_bucket(&mut self, _old_name: &str, _new_name: &str) -> Result<(), ReductError> {
+        Ok(())
+    }
 }
 
 /// Creates a token repository
@@ -481,6 +492,7 @@ pub fn create_token_repository(
 mod tests {
     use super::*;
 
+    use reduct_base::{bad_request, conflict, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
@@ -496,50 +508,63 @@ mod tests {
         assert_eq!(token_list[0].name, "init-token");
     }
 
-    //------------
-    // create_token tests
-    //------------
-    #[rstest]
-    fn test_create_empty_token(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.generate_token(
-            "",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
+    mod create_token {
+        use super::*;
 
-        assert_eq!(
-            token,
-            Err(ReductError::unprocessable_entity(
-                "Token name can't be empty"
-            ))
-        );
-    }
+        #[rstest]
+        fn test_create_empty_token(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.generate_token(
+                "",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            );
 
-    #[rstest]
-    fn test_create_existing_token(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
+            assert_eq!(
+                token,
+                Err(unprocessable_entity!("Token name can't be empty"))
+            );
+        }
 
-        assert_eq!(
-            token,
-            Err(ReductError::conflict("Token 'test' already exists"))
-        );
-    }
+        #[rstest]
+        fn test_create_existing_token(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            );
 
-    #[rstest]
-    fn test_create_token(mut repo: Box<dyn ManageTokens>) {
-        let token = repo
-            .generate_token(
-                "test-1",
+            assert_eq!(token, Err(conflict!("Token 'test' already exists")));
+        }
+
+        #[rstest]
+        fn test_create_token(mut repo: Box<dyn ManageTokens>) {
+            let token = repo
+                .generate_token(
+                    "test-1",
+                    Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                )
+                .unwrap();
+
+            assert_eq!(token.value.len(), 39);
+            assert_eq!(token.value, "test-1-".to_string() + &token.value[7..]);
+            assert!(token.created_at.timestamp() > 0);
+        }
+
+        #[rstest]
+        fn test_create_token_persistent(path: PathBuf) {
+            let mut repo = create_token_repository(path.clone(), "test");
+            repo.generate_token(
+                "test",
                 Permissions {
                     full_access: true,
                     read: vec![],
@@ -548,52 +573,82 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(token.value.len(), 39);
-        assert_eq!(token.value, "test-1-".to_string() + &token.value[7..]);
-        assert!(token.created_at.timestamp() > 0);
+            let repo = create_token_repository(path.clone(), "test");
+            assert_eq!(repo.get_token("test").unwrap().name, "test");
+        }
+
+        #[rstest]
+        fn test_create_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
+            let token = disabled_repo.generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            );
+
+            assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+        }
     }
 
-    #[rstest]
-    fn test_create_token_persistent(path: PathBuf) {
-        let mut repo = create_token_repository(path.clone(), "test");
-        repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        )
-        .unwrap();
+    mod update_token {
+        use super::*;
+        #[rstest]
+        fn test_update_token_ok(mut repo: Box<dyn ManageTokens>) {
+            let token = repo
+                .update_token(
+                    "test",
+                    Permissions {
+                        full_access: false,
+                        read: vec!["test".to_string()],
+                        write: vec![],
+                    },
+                )
+                .unwrap();
 
-        let repo = create_token_repository(path.clone(), "test");
-        assert_eq!(repo.get_token("test").unwrap().name, "test");
-    }
+            assert_eq!(token, ());
 
-    #[rstest]
-    fn test_create_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
-        let token = disabled_repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
+            let token = repo.get_token("test").unwrap().clone();
 
-        assert_eq!(
-            token,
-            Err(ReductError::bad_request("Authentication is disabled"))
-        );
-    }
+            assert_eq!(token.name, "test");
 
-    //------------
-    // update_token tests
-    //------------
-    #[rstest]
-    fn test_update_token_ok(mut repo: Box<dyn ManageTokens>) {
-        let token = repo
-            .update_token(
+            let permissions = token.permissions.unwrap();
+            assert_eq!(permissions.full_access, false);
+            assert_eq!(permissions.read, vec!["test".to_string()]);
+        }
+
+        #[rstest]
+        fn test_update_token_not_found(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.update_token(
+                "test-1",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            );
+
+            assert_eq!(
+                token,
+                Err(ReductError::not_found("Token 'test-1' doesn't exist"))
+            );
+        }
+
+        #[rstest]
+        fn test_update_token_persistent(path: PathBuf) {
+            let mut repo = create_token_repository(path.clone(), "test");
+            repo.generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .unwrap();
+
+            repo.update_token(
                 "test",
                 Permissions {
                     full_access: false,
@@ -603,274 +658,246 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(token, ());
+            let repo = create_token_repository(path.clone(), "test");
+            let token = repo.get_token("test").unwrap().clone();
 
-        let token = repo.get_token("test").unwrap().clone();
+            assert_eq!(token.name, "test");
 
-        assert_eq!(token.name, "test");
+            let permissions = token.permissions.unwrap();
+            assert_eq!(permissions.full_access, false);
+            assert_eq!(permissions.read, vec!["test".to_string()]);
+        }
 
-        let permissions = token.permissions.unwrap();
-        assert_eq!(permissions.full_access, false);
-        assert_eq!(permissions.read, vec!["test".to_string()]);
+        #[rstest]
+        fn test_update_provisioned_token(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.get_mut_token("test").unwrap();
+            token.is_provisioned = true;
+
+            let token = repo.update_token("test", Permissions::default());
+
+            assert_eq!(
+                token,
+                Err(conflict!("Can't update provisioned token 'test'"))
+            );
+        }
+
+        #[rstest]
+        fn test_update_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
+            let token = disabled_repo.update_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            );
+
+            assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+        }
     }
 
-    #[rstest]
-    fn test_update_token_not_found(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.update_token(
-            "test-1",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
+    mod find_token {
+        use super::*;
+        #[rstest]
+        fn test_find_by_name(repo: Box<dyn ManageTokens>) {
+            let token = repo.get_token("test").unwrap();
+            assert_eq!(token.name, "test");
+            assert!(token.value.starts_with("test-"));
+        }
 
-        assert_eq!(
-            token,
-            Err(ReductError::not_found("Token 'test-1' doesn't exist"))
-        );
+        #[rstest]
+        fn test_find_by_name_not_found(repo: Box<dyn ManageTokens>) {
+            let token = repo.get_token("test-1");
+            assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
+        }
+
+        #[rstest]
+        fn test_find_by_name_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
+            let token = disabled_repo.get_token("test");
+            assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+        }
     }
 
-    #[rstest]
-    fn test_update_token_persistent(path: PathBuf) {
-        let mut repo = create_token_repository(path.clone(), "test");
-        repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        )
-        .unwrap();
+    mod token_list {
+        use super::*;
+        #[rstest]
+        fn test_get_token_list(repo: Box<dyn ManageTokens>) {
+            let token_list = repo.get_token_list().unwrap();
 
-        repo.update_token(
-            "test",
-            Permissions {
-                full_access: false,
-                read: vec!["test".to_string()],
-                write: vec![],
-            },
-        )
-        .unwrap();
+            assert_eq!(token_list.len(), 2);
+            assert_eq!(token_list[1].name, "test");
+            assert_eq!(token_list[1].value, "");
+            assert_eq!(
+                token_list[1].permissions,
+                Some(Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                })
+            );
+        }
 
-        let repo = create_token_repository(path.clone(), "test");
-        let token = repo.get_token("test").unwrap().clone();
-
-        assert_eq!(token.name, "test");
-
-        let permissions = token.permissions.unwrap();
-        assert_eq!(permissions.full_access, false);
-        assert_eq!(permissions.read, vec!["test".to_string()]);
+        #[rstest]
+        fn test_get_token_list_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
+            let token_list = disabled_repo.get_token_list().unwrap();
+            assert_eq!(token_list, vec![]);
+        }
     }
 
-    #[rstest]
-    fn test_update_provisioned_token(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.get_mut_token("test").unwrap();
-        token.is_provisioned = true;
+    mod validate_token {
+        use super::*;
+        #[rstest]
+        fn test_validate_token(mut repo: Box<dyn ManageTokens>) {
+            let value = repo
+                .generate_token(
+                    "test-1",
+                    Permissions {
+                        full_access: true,
+                        read: vec!["bucket-1".to_string()],
+                        write: vec!["bucket-2".to_string()],
+                    },
+                )
+                .unwrap()
+                .value;
 
-        let token = repo.update_token("test", Permissions::default());
+            let token = repo
+                .validate_token(Some(&format!("Bearer {}", value)))
+                .unwrap();
 
-        assert_eq!(
-            token,
-            Err(ReductError::conflict(
-                "Can't update provisioned token 'test'"
-            ))
-        );
+            assert_eq!(
+                token,
+                Token {
+                    name: "test-1".to_string(),
+                    created_at: token.created_at.clone(),
+                    value: "".to_string(),
+                    permissions: Some(Permissions {
+                        full_access: true,
+                        read: vec!["bucket-1".to_string()],
+                        write: vec!["bucket-2".to_string()],
+                    }),
+                    is_provisioned: false,
+                }
+            );
+
+            #[rstest]
+            fn test_validate_token_not_found(repo: Box<dyn ManageTokens>) {
+                let token = repo.validate_token(Some("Bearer invalid-value"));
+                assert_eq!(token, Err(unauthorized!("Invalid token")));
+            }
+
+            #[rstest]
+            fn test_validate_token_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
+                let placeholder = disabled_repo.validate_token(Some("invalid-value")).unwrap();
+
+                assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
+                assert_eq!(placeholder.value, "");
+                assert_eq!(placeholder.permissions.unwrap().full_access, true);
+            }
+        }
     }
 
-    #[rstest]
-    fn test_update_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
-        let token = disabled_repo.update_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
+    mod remove_token {
+        use super::*;
+        #[rstest]
+        fn test_remove_token(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.remove_token("test").unwrap();
+            assert_eq!(token, ());
+        }
 
-        assert_eq!(
-            token,
-            Err(ReductError::bad_request("Authentication is disabled"))
-        );
+        #[rstest]
+        fn test_remove_init_token(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.remove_token("init-token");
+            assert_eq!(
+                token,
+                Err(conflict!("Can't remove provisioned token 'init-token'"))
+            );
+        }
+
+        #[rstest]
+        fn test_remove_token_not_found(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.remove_token("test-1");
+            assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
+        }
+
+        #[rstest]
+        fn test_remove_token_persistent(path: PathBuf, init_token: &str) {
+            let mut repo = create_token_repository(path.clone(), init_token);
+            repo.generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .unwrap();
+
+            repo.remove_token("test").unwrap();
+
+            let repo = create_token_repository(path, init_token);
+            let token = repo.get_token("test");
+
+            assert_eq!(token, Err(not_found!("Token 'test' doesn't exist")));
+        }
+
+        #[rstest]
+        fn test_remove_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
+            let token = disabled_repo.remove_token("test");
+            assert_eq!(token, Ok(()));
+        }
+
+        #[rstest]
+        fn test_remove_provisioned_token(mut repo: Box<dyn ManageTokens>) {
+            let token = repo.get_mut_token("test").unwrap();
+            token.is_provisioned = true;
+
+            let err = repo.remove_token("test").err().unwrap();
+            assert_eq!(err, conflict!("Can't remove provisioned token 'test'"))
+        }
     }
 
-    //----------------
-    // find_by_name tests
-    //----------------
-    #[rstest]
-    fn test_find_by_name(repo: Box<dyn ManageTokens>) {
-        let token = repo.get_token("test").unwrap();
-        assert_eq!(token.name, "test");
-        assert!(token.value.starts_with("test-"));
-    }
+    mod rename_bucket {
+        use super::*;
 
-    #[rstest]
-    fn test_find_by_name_not_found(repo: Box<dyn ManageTokens>) {
-        let token = repo.get_token("test-1");
-        assert_eq!(
-            token,
-            Err(ReductError::not_found("Token 'test-1' doesn't exist"))
-        );
-    }
+        #[rstest]
+        fn test_rename_bucket(mut repo: Box<dyn ManageTokens>) {
+            repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
-    #[rstest]
-    fn test_find_by_name_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
-        let token = disabled_repo.get_token("test");
-        assert_eq!(
-            token,
-            Err(ReductError::bad_request("Authentication is disabled"))
-        );
-    }
+            let token = repo.get_token("test").unwrap();
+            let permissions = token.permissions.as_ref().unwrap();
 
-    //------------
-    // get_token_list tests
-    //------------
-    #[rstest]
-    fn test_get_token_list(repo: Box<dyn ManageTokens>) {
-        let token_list = repo.get_token_list().unwrap();
+            assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
+            assert_eq!(permissions.write, vec!["bucket-2".to_string()]);
+        }
 
-        assert_eq!(token_list.len(), 2);
-        assert_eq!(token_list[1].name, "test");
-        assert_eq!(token_list[1].value, "");
-        assert_eq!(
-            token_list[1].permissions,
-            Some(Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            })
-        );
-    }
-
-    #[rstest]
-    fn test_get_token_list_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
-        let token_list = disabled_repo.get_token_list().unwrap();
-        assert_eq!(token_list, vec![]);
-    }
-
-    //------------
-    // validate_token tests
-    //------------
-    #[rstest]
-    fn test_validate_token(mut repo: Box<dyn ManageTokens>) {
-        let value = repo
-            .generate_token(
-                "test-1",
+        #[rstest]
+        fn test_rename_bucket_persistent(path: PathBuf, init_token: &str) {
+            let mut repo = create_token_repository(path.clone(), init_token);
+            repo.generate_token(
+                "test",
                 Permissions {
                     full_access: true,
                     read: vec!["bucket-1".to_string()],
-                    write: vec!["bucket-2".to_string()],
+                    write: vec!["bucket-1".to_string()],
                 },
             )
-            .unwrap()
-            .value;
-
-        let token = repo
-            .validate_token(Some(&format!("Bearer {}", value)))
             .unwrap();
 
-        assert_eq!(
-            token,
-            Token {
-                name: "test-1".to_string(),
-                created_at: token.created_at.clone(),
-                value: "".to_string(),
-                permissions: Some(Permissions {
-                    full_access: true,
-                    read: vec!["bucket-1".to_string()],
-                    write: vec!["bucket-2".to_string()],
-                }),
-                is_provisioned: false,
-            }
-        );
-    }
+            repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
-    #[rstest]
-    fn test_validate_token_not_found(repo: Box<dyn ManageTokens>) {
-        let token = repo.validate_token(Some("Bearer invalid-value"));
-        assert_eq!(token, Err(ReductError::unauthorized("Invalid token")));
-    }
+            let repo = create_token_repository(path.clone(), init_token);
+            let token = repo.get_token("test").unwrap();
+            let permissions = token.permissions.as_ref().unwrap();
 
-    #[rstest]
-    fn test_validate_token_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
-        let placeholder = disabled_repo.validate_token(Some("invalid-value")).unwrap();
+            assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
+            assert_eq!(permissions.write, vec!["bucket-2".to_string()]);
+        }
 
-        assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
-        assert_eq!(placeholder.value, "");
-        assert_eq!(placeholder.permissions.unwrap().full_access, true);
-    }
-
-    //------------
-    // remove_token tests
-    //------------
-    #[rstest]
-    fn test_remove_token(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.remove_token("test").unwrap();
-        assert_eq!(token, ());
-    }
-
-    #[rstest]
-    fn test_remove_init_token(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.remove_token("init-token");
-        assert_eq!(
-            token,
-            Err(ReductError::conflict(
-                "Can't remove provisioned token 'init-token'"
-            ))
-        );
-    }
-
-    #[rstest]
-    fn test_remove_token_not_found(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.remove_token("test-1");
-        assert_eq!(
-            token,
-            Err(ReductError::not_found("Token 'test-1' doesn't exist"))
-        );
-    }
-
-    #[rstest]
-    fn test_remove_token_persistent(path: PathBuf, init_token: &str) {
-        let mut repo = create_token_repository(path.clone(), init_token);
-        repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        )
-        .unwrap();
-
-        repo.remove_token("test").unwrap();
-
-        let repo = create_token_repository(path, init_token);
-        let token = repo.get_token("test");
-
-        assert_eq!(
-            token,
-            Err(ReductError::not_found("Token 'test' doesn't exist"))
-        );
-    }
-
-    #[rstest]
-    fn test_remove_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
-        let token = disabled_repo.remove_token("test");
-        assert_eq!(token, Ok(()));
-    }
-
-    #[rstest]
-    fn test_remove_provisioned_token(mut repo: Box<dyn ManageTokens>) {
-        let token = repo.get_mut_token("test").unwrap();
-        token.is_provisioned = true;
-
-        let err = repo.remove_token("test").err().unwrap();
-        assert_eq!(
-            err,
-            ReductError::conflict("Can't remove provisioned token 'test'")
-        )
+        #[rstest]
+        fn test_rename_bucket_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
+            let result = disabled_repo.rename_bucket("bucket-1", "bucket-2");
+            assert!(result.is_ok());
+        }
     }
 
     #[fixture]

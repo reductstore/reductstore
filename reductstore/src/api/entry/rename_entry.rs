@@ -4,13 +4,11 @@
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use std::collections::HashMap;
-
 use axum::extract::{Path, State};
-use axum_extra::headers::HeaderMap;
-
 use axum::Json;
-use reduct_base::msg::entry_api::RenameEnry;
+use axum_extra::headers::HeaderMap;
+use reduct_base::msg::entry_api::RenameEntry;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 // PUT /b/:bucket_name/:entry_name
@@ -18,7 +16,7 @@ pub(crate) async fn rename_entry(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     headers: HeaderMap,
-    request: Json<RenameEnry>,
+    request: Json<RenameEntry>,
 ) -> Result<(), HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
@@ -53,7 +51,7 @@ mod tests {
     async fn test_rename_entry(
         #[future] components: Arc<Components>,
         headers: HeaderMap,
-        request: RenameEnry,
+        request: RenameEntry,
     ) {
         let components = components.await;
         let path = HashMap::from_iter(vec![
@@ -102,7 +100,7 @@ mod tests {
     async fn test_rename_bucket_not_found(
         #[future] components: Arc<Components>,
         headers: HeaderMap,
-        request: RenameEnry,
+        request: RenameEntry,
     ) {
         let components = components.await;
         let path = HashMap::from_iter(vec![
@@ -129,7 +127,7 @@ mod tests {
     async fn test_rename_entry_not_found(
         #[future] components: Arc<Components>,
         headers: HeaderMap,
-        request: RenameEnry,
+        request: RenameEntry,
     ) {
         let components = components.await;
         let path = HashMap::from_iter(vec![
@@ -155,8 +153,8 @@ mod tests {
     }
 
     #[fixture]
-    fn request() -> RenameEnry {
-        RenameEnry {
+    fn request() -> RenameEntry {
+        RenameEntry {
             new_name: "entry-2".to_string(),
         }
     }

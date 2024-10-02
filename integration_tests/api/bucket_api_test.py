@@ -270,3 +270,64 @@ def test__head_bucket_with_full_access_token(
         f"{base_url}/b/{bucket_name}", headers=auth_headers(token_without_permissions)
     )
     assert resp.status_code == 200
+
+
+def test__rename_bucket_ok(base_url, session, bucket_name):
+    """Should rename a bucket"""
+    resp = session.post(f"{base_url}/b/{bucket_name}")
+    assert resp.status_code == 200
+
+    new_bucket_name = "new_bucket_name"
+    resp = session.post(
+        f"{base_url}/b/{bucket_name}/rename", json={"name": new_bucket_name}
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket_name}")
+    assert resp.status_code == 404
+
+    resp = session.get(f"{base_url}/b/{new_bucket_name}")
+    assert resp.status_code == 200
+
+
+@requires_env("API_TOKEN")
+def test__rename_bucket_with_full_access_token(
+    base_url,
+    session,
+    bucket_name,
+    token_without_permissions,
+    token_read_bucket,
+    token_write_bucket,
+):
+    """Needs full access to rename bucket"""
+    resp = session.post(f"{base_url}/b/{bucket_name}")
+    assert resp.status_code == 200
+
+    new_bucket_name = "new_bucket_name"
+    resp = session.post(
+        f"{base_url}/b/{bucket_name}/rename",
+        json={"name": new_bucket_name},
+        headers=auth_headers(""),
+    )
+    assert resp.status_code == 401
+
+    resp = session.post(
+        f"{base_url}/b/{bucket_name}/rename",
+        json={"name": new_bucket_name},
+        headers=auth_headers(token_without_permissions),
+    )
+    assert resp.status_code == 403
+
+    resp = session.post(
+        f"{base_url}/b/{bucket_name}/rename",
+        json={"name": new_bucket_name},
+        headers=auth_headers(token_read_bucket),
+    )
+    assert resp.status_code == 403
+
+    resp = session.post(
+        f"{base_url}/b/{bucket_name}/rename",
+        json={"name": new_bucket_name},
+        headers=auth_headers(token_write_bucket),
+    )
+    assert resp.status_code == 403

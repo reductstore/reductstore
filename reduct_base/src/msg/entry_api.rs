@@ -36,7 +36,7 @@ pub struct RemoveQueryInfo {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
-pub struct RenameEnry {
+pub struct RenameEntry {
     /// New entry name
     pub new_name: String,
 }

@@ -127,3 +127,9 @@ mod tests {
         assert_eq!(QuotaType::from_str(as_string).unwrap(), expected);
     }
 }
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct RenameBucket {
+    /// New bucket name
+    pub new_name: String,
+}
