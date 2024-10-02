@@ -869,7 +869,6 @@ mod tests {
 
     mod rename_bucket {
         use super::*;
-        use std::ops::Deref;
 
         #[rstest]
         fn test_rename_bucket(mut repo: Box<dyn ManageTokens>) {
