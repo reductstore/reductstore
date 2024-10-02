@@ -300,9 +300,6 @@ def test__rename_bucket_with_full_access_token(
     token_write_bucket,
 ):
     """Needs full access to rename bucket"""
-    resp = session.post(f"{base_url}/b/{bucket_name}")
-    assert resp.status_code == 200
-
     new_bucket_name = "new_bucket_name"
     resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
