@@ -7,7 +7,7 @@ pub mod filters;
 mod historical;
 mod limited;
 
-use crate::core::thread_pool::{shared_isolated, TaskHandle};
+use crate::core::thread_pool::{shared, shared_isolated, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -15,9 +15,9 @@ use log::{trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
@@ -45,40 +45,63 @@ pub(in crate::storage) fn build_query(
 
 pub(super) fn spawn_query_task(
     task_group: String,
-    mut query: Box<dyn Query + Send + Sync>,
+    query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<RwLock<BlockManager>>,
 ) -> (QueryRx, TaskHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
-    let handle = shared_isolated(&task_group.clone(), "spawn query task", move || {
+    // we spawn a new task to run the query outside of hierarchical task group to avoid deadlocks
+    let query = Arc::new(Mutex::new(query));
+    let handle = shared_isolated("spawn_query_task", "spawn query task", move || {
+        trace!("Query task for '{}' running", task_group);
+
         loop {
-            let next_result = query.next(block_manager.clone());
-            let query_err = next_result.as_ref().err().cloned();
+            let group = task_group.clone();
+            let query = query.clone();
+            let block_manager = block_manager.clone();
+            let tx = tx.clone();
 
-            if tx.is_closed() {
-                trace!("Query '{}' task channel closed", task_group);
-                break;
-            }
-
-            let send_result = tx.blocking_send(next_result);
-
-            if let Err(err) = send_result {
-                warn!("Error sending query '{}' result: {}", task_group, err);
-                break;
-            }
-
-            if let Some(err) = query_err {
-                if err.status == NoContent && options.continuous {
-                    // continuous query will never be done
-                    // but we don't want to flood the channel and wait for the receiver
-                    while tx.capacity() < tx.max_capacity() {
-                        sleep(Duration::from_millis(10));
-                    }
-                } else {
-                    trace!("Query task done for '{}'", task_group);
-                    break;
+            let task = shared(&group.clone(), "query iteration", move || {
+                if tx.is_closed() {
+                    trace!("Query '{}' task channel closed", group);
+                    return None;
                 }
+
+                if tx.capacity() == 0 {
+                    trace!("Query '{}' task channel full", group);
+                    sleep(Duration::from_micros(10));
+                    return Some(());
+                }
+
+                let next_result = query.lock().unwrap().next(block_manager.clone());
+                let query_err = next_result.as_ref().err().cloned();
+
+                let send_result = tx.blocking_send(next_result);
+
+                if let Err(err) = send_result {
+                    warn!("Error sending query '{}' result: {}", group, err);
+                    return None;
+                }
+
+                if let Some(err) = query_err {
+                    if err.status == NoContent && options.continuous {
+                        // continuous query will never be done
+                        // but we don't want to flood the channel and wait for the receiver
+                        let now = Instant::now();
+                        while tx.capacity() < tx.max_capacity() && now.elapsed() < options.ttl {
+                            sleep(Duration::from_millis(10));
+                        }
+                    } else {
+                        trace!("Query task done for '{}'", group);
+                        return None;
+                    }
+                }
+                Some(())
+            });
+
+            if task.wait().is_none() {
+                break;
             }
         }
     });
@@ -88,6 +111,7 @@ pub(super) fn spawn_query_task(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::logger::Logger;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
@@ -158,6 +182,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
+        Logger::init("TRACE");
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             continuous: true,

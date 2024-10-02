@@ -147,15 +147,14 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_update_labels(mut entry: Entry) {
+    fn test_update_labels(mut entry: Entry) {
         entry.set_settings(EntrySettings {
             max_block_records: 2,
             ..entry.settings()
         });
-        write_stub_record(&mut entry, 1).await.unwrap();
-        write_stub_record(&mut entry, 2).await.unwrap();
-        write_stub_record(&mut entry, 3).await.unwrap();
+        write_stub_record(&mut entry, 1);
+        write_stub_record(&mut entry, 2);
+        write_stub_record(&mut entry, 3);
 
         // update, remove and add labels
         let result = entry
@@ -166,7 +165,7 @@ mod tests {
                 make_update(3),
                 make_update(5),
             ])
-            .await
+            .wait()
             .unwrap();
 
         // check results
@@ -199,33 +198,32 @@ mod tests {
         assert!(updated_labels.contains(&expected_labels_3[1]));
 
         // check if the records were updated
-        let record = entry.begin_read(1).await.unwrap().record().clone();
+        let record = entry.begin_read(1).wait().unwrap().record().clone();
         assert_eq!(record.labels.len(), 2);
         assert!(record.labels.contains(&expected_labels_1[0]));
         assert!(record.labels.contains(&expected_labels_1[1]));
 
-        let record = entry.begin_read(2).await.unwrap().record().clone();
+        let record = entry.begin_read(2).wait().unwrap().record().clone();
         assert_eq!(record.labels.len(), 2);
         assert!(record.labels.contains(&expected_labels_2[0]));
         assert!(record.labels.contains(&expected_labels_2[1]));
 
-        let record = entry.begin_read(3).await.unwrap().record().clone();
+        let record = entry.begin_read(3).wait().unwrap().record().clone();
         assert_eq!(record.labels.len(), 2);
         assert!(record.labels.contains(&expected_labels_3[0]));
         assert!(record.labels.contains(&expected_labels_3[1]));
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_update_nothing(mut entry: Entry) {
-        write_stub_record(&mut entry, 1).await.unwrap();
+    fn test_update_nothing(mut entry: Entry) {
+        write_stub_record(&mut entry, 1);
         let result = entry
             .update_labels(vec![UpdateLabels {
                 time: 1,
                 update: Labels::new(),
                 remove: HashSet::new(),
             }])
-            .await
+            .wait()
             .unwrap();
 
         assert_eq!(result.len(), 1);
@@ -277,7 +275,7 @@ mod tests {
         ]
     }
 
-    async fn write_stub_record(mut entry: &mut Entry, time: u64) -> Result<(), ReductError> {
+    fn write_stub_record(mut entry: &mut Entry, time: u64) {
         write_record_with_labels(
             &mut entry,
             time,
@@ -286,7 +284,6 @@ mod tests {
                 (format!("a-{}", time), format!("x-{}", time)),
                 (format!("c-{}", time), format!("z-{}", time)),
             ]),
-        )
-        .await
+        );
     }
 }

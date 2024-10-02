@@ -310,52 +310,48 @@ mod tests {
     mod reader {
         use super::*;
         use crate::storage::entry::Entry;
+        use std::thread::sleep;
 
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
         use std::time::Duration;
 
         #[rstest]
-        #[tokio::test]
-        async fn test_no_task(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000).await.unwrap();
-
-            let mut reader = entry.begin_read(1000).await.unwrap();
+        fn test_no_task(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000);
+            let mut reader = entry.begin_read(1000).wait().unwrap();
             assert!(
                 find_task_group(&get_task_group(entry.path(), 1000)).is_none(),
                 "We don't spawn a task for small records"
             );
             assert_eq!(
-                reader.rx().recv().await.unwrap().unwrap(),
+                reader.rx().blocking_recv().unwrap().unwrap(),
                 Bytes::from("0123456789")
             );
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_with_task(mut entry: Entry) {
+        fn test_with_task(mut entry: Entry) {
             write_record(
                 &mut entry,
                 1000,
                 vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
-            )
-            .await
-            .unwrap();
+            );
 
-            let mut reader = entry.begin_read(1000).await.unwrap();
+            let mut reader = entry.begin_read(1000).wait().unwrap();
             let task_group = get_task_group(entry.path(), 1000);
-            tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to start
+            sleep(Duration::from_millis(100)); // Wait for the task to start
 
             assert!(
                 find_task_group(&task_group).is_some(),
                 "We spawn a task for big records"
             );
             assert_eq!(
-                reader.rx().recv().await.unwrap().unwrap().len(),
+                reader.rx().blocking_recv().unwrap().unwrap().len(),
                 MAX_IO_BUFFER_SIZE
             );
 
-            tokio::time::sleep(Duration::from_millis(100)).await; // Wait for the task to finish
+            sleep(Duration::from_millis(100)); // Wait for the task to finish
 
             assert!(
                 find_task_group(&task_group).is_none(),

@@ -172,16 +172,12 @@ impl Entry {
     ) -> Result<Weak<AsyncRwLock<QueryRx>>, ReductError> {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        shared(&self.task_group(), "remove expired query", move || {
+        shared(&self.task_group(), "remove expired queries", move || {
             Self::remove_expired_query(queries, entry_path);
-            tx.send(()).unwrap();
-        });
-
-        rx.recv().unwrap();
+        })
+        .wait();
 
         let mut queries = self.queries.write()?;
-
         let query = queries.get_mut(&query_id)
             .ok_or_else(||
                 ReductError::not_found(
@@ -283,9 +279,11 @@ impl Entry {
                 return false;
             }
 
-            if handle.rx.blocking_read().is_empty() && handle.query_task_handle.is_finished() {
-                debug!("Query {}/{} finished", entry_path, id);
-                return false;
+            if let Ok(rx) = handle.rx.try_read() {
+                if rx.is_empty() && handle.query_task_handle.is_finished() {
+                    debug!("Query {}/{} finished", entry_path, id);
+                    return false;
+                }
             }
 
             true
@@ -312,20 +310,19 @@ mod tests {
     use bytes::Bytes;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
+    use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
-    use tokio::time::sleep;
 
     mod restore {
         use super::*;
         use crate::storage::proto::{record, us_to_ts, Record};
 
         #[rstest]
-        #[tokio::test]
-        async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
+        fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
             let mut entry = entry(entry_settings.clone(), path.clone());
-            write_stub_record(&mut entry, 1).await.unwrap();
-            write_stub_record(&mut entry, 2000010).await.unwrap();
+            write_stub_record(&mut entry, 1);
+            write_stub_record(&mut entry, 2000010);
 
             let mut bm = entry.block_manager.write().unwrap();
             let records = bm
@@ -362,7 +359,7 @@ mod tests {
 
             bm.save_cache_on_disk().unwrap();
             let entry = Entry::restore(path.join(entry.name), entry_settings)
-                .await
+                .wait()
                 .unwrap();
 
             let info = entry.info().unwrap();
@@ -376,42 +373,44 @@ mod tests {
         use super::*;
         use reduct_base::error::ErrorCode;
         use reduct_base::{no_content, not_found};
+        use std::thread::sleep;
 
         #[rstest]
-        #[tokio::test]
-        async fn test_historical_query(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            write_stub_record(&mut entry, 2000000).await.unwrap();
-            write_stub_record(&mut entry, 3000000).await.unwrap();
+        fn test_historical_query(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000);
+            write_stub_record(&mut entry, 2000000);
+            write_stub_record(&mut entry, 3000000);
 
             let id = entry
                 .query(0, 4000000, QueryOptions::default())
-                .await
+                .wait()
                 .unwrap();
             assert!(id >= 1);
 
             {
                 let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
-                let mut rx = rx.write().await;
+                let mut rx = rx.blocking_write();
 
                 {
-                    let reader = rx.recv().await.unwrap().unwrap();
+                    let reader = rx.blocking_recv().unwrap().unwrap();
                     assert_eq!(reader.timestamp(), 1000000);
                 }
                 {
-                    let reader = rx.recv().await.unwrap().unwrap();
+                    let reader = rx.blocking_recv().unwrap().unwrap();
                     assert_eq!(reader.timestamp(), 2000000);
                 }
                 {
-                    let reader = rx.recv().await.unwrap().unwrap();
+                    let reader = rx.blocking_recv().unwrap().unwrap();
                     assert_eq!(reader.timestamp(), 3000000);
                 }
 
                 assert_eq!(
-                    rx.recv().await.unwrap().err(),
+                    rx.blocking_recv().unwrap().err(),
                     Some(no_content!("No content"))
                 );
             }
+
+            sleep(Duration::from_millis(100)); // let query task finish
 
             assert_eq!(
                 entry.get_query_receiver(id).err(),
@@ -420,9 +419,8 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_continuous_query(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await.unwrap();
+        fn test_continuous_query(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000);
 
             let id = entry
                 .query(
@@ -434,26 +432,26 @@ mod tests {
                         ..QueryOptions::default()
                     },
                 )
-                .await
+                .wait()
                 .unwrap();
 
             {
                 let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
-                let mut rx = rx.write().await;
-                let reader = rx.recv().await.unwrap().unwrap();
+                let mut rx = rx.blocking_write();
+                let reader = rx.blocking_recv().unwrap().unwrap();
                 assert_eq!(reader.timestamp(), 1000000);
                 assert_eq!(
-                    rx.recv().await.unwrap().err(),
+                    rx.blocking_recv().unwrap().err(),
                     Some(no_content!("No content"))
                 );
             }
 
-            write_stub_record(&mut entry, 2000000).await.unwrap();
+            write_stub_record(&mut entry, 2000000);
             {
                 let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
-                let mut rx = rx.write().await;
+                let mut rx = rx.blocking_write();
                 let reader = loop {
-                    let reader = rx.recv().await.unwrap();
+                    let reader = rx.blocking_recv().unwrap();
                     match reader {
                         Ok(reader) => break reader,
                         Err(ReductError {
@@ -466,7 +464,7 @@ mod tests {
                 assert_eq!(reader.timestamp(), 2000000);
             }
 
-            sleep(Duration::from_millis(700)).await;
+            sleep(Duration::from_millis(700));
             assert_eq!(
                 entry.get_query_receiver(id).err(),
                 Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
@@ -475,8 +473,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_info(path: PathBuf) {
+    fn test_info(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
                 max_block_size: 10000,
@@ -485,9 +482,9 @@ mod tests {
             path,
         );
 
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 2000000).await.unwrap();
-        write_stub_record(&mut entry, 3000000).await.unwrap();
+        write_stub_record(&mut entry, 1000000);
+        write_stub_record(&mut entry, 2000000);
+        write_stub_record(&mut entry, 3000000);
 
         let info = entry.info().unwrap();
         assert_eq!(info.name, "entry");
@@ -500,6 +497,7 @@ mod tests {
 
     mod try_remove_oldest_block {
         use super::*;
+        use std::thread::sleep;
 
         use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
@@ -512,17 +510,14 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_entry_which_has_reader(mut entry: Entry) {
+        fn test_entry_which_has_reader(mut entry: Entry) {
             write_record(
                 &mut entry,
                 1000000,
                 vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
-            )
-            .await
-            .unwrap();
+            );
             let _rx = entry.begin_read(1000000).wait().unwrap();
-            sleep(Duration::from_millis(100)).await;
+            sleep(Duration::from_millis(100));
 
             assert_eq!(
                 entry.try_remove_oldest_block().wait(),
@@ -546,7 +541,7 @@ mod tests {
                 .blocking_send(Ok(Some(Bytes::from_static(b"456789"))))
                 .unwrap();
 
-            std::thread::sleep(Duration::from_millis(100));
+            sleep(Duration::from_millis(100));
             assert_eq!(
                 entry.try_remove_oldest_block().wait(),
                 Err(internal_server_error!(
@@ -559,8 +554,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_size_counting(path: PathBuf) {
+        fn test_size_counting(path: PathBuf) {
             let mut entry = Entry::try_new(
                 "entry",
                 path.clone(),
@@ -571,21 +565,21 @@ mod tests {
             )
             .unwrap();
 
-            write_stub_record(&mut entry, 1000000).await.unwrap();
-            write_stub_record(&mut entry, 2000000).await.unwrap();
-            write_stub_record(&mut entry, 3000000).await.unwrap();
-            write_stub_record(&mut entry, 4000000).await.unwrap();
+            write_stub_record(&mut entry, 1000000);
+            write_stub_record(&mut entry, 2000000);
+            write_stub_record(&mut entry, 3000000);
+            write_stub_record(&mut entry, 4000000);
 
             assert_eq!(entry.info().unwrap().block_count, 2);
             assert_eq!(entry.info().unwrap().record_count, 4);
             assert_eq!(entry.info().unwrap().size, 138);
 
-            entry.try_remove_oldest_block().await.unwrap();
+            entry.try_remove_oldest_block().wait().unwrap();
             assert_eq!(entry.info().unwrap().block_count, 1);
             assert_eq!(entry.info().unwrap().record_count, 2);
             assert_eq!(entry.info().unwrap().size, 58);
 
-            entry.try_remove_oldest_block().await.unwrap();
+            entry.try_remove_oldest_block().wait().unwrap();
             assert_eq!(entry.info().unwrap().block_count, 0);
             assert_eq!(entry.info().unwrap().record_count, 0);
             assert_eq!(entry.info().unwrap().size, 0);
@@ -610,53 +604,40 @@ mod tests {
         tempfile::tempdir().unwrap().into_path().join("bucket")
     }
 
-    pub async fn write_record(
-        entry: &mut Entry,
-        time: u64,
-        data: Vec<u8>,
-    ) -> Result<(), ReductError> {
+    pub fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) {
         let sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
-            .await?;
-        let x = sender.tx().send(Ok(Some(Bytes::from(data)))).await;
+            .wait()
+            .unwrap();
         sender
             .tx()
-            .send(Ok(None))
-            .await
+            .blocking_send(Ok(Some(Bytes::from(data))))
+            .unwrap();
+        sender
+            .tx()
+            .blocking_send(Ok(None))
             .expect("Failed to send None");
-        sender.tx().closed().await;
         drop(sender);
-        sleep(Duration::from_millis(10)).await; // let the record be written
-        match x {
-            Ok(_) => Ok(()),
-            Err(_) => Err(ReductError::internal_server_error("Error sending data")),
-        }
+        sleep(Duration::from_millis(10)); // let the record be written
     }
 
-    pub async fn write_record_with_labels(
-        entry: &mut Entry,
-        time: u64,
-        data: Vec<u8>,
-        labels: Labels,
-    ) -> Result<(), ReductError> {
+    pub fn write_record_with_labels(entry: &mut Entry, time: u64, data: Vec<u8>, labels: Labels) {
         let sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), labels)
-            .await?;
-        let x = sender.tx().send(Ok(Some(Bytes::from(data)))).await;
+            .wait()
+            .unwrap();
         sender
             .tx()
-            .send(Ok(None))
-            .await
+            .blocking_send(Ok(Some(Bytes::from(data))))
+            .unwrap();
+        sender
+            .tx()
+            .blocking_send(Ok(None))
             .expect("Failed to send None");
-        sender.tx().closed().await;
-        match x {
-            Ok(_) => Ok(()),
-            Err(_) => Err(internal_server_error!("Error sending data")),
-        }
     }
 
-    pub(super) async fn write_stub_record(entry: &mut Entry, time: u64) -> Result<(), ReductError> {
-        write_record(entry, time, b"0123456789".to_vec()).await
+    pub(super) fn write_stub_record(entry: &mut Entry, time: u64) {
+        write_record(entry, time, b"0123456789".to_vec());
     }
 
     pub fn get_task_group(entry_path: &PathBuf, time: u64) -> String {
