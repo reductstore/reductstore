@@ -275,7 +275,7 @@ mod tests {
         ]
     }
 
-    async fn write_stub_record(mut entry: &mut Entry, time: u64) {
+    fn write_stub_record(mut entry: &mut Entry, time: u64) {
         write_record_with_labels(
             &mut entry,
             time,

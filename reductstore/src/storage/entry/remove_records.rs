@@ -195,55 +195,51 @@ mod tests {
     use rstest::{fixture, rstest};
 
     #[rstest]
-    #[tokio::test]
-    async fn test_remove_records(#[future] mut entry_with_data: Entry) {
-        let entry = entry_with_data.await;
+    fn test_remove_records(mut entry_with_data: Entry) {
         let timestamps = vec![0, 2, 4, 5];
-        let error_map = entry.remove_records(timestamps).await.unwrap();
+        let error_map = entry_with_data.remove_records(timestamps).wait().unwrap();
 
         assert_eq!(error_map.len(), 2, "Only two records are not found");
         assert_eq!(error_map[&0], not_found!("No record with timestamp 0"));
         assert_eq!(error_map[&5], not_found!("No record with timestamp 5"));
 
         // check existing records
-        assert!(entry.begin_read(1).await.is_ok());
-        assert!(entry.begin_read(3).await.is_ok());
+        assert!(entry_with_data.begin_read(1).wait().is_ok());
+        assert!(entry_with_data.begin_read(3).wait().is_ok());
 
         // check removed records
         assert_eq!(
-            entry.begin_read(2).await.err().unwrap(),
+            entry_with_data.begin_read(2).wait().err().unwrap(),
             not_found!("No record with timestamp 2")
         );
         assert_eq!(
-            entry.begin_read(4).await.err().unwrap(),
+            entry_with_data.begin_read(4).wait().err().unwrap(),
             not_found!("No record with timestamp 4")
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_remove_records(#[future] mut entry_with_data: Entry) {
-        let entry = entry_with_data.await;
-        let removed_records = entry
+    fn test_query_remove_records(mut entry_with_data: Entry) {
+        let removed_records = entry_with_data
             .query_remove_records(2, 4, QueryOptions::default())
-            .await
+            .wait()
             .unwrap();
 
         assert_eq!(removed_records, 2);
 
         // check removed records
         assert_eq!(
-            entry.begin_read(2).await.err().unwrap(),
+            entry_with_data.begin_read(2).wait().err().unwrap(),
             not_found!("No record with timestamp 2")
         );
         assert_eq!(
-            entry.begin_read(3).await.err().unwrap(),
+            entry_with_data.begin_read(3).wait().err().unwrap(),
             not_found!("No record with timestamp 3")
         );
     }
 
     #[fixture]
-    async fn entry_with_data(mut entry: Entry) -> Entry {
+    fn entry_with_data(mut entry: Entry) -> Entry {
         entry.set_settings(EntrySettings {
             max_block_records: 2,
             ..entry.settings()

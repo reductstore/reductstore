@@ -27,7 +27,9 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
 
-use crate::core::thread_pool::{shared, try_unique, unique_child, TaskHandle};
+use crate::core::thread_pool::{
+    shared, shared_child, shared_isolated, try_unique, unique_child, TaskHandle,
+};
 use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
 use reduct_base::internal_server_error;
@@ -172,10 +174,12 @@ impl Entry {
     ) -> Result<Weak<AsyncRwLock<QueryRx>>, ReductError> {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
-        Self::remove_expired_query(queries, entry_path);
+        shared(&self.task_group(), "remove expired queries", move || {
+            Self::remove_expired_query(queries, entry_path);
+        })
+        .wait();
 
         let mut queries = self.queries.write()?;
-
         let query = queries.get_mut(&query_id)
             .ok_or_else(||
                 ReductError::not_found(
@@ -277,9 +281,11 @@ impl Entry {
                 return false;
             }
 
-            if handle.rx.blocking_read().is_empty() && handle.query_task_handle.is_finished() {
-                debug!("Query {}/{} finished", entry_path, id);
-                return false;
+            if let Ok(rx) = handle.rx.try_read() {
+                if rx.is_empty() && handle.query_task_handle.is_finished() {
+                    debug!("Query {}/{} finished", entry_path, id);
+                    return false;
+                }
             }
 
             true
@@ -315,8 +321,7 @@ mod tests {
         use crate::storage::proto::{record, us_to_ts, Record};
 
         #[rstest]
-        #[tokio::test]
-        async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
+        fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
             let mut entry = entry(entry_settings.clone(), path.clone());
             write_stub_record(&mut entry, 1);
             write_stub_record(&mut entry, 2000010);
@@ -356,7 +361,7 @@ mod tests {
 
             bm.save_cache_on_disk().unwrap();
             let entry = Entry::restore(path.join(entry.name), entry_settings)
-                .await
+                .wait()
                 .unwrap();
 
             let info = entry.info().unwrap();
@@ -373,37 +378,36 @@ mod tests {
         use std::thread::sleep;
 
         #[rstest]
-        #[tokio::test]
-        async fn test_historical_query(mut entry: Entry) {
+        fn test_historical_query(mut entry: Entry) {
             write_stub_record(&mut entry, 1000000);
             write_stub_record(&mut entry, 2000000);
             write_stub_record(&mut entry, 3000000);
 
             let id = entry
                 .query(0, 4000000, QueryOptions::default())
-                .await
+                .wait()
                 .unwrap();
             assert!(id >= 1);
 
             {
                 let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
-                let mut rx = rx.write().await;
+                let mut rx = rx.blocking_write();
 
                 {
-                    let reader = rx.recv().await.unwrap().unwrap();
+                    let reader = rx.blocking_recv().unwrap().unwrap();
                     assert_eq!(reader.timestamp(), 1000000);
                 }
                 {
-                    let reader = rx.recv().await.unwrap().unwrap();
+                    let reader = rx.blocking_recv().unwrap().unwrap();
                     assert_eq!(reader.timestamp(), 2000000);
                 }
                 {
-                    let reader = rx.recv().await.unwrap().unwrap();
+                    let reader = rx.blocking_recv().unwrap().unwrap();
                     assert_eq!(reader.timestamp(), 3000000);
                 }
 
                 assert_eq!(
-                    rx.recv().await.unwrap().err(),
+                    rx.blocking_recv().unwrap().err(),
                     Some(no_content!("No content"))
                 );
             }

@@ -63,13 +63,19 @@ pub(super) fn spawn_query_task(
             let tx = tx.clone();
 
             let task = shared(&group.clone(), "query iteration", move || {
-                let next_result = query.lock().unwrap().next(block_manager.clone());
-                let query_err = next_result.as_ref().err().cloned();
-
                 if tx.is_closed() {
                     trace!("Query '{}' task channel closed", group);
                     return None;
                 }
+
+                if tx.capacity() == 0 {
+                    trace!("Query '{}' task channel full", group);
+                    sleep(Duration::from_micros(10));
+                    return Some(());
+                }
+
+                let next_result = query.lock().unwrap().next(block_manager.clone());
+                let query_err = next_result.as_ref().err().cloned();
 
                 let send_result = tx.blocking_send(next_result);
 
