@@ -65,6 +65,8 @@ mod tests {
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;
+    use std::thread::sleep;
+    use std::time::Duration;
 
     #[rstest]
     #[tokio::test]
@@ -77,10 +79,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_early(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        let writer = entry.begin_read(1000).await;
+    fn test_begin_read_early(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000);
+        let writer = entry.begin_read(1000).wait();
         assert_eq!(
             writer.err(),
             Some(not_found!("No record with timestamp 1000"))
@@ -88,10 +89,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_late(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        let reader = entry.begin_read(2000000).await;
+    fn test_begin_read_late(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000);
+        let reader = entry.begin_read(2000000).wait();
         assert_eq!(
             reader.err(),
             Some(not_found!("No record with timestamp 2000000"))
@@ -99,20 +99,18 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_broken(entry: Entry) {
+    fn test_begin_read_broken(entry: Entry) {
         let sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .await
+            .wait()
             .unwrap();
         sender
             .tx()
-            .send(Ok(Some(Bytes::from(vec![0; 50]))))
-            .await
+            .blocking_send(Ok(Some(Bytes::from(vec![0; 50]))))
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let reader = entry.begin_read(1000000).await;
+        sleep(Duration::from_millis(100));
+        let reader = entry.begin_read(1000000).wait();
         assert_eq!(
             reader.err(),
             Some(internal_server_error!(
@@ -122,19 +120,17 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_still_written(entry: Entry) {
+    fn test_begin_read_still_written(entry: Entry) {
         let sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .await
+            .wait()
             .unwrap();
         sender
             .tx()
-            .send(Ok(Some(Bytes::from(vec![0; 5]))))
-            .await
+            .blocking_send(Ok(Some(Bytes::from(vec![0; 5]))))
             .unwrap();
 
-        let reader = entry.begin_read(1000000).await;
+        let reader = entry.begin_read(1000000).wait();
         assert_eq!(
             reader.err(),
             Some(too_early!(
@@ -144,12 +140,11 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_not_found(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 3000000).await.unwrap();
+    fn test_begin_read_not_found(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000);
+        write_stub_record(&mut entry, 3000000);
 
-        let reader = entry.begin_read(2000000).await;
+        let reader = entry.begin_read(2000000).wait();
         assert_eq!(
             reader.err(),
             Some(not_found!("No record with timestamp 2000000"))
@@ -157,55 +152,49 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok1(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        let mut reader = entry.begin_read(1000000).await.unwrap();
+    fn test_begin_read_ok1(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000);
+        let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(
-            reader.rx().recv().await.unwrap(),
+            reader.rx().blocking_recv().unwrap(),
             Ok(Bytes::from("0123456789"))
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok2(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await.unwrap();
-        write_stub_record(&mut entry, 1010000).await.unwrap();
+    fn test_begin_read_ok2(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000);
+        write_stub_record(&mut entry, 1010000);
 
-        let mut reader = entry.begin_read(1010000).await.unwrap();
+        let mut reader = entry.begin_read(1010000).wait().unwrap();
         assert_eq!(
-            reader.rx().recv().await.unwrap(),
+            reader.rx().blocking_recv().unwrap(),
             Ok(Bytes::from("0123456789"))
         );
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok_in_chunks(mut entry: Entry) {
+    fn test_begin_read_ok_in_chunks(mut entry: Entry) {
         let mut data = vec![0; MAX_IO_BUFFER_SIZE + 1];
         data[0] = 1;
         data[MAX_IO_BUFFER_SIZE] = 2;
 
-        write_record(&mut entry, 1000000, data.clone())
-            .await
-            .unwrap();
+        write_record(&mut entry, 1000000, data.clone());
 
-        let mut reader = entry.begin_read(1000000).await.unwrap();
+        let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(
-            reader.rx().recv().await.unwrap().unwrap().to_vec(),
+            reader.rx().blocking_recv().unwrap().unwrap().to_vec(),
             data[0..MAX_IO_BUFFER_SIZE]
         );
         assert_eq!(
-            reader.rx().recv().await.unwrap().unwrap().to_vec(),
+            reader.rx().blocking_recv().unwrap().unwrap().to_vec(),
             data[MAX_IO_BUFFER_SIZE..]
         );
-        assert_eq!(reader.rx().recv().await, None);
+        assert_eq!(reader.rx().blocking_recv(), None);
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_search(path: PathBuf) {
+    fn test_search(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
                 max_block_size: 10000,
@@ -216,10 +205,10 @@ mod tests {
 
         let step = 100000;
         for i in 0..100 {
-            write_stub_record(&mut entry, i * step).await.unwrap();
+            write_stub_record(&mut entry, i * step);
         }
 
-        let reader = entry.begin_read(30 * step).await.unwrap();
+        let reader = entry.begin_read(30 * step).wait().unwrap();
         assert_eq!(reader.timestamp(), 3000000);
     }
 }

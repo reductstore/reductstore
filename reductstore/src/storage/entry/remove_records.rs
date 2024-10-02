@@ -249,10 +249,10 @@ mod tests {
             ..entry.settings()
         });
 
-        write_stub_record(&mut entry, 1).await.unwrap();
-        write_stub_record(&mut entry, 2).await.unwrap();
-        write_stub_record(&mut entry, 3).await.unwrap();
-        write_stub_record(&mut entry, 4).await.unwrap();
+        write_stub_record(&mut entry, 1);
+        write_stub_record(&mut entry, 2);
+        write_stub_record(&mut entry, 3);
+        write_stub_record(&mut entry, 4);
         entry
     }
 }
