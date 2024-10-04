@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2024-10-04
+
 ### Added
 
 - RS-418: Remove record API, [PR-560](https://github.com/reductstore/reductstore/pull/560)
