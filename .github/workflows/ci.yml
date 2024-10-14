@@ -73,9 +73,6 @@ jobs:
         with:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
 
-      - name: Install CMake
-        run: pip install cmake
-
       - name: Install rustfmt
         run: rustup component add rustfmt
 
@@ -194,7 +191,7 @@ jobs:
       - build
     strategy:
       matrix:
-        version: [ 'latest', 'v1.10.1', 'v1.9.5', 'v1.8.2', 'v1.7.3' ]
+        version: [ 'latest', 'v1.11.2', 'v1.10.1', 'v1.9.5', 'v1.8.2', 'v1.7.3' ]
     env:
       RS_API_TOKEN: XXXX
     steps:
