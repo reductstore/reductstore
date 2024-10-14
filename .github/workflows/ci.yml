@@ -170,7 +170,9 @@ jobs:
           sleep 5
 
       - name: Build API tests
-        run: docker build -t api ./integration_tests/api
+        run:  |
+          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+          docker build -t api ./integration_tests/api
 
       - name: Run API tests
         run: docker run --network=host
@@ -196,9 +198,13 @@ jobs:
       RS_API_TOKEN: XXXX
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
 
       - name: Run latest stable ReductStore
         run: |
+          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
           docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:${{matrix.version}}
           sleep 5
           docker logs latest
@@ -252,6 +258,9 @@ jobs:
       RS_API_TOKEN: XXXX
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
 
       - name: Download artifact
         uses: actions/download-artifact@v4
@@ -314,6 +323,9 @@ jobs:
       RS_API_TOKEN: XXXX
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
 
       - name: Download artifact
         uses: actions/download-artifact@v4
