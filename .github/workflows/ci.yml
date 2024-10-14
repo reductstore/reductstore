@@ -202,6 +202,7 @@ jobs:
 
       - name: Run latest stable ReductStore
         run: |
+          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
           docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:${{matrix.version}}
           sleep 5
           docker logs latest
