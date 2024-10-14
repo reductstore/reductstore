@@ -170,7 +170,9 @@ jobs:
           sleep 5
 
       - name: Build API tests
-        run: docker build -t api ./integration_tests/api
+        run:  |
+          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+          docker build -t api ./integration_tests/api
 
       - name: Run API tests
         run: docker run --network=host
