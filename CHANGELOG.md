@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Crash when querying removed entry, [PR-605](https://github.com/reductstore/reductstore/pull/605)
+
 ## [1.12.0] - 2024-10-04
 
 ### Added
