@@ -112,8 +112,7 @@ async fn fetch_and_response_batched_records(
     let mut last = false;
     let bucket_name = bucket.name().to_string();
     let rx = bucket
-        .get_entry(entry_name)
-        .unwrap()
+        .get_entry(entry_name)?
         .upgrade()?
         .get_query_receiver(query_id)?;
 
@@ -302,6 +301,49 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_batched_no_entry(
+        #[future] components: Arc<Components>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let components = components.await;
+        let query_id = query(&path_to_entry_1, components.clone()).await;
+
+        components
+            .storage
+            .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+            .unwrap()
+            .upgrade()
+            .unwrap()
+            .remove_entry(path_to_entry_1.get("entry_name").unwrap())
+            .await
+            .unwrap();
+
+        let err = read_batched_records(
+            State(components.clone()),
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "q".to_string(),
+                query_id.to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err,
+            HttpError::new(
+                ErrorCode::NotFound,
+                "Entry 'entry-1' not found in bucket 'bucket-1'"
+            )
+        );
+    }
+
     mod next_record_reader {
         use super::*;
 
@@ -350,7 +392,7 @@ mod tests {
         }
     }
 
-    mod stram_wrapper {
+    mod stream_wrapper {
         use super::*;
 
         #[rstest]
