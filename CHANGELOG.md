@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2024-10-17
+
 ### Fixed
 
 - Crash when querying removed entry, [PR-605](https://github.com/reductstore/reductstore/pull/605)
@@ -805,9 +807,13 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.11.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.1...HEAD
 
-[1.11.0]: https://github.com/reductstore/reductstore/compare/v1.11.0...v1.11.1
+[1.12.1]: https://github.com/reductstore/reductstore/compare/v1.12.0...v1.12.1
+
+[1.12.0]: https://github.com/reductstore/reductstore/compare/v1.11.1...v1.12.0
+
+[1.11.1]: https://github.com/reductstore/reductstore/compare/v1.11.0...v1.11.1
 
 [1.11.0]: https://github.com/reductstore/reductstore/compare/v1.10.1...v1.11.0
 
