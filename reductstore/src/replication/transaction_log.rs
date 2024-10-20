@@ -361,6 +361,25 @@ mod tests {
         assert_eq!(transaction_log.read_pos, HEADER_SIZE);
     }
 
+    #[rstest]
+    fn test_recovery_empty_cache(path: PathBuf) {
+        TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        FILE_CACHE.discard_recursive(&path).unwrap(); // discard the cache to simulate restart
+
+        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
+        transaction_log
+            .push_back(Transaction::WriteRecord(1))
+            .unwrap();
+
+        // check if the transaction log is still working after cache discard
+        assert_eq!(
+            transaction_log.front(1).unwrap(),
+            vec![Transaction::WriteRecord(1)]
+        );
+        assert_eq!(transaction_log.pop_front(1).unwrap(), 1);
+        assert!(transaction_log.is_empty());
+    }
+
     #[fixture]
     fn path() -> PathBuf {
         let path = tempdir().unwrap().into_path().join("transaction_log");
