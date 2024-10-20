@@ -14,7 +14,7 @@ use crate::storage::bucket::settings::{
 };
 use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
-use log::{debug, info};
+use log::debug;
 use prost::bytes::Bytes;
 use prost::Message;
 use reduct_base::error::ReductError;
@@ -336,8 +336,6 @@ impl Bucket {
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
         let entries = self.entries.read().unwrap().clone();
-
-        let name = self.name.clone();
         // use shared task to avoid locking in graceful shutdown
         shared(&self.task_group(), "sync entries", move || {
             for entry in entries.values() {

@@ -105,7 +105,7 @@ pub(crate) enum GroupDepth {
 }
 
 pub(crate) fn group_from_path(path: &PathBuf, depth: GroupDepth) -> String {
-    let mut group = path
+    let group = path
         .iter()
         .map(|s| s.to_string_lossy().to_string())
         .collect::<Vec<String>>();
