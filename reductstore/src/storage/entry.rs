@@ -14,7 +14,7 @@ use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
-use log::debug;
+use log::{debug, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::EntryInfo;
 use std::collections::HashMap;
@@ -27,7 +27,9 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
 
-use crate::core::thread_pool::{shared, try_unique, unique_child, TaskHandle};
+use crate::core::thread_pool::{
+    group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
+};
 use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
 use reduct_base::internal_server_error;
@@ -91,15 +93,8 @@ impl Entry {
         path: PathBuf,
         options: EntrySettings,
     ) -> TaskHandle<Result<Entry, ReductError>> {
-        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
         unique_child(
-            &[
-                path.parent().unwrap().to_str().unwrap(),
-                &bucket_name,
-                &name,
-            ]
-            .join("/"),
+            &group_from_path(&path, GroupDepth::ENTRY),
             "restore entry",
             move || {
                 let entry = EntryLoader::restore_entry(path, options)?;
@@ -248,6 +243,7 @@ impl Entry {
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {
         let mut bm = self.block_manager.write()?;
+        info!("Syncing entry {}", self.name);
         bm.save_cache_on_disk()
     }
 
@@ -292,15 +288,7 @@ impl Entry {
 
     fn task_group(&self) -> String {
         // use folder hierarchy as task group to protect resources
-        let bucket_path = self.path.parent().unwrap();
-        let storage_path = bucket_path.parent().unwrap();
-
-        [
-            storage_path.file_name().unwrap().to_str().unwrap(),
-            bucket_path.file_name().unwrap().to_str().unwrap(),
-            self.path.file_name().unwrap().to_str().unwrap(),
-        ]
-        .join("/")
+        group_from_path(&self.path, GroupDepth::ENTRY)
     }
 }
 
@@ -641,14 +629,6 @@ mod tests {
     }
 
     pub fn get_task_group(entry_path: &PathBuf, time: u64) -> String {
-        let bucket_path = entry_path.parent().unwrap();
-        let storage_path = bucket_path.parent().unwrap();
-        format!(
-            "{}/{}/{}/{}",
-            storage_path.file_name().unwrap().to_str().unwrap(),
-            bucket_path.file_name().unwrap().to_str().unwrap(),
-            entry_path.file_name().unwrap().to_str().unwrap(),
-            time
-        )
+        group_from_path(entry_path.join(time.to_string()), 4)
     }
 }
