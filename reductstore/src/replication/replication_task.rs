@@ -136,7 +136,7 @@ impl ReplicationTask {
                             error!("Failed to remove transaction log: {:?}", err);
                         }
 
-                        info!("Creating a new transaction log");
+                        info!("Creating a new transaction log: {:?}", path);
                         thr_log_map.write().unwrap().insert(
                             entry_name,
                             RwLock::new(
