@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2024-10-21
+
 ### Fixed
 
 - Bad file descriptor error in replication log, [PR-606](https://github.com/reductstore/reductstore/pull/606)
@@ -812,7 +814,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.2...HEAD
+
+[1.12.2]: https://github.com/reductstore/reductstore/compare/v1.12.1...v1.12.2
 
 [1.12.1]: https://github.com/reductstore/reductstore/compare/v1.12.0...v1.12.1
 
