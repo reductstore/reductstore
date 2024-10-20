@@ -5,7 +5,7 @@ mod quotas;
 mod settings;
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::thread_pool::{group_from_path, unique, GroupDepth, TaskHandle};
+use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -338,8 +338,8 @@ impl Bucket {
         let entries = self.entries.read().unwrap().clone();
 
         let name = self.name.clone();
-        unique(&self.task_group(), "sync entries", move || {
-            info!("Syncing bucket '{}'", name);
+        // use shared task to avoid locking in graceful shutdown
+        shared(&self.task_group(), "sync entries", move || {
             for entry in entries.values() {
                 entry.sync_fs()?;
             }

@@ -243,7 +243,6 @@ impl Entry {
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {
         let mut bm = self.block_manager.write()?;
-        info!("Syncing entry {}", self.name);
         bm.save_cache_on_disk()
     }
 
