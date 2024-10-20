@@ -115,7 +115,7 @@ impl TransactionLog {
     ) -> Result<Option<Transaction>, ReductError> {
         {
             let file = FILE_CACHE
-                .read(&self.file_path, SeekFrom::Start(self.write_pos as u64))?
+                .write_or_create(&self.file_path, SeekFrom::Start(self.write_pos as u64))?
                 .upgrade()?;
             let mut file = file.write()?;
 
