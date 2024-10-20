@@ -10,6 +10,7 @@ use std::cmp::max;
 use std::fmt::Display;
 use std::num::NonZero;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread::{available_parallelism, JoinHandle};
 use std::time::Duration;
@@ -96,6 +97,22 @@ where
     }
 }
 
+pub(crate) enum GroupDepth {
+    STORAGE = 1,
+    BUCKET = 2,
+    ENTRY = 3,
+    BLOCK = 4,
+}
+
+pub(crate) fn group_from_path(path: &PathBuf, depth: GroupDepth) -> String {
+    let group = path
+        .iter()
+        .map(|s| s.to_string_lossy().to_string())
+        .collect::<Vec<String>>();
+
+    group[group.len() - depth as usize..].join("/")
+}
+
 /// Spawn a shared task as a isolated task outside of thread pool.
 ///
 /// Use it for loops or other blocking operations.
@@ -153,6 +170,7 @@ enum TaskMode {
 
 struct Task {
     task_group: String,
+    description: String,
     func: BoxedFunc,
     mode: TaskMode,
     child: bool,    // Child task, check only current group and children
@@ -233,7 +251,12 @@ impl ThreadPool {
                 };
 
                 if !ready {
-                    trace!("Group '{}' is not ready for {}", task.task_group, task);
+                    trace!(
+                        "Group '{} ({})' is not ready for {}",
+                        task.task_group,
+                        task.description,
+                        task
+                    );
                     task_tx.send(task).unwrap_or(());
                     continue;
                 }
@@ -395,6 +418,7 @@ impl ThreadPool {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         let copy_group = group.clone();
+        let copy_description = description.clone();
         let box_task = Box::new(move || {
             trace!("Task '{}' started: {}", group, description);
 
@@ -406,6 +430,7 @@ impl ThreadPool {
 
         let task = Task {
             task_group: copy_group,
+            description: copy_description,
             func: box_task,
             mode: TaskMode::Shared,
             child: false,
