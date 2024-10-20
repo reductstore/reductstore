@@ -449,8 +449,8 @@ impl BlockManager {
         self.save_block(block_ref)?;
 
         debug!(
-            "Finished writing record {}/{}/{} with state {:?}",
-            self.bucket, self.entry, block_id, state
+            "Finished writing record {} to block {}/{}/{}.meta with state {:?}",
+            record_timestamp, self.bucket, self.entry, block_id, state
         );
 
         Ok(())

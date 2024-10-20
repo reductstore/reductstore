@@ -237,7 +237,9 @@ impl Storage {
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {
         let mut handlers = vec![];
-        for bucket in self.buckets.read().unwrap().values() {
+        let buckets = self.buckets.read()?.clone();
+        for (name, bucket) in buckets {
+            info!("Sync bucket '{}'", name);
             handlers.push(bucket.sync_fs());
         }
 

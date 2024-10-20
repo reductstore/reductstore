@@ -7,14 +7,14 @@ use axum_server::tls_rustls::RustlsConfig;
 
 use axum_server::Handle;
 use log::info;
+use reductstore::api::create_axum_app;
 use reductstore::cfg::Cfg;
 use reductstore::core::env::StdEnvGetter;
-use std::str::FromStr;
-use std::sync::Arc;
-
-use reductstore::api::create_axum_app;
 use reductstore::core::logger::Logger;
 use reductstore::storage::storage::Storage;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 
 async fn launch_server() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -130,8 +130,8 @@ async fn shutdown_signal(handle: Handle, storage: Arc<Storage>) {
 }
 
 fn shutdown_app(handle: Handle, storage: Arc<Storage>) {
+    handle.graceful_shutdown(Some(Duration::from_secs(5)));
     storage.sync_fs().expect("Failed to shutdown storage");
-    handle.shutdown();
 }
 
 #[cfg(test)]
@@ -153,7 +153,7 @@ mod tests {
     static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
     pub(super) async fn shutdown_server(handle: Handle) {
         while !*STOP_SERVER.lock().await {
-            sleep(std::time::Duration::from_millis(10)).await;
+            sleep(Duration::from_millis(10)).await;
         }
         warn!("Shutting down server");
         handle.shutdown();
@@ -244,7 +244,7 @@ mod tests {
             });
         });
 
-        sleep(std::time::Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(1)).await;
         task
     }
 }

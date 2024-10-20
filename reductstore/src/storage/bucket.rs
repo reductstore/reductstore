@@ -5,7 +5,7 @@ mod quotas;
 mod settings;
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::thread_pool::{unique, TaskHandle};
+use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -335,10 +335,9 @@ impl Bucket {
 
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
-        let entries = self.entries.clone();
-
-        unique(&self.task_group(), "sync entires", move || {
-            let entries = entries.read().unwrap();
+        let entries = self.entries.read().unwrap().clone();
+        // use shared task to avoid locking in graceful shutdown
+        shared(&self.task_group(), "sync entries", move || {
             for entry in entries.values() {
                 entry.sync_fs()?;
             }
@@ -364,17 +363,7 @@ impl Bucket {
 
     fn task_group(&self) -> String {
         // use folder hierarchy as task group to protect resources
-        [
-            self.path
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            &self.path.file_name().unwrap().to_str().unwrap(),
-        ]
-        .join("/")
+        group_from_path(&self.path, GroupDepth::BUCKET)
     }
 }
 
