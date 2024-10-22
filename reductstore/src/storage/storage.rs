@@ -12,7 +12,8 @@ use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::thread_pool::{unique, TaskHandle};
+use crate::core::thread_pool::GroupDepth::BUCKET;
+use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
@@ -186,16 +187,32 @@ impl Storage {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
-        if let Err(err) = Self::check_bucket_name(new_name) {
-            return Err(err).into();
+        let pre_check = || {
+            Self::check_bucket_name(new_name)?;
+            let buckets = self.buckets.read().unwrap();
+            if let Some(bucket) = buckets.get(new_name) {
+                return Err(conflict!("Bucket '{}' already exists", bucket.name()));
+            }
+
+            if let Some(bucket) = buckets.get(old_name) {
+                if bucket.is_provisioned() {
+                    return Err(conflict!(
+                        "Can't rename provisioned bucket '{}'",
+                        bucket.name()
+                    ));
+                }
+            } else {
+                return Err(not_found!("Bucket '{}' is not found", old_name));
+            }
+
+            Ok(())
+        };
+
+        if let Err(err) = pre_check() {
+            return TaskHandle::from(Err(err));
         }
 
-        let task_group = [
-            self.data_path.file_name().unwrap().to_str().unwrap(),
-            old_name,
-        ]
-        .join("/");
-
+        let task_group = group_from_path(&self.data_path.join(old_name), BUCKET);
         let buckets = self.buckets.clone();
         let path = self.data_path.join(old_name);
         let new_path = self.data_path.join(new_name);
@@ -204,10 +221,6 @@ impl Storage {
 
         unique(&task_group, "rename bucket", move || {
             let mut buckets = buckets.write().unwrap();
-            if let Some(bucket) = buckets.get(&new_name) {
-                return Err(conflict!("Bucket '{}' already exists", bucket.name()));
-            }
-
             match buckets.remove(&old_name) {
                 Some(_) => {
                     FILE_CACHE.discard_recursive(&path)?;
@@ -540,6 +553,20 @@ mod tests {
                 Err(unprocessable_entity!(
                     "Bucket name can contain only letters, digests and [-,_] symbols"
                 ))
+            );
+        }
+
+        #[rstest]
+        fn test_rename_provisioned_bucket(storage: Storage) {
+            let bucket = storage
+                .create_bucket("test", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap();
+            bucket.set_provisioned(true);
+            let result = storage.rename_bucket("test", "new").wait();
+            assert_eq!(
+                result,
+                Err(conflict!("Can't rename provisioned bucket 'test'"))
             );
         }
     }
