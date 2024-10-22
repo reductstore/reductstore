@@ -16,7 +16,7 @@ use crate::core::thread_pool::{unique, TaskHandle};
 use crate::core::weak::Weak;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
-use reduct_base::{conflict, not_found};
+use reduct_base::{conflict, not_found, unprocessable_entity};
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -113,18 +113,10 @@ impl Storage {
         name: &str,
         settings: BucketSettings,
     ) -> Result<Weak<Bucket>, ReductError> {
-        let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
-        if !regex.is_match(name) {
-            return Err(ReductError::unprocessable_entity(
-                "Bucket name can contain only letters, digests and [-,_] symbols",
-            ));
-        }
-
-        let mut buckets = self.buckets.write().unwrap();
+        Self::check_bucket_name(name)?;
+        let mut buckets = self.buckets.write()?;
         if buckets.contains_key(name) {
-            return Err(ReductError::conflict(
-                format!("Bucket '{}' already exists", name).as_str(),
-            ));
+            return Err(conflict!("Bucket '{}' already exists", name));
         }
 
         let bucket = Arc::new(Bucket::new(name, &self.data_path, settings)?);
@@ -194,6 +186,10 @@ impl Storage {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(err) = Self::check_bucket_name(new_name) {
+            return Err(err).into();
+        }
+
         let task_group = [
             self.data_path.file_name().unwrap().to_str().unwrap(),
             old_name,
@@ -257,6 +253,16 @@ impl Storage {
 
     pub fn data_path(&self) -> &PathBuf {
         &self.data_path
+    }
+
+    fn check_bucket_name(name: &str) -> Result<(), ReductError> {
+        let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
+        if !regex.is_match(name) {
+            return Err(unprocessable_entity!(
+                "Bucket name can contain only letters, digests and [-,_] symbols",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -383,7 +389,7 @@ mod tests {
         let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
             result.err(),
-            Some(ReductError::unprocessable_entity(
+            Some(unprocessable_entity!(
                 "Bucket name can contain only letters, digests and [-,_] symbols"
             ))
         );
@@ -400,7 +406,7 @@ mod tests {
         let result = storage.create_bucket("test", BucketSettings::default());
         assert_eq!(
             result.err(),
-            Some(ReductError::conflict("Bucket 'test' already exists"))
+            Some(conflict!("Bucket 'test' already exists"))
         );
     }
 
@@ -419,10 +425,7 @@ mod tests {
     #[rstest]
     fn test_get_bucket_with_non_existing_name(storage: Storage) {
         let result = storage.get_bucket("test");
-        assert_eq!(
-            result.err(),
-            Some(ReductError::not_found("Bucket 'test' is not found"))
-        );
+        assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
     }
 
     mod remove_bucket {
@@ -440,19 +443,13 @@ mod tests {
             assert_eq!(result, Ok(()));
 
             let result = storage.get_bucket("test");
-            assert_eq!(
-                result.err(),
-                Some(ReductError::not_found("Bucket 'test' is not found"))
-            );
+            assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
         }
 
         #[rstest]
         fn test_remove_bucket_with_non_existing_name(storage: Storage) {
             let result = storage.remove_bucket("test").wait();
-            assert_eq!(
-                result,
-                Err(ReductError::not_found("Bucket 'test' is not found"))
-            );
+            assert_eq!(result, Err(not_found!("Bucket 'test' is not found")));
         }
 
         #[rstest]
@@ -468,10 +465,7 @@ mod tests {
 
             let storage = Storage::load(path, None);
             let result = storage.get_bucket("test");
-            assert_eq!(
-                result.err(),
-                Some(ReductError::not_found("Bucket 'test' is not found"))
-            );
+            assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
         }
     }
 
@@ -504,10 +498,7 @@ mod tests {
             assert_eq!(result, Ok(()));
 
             let result = storage.get_bucket("test");
-            assert_eq!(
-                result.err(),
-                Some(ReductError::not_found("Bucket 'test' is not found"))
-            );
+            assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
 
             let bucket = storage.get_bucket("new").unwrap().upgrade_and_unwrap();
             assert_eq!(bucket.name(), "new");
@@ -520,10 +511,7 @@ mod tests {
         #[rstest]
         fn test_rename_bucket_with_non_existing_name(storage: Storage) {
             let result = storage.rename_bucket("test", "new").wait();
-            assert_eq!(
-                result,
-                Err(ReductError::not_found("Bucket 'test' is not found"))
-            );
+            assert_eq!(result, Err(not_found!("Bucket 'test' is not found")));
         }
 
         #[rstest]
@@ -541,9 +529,17 @@ mod tests {
             assert_eq!(bucket.name(), "new");
 
             let result = storage.rename_bucket("test", "new").wait();
+            assert_eq!(result, Err(conflict!("Bucket 'new' already exists")));
+        }
+
+        #[rstest]
+        fn test_rename_bucket_with_invalid_name(storage: Storage) {
+            let result = storage.rename_bucket("test", "new$").wait();
             assert_eq!(
                 result,
-                Err(ReductError::conflict("Bucket 'new' already exists"))
+                Err(unprocessable_entity!(
+                    "Bucket name can contain only letters, digests and [-,_] symbols"
+                ))
             );
         }
     }
