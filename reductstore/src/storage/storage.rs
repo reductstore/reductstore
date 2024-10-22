@@ -189,7 +189,7 @@ impl Storage {
     ) -> TaskHandle<Result<(), ReductError>> {
         let pre_check = || {
             Self::check_bucket_name(new_name)?;
-            let mut buckets = self.buckets.read().unwrap();
+            let buckets = self.buckets.read().unwrap();
             if let Some(bucket) = buckets.get(new_name) {
                 return Err(conflict!("Bucket '{}' already exists", bucket.name()));
             }
