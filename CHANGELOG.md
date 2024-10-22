@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- RS-519: check bucket name convention when renaming bucket, [PR-616](https://github.com/reductstore/reductstore/pull/616)
+- RS-519: Check bucket name convention when renaming bucket, [PR-616](https://github.com/reductstore/reductstore/pull/616)
+- RS-520: Check if bucket provisioned before renaming it, [PR-617](https://github.com/reductstore/reductstore/pull/617)
 
 ## [1.12.1] - 2024-10-21
 
