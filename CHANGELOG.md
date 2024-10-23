@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-519: Check bucket name convention when renaming bucket, [PR-616](https://github.com/reductstore/reductstore/pull/616)
 - RS-520: Check if bucket provisioned before renaming it, [PR-617](https://github.com/reductstore/reductstore/pull/617)
+- RS-521: Sync bucket and entry before renaming them, [PR-521](https://github.com/reductstore/reductstore/pull/618)
 
 ## [1.12.1] - 2024-10-21
 
