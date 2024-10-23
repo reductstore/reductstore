@@ -7,11 +7,13 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::{BTreeSet, HashMap};
+use std::fs::read_dir;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block::Block;
+use crate::storage::block_manager::DESCRIPTOR_FILE_EXT;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
@@ -133,7 +135,17 @@ impl BlockIndex {
                 ));
             };
 
-            if lock.metadata()?.len() == 0 {
+            let has_block_descriptors = read_dir(&path.parent().unwrap())?.any(|file| {
+                file.map(|f| {
+                    f.file_name()
+                        .to_str()
+                        .unwrap()
+                        .ends_with(DESCRIPTOR_FILE_EXT)
+                })
+                .unwrap_or(false)
+            });
+
+            if lock.metadata()?.len() == 0 && has_block_descriptors {
                 return Err(internal_server_error!("Block index {:?} is empty", path));
             }
 
