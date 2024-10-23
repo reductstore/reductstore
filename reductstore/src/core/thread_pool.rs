@@ -4,7 +4,7 @@
 mod task_group;
 mod task_handle;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Sender};
 use log::trace;
 use std::cmp::max;
 use std::fmt::Display;
