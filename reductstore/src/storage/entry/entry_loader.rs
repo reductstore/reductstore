@@ -435,12 +435,12 @@ mod tests {
 
         {
             let block_file_index = path.join(&entry.name).join(BLOCK_INDEX_FILE);
-            let mut rc = FILE_CACHE
+            let rc = FILE_CACHE
                 .write_or_create(&block_file_index, SeekFrom::Current(0))
                 .unwrap()
                 .upgrade()
                 .unwrap();
-            let mut file = rc.write().unwrap();
+            let file = rc.write().unwrap();
             file.set_len(0).unwrap();
             file.sync_all().unwrap();
         }
