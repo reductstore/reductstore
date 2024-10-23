@@ -100,7 +100,6 @@ impl EntryLoader {
             };
 
             // Migration for old blocks without fields to speed up the restore process
-            // todo: remove this data_check in the future rel 1.12
             if block.record_count == 0 {
                 debug!("Record count is 0. Migrate the block");
                 let mut full_block = match Block::decode(Bytes::from(fs::read(path.clone())?)) {
@@ -276,6 +275,7 @@ mod tests {
     use crate::storage::block_manager::wal::WalEntry;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
+    use std::io::SeekFrom;
 
     use super::*;
     use crate::core::file_cache::FILE_CACHE;
@@ -377,9 +377,9 @@ mod tests {
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
         );
         {
-            let block_v18_ref = block_manager.start_new_block(1, 100).unwrap();
-            let mut block_v18 = block_v18_ref.write().unwrap();
-            block_v18.insert_or_update_record(Record {
+            let block_v1_8_ref = block_manager.start_new_block(1, 100).unwrap();
+            let mut block_v1_8 = block_v1_8_ref.write().unwrap();
+            block_v1_8.insert_or_update_record(Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
                 end: 10,
@@ -387,7 +387,7 @@ mod tests {
                 state: record::State::Finished as i32,
                 labels: vec![],
             });
-            block_v18.insert_or_update_record(Record {
+            block_v1_8.insert_or_update_record(Record {
                 timestamp: Some(us_to_ts(&2000010)),
                 begin: 10,
                 end: 20,
@@ -420,10 +420,34 @@ mod tests {
 
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
         let block_manager = BlockManager::new(path.clone(), block_index); // reload the block manager
-        let block_v19 = block_manager.load_block(1).unwrap().read().unwrap().clone();
-        assert_eq!(block_v19.record_count(), 2);
-        assert_eq!(block_v19.size(), 20);
-        assert_eq!(block_v19.metadata_size(), 68);
+        let block_v1_9 = block_manager.load_block(1).unwrap().read().unwrap().clone();
+        assert_eq!(block_v1_9.record_count(), 2);
+        assert_eq!(block_v1_9.size(), 20);
+        assert_eq!(block_v1_9.metadata_size(), 68);
+    }
+
+    #[rstest]
+    fn test_empty_block_index(path: PathBuf, entry_settings: EntrySettings) {
+        let mut entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&mut entry, 1);
+        write_stub_record(&mut entry, 2000010);
+        entry.sync_fs().unwrap(); // sync WALs
+
+        {
+            let block_file_index = path.join(&entry.name).join(BLOCK_INDEX_FILE);
+            let mut rc = FILE_CACHE
+                .write_or_create(&block_file_index, SeekFrom::Current(0))
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let mut file = rc.write().unwrap();
+            file.set_len(0).unwrap();
+            file.sync_all().unwrap();
+        }
+
+        let entry = EntryLoader::restore_entry(path.join(entry.name), entry_settings).unwrap();
+        let info = entry.info().unwrap();
+        assert_eq!(info.record_count, 2);
     }
 
     #[rstest]

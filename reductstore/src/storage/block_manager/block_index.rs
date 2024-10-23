@@ -133,6 +133,10 @@ impl BlockIndex {
                 ));
             };
 
+            if lock.metadata()?.len() == 0 {
+                return Err(internal_server_error!("Block index {:?} is empty", path));
+            }
+
             BlockIndexProto::decode(Bytes::from(buf))
         };
 
