@@ -8,11 +8,12 @@ use std::future::Future;
 
 pub(crate) struct TaskHandle<T> {
     rx: Receiver<T>,
+    rx_start: Receiver<()>,
 }
 
 impl<T> TaskHandle<T> {
-    pub(super) fn new(rx: Receiver<T>) -> Self {
-        Self { rx }
+    pub(super) fn new(rx: Receiver<T>, rx_start: Receiver<()>) -> Self {
+        Self { rx, rx_start }
     }
 
     pub fn wait(self) -> T {
@@ -22,13 +23,22 @@ impl<T> TaskHandle<T> {
     pub fn is_finished(&self) -> bool {
         self.rx.is_ready()
     }
+
+    pub fn is_started(&self) -> bool {
+        self.rx_start.is_ready()
+    }
+    pub fn wait_started(&self) {
+        self.rx_start.recv().unwrap()
+    }
 }
 
 impl<T> From<T> for TaskHandle<T> {
     fn from(data: T) -> Self {
         let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx_start, rx_start) = crossbeam_channel::bounded(1);
         tx.send(data).unwrap();
-        Self { rx }
+        tx_start.send(()).unwrap();
+        Self { rx, rx_start }
     }
 }
 

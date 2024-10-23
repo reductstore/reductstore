@@ -187,7 +187,7 @@ impl Storage {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
-        let pre_check = || {
+        let check_and_prepare_bucket = || {
             Self::check_bucket_name(new_name)?;
             let buckets = self.buckets.read().unwrap();
             if let Some(bucket) = buckets.get(new_name) {
@@ -201,16 +201,21 @@ impl Storage {
                         bucket.name()
                     ));
                 }
-            } else {
-                return Err(not_found!("Bucket '{}' is not found", old_name));
-            }
 
-            Ok(())
+                let sync_task = bucket.sync_fs();
+                // wait for the start of the sync_fs task
+                // to avoid lock with unique task on the bucket level
+                sync_task.wait_started();
+                Ok(sync_task)
+            } else {
+                Err(not_found!("Bucket '{}' is not found", old_name))
+            }
         };
 
-        if let Err(err) = pre_check() {
-            return TaskHandle::from(Err(err));
-        }
+        let sync_task = match check_and_prepare_bucket() {
+            Ok(sync_task) => sync_task,
+            Err(err) => return TaskHandle::from(Err(err)),
+        };
 
         let task_group = group_from_path(&self.data_path.join(old_name), BUCKET);
         let buckets = self.buckets.clone();
@@ -223,6 +228,7 @@ impl Storage {
             let mut buckets = buckets.write().unwrap();
             match buckets.remove(&old_name) {
                 Some(_) => {
+                    sync_task.wait()?;
                     FILE_CACHE.discard_recursive(&path)?;
                     std::fs::rename(&path, &new_path)?;
                     let bucket = Bucket::restore(new_path)?;

@@ -4,7 +4,7 @@
 mod task_group;
 mod task_handle;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Sender};
 use log::trace;
 use std::cmp::max;
 use std::fmt::Display;
@@ -311,11 +311,11 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (mut task, rx) = Self::build_task(group, description, task);
+        let (mut task, task_handle) = Self::build_task(group, description, task);
         task.mode = TaskMode::Unique;
 
         self.task_queue.send(task).unwrap_or(());
-        TaskHandle::new(rx)
+        task_handle
     }
 
     pub fn unique_child<T: Send + 'static>(
@@ -328,12 +328,12 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (mut task, rx) = Self::build_task(group, description, task);
+        let (mut task, task_handle) = Self::build_task(group, description, task);
         task.mode = TaskMode::Unique;
         task.child = true;
 
         self.task_queue.send(task).unwrap_or(());
-        TaskHandle::new(rx)
+        task_handle
     }
 
     pub fn shared<T: Send + 'static>(
@@ -348,11 +348,11 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (mut task, rx) = Self::build_task(group, description, task);
+        let (mut task, task_handle) = Self::build_task(group, description, task);
         task.mode = TaskMode::Shared;
 
         self.task_queue.send(task).unwrap_or(());
-        TaskHandle::new(rx)
+        task_handle
     }
 
     pub fn shared_child<T: Send + 'static>(
@@ -365,12 +365,12 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (mut task, rx) = Self::build_task(group, description, task);
+        let (mut task, task_handle) = Self::build_task(group, description, task);
         task.mode = TaskMode::Shared;
         task.child = true;
 
         self.task_queue.send(task).unwrap_or(());
-        TaskHandle::new(rx)
+        task_handle
     }
 
     pub fn shared_isolated<T: Send + 'static>(
@@ -383,12 +383,12 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (mut task, rx) = Self::build_task(group, description, task);
+        let (mut task, task_handle) = Self::build_task(group, description, task);
         task.mode = TaskMode::Shared;
         task.isolated = true;
 
         self.task_queue.send(task).unwrap_or(());
-        TaskHandle::new(rx)
+        task_handle
     }
 
     pub fn shared_child_isolated<T: Send + 'static>(
@@ -401,26 +401,28 @@ impl ThreadPool {
         let group = group.to_string();
         let description = description.to_string();
 
-        let (mut task, rx) = Self::build_task(group, description, task);
+        let (mut task, task_handle) = Self::build_task(group, description, task);
         task.mode = TaskMode::Shared;
         task.child = true;
         task.isolated = true;
 
         self.task_queue.send(task).unwrap_or(());
-        TaskHandle::new(rx)
+        task_handle
     }
 
     fn build_task<T: Send + 'static>(
         group: String,
         description: String,
         task: impl FnOnce() -> T + Send + 'static,
-    ) -> (Task, Receiver<T>) {
+    ) -> (Task, TaskHandle<T>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx_start, rx_start) = crossbeam_channel::bounded(1);
 
         let copy_group = group.clone();
         let copy_description = description.clone();
         let box_task = Box::new(move || {
             trace!("Task '{}' started: {}", group, description);
+            tx_start.send(()).unwrap_or(());
 
             let result = task();
             tx.send(result).unwrap_or(());
@@ -437,7 +439,7 @@ impl ThreadPool {
             isolated: false,
         };
 
-        (task, rx)
+        (task, TaskHandle::new(rx, rx_start))
     }
 
     fn check_current_thread(&self) {
