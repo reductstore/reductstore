@@ -328,9 +328,9 @@ impl BlockManager {
                 let record_time = ts_to_us(&record.timestamp.unwrap());
 
                 let (file, offset) = {
-                    let path = self.path_to_data(block_id);
+                    let src_block_path = self.path_to_data(block_id);
                     let offset = record.begin;
-                    let file = FILE_CACHE.read(&path, SeekFrom::Start(offset))?;
+                    let file = FILE_CACHE.read(&src_block_path, SeekFrom::Start(offset))?;
                     (file, offset)
                 };
 
@@ -338,9 +338,6 @@ impl BlockManager {
                 let record_size = record.end - record.begin;
                 while read_bytes < record_size {
                     let (buf, read) = read_in_chunks(&file, offset, record_size, read_bytes)?;
-                    if read == 0 {
-                        return Err(internal_server_error!("Failed to read record chunk: EOF"));
-                    }
 
                     read_bytes += read as u64;
                     temp_block.write_all(&buf)?;

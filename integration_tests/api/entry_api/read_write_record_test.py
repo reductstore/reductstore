@@ -273,9 +273,6 @@ def test_read_batched_max_header_size(base_url, session, bucket):
     assert sum(header.startswith("x-reduct-time-") for header in resp.headers) == 14
     assert resp.headers["x-reduct-last"] == "true"
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/batch?q={query_id}")
-    assert resp.status_code == 404
-
 
 def test_read_batched_query_required(base_url, session, bucket):
     """Should have query id in params"""

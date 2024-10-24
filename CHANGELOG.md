@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-520: Check if bucket provisioned before renaming it, [PR-617](https://github.com/reductstore/reductstore/pull/617)
 - RS-521: Sync bucket and entry before renaming them, [PR-521](https://github.com/reductstore/reductstore/pull/618)
 - RS-525: Recovering from empty block index, [PR-620](https://github.com/reductstore/reductstore/pull/620)
+- RS-523: Fix EOF error when writing and removing data in parallel, [PR-621](https://github.com/reductstore/reductstore/pull/621)
 
 ## [1.12.2] - 2024-10-21
 

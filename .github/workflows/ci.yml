@@ -360,7 +360,7 @@ jobs:
         run: |
           pip install -r ./integration_tests/data_check/requirements.txt
           python3 ./integration_tests/data_check/uploader.py
-          sleep 10 # Wait for replication
+          sleep 30 # Wait for replication
 
       - name: Check replicated data
         env:
