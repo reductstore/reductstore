@@ -6,7 +6,7 @@ pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod wal;
 
 mod block_cache;
-use log::{debug, error, trace, warn};
+use log::{debug, error, trace};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 
