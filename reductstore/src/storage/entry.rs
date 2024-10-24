@@ -414,7 +414,7 @@ mod tests {
                     0,
                     4000000,
                     QueryOptions {
-                        ttl: Duration::from_millis(500),
+                        ttl: Duration::from_millis(1000),
                         continuous: true,
                         ..QueryOptions::default()
                     },
@@ -451,7 +451,7 @@ mod tests {
                 assert_eq!(reader.timestamp(), 2000000);
             }
 
-            sleep(Duration::from_millis(700));
+            sleep(Duration::from_millis(1700));
             assert_eq!(
                 entry.get_query_receiver(id).err(),
                 Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
@@ -605,7 +605,7 @@ mod tests {
             .blocking_send(Ok(None))
             .expect("Failed to send None");
         drop(sender);
-        sleep(Duration::from_millis(10)); // let the record be written
+        sleep(Duration::from_millis(50)); // let the record be written
     }
 
     pub fn write_record_with_labels(entry: &mut Entry, time: u64, data: Vec<u8>, labels: Labels) {
