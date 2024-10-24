@@ -24,7 +24,7 @@ use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
 use middleware::{default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
-use reduct_base::error::{ReductError as BaseHttpError, ReductError};
+use reduct_base::error::ReductError as BaseHttpError;
 use reduct_macros::Twin;
 use replication::create_replication_api_routes;
 use serde::de::StdError;

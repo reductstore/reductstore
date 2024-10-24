@@ -254,14 +254,13 @@ impl Stream for ReadersWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread::sleep;
 
     use axum::body::to_bytes;
 
     use crate::api::entry::tests::query;
-    use crate::api::entry::write_single::write_record;
+
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use reduct_base::not_found;
+
     use rstest::*;
 
     #[rstest]
