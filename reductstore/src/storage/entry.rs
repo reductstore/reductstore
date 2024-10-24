@@ -607,7 +607,7 @@ mod tests {
             .blocking_send(Ok(None))
             .expect("Failed to send None");
         drop(sender);
-        sleep(Duration::from_millis(5)); // let the record be written
+        sleep(Duration::from_millis(15)); // let the record be written
     }
 
     pub fn write_record_with_labels(entry: &mut Entry, time: u64, data: Vec<u8>, labels: Labels) {
