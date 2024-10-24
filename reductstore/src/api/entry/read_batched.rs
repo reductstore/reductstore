@@ -262,6 +262,7 @@ mod tests {
     use crate::api::tests::{components, headers, path_to_entry_1};
 
     use rstest::*;
+    use tokio::time::sleep;
 
     #[rstest]
     #[case("GET", "Hey!!!")]
@@ -295,6 +296,9 @@ mod tests {
                 .unwrap();
             writer.tx().send(Ok(None)).await.unwrap();
         }
+
+        // let threads finish writing
+        sleep(Duration::from_millis(100)).await;
 
         let query_id = query(&path_to_entry_1, components.clone()).await;
         let query = Query(HashMap::from_iter(vec![(
@@ -345,8 +349,8 @@ mod tests {
         let resp_headers = response.headers();
         assert_eq!(resp_headers["x-reduct-time-98"], "6,text/plain");
         assert_eq!(resp_headers["content-type"], "application/octet-stream");
-        assert_eq!(resp_headers["content-length"], "30");
         assert_eq!(resp_headers["x-reduct-last"], "true");
+        assert_eq!(resp_headers["content-length"], "30");
 
         if method == "GET" {
             assert_eq!(
