@@ -51,7 +51,7 @@ pub(super) fn spawn_query_task(
 ) -> (QueryRx, TaskHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
-    // we spawn a new task to run the query outside of hierarchical task group to avoid deadlocks
+    // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
     let query = Arc::new(Mutex::new(query));
     let handle = shared_isolated("spawn_query_task", "spawn query task", move || {
         trace!("Query task for '{}' running", task_group);
@@ -70,7 +70,6 @@ pub(super) fn spawn_query_task(
 
                 if tx.capacity() == 0 {
                     trace!("Query '{}' task channel full", group);
-                    sleep(Duration::from_micros(10));
                     return Some(());
                 }
 
@@ -89,13 +88,14 @@ pub(super) fn spawn_query_task(
                         // continuous query will never be done
                         // but we don't want to flood the channel and wait for the receiver
                         let now = Instant::now();
-                        while tx.capacity() < tx.max_capacity() && now.elapsed() < options.ttl {
-                            sleep(Duration::from_millis(10));
+                        if now.elapsed() <= options.ttl {
+                            sleep(Duration::from_millis(1));
+                            return Some(());
                         }
-                    } else {
-                        trace!("Query task done for '{}'", group);
-                        return None;
                     }
+
+                    trace!("Query task done for '{}'", group);
+                    return None;
                 }
                 Some(())
             });
@@ -176,13 +176,12 @@ mod tests {
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
-        assert!(timeout(Duration::from_millis(1000), handle).await.is_ok());
+        assert_eq!(timeout(Duration::from_millis(1000), handle).await, Ok(()));
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
-        Logger::init("TRACE");
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             continuous: true,

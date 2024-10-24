@@ -32,7 +32,7 @@ use crate::core::thread_pool::{
 };
 use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
-use reduct_base::internal_server_error;
+use reduct_base::{internal_server_error, not_found};
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
@@ -175,8 +175,8 @@ impl Entry {
         let mut queries = self.queries.write()?;
         let query = queries.get_mut(&query_id)
             .ok_or_else(||
-                ReductError::not_found(
-                    &format!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.", query_id, QueryOptions::default().ttl.as_secs())))?;
+                not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.",
+                    query_id, QueryOptions::default().ttl.as_secs()))?;
 
         query.last_access = Instant::now();
         Ok(Weak::new(Arc::clone(&query.rx)))
@@ -358,6 +358,7 @@ mod tests {
 
     mod query {
         use super::*;
+        use crate::core::logger::Logger;
         use reduct_base::error::ErrorCode;
         use reduct_base::{no_content, not_found};
         use std::thread::sleep;
@@ -407,6 +408,7 @@ mod tests {
 
         #[rstest]
         fn test_continuous_query(mut entry: Entry) {
+            Logger::init("DEBUG");
             write_stub_record(&mut entry, 1000000);
 
             let id = entry
@@ -605,7 +607,7 @@ mod tests {
             .blocking_send(Ok(None))
             .expect("Failed to send None");
         drop(sender);
-        sleep(Duration::from_millis(50)); // let the record be written
+        sleep(Duration::from_millis(5)); // let the record be written
     }
 
     pub fn write_record_with_labels(entry: &mut Entry, time: u64, data: Vec<u8>, labels: Labels) {
