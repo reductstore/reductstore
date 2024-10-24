@@ -18,6 +18,7 @@ use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
+use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -52,10 +53,9 @@ pub(crate) async fn read_batched_records(
         })?,
 
         None => {
-            return Err(HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "'q' parameter is required for batched reads",
-            ));
+            return Err(
+                unprocessable_entity!("'q' parameter is required for batched reads").into(),
+            );
         }
     };
 
@@ -254,11 +254,14 @@ impl Stream for ReadersWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread::sleep;
 
     use axum::body::to_bytes;
 
     use crate::api::entry::tests::query;
+    use crate::api::entry::write_single::write_record;
     use crate::api::tests::{components, headers, path_to_entry_1};
+    use reduct_base::not_found;
     use rstest::*;
 
     #[rstest]
@@ -273,31 +276,98 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+        for time in 10..100 {
+            let writer = entry
+                .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
+                .await
+                .unwrap();
+            writer
+                .tx()
+                .send(Ok(Some(Bytes::from("Hey!!!"))))
+                .await
+                .unwrap();
+            writer.tx().send(Ok(None)).await.unwrap();
+        }
+
         let query_id = query(&path_to_entry_1, components.clone()).await;
+        let query = Query(HashMap::from_iter(vec![(
+            "q".to_string(),
+            query_id.to_string(),
+        )]));
 
-        let response = read_batched_records(
-            State(components.clone()),
-            path_to_entry_1,
-            Query(HashMap::from_iter(vec![(
-                "q".to_string(),
-                query_id.to_string(),
-            )])),
-            headers,
-            MethodExtractor::new(method.as_str()),
-        )
-        .await
-        .unwrap()
-        .into_response();
+        macro_rules! read_batched_records {
+            () => {
+                read_batched_records(
+                    State(components.clone()),
+                    Path(path_to_entry_1.clone()),
+                    query.clone(),
+                    headers.clone(),
+                    MethodExtractor::new(method.as_str()),
+                )
+                .await
+                .into_response()
+            };
+        }
 
-        let headers = response.headers();
-        assert_eq!(headers["x-reduct-time-0"], "6,text/plain,b=\"[a,b]\",x=y");
-        assert_eq!(headers["content-type"], "application/octet-stream");
-        assert_eq!(headers["content-length"], "6");
-        assert_eq!(headers["x-reduct-last"], "true");
-
+        let response = read_batched_records!();
+        let resp_headers = response.headers();
         assert_eq!(
-            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-            Bytes::from(body)
+            resp_headers["x-reduct-time-0"],
+            "6,text/plain,b=\"[a,b]\",x=y"
+        );
+        assert_eq!(resp_headers["content-type"], "application/octet-stream");
+        assert_eq!(resp_headers["content-length"], "516");
+        assert_eq!(resp_headers["x-reduct-last"], "false");
+
+        if method == "GET" {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                Bytes::from("Hey!!!".repeat(86))
+            );
+        } else {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        }
+
+        let response = read_batched_records!();
+        let resp_headers = response.headers();
+        assert_eq!(resp_headers["x-reduct-time-98"], "6,text/plain");
+        assert_eq!(resp_headers["content-type"], "application/octet-stream");
+        assert_eq!(resp_headers["content-length"], "30");
+        assert_eq!(resp_headers["x-reduct-last"], "true");
+
+        if method == "GET" {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                Bytes::from("Hey!!!".repeat(5))
+            );
+        } else {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        }
+
+        let err = read_batched_records!();
+        assert_eq!(
+            err.headers()["x-reduct-error"],
+            format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
         );
     }
 

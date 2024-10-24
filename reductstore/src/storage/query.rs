@@ -111,7 +111,6 @@ pub(super) fn spawn_query_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::logger::Logger;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
