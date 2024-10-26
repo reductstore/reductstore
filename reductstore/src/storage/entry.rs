@@ -22,8 +22,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};

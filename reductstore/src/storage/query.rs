@@ -17,7 +17,7 @@ use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
