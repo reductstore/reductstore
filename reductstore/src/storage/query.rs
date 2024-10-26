@@ -62,6 +62,8 @@ pub(super) fn spawn_query_task(
             let block_manager = block_manager.clone();
             let tx = tx.clone();
 
+            // the task return None if the loop must be stopped
+            // we do it for each iteration so we don't need to take the whole worker for a long query
             let task = shared(&group.clone(), "query iteration", move || {
                 if tx.is_closed() {
                     trace!("Query '{}' task channel closed", group);
@@ -70,7 +72,7 @@ pub(super) fn spawn_query_task(
 
                 if tx.capacity() == 0 {
                     trace!("Query '{}' task channel full", group);
-                    return Some(());
+                    return Some(Duration::from_millis(10));
                 }
 
                 let next_result = query.lock().unwrap().next(block_manager.clone());
@@ -87,20 +89,18 @@ pub(super) fn spawn_query_task(
                     if err.status == NoContent && options.continuous {
                         // continuous query will never be done
                         // but we don't want to flood the channel and wait for the receiver
-                        let now = Instant::now();
-                        if now.elapsed() <= options.ttl {
-                            sleep(Duration::from_millis(1));
-                            return Some(());
-                        }
+                        return Some(options.ttl / 4);
                     }
 
                     trace!("Query task done for '{}'", group);
                     return None;
                 }
-                Some(())
+                Some(Duration::from_millis(0))
             });
 
-            if task.wait().is_none() {
+            if let Some(sleep_duration) = task.wait() {
+                sleep(sleep_duration);
+            } else {
                 break;
             }
         }

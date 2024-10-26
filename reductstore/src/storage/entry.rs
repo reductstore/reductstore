@@ -22,7 +22,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
@@ -274,6 +275,7 @@ impl Entry {
                 return false;
             }
 
+            // check if query task is finished and receiver is empty or closed
             if let Ok(rx) = handle.rx.try_read() {
                 if rx.is_empty() && handle.query_task_handle.is_finished() {
                     debug!("Query {}/{} finished", entry_path, id);

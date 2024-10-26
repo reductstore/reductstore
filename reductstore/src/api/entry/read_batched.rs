@@ -347,10 +347,10 @@ mod tests {
 
         let response = read_batched_records!();
         let resp_headers = response.headers();
-        assert_eq!(resp_headers["x-reduct-time-98"], "6,text/plain");
+        assert_eq!(resp_headers["content-length"], "30", "{:?}", resp_headers);
         assert_eq!(resp_headers["content-type"], "application/octet-stream");
+        assert_eq!(resp_headers["x-reduct-time-98"], "6,text/plain");
         assert_eq!(resp_headers["x-reduct-last"], "true");
-        assert_eq!(resp_headers["content-length"], "30");
 
         if method == "GET" {
             assert_eq!(
@@ -367,9 +367,12 @@ mod tests {
             );
         }
 
-        let err = read_batched_records!();
+        let response = read_batched_records!();
+        let resp_headers = response.headers();
+        println!("{:?}", resp_headers);
+
         assert_eq!(
-            err.headers()["x-reduct-error"],
+            resp_headers["x-reduct-error"],
             format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
         );
     }
