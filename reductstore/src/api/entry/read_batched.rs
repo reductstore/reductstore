@@ -167,6 +167,7 @@ async fn fetch_and_response_batched_records(
         };
     }
 
+    // TODO: it's workaround
     // check if the query is still alive
     // unfortunately, we can start using a finished query so we need to check if it's still alive again
     if readers.is_empty() {
