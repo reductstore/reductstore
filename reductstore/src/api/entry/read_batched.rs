@@ -18,6 +18,7 @@ use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
+use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -52,10 +53,9 @@ pub(crate) async fn read_batched_records(
         })?,
 
         None => {
-            return Err(HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "'q' parameter is required for batched reads",
-            ));
+            return Err(
+                unprocessable_entity!("'q' parameter is required for batched reads").into(),
+            );
         }
     };
 
@@ -77,6 +77,9 @@ async fn fetch_and_response_batched_records(
     const MAX_HEADER_SIZE: u64 = 6_000; // many http servers have a default limit of 8kb
     const MAX_BODY_SIZE: u64 = 16_000_000; // 16mb just not to be too big
     const MAX_RECORDS: usize = 85; // some clients have a limit of 100 headers
+
+    const BATCH_TIMEOUT: Duration = Duration::from_secs(5); // 5 seconds for the batch
+    const RECORD_TIMEOUT: Duration = Duration::from_secs(1); // 1 second for each record
 
     let make_header = |reader: &RecordReader| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
@@ -116,16 +119,12 @@ async fn fetch_and_response_batched_records(
         .upgrade()?
         .get_query_receiver(query_id)?;
 
+    let start_time = std::time::Instant::now();
     loop {
-        let timeout = if readers.is_empty() {
-            Some(Duration::from_secs(1))
-        } else {
-            None
-        };
         let reader = match next_record_reader(
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
-            timeout,
+            RECORD_TIMEOUT,
         )
         .await
         {
@@ -146,6 +145,7 @@ async fn fetch_and_response_batched_records(
                 if header_size > MAX_HEADER_SIZE
                     || body_size > MAX_BODY_SIZE
                     || readers.len() > MAX_RECORDS
+                    || start_time.elapsed() > BATCH_TIMEOUT
                 {
                     // This is not correct, because we should check sizes before adding the record
                     // but we can't know the size in advance and after next() we can't go back
@@ -167,6 +167,17 @@ async fn fetch_and_response_batched_records(
         };
     }
 
+    // TODO: it's workaround
+    // check if the query is still alive
+    // unfortunately, we can start using a finished query so we need to check if it's still alive again
+    if readers.is_empty() {
+        let _ = bucket
+            .get_entry(entry_name)?
+            .upgrade()?
+            .get_query_receiver(query_id)?
+            .upgrade()?;
+    }
+
     headers.insert("content-length", body_size.to_string().parse().unwrap());
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
     headers.insert("x-reduct-last", last.to_string().parse().unwrap());
@@ -185,18 +196,14 @@ async fn fetch_and_response_batched_records(
 async fn next_record_reader(
     rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
-    recv_timeout: Option<Duration>,
+    recv_timeout: Duration,
 ) -> Option<Result<RecordReader, ReductError>> {
     // we need to wait for the first record
-    let result = if let Some(recv_timeout) = recv_timeout {
-        if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
-            result
-        } else {
-            debug!("Timeout while waiting for record from query {}", query_path);
-            return None;
-        }
+    let result = if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
+        result
     } else {
-        rx.write().await.recv().await
+        debug!("Timeout while waiting for record from query {}", query_path);
+        return None;
     };
 
     let reader = match result {
@@ -258,8 +265,11 @@ mod tests {
     use axum::body::to_bytes;
 
     use crate::api::entry::tests::query;
+
     use crate::api::tests::{components, headers, path_to_entry_1};
+
     use rstest::*;
+    use tokio::time::sleep;
 
     #[rstest]
     #[case("GET", "Hey!!!")]
@@ -273,31 +283,104 @@ mod tests {
         #[case] body: String,
     ) {
         let components = components.await;
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+        for time in 10..100 {
+            let writer = entry
+                .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
+                .await
+                .unwrap();
+            writer
+                .tx()
+                .send(Ok(Some(Bytes::from("Hey!!!"))))
+                .await
+                .unwrap();
+            writer.tx().send(Ok(None)).await.unwrap();
+        }
+
+        // let threads finish writing
+        sleep(Duration::from_millis(100)).await;
+
         let query_id = query(&path_to_entry_1, components.clone()).await;
+        let query = Query(HashMap::from_iter(vec![(
+            "q".to_string(),
+            query_id.to_string(),
+        )]));
 
-        let response = read_batched_records(
-            State(components.clone()),
-            path_to_entry_1,
-            Query(HashMap::from_iter(vec![(
-                "q".to_string(),
-                query_id.to_string(),
-            )])),
-            headers,
-            MethodExtractor::new(method.as_str()),
-        )
-        .await
-        .unwrap()
-        .into_response();
+        macro_rules! read_batched_records {
+            () => {
+                read_batched_records(
+                    State(components.clone()),
+                    Path(path_to_entry_1.clone()),
+                    query.clone(),
+                    headers.clone(),
+                    MethodExtractor::new(method.as_str()),
+                )
+                .await
+                .into_response()
+            };
+        }
 
-        let headers = response.headers();
-        assert_eq!(headers["x-reduct-time-0"], "6,text/plain,b=\"[a,b]\",x=y");
-        assert_eq!(headers["content-type"], "application/octet-stream");
-        assert_eq!(headers["content-length"], "6");
-        assert_eq!(headers["x-reduct-last"], "true");
+        let response = read_batched_records!();
+        let resp_headers = response.headers();
+        assert_eq!(
+            resp_headers["x-reduct-time-0"],
+            "6,text/plain,b=\"[a,b]\",x=y"
+        );
+        assert_eq!(resp_headers["content-type"], "application/octet-stream");
+        assert_eq!(resp_headers["content-length"], "516");
+        assert_eq!(resp_headers["x-reduct-last"], "false");
+
+        if method == "GET" {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                Bytes::from("Hey!!!".repeat(86))
+            );
+        } else {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        }
+
+        let response = read_batched_records!();
+        let resp_headers = response.headers();
+        assert_eq!(resp_headers["content-length"], "30", "{:?}", resp_headers);
+        assert_eq!(resp_headers["content-type"], "application/octet-stream");
+        assert_eq!(resp_headers["x-reduct-time-98"], "6,text/plain");
+        assert_eq!(resp_headers["x-reduct-last"], "true");
+
+        if method == "GET" {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                Bytes::from("Hey!!!".repeat(5))
+            );
+        } else {
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        }
+
+        let response = read_batched_records!();
+        let resp_headers = response.headers();
+        println!("{:?}", resp_headers);
 
         assert_eq!(
-            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-            Bytes::from(body)
+            resp_headers["x-reduct-error"],
+            format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
         );
     }
 
@@ -355,21 +438,12 @@ mod tests {
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", Some(Duration::from_millis(10)))
+                    next_record_reader(rx.clone(), "", Duration::from_millis(10))
                 )
                 .await
                 .unwrap()
                 .is_none(),
                 "should return None if no record is received after timeout"
-            );
-            assert!(
-                timeout(
-                    Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", None)
-                )
-                .await
-                .is_err(),
-                "should wait for the first record"
             );
         }
 
@@ -382,7 +456,7 @@ mod tests {
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", None)
+                    next_record_reader(rx.clone(), "", Duration::from_millis(0))
                 )
                 .await
                 .unwrap()
