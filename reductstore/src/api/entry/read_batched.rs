@@ -167,6 +167,16 @@ async fn fetch_and_response_batched_records(
         };
     }
 
+    // check if the query is still alive
+    // unfortunately, we can start using a finished query so we need to check if it's still alive again
+    if readers.is_empty() {
+        let _ = bucket
+            .get_entry(entry_name)?
+            .upgrade()?
+            .get_query_receiver(query_id)?
+            .upgrade()?;
+    }
+
     headers.insert("content-length", body_size.to_string().parse().unwrap());
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
     headers.insert("x-reduct-last", last.to_string().parse().unwrap());
