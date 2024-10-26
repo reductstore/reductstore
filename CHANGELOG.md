@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.3] - 2024-10-26
+
 ### Fixed
 
 - RS-519: Check bucket name convention when renaming bucket, [PR-616](https://github.com/reductstore/reductstore/pull/616)
@@ -822,7 +824,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.3...HEAD
+
+[1.12.3]: https://github.com/reductstore/reductstore/compare/v1.12.2...v1.12.3
 
 [1.12.2]: https://github.com/reductstore/reductstore/compare/v1.12.1...v1.12.2
 
