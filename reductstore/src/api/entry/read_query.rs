@@ -33,8 +33,8 @@ pub(crate) async fn read_query(
     .await?;
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
-    let entry_info = bucket.get_entry(entry_name)?.upgrade()?.info()?;
-    let entry = bucket.get_or_create_entry(entry_name)?.upgrade()?;
+    let entry = bucket.get_entry(entry_name)?.upgrade()?;
+    let entry_info = entry.info()?;
 
     let (start, stop) =
         parse_time_range(&params, entry_info.oldest_record, entry_info.latest_record)?;

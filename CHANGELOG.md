@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix CI actions after Ubuntu update, [PR-604](https://github.com/reductstore/reductstore/pull/604)
 
+## [1.12.3] - 2024-10-26
+
+### Fixed
+
+- RS-519: Check bucket name convention when renaming bucket, [PR-616](https://github.com/reductstore/reductstore/pull/616)
+- RS-520: Check if bucket provisioned before renaming it, [PR-617](https://github.com/reductstore/reductstore/pull/617)
+- RS-521: Sync bucket and entry before renaming them, [PR-521](https://github.com/reductstore/reductstore/pull/618)
+- RS-525: Recovering from empty block index, [PR-620](https://github.com/reductstore/reductstore/pull/620)
+- RS-523: Fix EOF error when writing and removing data in parallel, [PR-621](https://github.com/reductstore/reductstore/pull/621)
+
 ## [1.12.2] - 2024-10-21
 
 ### Fixed
@@ -818,8 +828,14 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
+<<<<<<< HEAD
 
 [Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.2...HEAD
+=======
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.3...HEAD
+
+[1.12.3]: https://github.com/reductstore/reductstore/compare/v1.12.2...v1.12.3
+>>>>>>> stable
 
 [1.12.2]: https://github.com/reductstore/reductstore/compare/v1.12.1...v1.12.2
 

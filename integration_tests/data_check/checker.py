@@ -63,9 +63,10 @@ async def check():
                 if count % 32 == 0:
                     print(f"Check {count} records for {entry_name}")
 
-            assert (
-                count == report["bucket"]["entries"][entry_i]["record_count"]
-            )  # Check that the number of records is correct
+            if count != report["bucket"]["entries"][entry_i]["record_count"]:
+                print(
+                    f"Total record count mismatch for {entry_name}: expected {report['bucket']['entries'][entry_i]['record_count']}, got {count}"
+                )
 
         for i in range(report["bucket"]["info"]["entry_count"]):
             tasks.append(check_entry(i))

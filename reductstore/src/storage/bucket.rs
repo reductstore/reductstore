@@ -20,7 +20,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{internal_server_error, not_found, Labels};
+use reduct_base::{conflict, internal_server_error, not_found, Labels};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -131,9 +131,9 @@ impl Bucket {
     ///
     /// * `&mut Entry` - The entry or an HTTPError
     pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write()?;
         if !entries.contains_key(key) {
-            let settings = self.settings.read().unwrap();
+            let settings = self.settings.read()?;
             let entry = Entry::try_new(
                 &key,
                 self.path.clone(),
@@ -265,7 +265,17 @@ impl Bucket {
         let settings = self.settings();
 
         unique(&self.task_group(), "rename entry", move || {
-            if entries.write().unwrap().remove(&old_name).is_none() {
+            if new_path.exists() {
+                return Err(conflict!(
+                    "Entry '{}' already exists in bucket '{}'",
+                    new_name,
+                    bucket_name
+                ));
+            }
+
+            if let Some(entry) = entries.read()?.get(&old_name) {
+                entry.sync_fs()?;
+            } else {
                 return Err(not_found!(
                     "Entry '{}' not found in bucket '{}'",
                     old_name,
@@ -273,14 +283,7 @@ impl Bucket {
                 ));
             }
 
-            if new_path.exists() {
-                return Err(internal_server_error!(
-                    "Entry '{}' already exists in bucket '{}'",
-                    new_name,
-                    bucket_name
-                ));
-            }
-
+            entries.write()?.remove(&old_name);
             FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
             std::fs::rename(&old_path, &new_path)?;
 
@@ -447,9 +450,7 @@ mod tests {
 
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2").await.err(),
-                Some(internal_server_error!(
-                    "Entry 'test-2' already exists in bucket 'test'"
-                ))
+                Some(conflict!("Entry 'test-2' already exists in bucket 'test'"))
             );
         }
 

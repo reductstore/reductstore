@@ -2,7 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
-use crate::core::thread_pool::shared_child_isolated;
+use crate::core::thread_pool::GroupDepth::BLOCK;
+use crate::core::thread_pool::{group_from_path, shared_child_isolated};
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::proto::record;
 use crate::storage::storage::CHANNEL_BUFFER_SIZE;
@@ -69,16 +70,8 @@ impl RecordWriter {
             bm.save_block(block_ref.clone())?;
 
             let entry_path = bm.path();
-            let bucket_path = entry_path.parent().unwrap();
-            let storage_path = bucket_path.parent().unwrap();
-
-            let task_group = [
-                storage_path.file_name().unwrap().to_str().unwrap(),
-                bucket_path.file_name().unwrap().to_str().unwrap(),
-                entry_path.file_name().unwrap().to_str().unwrap(),
-                &block.block_id().to_string(),
-            ]
-            .join("/");
+            let task_group =
+                group_from_path(&entry_path.join(&block.block_id().to_string()), BLOCK);
             (
                 file,
                 offset,
