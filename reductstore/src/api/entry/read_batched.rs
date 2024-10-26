@@ -78,6 +78,9 @@ async fn fetch_and_response_batched_records(
     const MAX_BODY_SIZE: u64 = 16_000_000; // 16mb just not to be too big
     const MAX_RECORDS: usize = 85; // some clients have a limit of 100 headers
 
+    const BATCH_TIMEOUT: Duration = Duration::from_secs(5); // 5 seconds for the batch
+    const RECORD_TIMEOUT: Duration = Duration::from_secs(1); // 1 second for each record
+
     let make_header = |reader: &RecordReader| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
         let mut meta_data = vec![
@@ -116,16 +119,12 @@ async fn fetch_and_response_batched_records(
         .upgrade()?
         .get_query_receiver(query_id)?;
 
+    let start_time = std::time::Instant::now();
     loop {
-        let timeout = if readers.is_empty() {
-            Some(Duration::from_secs(1))
-        } else {
-            None
-        };
         let reader = match next_record_reader(
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
-            timeout,
+            RECORD_TIMEOUT,
         )
         .await
         {
@@ -146,6 +145,7 @@ async fn fetch_and_response_batched_records(
                 if header_size > MAX_HEADER_SIZE
                     || body_size > MAX_BODY_SIZE
                     || readers.len() > MAX_RECORDS
+                    || start_time.elapsed() > BATCH_TIMEOUT
                 {
                     // This is not correct, because we should check sizes before adding the record
                     // but we can't know the size in advance and after next() we can't go back
@@ -185,18 +185,14 @@ async fn fetch_and_response_batched_records(
 async fn next_record_reader(
     rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
-    recv_timeout: Option<Duration>,
+    recv_timeout: Duration,
 ) -> Option<Result<RecordReader, ReductError>> {
     // we need to wait for the first record
-    let result = if let Some(recv_timeout) = recv_timeout {
-        if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
-            result
-        } else {
-            debug!("Timeout while waiting for record from query {}", query_path);
-            return None;
-        }
+    let result = if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
+        result
     } else {
-        rx.write().await.recv().await
+        debug!("Timeout while waiting for record from query {}", query_path);
+        return None;
     };
 
     let reader = match result {
@@ -431,21 +427,12 @@ mod tests {
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", Some(Duration::from_millis(10)))
+                    next_record_reader(rx.clone(), "", Duration::from_millis(10))
                 )
                 .await
                 .unwrap()
                 .is_none(),
                 "should return None if no record is received after timeout"
-            );
-            assert!(
-                timeout(
-                    Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", None)
-                )
-                .await
-                .is_err(),
-                "should wait for the first record"
             );
         }
 
@@ -458,7 +445,7 @@ mod tests {
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", None)
+                    next_record_reader(rx.clone(), "", Duration::from_millis(0))
                 )
                 .await
                 .unwrap()
