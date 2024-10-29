@@ -170,6 +170,7 @@ mod tests {
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
+    use crate::cfg::DEFAULT_PORT;
     use crate::replication::create_replication_repo;
 
     use super::*;
@@ -216,7 +217,7 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let storage = Arc::new(storage);
-        let mut replication_repo = create_replication_repo(Arc::clone(&storage));
+        let mut replication_repo = create_replication_repo(Arc::clone(&storage), DEFAULT_PORT);
         replication_repo
             .create_replication(
                 "api-test",
