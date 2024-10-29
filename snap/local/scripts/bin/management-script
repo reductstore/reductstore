@@ -7,6 +7,8 @@ DEFAULT_API_BASE_PATH="/"
 DEFAULT_API_TOKEN=""
 DEFAULT_CERT_PATH=""
 DEFAULT_CERT_KEY_PATH=""
+DEFAULT_LICENSE_PATH=""
+DEFAULT_CORS_ALLOW_ORIGIN="*"
 
 data_path()
 {
@@ -126,4 +128,35 @@ cert_key_path()
 set_cert_key_path()
 {
           snapctl set cert-key-path="$1"
+}
+
+
+license_path()
+{
+            license_path="$(snapctl get license-path)"
+            if [ -z "$license_path" ]; then
+                    license_path="$DEFAULT_LICENSE_PATH"
+                    set_license_path "$license_path"
+            fi
+            echo "$license_path"
+}
+
+set_license_path()
+{
+          snapctl set license-path="$1"
+}
+
+cors_allow_origin()
+{
+            cors_allow_origin="$(snapctl get cors-allow-origin)"
+            if [ -z "$cors_allow_origin" ]; then
+                    cors_allow_origin="$DEFAULT_CORS_ALLOW_ORIGIN"
+                    set_cors_allow_origin "$cors_allow_origin"
+            fi
+            echo "$cors_allow_origin"
+}
+
+set_cors_allow_origin()
+{
+          snapctl set cors-allow-origin="$1"
 }
