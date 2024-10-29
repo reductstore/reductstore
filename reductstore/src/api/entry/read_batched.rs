@@ -24,6 +24,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::thread::sleep;
 use std::time::Duration;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::timeout;
@@ -171,6 +172,7 @@ async fn fetch_and_response_batched_records(
     // check if the query is still alive
     // unfortunately, we can start using a finished query so we need to check if it's still alive again
     if readers.is_empty() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
         let _ = bucket
             .get_entry(entry_name)?
             .upgrade()?
