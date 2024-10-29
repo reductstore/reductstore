@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- RS-439: Snap hooks for new configuration parameters, [PR-628](https://github.com/reductstore/reductstore/pull/628)
+
 ### Internal
 
 - Fix CI actions after Ubuntu update, [PR-604](https://github.com/reductstore/reductstore/pull/604)

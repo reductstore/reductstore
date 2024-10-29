@@ -11,5 +11,7 @@ export RS_API_BASE_PATH=$(api_base)
 export RS_API_TOKEN=$(api_token)
 export RS_CERT_PATH=$(cert_path)
 export RS_CERT_KEY_PATH=$(cert_key_path)
+export RS_LICENSE_PATH=$(license_path)
+export RS_CORS_ALLOW_ORIGIN=$(cors_allow_origin)
 
 $SNAP/bin/reductstore
