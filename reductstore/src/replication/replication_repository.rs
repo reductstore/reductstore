@@ -367,6 +367,21 @@ mod tests {
         }
 
         #[rstest]
+        fn test_replication_src_bucket_not_found(
+            mut repo: ReplicationRepository,
+            mut settings: ReplicationSettings,
+        ) {
+            settings.src_bucket = "bucket-2".to_string();
+            assert_eq!(
+                repo.create_replication("test", settings),
+                Err(not_found!(
+                    "Source bucket 'bucket-2' for replication 'test' does not exist"
+                )),
+                "Should not create replication with non existing source bucket"
+            );
+        }
+
+        #[rstest]
         fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
             let mut repo =
                 ReplicationRepository::load_or_create(Arc::clone(&storage), DEFAULT_PORT);
@@ -458,6 +473,25 @@ mod tests {
                     "Source and destination buckets must be different"
                 )),
                 "Should not update replication to the same bucket"
+            );
+        }
+
+        #[rstest]
+        fn test_update_replication_src_bucket_not_found(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let mut settings = settings;
+            settings.src_bucket = "bucket-2".to_string();
+
+            assert_eq!(
+                repo.update_replication("test", settings),
+                Err(not_found!(
+                    "Source bucket 'bucket-2' for replication 'test' does not exist"
+                )),
+                "Should not update replication with non existing source bucket"
             );
         }
     }
