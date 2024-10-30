@@ -537,7 +537,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_get_non_existing_replication(mut repo: ReplicationRepository) {
+        fn test_get_non_existing_replication(repo: ReplicationRepository) {
             assert_eq!(
                 repo.get_info("test-2").err(),
                 Some(not_found!("Replication 'test-2' does not exist")),
