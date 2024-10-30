@@ -1,6 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::DEFAULT_PORT;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
     Label as ProtoLabel, ReplicationRepo as ProtoReplicationRepo,
@@ -16,6 +17,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
+use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -85,6 +87,7 @@ pub(crate) struct ReplicationRepository {
     replications: HashMap<String, ReplicationTask>,
     storage: Arc<Storage>,
     config_path: PathBuf,
+    listening_port: u16,
 }
 
 impl ManageReplications for ReplicationRepository {
@@ -101,7 +104,7 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
 
-        self.check_and_create_replication(&name, settings)
+        self.create_or_update_replication_task(&name, settings)
     }
 
     fn update_replication(
@@ -128,7 +131,7 @@ impl ManageReplications for ReplicationRepository {
         }?;
 
         self.replications.remove(name); // remove old replication because it may have a different connection configuration
-        self.check_and_create_replication(&name, settings)
+        self.create_or_update_replication_task(&name, settings)
     }
 
     fn replications(&self) -> Vec<ReplicationInfo> {
@@ -182,13 +185,14 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) fn load_or_create(storage: Arc<Storage>) -> Self {
+    pub(crate) fn load_or_create(storage: Arc<Storage>, listening_port: u16) -> Self {
         let config_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
 
         let mut repo = Self {
             replications: HashMap::new(),
             storage,
             config_path,
+            listening_port,
         };
 
         match std::fs::read(&repo.config_path) {
@@ -245,25 +249,40 @@ impl ReplicationRepository {
         })
     }
 
-    fn check_and_create_replication(
+    fn create_or_update_replication_task(
         &mut self,
         name: &&str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
         // check if destination host is valid
-        if Url::parse(&settings.dst_host).is_err() {
-            return Err(ReductError::unprocessable_entity(&format!(
-                "Invalid destination host '{}'",
-                settings.dst_host
-            )));
-        }
+        let dest_url = match Url::parse(&settings.dst_host) {
+            Ok(url) => url,
+
+            Err(_) => {
+                return Err(unprocessable_entity!(
+                    "Invalid destination host '{}'",
+                    settings.dst_host
+                ))
+            }
+        };
 
         // check if source bucket exists
         if self.storage.get_bucket(&settings.src_bucket).is_err() {
-            return Err(ReductError::not_found(&format!(
+            return Err(not_found!(
                 "Source bucket '{}' for replication '{}' does not exist",
-                settings.src_bucket, name
-            )));
+                settings.src_bucket,
+                name
+            ));
+        }
+
+        // check if target and source buckets are the same
+        if settings.src_bucket == settings.dst_bucket
+            && self.listening_port == dest_url.port_or_known_default().unwrap_or(DEFAULT_PORT)
+            && ["127.0.0.1", "localhost", "0.0.0.0"].contains(&dest_url.host_str().unwrap_or(""))
+        {
+            return Err(unprocessable_entity!(
+                "Source and destination buckets must be different",
+            ));
         }
         let replication =
             ReplicationTask::new(name.to_string(), settings, Arc::clone(&self.storage));
@@ -274,173 +293,329 @@ impl ReplicationRepository {
 
 #[cfg(test)]
 mod tests {
-    use crate::replication::replication_repository::ReplicationRepository;
-    use crate::replication::{ManageReplications, TransactionNotification};
-    use crate::storage::storage::Storage;
-
+    use super::*;
     use crate::replication::Transaction::WriteRecord;
-    use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::replication_api::ReplicationSettings;
-    use reduct_base::Labels;
-    use rstest::{fixture, rstest};
-    use std::sync::Arc;
+    use reduct_base::{conflict, Labels};
+    use rstest::*;
     use std::thread::sleep;
     use std::time::Duration;
 
-    #[rstest]
-    fn create_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
+    mod create {
+        use super::*;
+        #[rstest]
+        fn create_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test", settings.clone()).unwrap();
 
-        let repls = repo.replications();
-        assert_eq!(repls.len(), 1);
-        assert_eq!(repls[0].name, "test");
-        assert_eq!(
-            repo.get_replication("test").unwrap().settings(),
-            &settings,
-            "Should create replication with the same name and settings"
-        );
-    }
-
-    #[rstest]
-    fn create_replication_with_same_name(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
-
-        assert_eq!(
-            repo.create_replication("test", settings),
-            Err(ReductError::conflict("Replication 'test' already exists")),
-            "Should not create replication with the same name"
-        );
-    }
-
-    #[rstest]
-    fn create_replication_with_invalid_url(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        let mut settings = settings;
-        settings.dst_host = "invalid_url".to_string();
-
-        assert_eq!(
-            repo.create_replication("test", settings),
-            Err(ReductError::unprocessable_entity(
-                "Invalid destination host 'invalid_url'"
-            )),
-            "Should not create replication with invalid url"
-        );
-    }
-
-    #[rstest]
-    fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
-
-        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        assert_eq!(repo.replications().len(), 1);
-        assert_eq!(
-            repo.get_replication("test").unwrap().settings(),
-            &settings,
-            "Should load replication from file"
-        );
-    }
-
-    #[rstest]
-    fn test_update_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
-
-        let mut settings = settings;
-        settings.dst_bucket = "bucket-3".to_string();
-        repo.update_replication("test", settings.clone()).unwrap();
-
-        let replication = repo.get_replication("test").unwrap();
-        assert_eq!(replication.settings().dst_bucket, "bucket-3");
-    }
-
-    #[rstest]
-    fn test_update_provisioned_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
-
-        let replication = repo.get_mut_replication("test").unwrap();
-        replication.set_provisioned(true);
-
-        assert_eq!(
-            repo.update_replication("test", settings),
-            Err(ReductError::conflict(
-                "Can't update provisioned replication 'test'"
-            )),
-            "Should not update provisioned replication"
-        );
-    }
-
-    #[rstest]
-    fn test_remove_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
-
-        repo.remove_replication("test").unwrap();
-        assert_eq!(repo.replications().len(), 0);
-
-        // check if replication is removed from file
-        let repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        assert_eq!(
-            repo.replications().len(),
-            0,
-            "Should remove replication permanently"
-        );
-    }
-
-    #[rstest]
-    fn test_remove_non_existing_replication(storage: Arc<Storage>) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        assert_eq!(
-            repo.remove_replication("test-2"),
-            Err(ReductError::not_found(
-                "Replication 'test-2' does not exist"
-            )),
-            "Should not remove non existing replication"
-        );
-    }
-
-    #[rstest]
-    fn test_remove_provisioned_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
-
-        let replication = repo.get_mut_replication("test").unwrap();
-        replication.set_provisioned(true);
-
-        assert_eq!(
-            repo.remove_replication("test"),
-            Err(ReductError::conflict(
-                "Can't remove provisioned replication 'test'"
-            )),
-            "Should not remove provisioned replication"
-        );
-    }
-
-    #[rstest]
-    fn test_get_replication(storage: Arc<Storage>, settings: ReplicationSettings) {
-        let mut repo = ReplicationRepository::load_or_create(Arc::clone(&storage));
-        repo.create_replication("test", settings.clone()).unwrap();
-        {
-            let repl = repo.get_mut_replication("test").unwrap();
-            repl.notify(TransactionNotification {
-                bucket: "bucket-1".to_string(),
-                entry: "entry-1".to_string(),
-                labels: Vec::new(),
-                event: WriteRecord(0),
-            })
-            .unwrap();
-            sleep(Duration::from_millis(100));
+            let repls = repo.replications();
+            assert_eq!(repls.len(), 1);
+            assert_eq!(repls[0].name, "test");
+            assert_eq!(
+                repo.get_replication("test").unwrap().settings(),
+                &settings,
+                "Should create replication with the same name and settings"
+            );
         }
 
-        let info = repo.get_info("test").unwrap();
-        let repl = repo.get_replication("test").unwrap();
-        assert_eq!(info.settings, repl.masked_settings().clone());
-        assert_eq!(info.info, repl.info());
-        assert_eq!(info.diagnostics, repl.diagnostics());
+        #[rstest]
+        fn create_replication_with_same_name(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            assert_eq!(
+                repo.create_replication("test", settings),
+                Err(conflict!("Replication 'test' already exists")),
+                "Should not create replication with the same name"
+            );
+        }
+
+        #[rstest]
+        fn create_replication_with_invalid_url(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut settings = settings;
+            settings.dst_host = "invalid_url".to_string();
+
+            assert_eq!(
+                repo.create_replication("test", settings),
+                Err(unprocessable_entity!(
+                    "Invalid destination host 'invalid_url'"
+                )),
+                "Should not create replication with invalid url"
+            );
+        }
+
+        #[rstest]
+        fn create_replication_to_same_bucket(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut settings = settings;
+            settings.dst_host = format!("http://localhost:{}", DEFAULT_PORT);
+            settings.dst_bucket = "bucket-1".to_string();
+
+            assert_eq!(
+                repo.create_replication("test", settings),
+                Err(unprocessable_entity!(
+                    "Source and destination buckets must be different"
+                )),
+                "Should not create replication to the same bucket"
+            );
+        }
+
+        #[rstest]
+        fn test_replication_src_bucket_not_found(
+            mut repo: ReplicationRepository,
+            mut settings: ReplicationSettings,
+        ) {
+            settings.src_bucket = "bucket-2".to_string();
+            assert_eq!(
+                repo.create_replication("test", settings),
+                Err(not_found!(
+                    "Source bucket 'bucket-2' for replication 'test' does not exist"
+                )),
+                "Should not create replication with non existing source bucket"
+            );
+        }
+
+        #[rstest]
+        fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
+            let mut repo =
+                ReplicationRepository::load_or_create(Arc::clone(&storage), DEFAULT_PORT);
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), DEFAULT_PORT);
+            assert_eq!(repo.replications().len(), 1);
+            assert_eq!(
+                repo.get_replication("test").unwrap().settings(),
+                &settings,
+                "Should load replication from file"
+            );
+        }
+    }
+
+    mod update {
+        use super::*;
+        #[rstest]
+        fn test_update_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let mut settings = settings;
+            settings.dst_bucket = "bucket-3".to_string();
+            repo.update_replication("test", settings.clone()).unwrap();
+
+            let replication = repo.get_replication("test").unwrap();
+            assert_eq!(replication.settings().dst_bucket, "bucket-3");
+        }
+
+        #[rstest]
+        fn test_update_provisioned_replication(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let replication = repo.get_mut_replication("test").unwrap();
+            replication.set_provisioned(true);
+
+            assert_eq!(
+                repo.update_replication("test", settings),
+                Err(conflict!("Can't update provisioned replication 'test'")),
+                "Should not update provisioned replication"
+            );
+        }
+
+        #[rstest]
+        fn test_update_non_existing_replication(mut repo: ReplicationRepository) {
+            assert_eq!(
+                repo.update_replication("test-2", ReplicationSettings::default()),
+                Err(not_found!("Replication 'test-2' does not exist")),
+                "Should not update non existing replication"
+            );
+        }
+
+        #[rstest]
+        fn test_update_replication_with_invalid_url(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let mut settings = settings;
+            settings.dst_host = "invalid_url".to_string();
+
+            assert_eq!(
+                repo.update_replication("test", settings),
+                Err(unprocessable_entity!(
+                    "Invalid destination host 'invalid_url'"
+                )),
+                "Should not update replication with invalid url"
+            );
+        }
+
+        #[rstest]
+        fn test_update_replication_to_same_bucket(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let mut settings = settings;
+            settings.dst_host = format!("http://localhost:{}", DEFAULT_PORT);
+            settings.dst_bucket = "bucket-1".to_string();
+
+            assert_eq!(
+                repo.update_replication("test", settings),
+                Err(unprocessable_entity!(
+                    "Source and destination buckets must be different"
+                )),
+                "Should not update replication to the same bucket"
+            );
+        }
+
+        #[rstest]
+        fn test_update_replication_src_bucket_not_found(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let mut settings = settings;
+            settings.src_bucket = "bucket-2".to_string();
+
+            assert_eq!(
+                repo.update_replication("test", settings),
+                Err(not_found!(
+                    "Source bucket 'bucket-2' for replication 'test' does not exist"
+                )),
+                "Should not update replication with non existing source bucket"
+            );
+        }
+    }
+
+    mod remove {
+        use super::*;
+        #[rstest]
+        fn test_remove_replication(
+            mut repo: ReplicationRepository,
+            storage: Arc<Storage>,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            repo.remove_replication("test").unwrap();
+            assert_eq!(repo.replications().len(), 0);
+
+            // check if replication is removed from file
+            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), DEFAULT_PORT);
+            assert_eq!(
+                repo.replications().len(),
+                0,
+                "Should remove replication permanently"
+            );
+        }
+
+        #[rstest]
+        fn test_remove_non_existing_replication(mut repo: ReplicationRepository) {
+            assert_eq!(
+                repo.remove_replication("test-2"),
+                Err(not_found!("Replication 'test-2' does not exist")),
+                "Should not remove non existing replication"
+            );
+        }
+
+        #[rstest]
+        fn test_remove_provisioned_replication(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let replication = repo.get_mut_replication("test").unwrap();
+            replication.set_provisioned(true);
+
+            assert_eq!(
+                repo.remove_replication("test"),
+                Err(conflict!("Can't remove provisioned replication 'test'")),
+                "Should not remove provisioned replication"
+            );
+        }
+    }
+
+    mod get {
+        use super::*;
+
+        #[rstest]
+        fn test_get_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test", settings.clone()).unwrap();
+            {
+                let repl = repo.get_mut_replication("test").unwrap();
+                repl.notify(TransactionNotification {
+                    bucket: "bucket-1".to_string(),
+                    entry: "entry-1".to_string(),
+                    labels: Vec::new(),
+                    event: WriteRecord(0),
+                })
+                .unwrap();
+                sleep(Duration::from_millis(100));
+            }
+
+            let info = repo.get_info("test").unwrap();
+            let repl = repo.get_replication("test").unwrap();
+            assert_eq!(info.settings, repl.masked_settings().clone());
+            assert_eq!(info.info, repl.info());
+            assert_eq!(info.diagnostics, repl.diagnostics());
+        }
+
+        #[rstest]
+        fn test_get_non_existing_replication(repo: ReplicationRepository) {
+            assert_eq!(
+                repo.get_info("test-2").err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get non existing replication"
+            );
+        }
+
+        #[rstest]
+        fn test_get_mut_non_existing_replication(mut repo: ReplicationRepository) {
+            assert_eq!(
+                repo.get_mut_replication("test-2").err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get non existing replication"
+            );
+        }
+    }
+
+    mod from {
+        use super::*;
+
+        #[rstest]
+        fn test_from_proto(settings: ReplicationSettings) {
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            let settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, settings);
+        }
+
+        #[rstest]
+        fn test_from_each_n_proto(settings: ReplicationSettings) {
+            let mut settings = settings;
+            settings.each_n = Some(10);
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            let settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, settings);
+        }
+
+        #[rstest]
+        fn test_from_each_s_proto(settings: ReplicationSettings) {
+            let mut settings = settings;
+            settings.each_s = Some(10.0);
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            let settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, settings);
+        }
     }
 
     #[fixture]
@@ -468,5 +643,10 @@ mod tests {
             .upgrade_and_unwrap();
         let _ = bucket.get_or_create_entry("entry-1").unwrap();
         Arc::new(storage)
+    }
+
+    #[fixture]
+    fn repo(storage: Arc<Storage>) -> ReplicationRepository {
+        ReplicationRepository::load_or_create(storage, DEFAULT_PORT)
     }
 }

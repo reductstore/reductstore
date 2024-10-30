@@ -21,11 +21,15 @@ use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+pub const DEFAULT_LOG_LEVEL: &str = "INFO";
+pub const DEFAULT_HOST: &str = "0.0.0.0";
+pub const DEFAULT_PORT: u16 = 8383;
+
 /// Database configuration
 pub struct Cfg<EnvGetter: GetEnv> {
     pub log_level: String,
     pub host: String,
-    pub port: i32,
+    pub port: u16,
     pub api_base_path: String,
     pub data_path: String,
     pub api_token: String,
@@ -44,9 +48,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub fn from_env(env_getter: EnvGetter) -> Self {
         let mut env = Env::new(env_getter);
         let cfg = Cfg {
-            log_level: env.get("RS_LOG_LEVEL", "INFO".to_string()),
-            host: env.get("RS_HOST", "0.0.0.0".to_string()),
-            port: env.get("RS_PORT", 8383),
+            log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
+            host: env.get("RS_HOST", DEFAULT_HOST.to_string()),
+            port: env.get("RS_PORT", DEFAULT_PORT),
             api_base_path: env.get("RS_API_BASE_PATH", "/".to_string()),
             data_path: env.get("RS_DATA_PATH", "/data".to_string()),
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
@@ -155,7 +159,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         &self,
         storage: Arc<Storage>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_repo(Arc::clone(&storage));
+        let mut repo = create_replication_repo(Arc::clone(&storage), self.port);
         for (name, settings) in &self.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {

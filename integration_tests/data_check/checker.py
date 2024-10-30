@@ -67,6 +67,7 @@ async def check():
                 print(
                     f"Total record count mismatch for {entry_name}: expected {report['bucket']['entries'][entry_i]['record_count']}, got {count}"
                 )
+                exit(1)
 
         for i in range(report["bucket"]["info"]["entry_count"]):
             tasks.append(check_entry(i))

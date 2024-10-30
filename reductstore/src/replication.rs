@@ -135,6 +135,7 @@ pub trait ManageReplications {
 /// A fabric method to create a new replication repository and return it as a trait object.
 pub(crate) fn create_replication_repo(
     storage: Arc<Storage>,
+    listening_port: u16,
 ) -> Box<dyn ManageReplications + Send + Sync> {
-    Box::new(replication_repository::ReplicationRepository::load_or_create(storage))
+    Box::new(replication_repository::ReplicationRepository::load_or_create(storage, listening_port))
 }

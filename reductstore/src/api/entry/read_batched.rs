@@ -24,7 +24,6 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::thread::sleep;
 use std::time::Duration;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::timeout;

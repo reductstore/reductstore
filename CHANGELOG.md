@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - RS-439: Snap hooks for new configuration parameters, [PR-628](https://github.com/reductstore/reductstore/pull/628)
+- RS-415: Add check to prevent replication to the same bucket, [PR-629](https://github.com/reductstore/reductstore/pull/629)
 
 ### Internal
 
