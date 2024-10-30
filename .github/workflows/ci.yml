@@ -241,8 +241,9 @@ jobs:
         if: always()
         run: docker logs current | zip > /tmp/docker-log.zip
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: docker-log-${{matrix.version}}
+          name: docker-log-migration-${{matrix.version}}
           path: /tmp/docker-log.zip
 
       - name: Show replication report
@@ -302,8 +303,9 @@ jobs:
         if: always()
         run: docker logs current | zip > /tmp/docker-log.zip
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: docker-log-${{matrix.cmd}}
+          name: docker-log-recovery-${{matrix.cmd}}
           path: /tmp/docker-log.zip
 
       - name: Show replication report
@@ -388,8 +390,9 @@ jobs:
         if: always()
         run: docker logs current | zip > /tmp/docker-log.zip
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: docker-log-${{matrix.max_blob_size}}
+          name: docker-log-repl-${{matrix.max_blob_size}}
           path: /tmp/docker-log.zip
 
       - name: Show replication report
