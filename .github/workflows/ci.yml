@@ -237,9 +237,13 @@ jobs:
       - name: Check data after migration
         run: python3 ./integration_tests/data_check/checker.py
 
-      - name: Print docker logs
+      - name: Save docker logs
         if: always()
-        run: docker logs current
+        run: docker logs current | zip > /tmp/docker-log.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-log
+          path: /tmp/docker-log.txt
 
       - name: Show replication report
         if: always()
@@ -294,9 +298,13 @@ jobs:
       - name: Check data after migraiton
         run: python3 ./integration_tests/data_check/checker.py
 
-      - name: Print docker logs
+      - name: Save docker logs
         if: always()
-        run: docker logs reductstore-1
+        run: docker logs current | zip > /tmp/docker-log.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-log
+          path: /tmp/docker-log.txt
 
       - name: Show replication report
         if: always()
@@ -376,9 +384,13 @@ jobs:
           BUCKET_NAME: dest
         run: python3 ./integration_tests/data_check/checker.py
 
-      - name: Print docker logs
+      - name: Save docker logs
         if: always()
-        run: docker logs current
+        run: docker logs current | zip > /tmp/docker-log.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-log
+          path: /tmp/docker-log.txt
 
       - name: Show replication report
         if: always()
