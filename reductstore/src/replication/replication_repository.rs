@@ -511,26 +511,77 @@ mod tests {
         }
     }
 
-    #[rstest]
-    fn test_get_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-        repo.create_replication("test", settings.clone()).unwrap();
-        {
-            let repl = repo.get_mut_replication("test").unwrap();
-            repl.notify(TransactionNotification {
-                bucket: "bucket-1".to_string(),
-                entry: "entry-1".to_string(),
-                labels: Vec::new(),
-                event: WriteRecord(0),
-            })
-            .unwrap();
-            sleep(Duration::from_millis(100));
+    mod get {
+        use super::*;
+
+        #[rstest]
+        fn test_get_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test", settings.clone()).unwrap();
+            {
+                let repl = repo.get_mut_replication("test").unwrap();
+                repl.notify(TransactionNotification {
+                    bucket: "bucket-1".to_string(),
+                    entry: "entry-1".to_string(),
+                    labels: Vec::new(),
+                    event: WriteRecord(0),
+                })
+                .unwrap();
+                sleep(Duration::from_millis(100));
+            }
+
+            let info = repo.get_info("test").unwrap();
+            let repl = repo.get_replication("test").unwrap();
+            assert_eq!(info.settings, repl.masked_settings().clone());
+            assert_eq!(info.info, repl.info());
+            assert_eq!(info.diagnostics, repl.diagnostics());
         }
 
-        let info = repo.get_info("test").unwrap();
-        let repl = repo.get_replication("test").unwrap();
-        assert_eq!(info.settings, repl.masked_settings().clone());
-        assert_eq!(info.info, repl.info());
-        assert_eq!(info.diagnostics, repl.diagnostics());
+        #[rstest]
+        fn test_get_non_existing_replication(mut repo: ReplicationRepository) {
+            assert_eq!(
+                repo.get_info("test-2").err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get non existing replication"
+            );
+        }
+
+        #[rstest]
+        fn test_get_mut_non_existing_replication(mut repo: ReplicationRepository) {
+            assert_eq!(
+                repo.get_mut_replication("test-2").err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get non existing replication"
+            );
+        }
+    }
+
+    mod from {
+        use super::*;
+
+        #[rstest]
+        fn test_from_proto(settings: ReplicationSettings) {
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            let settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, settings);
+        }
+
+        #[rstest]
+        fn test_from_each_n_proto(settings: ReplicationSettings) {
+            let mut settings = settings;
+            settings.each_n = Some(10);
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            let settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, settings);
+        }
+
+        #[rstest]
+        fn test_from_each_s_proto(settings: ReplicationSettings) {
+            let mut settings = settings;
+            settings.each_s = Some(10.0);
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            let settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, settings);
+        }
     }
 
     #[fixture]
