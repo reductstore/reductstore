@@ -42,7 +42,7 @@ rand = "0.8.5"
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.132"
 regex = "1.11.1"
-bytes = "1.7.2"
+bytes = "1.8.0"
 axum = { version = "0.7.7", features = ["default", "macros"] }
 axum-extra = { version = "0.9.4", features = ["default", "typed-header"] }
 tokio = { version = "1.41.0", features = ["full"] }
