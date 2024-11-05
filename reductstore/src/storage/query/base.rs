@@ -7,6 +7,7 @@ use reduct_base::error::ReductError;
 use std::collections::HashMap;
 
 use crate::storage::entry::RecordReader;
+use reduct_base::msg::entry_api::QueryEntry;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -53,6 +54,21 @@ pub struct QueryOptions {
     pub each_s: Option<f64>,
     /// Only metadata
     pub only_metadata: bool,
+}
+
+impl From<QueryEntry> for QueryOptions {
+    fn from(query: QueryEntry) -> QueryOptions {
+        QueryOptions {
+            ttl: Duration::from_secs(query.ttl.unwrap_or(Self::default().ttl.as_secs())),
+            include: query.include,
+            exclude: query.exclude,
+            continuous: query.continuous.unwrap_or(false),
+            limit: query.limit,
+            each_n: query.each_n,
+            each_s: query.each_s,
+            only_metadata: query.only_metadata.unwrap(),
+        }
+    }
 }
 
 impl Default for QueryOptions {

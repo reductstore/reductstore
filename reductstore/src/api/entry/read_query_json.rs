@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::QueryInfoAxum;
@@ -13,8 +13,8 @@ use reduct_base::msg::entry_api::QueryInfo;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-// GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
-pub(crate) async fn read_query(
+// POST /:bucket/:entry/q
+pub(crate) async fn read_query_json(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -34,8 +34,6 @@ pub(crate) async fn read_query(
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let entry_info = entry.info()?;
-
     let id = entry.query(parse_query_params(params, false)?).await?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
@@ -59,7 +57,7 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("limit".to_string(), "1".to_string());
 
-        let result = read_query(
+        let result = read_query_json(
             State(Arc::clone(&components)),
             path_to_entry_1,
             Query(params),

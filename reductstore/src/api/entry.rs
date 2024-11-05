@@ -4,6 +4,7 @@
 mod common;
 mod read_batched;
 mod read_query;
+mod read_query_json;
 mod read_single;
 mod remove_batched;
 mod remove_entry;
@@ -125,10 +126,17 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
 mod tests {
     use super::*;
     use crate::storage::query::base::QueryOptions;
+    use reduct_base::msg::entry_api::QueryEntry;
     pub async fn query(
         path_to_entry_1: &Path<HashMap<String, String>>,
         components: Arc<Components>,
     ) -> u64 {
+        let options = QueryEntry {
+            start: Some(0),
+            stop: Some(u64::MAX),
+            ..Default::default()
+        };
+
         let query_id = {
             components
                 .storage
@@ -140,7 +148,7 @@ mod tests {
                 .unwrap()
                 .upgrade()
                 .unwrap()
-                .query(0, u64::MAX, QueryOptions::default())
+                .query(options)
                 .await
                 .unwrap()
         };

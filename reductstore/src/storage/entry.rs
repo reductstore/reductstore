@@ -16,7 +16,7 @@ use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::msg::entry_api::EntryInfo;
+use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -107,26 +107,44 @@ impl Entry {
     ///
     /// # Arguments
     ///
-    /// * `start` - The start time of the query.
-    /// * `end` - The end time of the query. Ignored if `continuous` is true.
-    /// * `options` - The query options.
+    /// * `query_parameters` - The query parameters.
     ///
     /// # Returns
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(
-        &self,
-        start: u64,
-        end: u64,
-        options: QueryOptions,
-    ) -> TaskHandle<Result<u64, ReductError>> {
+    pub fn query(&self, mut query_parameters: QueryEntry) -> TaskHandle<Result<u64, ReductError>> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
+
+        let range = self.get_query_time_range(&query_parameters);
+        if let Err(e) = range {
+            return Err(e).into();
+        }
+
+        let (start, end) = range.unwrap();
 
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         let block_manager = Arc::clone(&self.block_manager);
+        let info = self.info();
+        if let Err(e) = info {
+            return e.into();
+        }
 
-        let query = build_query(start, end, options.clone());
+        let info = info.unwrap();
+        let start = if let Some(start) = query_parameters.start {
+            start
+        } else {
+            info.oldest_record
+        };
+
+        let stop = if let Some(stop) = query_parameters.stop {
+            stop
+        } else {
+            info.latest_record + 1
+        };
+
+        let options: QueryOptions = query_parameters.into();
+        let query = build_query(start, stop, options.clone());
         if let Err(e) = query {
             return e.into();
         }
@@ -290,6 +308,23 @@ impl Entry {
         // use folder hierarchy as task group to protect resources
         group_from_path(&self.path, GroupDepth::ENTRY)
     }
+
+    fn get_query_time_range(&self, query: &QueryEntry) -> Result<(u64, u64), ReductError> {
+        let info = self.info()?;
+        let start = if let Some(start) = query.start {
+            start
+        } else {
+            info.oldest_record
+        };
+
+        let end = if let Some(end) = query.stop {
+            end
+        } else {
+            info.latest_record + 1
+        };
+
+        Ok((start, end))
+    }
 }
 
 #[cfg(test)]
@@ -370,10 +405,13 @@ mod tests {
             write_stub_record(&mut entry, 2000000);
             write_stub_record(&mut entry, 3000000);
 
-            let id = entry
-                .query(0, 4000000, QueryOptions::default())
-                .wait()
-                .unwrap();
+            let params = QueryEntry {
+                start: Some(0),
+                stop: Some(4000000),
+                ..Default::default()
+            };
+
+            let id = entry.query(params).wait().unwrap();
             assert!(id >= 1);
 
             {
@@ -412,18 +450,13 @@ mod tests {
             Logger::init("DEBUG");
             write_stub_record(&mut entry, 1000000);
 
-            let id = entry
-                .query(
-                    0,
-                    4000000,
-                    QueryOptions {
-                        ttl: Duration::from_millis(1000),
-                        continuous: true,
-                        ..QueryOptions::default()
-                    },
-                )
-                .wait()
-                .unwrap();
+            let params = QueryEntry {
+                start: Some(0),
+                stop: Some(4000000),
+                continuous: Some(true),
+                ..Default::default()
+            };
+            let id = entry.query(params).wait().unwrap();
 
             {
                 let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();

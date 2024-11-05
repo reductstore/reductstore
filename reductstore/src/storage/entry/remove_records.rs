@@ -7,6 +7,7 @@ use crate::storage::entry::Entry;
 use crate::storage::query::base::QueryOptions;
 use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::not_found;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -53,14 +54,12 @@ impl Entry {
     /// * If the query fails.
     pub fn query_remove_records(
         &self,
-        start: u64,
-        end: u64,
-        mut options: QueryOptions,
+        mut options: QueryEntry,
     ) -> TaskHandle<Result<u64, ReductError>> {
-        options.continuous = false; // force non-continuous query
+        options.continuous = None; // force non-continuous query
 
         let rx = || {
-            let query_id = self.query(start, end, options).wait()?;
+            let query_id = self.query(options).wait()?;
             self.get_query_receiver(query_id)
         };
 
@@ -220,10 +219,13 @@ mod tests {
 
     #[rstest]
     fn test_query_remove_records(entry_with_data: Entry) {
-        let removed_records = entry_with_data
-            .query_remove_records(2, 4, QueryOptions::default())
-            .wait()
-            .unwrap();
+        let params = QueryEntry {
+            start: Some(2),
+            stop: Some(4),
+            ..Default::default()
+        };
+
+        let removed_records = entry_with_data.query_remove_records(params).wait().unwrap();
 
         assert_eq!(removed_records, 2);
 
