@@ -8,7 +8,6 @@ use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::time::Duration;
 
 pub(super) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<usize, HttpError> {
     let content_size = headers
@@ -222,7 +221,6 @@ mod tests {
 
     use rstest::rstest;
     use std::collections::HashMap;
-    use std::time::Duration;
 
     mod parse_ttl {
         use super::*;

@@ -6,7 +6,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
-use crate::api::entry::common::{parse_query_params, parse_time_range};
+use crate::api::entry::common::parse_query_params;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::error::ReductError;

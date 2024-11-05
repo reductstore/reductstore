@@ -125,7 +125,7 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::query::base::QueryOptions;
+
     use reduct_base::msg::entry_api::QueryEntry;
     pub async fn query(
         path_to_entry_1: &Path<HashMap<String, String>>,

@@ -113,7 +113,7 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(&self, mut query_parameters: QueryEntry) -> TaskHandle<Result<u64, ReductError>> {
+    pub fn query(&self, query_parameters: QueryEntry) -> TaskHandle<Result<u64, ReductError>> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let range = self.get_query_time_range(&query_parameters);
@@ -394,7 +394,7 @@ mod tests {
 
     mod query {
         use super::*;
-        use crate::core::logger::Logger;
+
         use reduct_base::error::ErrorCode;
         use reduct_base::{no_content, not_found};
         use std::thread::sleep;

@@ -4,7 +4,6 @@
 use crate::core::thread_pool::{shared, unique, unique_child, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
-use crate::storage::query::base::QueryOptions;
 use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::entry_api::QueryEntry;

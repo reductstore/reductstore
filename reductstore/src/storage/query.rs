@@ -14,7 +14,6 @@ use crate::storage::query::base::{Query, QueryOptions};
 use log::{trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
-use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::unprocessable_entity;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
