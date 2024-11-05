@@ -7,9 +7,10 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 
 use crate::api::entry::common::parse_query_params;
+use crate::storage::query::base::QueryOptions;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
-use reduct_base::msg::entry_api::QueryInfo;
+use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -17,9 +18,15 @@ use std::sync::Arc;
 pub(crate) async fn read_query_json(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
-    Query(params): Query<HashMap<String, String>>,
+    request: QueryEntry,
     headers: HeaderMap,
 ) -> Result<QueryInfoAxum, HttpError> {
+    assert_eq!(
+        request.query_type,
+        QueryType::Query,
+        "Query type must be Query"
+    );
+
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
 
@@ -34,7 +41,7 @@ pub(crate) async fn read_query_json(
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let id = entry.query(parse_query_params(params, false)?).await?;
+    let id = entry.query(request).await?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }
@@ -44,6 +51,7 @@ mod tests {
     use super::*;
     use crate::api::tests::{components, headers, path_to_entry_1};
     use reduct_base::error::ErrorCode;
+    use reduct_base::msg::entry_api::QueryType;
     use rstest::*;
 
     #[rstest]
@@ -54,13 +62,16 @@ mod tests {
         headers: HeaderMap,
     ) {
         let components = components.await;
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), "1".to_string());
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            limit: Some(1),
+            ..Default::default()
+        };
 
         let result = read_query_json(
             State(Arc::clone(&components)),
             path_to_entry_1,
-            Query(params),
+            request,
             headers,
         )
         .await;

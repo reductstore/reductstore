@@ -4,7 +4,7 @@
 use crate::api::HttpError;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::entry_api::QueryEntry;
+use reduct_base::msg::entry_api::{QueryEntry, QueryType};
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -59,6 +59,7 @@ pub(super) fn parse_query_params(
     let limit = parse_limit(params)?;
 
     Ok(QueryEntry {
+        query_type: QueryType::Query,
         start,
         stop,
         include,

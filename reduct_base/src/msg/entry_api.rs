@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 // Copyright 2023 ReductSoftware UG
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -44,9 +45,51 @@ pub struct RenameEntry {
     pub new_name: String,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub enum QueryType {
+    /// Query records in entry
+    #[default]
+    Query = 0,
+    /// Remove records in entry
+    Remove = 1,
+}
+
+impl From<i32> for QueryType {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => QueryType::Query,
+            1 => QueryType::Remove,
+            _ => QueryType::Query,
+        }
+    }
+}
+
+impl FromStr for QueryType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "QUERY" => Ok(QueryType::Query),
+            "REMOVE" => Ok(QueryType::Remove),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<QueryType> for i32 {
+    fn from(value: QueryType) -> Self {
+        match value {
+            QueryType::Query => 0,
+            QueryType::Remove => 1,
+        }
+    }
+}
+
 /// Query records in entry
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct QueryEntry {
+    pub query_type: QueryType,
+
     /// Start query from (Unix timestamp in microseconds)
     pub start: Option<u64>,
     /// Stop query at (Unix timestamp in microseconds)
