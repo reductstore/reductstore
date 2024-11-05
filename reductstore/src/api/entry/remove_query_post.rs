@@ -7,7 +7,7 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use reduct_base::error::ReductError;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::msg::entry_api::{QueryEntry, QueryType, RemoveQueryInfo};
 use reduct_base::unprocessable_entity;

@@ -6,9 +6,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 
-use crate::api::entry::common::parse_query_params;
-use crate::storage::query::base::QueryOptions;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType};
 use std::collections::HashMap;

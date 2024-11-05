@@ -37,7 +37,6 @@ use crate::api::entry::rename_entry::rename_entry;
 use crate::api::entry::update_batched::update_batched_records;
 use crate::api::entry::update_single::update_record;
 
-use crate::api::bucket::BucketSettingsAxum;
 use crate::api::entry::read_query_post::read_query_json;
 use crate::api::entry::remove_query_post::remove_query_json;
 use axum::body::Body;
@@ -47,7 +46,6 @@ use axum::routing::{delete, get, head, patch, post, put};
 use axum_macros::debug_handler;
 use bytes::Bytes;
 use hyper::Response;
-use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType, RemoveQueryInfo};
 use reduct_macros::{IntoResponse, Twin};
 use std::collections::HashMap;
