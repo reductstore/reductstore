@@ -60,8 +60,8 @@ impl From<QueryEntry> for QueryOptions {
     fn from(query: QueryEntry) -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(query.ttl.unwrap_or(Self::default().ttl.as_secs())),
-            include: query.include,
-            exclude: query.exclude,
+            include: query.include.unwrap_or_default(),
+            exclude: query.exclude.unwrap_or_default(),
             continuous: query.continuous.unwrap_or(false),
             limit: query.limit,
             each_n: query.each_n,

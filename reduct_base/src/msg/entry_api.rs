@@ -49,40 +49,11 @@ pub struct RenameEntry {
 pub enum QueryType {
     /// Query records in entry
     #[default]
+    #[serde(rename = "QUERY")]
     Query = 0,
     /// Remove records in entry
+    #[serde(rename = "REMOVE")]
     Remove = 1,
-}
-
-impl From<i32> for QueryType {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => QueryType::Query,
-            1 => QueryType::Remove,
-            _ => QueryType::Query,
-        }
-    }
-}
-
-impl FromStr for QueryType {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "QUERY" => Ok(QueryType::Query),
-            "REMOVE" => Ok(QueryType::Remove),
-            _ => Err(()),
-        }
-    }
-}
-
-impl From<QueryType> for i32 {
-    fn from(value: QueryType) -> Self {
-        match value {
-            QueryType::Query => 0,
-            QueryType::Remove => 1,
-        }
-    }
 }
 
 /// Query records in entry
@@ -96,9 +67,9 @@ pub struct QueryEntry {
     pub stop: Option<u64>,
 
     /// Include records with label
-    pub include: HashMap<String, String>,
+    pub include: Option<HashMap<String, String>>,
     /// Exclude records with label
-    pub exclude: HashMap<String, String>,
+    pub exclude: Option<HashMap<String, String>>,
     /// Return a record every S seconds
     pub each_s: Option<f64>,
     /// Return a record every N records

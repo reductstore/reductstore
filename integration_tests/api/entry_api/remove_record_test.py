@@ -63,8 +63,9 @@ def test_remove_records_query(base_url, session, bucket, write_data):
     """Should remove record within time range."""
     ts1, ts2 = write_data
 
-    resp = session.delete(
-        f"{base_url}/b/{bucket}/entry/q?start={ts1}&stop={ts2 + 1}",
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        json={"query_type": "REMOVE", "start": ts1, "stop": ts2 + 1},
     )
 
     assert resp.status_code == 200
