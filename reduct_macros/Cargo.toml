@@ -15,5 +15,5 @@ keywords = ["database", "time-series", "blob", "storage", "reductstore"]
 proc-macro = true
 
 [dependencies]
-syn = { version = "2.0.85", features = ["derive"] }
+syn = { version = "2.0.87", features = ["derive"] }
 quote = "1.0.36"
