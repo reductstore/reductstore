@@ -447,13 +447,13 @@ mod tests {
 
         #[rstest]
         fn test_continuous_query(mut entry: Entry) {
-            Logger::init("DEBUG");
             write_stub_record(&mut entry, 1000000);
 
             let params = QueryEntry {
                 start: Some(0),
                 stop: Some(4000000),
                 continuous: Some(true),
+                ttl: Some(1),
                 ..Default::default()
             };
             let id = entry.query(params).wait().unwrap();

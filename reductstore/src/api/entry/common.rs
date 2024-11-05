@@ -238,7 +238,7 @@ mod tests {
         fn test_default() {
             let params = HashMap::new();
             let ttl = parse_ttl(&params).unwrap();
-            assert_eq!(ttl, Some(60));
+            assert_eq!(ttl, None);
         }
 
         #[rstest]

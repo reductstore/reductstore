@@ -66,7 +66,7 @@ impl From<QueryEntry> for QueryOptions {
             limit: query.limit,
             each_n: query.each_n,
             each_s: query.each_s,
-            only_metadata: query.only_metadata.unwrap(),
+            only_metadata: query.only_metadata.unwrap_or(false),
         }
     }
 }
