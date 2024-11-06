@@ -123,7 +123,6 @@ async fn remove_entry_router(
     }
 }
 
-#[debug_handler]
 async fn query_entry_router(
     components: State<Arc<Components>>,
     headers: HeaderMap,
@@ -174,8 +173,184 @@ pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::api::tests::{components, headers, path_to_entry_1};
+    use reduct_base::error::ErrorCode;
     use reduct_base::msg::entry_api::QueryEntry;
+    use rstest::rstest;
+
+    mod method_extractor {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_from_request() {
+            let req = Request::builder()
+                .method("GET")
+                .uri("http://localhost")
+                .body(Body::empty())
+                .unwrap();
+            let extractor = MethodExtractor::from_request(req, &()).await.unwrap();
+            assert_eq!(extractor.name(), "GET");
+        }
+
+        #[tokio::test]
+        async fn test_from_request_post() {
+            let req = Request::builder()
+                .method("HEAD")
+                .uri("http://localhost")
+                .body(Body::empty())
+                .unwrap();
+            let extractor = MethodExtractor::from_request(req, &()).await.unwrap();
+            assert_eq!(extractor.name(), "HEAD");
+        }
+    }
+
+    mod query_entry_axum {
+        use super::*;
+        use serde::de::Unexpected::Bytes;
+
+        #[tokio::test]
+        async fn test_from_request() {
+            let query = QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            };
+            let body = serde_json::to_vec(&query).unwrap();
+            let req = Request::builder()
+                .method("POST")
+                .uri("http://localhost")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+            let axum_query = QueryEntryAxum::from_request(req, &()).await.unwrap();
+            assert_eq!(axum_query.0, query);
+        }
+
+        #[tokio::test]
+        async fn test_from_request_unprocessable_entity() {
+            let req = Request::builder()
+                .method("POST")
+                .uri("http://localhost")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap();
+            let resp = QueryEntryAxum::from_request(req, &()).await.err().unwrap();
+            assert_eq!(resp.status(), 422);
+        }
+    }
+
+    mod remove_entry_router {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_entry_router(
+            #[future] components: Arc<Components>,
+            path_to_entry_1: Path<HashMap<String, String>>,
+            headers: HeaderMap,
+        ) {
+            let query = Query(HashMap::new());
+            let components = components.await;
+            let result =
+                remove_entry_router(State(components.clone()), headers, path_to_entry_1, query)
+                    .await
+                    .unwrap();
+            assert_eq!(result, ());
+
+            let err = components
+                .storage
+                .get_bucket("bucket-1")
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .get_entry("entry-1")
+                .err()
+                .unwrap();
+
+            assert_eq!(err.status(), ErrorCode::NotFound);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_record(
+            #[future] components: Arc<Components>,
+            path_to_entry_1: Path<HashMap<String, String>>,
+            headers: HeaderMap,
+        ) {
+            let query = Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "0".to_string(),
+            )]));
+            let components = components.await;
+            let result =
+                remove_entry_router(State(components.clone()), headers, path_to_entry_1, query)
+                    .await
+                    .unwrap();
+            assert_eq!(result, ());
+
+            let entry = components
+                .storage
+                .get_bucket("bucket-1")
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            let err = entry.begin_read(0).await.err().unwrap();
+            assert_eq!(err.status(), ErrorCode::NotFound);
+        }
+    }
+
+    mod query_entry_router {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_query_entry_router_read(
+            #[future] components: Arc<Components>,
+            path_to_entry_1: Path<HashMap<String, String>>,
+            headers: HeaderMap,
+        ) {
+            let query = QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            };
+            let components = components.await;
+            let result = query_entry_router(
+                State(components.clone()),
+                headers,
+                path_to_entry_1,
+                QueryEntryAxum(query),
+            )
+            .await;
+            assert_eq!(result.status(), 200);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_query_entry_router_remove(
+            #[future] components: Arc<Components>,
+            path_to_entry_1: Path<HashMap<String, String>>,
+            headers: HeaderMap,
+        ) {
+            let query = QueryEntry {
+                query_type: QueryType::Remove,
+                start: Some(0),
+                ..Default::default()
+            };
+            let components = components.await;
+            let result = query_entry_router(
+                State(components.clone()),
+                headers,
+                path_to_entry_1,
+                QueryEntryAxum(query),
+            )
+            .await;
+            assert_eq!(result.status(), 200);
+        }
+    }
+
     pub async fn query(
         path_to_entry_1: &Path<HashMap<String, String>>,
         components: Arc<Components>,
