@@ -9,7 +9,10 @@ def test_query_entry_ok(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data")
     assert resp.status_code == 200
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        json={"query_type": "QUERY", "start": ts, "stop": ts + 200},
+    )
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
@@ -48,7 +51,10 @@ def test_query_entry_next(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts + 200}", data="some_data")
     assert resp.status_code == 200
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q?",
+        json={"query_type": "QUERY", "start": ts, "stop": ts + 200},
+    )
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
@@ -77,8 +83,9 @@ def test_query_ttl(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data")
     assert resp.status_code == 200
 
-    resp = session.get(
-        f"{base_url}/b/{bucket}/entry/q?start={ts}&stop={ts + 200}&ttl=0"
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        json={"query_type": "QUERY", "start": ts, "stop": ts + 200, "ttl": 0},
     )
     assert resp.status_code == 200
 
@@ -107,7 +114,9 @@ def test_query_limit(base_url, session, bucket):
     """Should limit number of records returned"""
     _make_bucket_with_records(base_url, session, bucket)
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?limit=1")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q", json={"query_type": "QUERY", "limit": 1}
+    )
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
@@ -122,7 +131,9 @@ def test_query_each_n(base_url, session, bucket):
     """Should return each 2d record"""
     _make_bucket_with_records(base_url, session, bucket)
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?each_n=2")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q", json={"query_type": "QUERY", "each_n": 2}
+    )
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
@@ -141,7 +152,9 @@ def test_query_each_n(base_url, session, bucket):
 def test_query_each_s(base_url, session, bucket):
     """Should return a record each 2ms"""
     _make_bucket_with_records(base_url, session, bucket)
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?each_s=0.002")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q", json={"query_type": "QUERY", "each_s": 0.002}
+    )
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
@@ -172,7 +185,10 @@ def test_query_with_include_and_exclude(base_url, session, bucket):
     )
     assert resp.status_code == 200
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?exclude-foo=bar")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        json={"query_type": "QUERY", "exclude": {"foo": "bar"}},
+    )
     assert resp.status_code == 200
     query_id = int(json.loads(resp.content)["id"])
 
@@ -180,7 +196,10 @@ def test_query_with_include_and_exclude(base_url, session, bucket):
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?include-foo=bar")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        json={"query_type": "QUERY", "include": {"foo": "bar"}},
+    )
     assert resp.status_code == 200
     query_id = int(json.loads(resp.content)["id"])
 
@@ -195,7 +214,10 @@ def test_query_entry_no_next(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data")
     assert resp.status_code == 200
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?start={ts + 1}&stop={ts + 200}")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        json={"query_type": "QUERY", "start": ts + 1, "stop": ts + 200},
+    )
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
@@ -212,7 +234,10 @@ def test_query_continuous(base_url, session, bucket):
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data")
     assert resp.status_code == 200
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?start={ts + 1}&continuous=true")
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        json={"query_type": "QUERY", "start": ts + 1, "continuous": True},
+    )
     assert resp.status_code == 200
 
     query_id = int(json.loads(resp.content)["id"])
@@ -233,7 +258,11 @@ def test__query_with_read_token(
     token_write_bucket,
 ):
     """Needs read permissions to query"""
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q", headers=auth_headers(""))
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        headers=auth_headers(""),
+        json={"query_type": "QUERY"},
+    )
     assert resp.status_code == 401
 
     resp = session.get(
@@ -242,13 +271,17 @@ def test__query_with_read_token(
     )
     assert resp.status_code == 403
 
-    resp = session.get(
-        f"{base_url}/b/{bucket}/entry/q", headers=auth_headers(token_read_bucket)
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        headers=auth_headers(token_read_bucket),
+        json={"query_type": "QUERY"},
     )
     assert resp.status_code == 404  # no data
 
-    resp = session.get(
-        f"{base_url}/b/{bucket}/entry/q", headers=auth_headers(token_write_bucket)
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        headers=auth_headers(token_write_bucket),
+        json={"query_type": "QUERY"},
     )
     assert resp.status_code == 403
 

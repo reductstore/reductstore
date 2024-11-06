@@ -2,13 +2,12 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::HttpError;
-use crate::storage::query::base::QueryOptions;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::msg::entry_api::{QueryEntry, QueryType};
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::time::Duration;
 
 pub(super) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<usize, HttpError> {
     let content_size = headers
@@ -48,69 +47,81 @@ pub(super) fn err_to_batched_header(headers: &mut HeaderMap, time: u64, err: &Re
 pub(super) fn parse_query_params(
     params: HashMap<String, String>,
     only_metadata: bool,
-) -> Result<QueryOptions, HttpError> {
+) -> Result<QueryEntry, HttpError> {
     let continuous = parse_continuous_flag(&params)?;
     let ttl = parse_ttl(&params)?;
 
     // filter parameters in order of priority
+    let (start, stop) = parse_time_range(&params)?;
     let (include, exclude) = parse_include_exclude_filters(&params);
     let each_s = parse_each_s(&params)?;
     let each_n = parse_each_n(&params)?;
     let limit = parse_limit(params)?;
 
-    Ok(QueryOptions {
-        continuous,
-        include,
-        exclude,
-        ttl,
+    Ok(QueryEntry {
+        query_type: QueryType::Query,
+        start,
+        stop,
+        include: Some(include),
+        exclude: Some(exclude),
         each_s,
         each_n,
         limit,
-        only_metadata,
+        continuous,
+        ttl,
+        only_metadata: Some(only_metadata),
+        when: None,
     })
 }
 
 pub(super) fn parse_time_range(
     params: &HashMap<String, String>,
-    oldest_record: u64,
-    latest_record: u64,
-) -> Result<(u64, u64), HttpError> {
+) -> Result<(Option<u64>, Option<u64>), HttpError> {
     let start = match params.get("start") {
-        Some(start) => start.parse::<u64>().map_err(|_| {
-            unprocessable_entity!("'start' must be an unix timestamp in microseconds",)
-        })?,
-        None => oldest_record,
+        Some(start) => {
+            let val = start.parse::<u64>().map_err(|_| {
+                unprocessable_entity!("'start' must be an unix timestamp in microseconds",)
+            })?;
+            Some(val)
+        }
+        None => None,
     };
 
     let stop = match params.get("stop") {
-        Some(stop) => stop.parse::<u64>().map_err(|_| {
-            unprocessable_entity!("'stop' must be an unix timestamp in microseconds",)
-        })?,
-        None => latest_record + 1,
+        Some(stop) => {
+            let val = stop.parse::<u64>().map_err(|_| {
+                unprocessable_entity!("'stop' must be an unix timestamp in microseconds",)
+            })?;
+            Some(val)
+        }
+        None => None,
     };
 
     Ok((start, stop))
 }
 
-fn parse_ttl(params: &HashMap<String, String>) -> Result<Duration, HttpError> {
+fn parse_ttl(params: &HashMap<String, String>) -> Result<Option<u64>, HttpError> {
     let ttl = match params.get("ttl") {
-        Some(ttl) => ttl.parse::<u64>().map_err(|_| {
-            unprocessable_entity!("'ttl' must be in seconds as an unsigned integer",)
-        })?,
-        None => QueryOptions::default().ttl.as_secs(),
+        Some(ttl) => {
+            let val = ttl.parse::<u64>().map_err(|_| {
+                unprocessable_entity!("'ttl' must be in seconds as an unsigned integer",)
+            })?;
+            Some(val)
+        }
+        None => None,
     };
-    Ok(Duration::from_secs(ttl))
+    Ok(ttl)
 }
 
-fn parse_continuous_flag(params: &HashMap<String, String>) -> Result<bool, HttpError> {
+fn parse_continuous_flag(params: &HashMap<String, String>) -> Result<Option<bool>, HttpError> {
     let continuous = match params.get("continuous") {
-        Some(continue_) => continue_.parse::<bool>().map_err(|_| {
-            HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "'continue' must be a bool value",
-            )
-        })?,
-        None => false,
+        Some(continue_) => {
+            let val = continue_
+                .parse::<bool>()
+                .map_err(|_| unprocessable_entity!("'continue' must be a bool value"))?;
+            Some(val)
+        }
+        None => None,
     };
     Ok(continuous)
 }
@@ -211,7 +222,6 @@ mod tests {
 
     use rstest::rstest;
     use std::collections::HashMap;
-    use std::time::Duration;
 
     mod parse_ttl {
         use super::*;
@@ -220,14 +230,14 @@ mod tests {
         fn test_ok() {
             let params = HashMap::from_iter(vec![("ttl".to_string(), "10".to_string())]);
             let ttl = parse_ttl(&params).unwrap();
-            assert_eq!(ttl, Duration::from_secs(10));
+            assert_eq!(ttl, Some(10));
         }
 
         #[rstest]
         fn test_default() {
             let params = HashMap::new();
             let ttl = parse_ttl(&params).unwrap();
-            assert_eq!(ttl, Duration::from_secs(60));
+            assert_eq!(ttl, None);
         }
 
         #[rstest]
@@ -248,14 +258,14 @@ mod tests {
         fn test_ok() {
             let params = HashMap::from_iter(vec![("continuous".to_string(), "true".to_string())]);
             let continuous = parse_continuous_flag(&params).unwrap();
-            assert_eq!(continuous, true);
+            assert_eq!(continuous, Some(true));
         }
 
         #[rstest]
         fn test_default() {
             let params = HashMap::new();
             let continuous = parse_continuous_flag(&params).unwrap();
-            assert_eq!(continuous, false);
+            assert_eq!(continuous, None);
         }
 
         #[rstest]
@@ -278,23 +288,23 @@ mod tests {
                 ("start".to_string(), "0".to_string()),
                 ("stop".to_string(), "10".to_string()),
             ]);
-            let (start, stop) = parse_time_range(&params, 0, 10).unwrap();
-            assert_eq!(start, 0);
-            assert_eq!(stop, 10);
+            let (start, stop) = parse_time_range(&params).unwrap();
+            assert_eq!(start, Some(0));
+            assert_eq!(stop, Some(10));
         }
 
         #[rstest]
         fn test_default() {
             let params = HashMap::new();
-            let (start, stop) = parse_time_range(&params, 0, 10).unwrap();
-            assert_eq!(start, 0);
-            assert_eq!(stop, 11);
+            let (start, stop) = parse_time_range(&params).unwrap();
+            assert_eq!(start, None);
+            assert_eq!(stop, None);
         }
 
         #[rstest]
         fn test_start_bad() {
             let params = HashMap::from_iter(vec![("start".to_string(), "a".to_string())]);
-            let result = parse_time_range(&params, 0, 0);
+            let result = parse_time_range(&params);
             assert_eq!(
                 result.err().unwrap().0.to_string(),
                 "[UnprocessableEntity] 'start' must be an unix timestamp in microseconds"
@@ -304,7 +314,7 @@ mod tests {
         #[rstest]
         fn test_stop_bad() {
             let params = HashMap::from_iter(vec![("stop".to_string(), "a".to_string())]);
-            let result = parse_time_range(&params, 0, 0);
+            let result = parse_time_range(&params);
             assert_eq!(
                 result.err().unwrap().0.to_string(),
                 "[UnprocessableEntity] 'stop' must be an unix timestamp in microseconds"

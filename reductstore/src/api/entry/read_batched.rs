@@ -281,7 +281,7 @@ mod tests {
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
-        #[case] body: String,
+        #[case] _body: String,
     ) {
         let components = components.await;
         let entry = components

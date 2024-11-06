@@ -6,7 +6,7 @@ use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
-use crate::api::entry::common::{parse_query_params, parse_time_range};
+use crate::api::entry::common::parse_query_params;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::error::ReductError;
@@ -36,18 +36,14 @@ pub(crate) async fn remove_query(
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_or_create_entry(entry_name)?.upgrade()?;
-    let entry_info = entry.info()?;
-
     if params.is_empty() {
         return Err(
             unprocessable_entity!("Define at least one query parameter to delete records").into(),
         );
     }
 
-    let (start, stop) =
-        parse_time_range(&params, entry_info.oldest_record, entry_info.latest_record)?;
     let removed_records = entry
-        .query_remove_records(start, stop, parse_query_params(params, true)?)
+        .query_remove_records(parse_query_params(params, true)?)
         .await?;
 
     Ok(RemoveQueryInfoAxum::from(RemoveQueryInfo {
