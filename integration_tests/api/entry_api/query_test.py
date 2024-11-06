@@ -258,7 +258,11 @@ def test__query_with_read_token(
     token_write_bucket,
 ):
     """Needs read permissions to query"""
-    resp = session.post(f"{base_url}/b/{bucket}/entry/q", headers=auth_headers(""))
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry/q",
+        headers=auth_headers(""),
+        json={"query_type": "QUERY"},
+    )
     assert resp.status_code == 401
 
     resp = session.get(
@@ -268,12 +272,16 @@ def test__query_with_read_token(
     assert resp.status_code == 403
 
     resp = session.post(
-        f"{base_url}/b/{bucket}/entry/q", headers=auth_headers(token_read_bucket)
+        f"{base_url}/b/{bucket}/entry/q",
+        headers=auth_headers(token_read_bucket),
+        json={"query_type": "QUERY"},
     )
     assert resp.status_code == 404  # no data
 
     resp = session.post(
-        f"{base_url}/b/{bucket}/entry/q", headers=auth_headers(token_write_bucket)
+        f"{base_url}/b/{bucket}/entry/q",
+        headers=auth_headers(token_write_bucket),
+        json={"query_type": "QUERY"},
     )
     assert resp.status_code == 403
 
