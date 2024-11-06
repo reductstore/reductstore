@@ -121,27 +121,9 @@ impl Entry {
             return Err(e).into();
         }
 
-        let (start, end) = range.unwrap();
-
+        let (start, stop) = range.unwrap();
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         let block_manager = Arc::clone(&self.block_manager);
-        let info = self.info();
-        if let Err(e) = info {
-            return e.into();
-        }
-
-        let info = info.unwrap();
-        let start = if let Some(start) = query_parameters.start {
-            start
-        } else {
-            info.oldest_record
-        };
-
-        let stop = if let Some(stop) = query_parameters.stop {
-            stop
-        } else {
-            info.latest_record + 1
-        };
 
         let options: QueryOptions = query_parameters.into();
         let query = build_query(start, stop, options.clone());

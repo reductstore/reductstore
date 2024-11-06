@@ -98,6 +98,7 @@ where
 }
 
 pub(crate) enum GroupDepth {
+    #[allow(dead_code)]
     STORAGE = 1,
     BUCKET = 2,
     ENTRY = 3,

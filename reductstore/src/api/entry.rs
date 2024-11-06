@@ -43,7 +43,6 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, head, patch, post, put};
-use axum_macros::debug_handler;
 use bytes::Bytes;
 use hyper::Response;
 use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType, RemoveQueryInfo};
@@ -206,7 +205,6 @@ mod tests {
 
     mod query_entry_axum {
         use super::*;
-        use serde::de::Unexpected::Bytes;
 
         #[tokio::test]
         async fn test_from_request() {

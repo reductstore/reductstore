@@ -34,8 +34,6 @@ pub(crate) async fn read_query(
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let entry_info = entry.info()?;
-
     let id = entry.query(parse_query_params(params, false)?).await?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))

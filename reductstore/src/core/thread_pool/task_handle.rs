@@ -24,6 +24,7 @@ impl<T> TaskHandle<T> {
         self.rx.is_ready()
     }
 
+    #[allow(dead_code)]
     pub fn is_started(&self) -> bool {
         self.rx_start.is_ready()
     }
