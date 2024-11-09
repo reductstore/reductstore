@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 pub mod base;
+mod condition;
 mod continuous;
 pub mod filters;
 mod historical;
