@@ -1,9 +1,21 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use reduct_base::error::ReductError;
+
 #[derive(Debug, Clone)]
 pub(crate) enum Value {
     Bool(bool),
+}
+
+impl Value {
+    pub(crate) fn parse(value: &String) -> Option<Value> {
+        if let Ok(value) = value.parse::<bool>() {
+            Some(Value::Bool(value))
+        } else {
+            None
+        }
+    }
 }
 
 impl From<bool> for Value {

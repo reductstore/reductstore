@@ -1,6 +1,6 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-mod gt;
+mod and;
 
-pub(super) use gt::GreaterThan;
+pub(super) use and::And;

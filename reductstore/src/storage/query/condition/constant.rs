@@ -3,14 +3,19 @@
 
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Context, Node};
+use reduct_base::error::ReductError;
 
 pub(super) struct Constant {
     value: Value,
 }
 
 impl Node for Constant {
-    fn apply(&mut self, context: &Context) -> &Value {
-        &self.value
+    fn apply(&mut self, context: &Context) -> Result<&Value, ReductError> {
+        Ok(&self.value)
+    }
+
+    fn debug(&self) -> String {
+        format!("{:?}", self.value)
     }
 }
 
