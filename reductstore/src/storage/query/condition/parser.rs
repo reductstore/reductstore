@@ -4,12 +4,12 @@
 use crate::storage::query::condition::constant::Constant;
 use crate::storage::query::condition::operators::And;
 use crate::storage::query::condition::reference::Reference;
-use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::Node;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Value as JsonValue};
 
+/// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
 
 impl Parser {
@@ -19,8 +19,10 @@ impl Parser {
                 let mut expressions = vec![];
                 for (key, value) in map.iter() {
                     if let JsonValue::Array(operand_list) = value {
+                        // Parse array notation e.g. {"$and": [true, true]}
                         expressions.push(self.parse_array_syntax(key, operand_list)?);
                     } else if let JsonValue::Object(operator_right_operand) = value {
+                        // Parse object notation e.g. {"&label": {"$and": true}}
                         expressions.push(self.parse_object_syntax(key, operator_right_operand)?);
                     } else {
                         return Err(unprocessable_entity!(

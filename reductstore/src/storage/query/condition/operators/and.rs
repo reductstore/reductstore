@@ -7,6 +7,7 @@ use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::fmt::Debug;
 
+/// A node representing a logical AND operation.
 pub(crate) struct And {
     operands: Vec<Box<dyn Node>>,
     holder: Value,
@@ -29,7 +30,7 @@ impl Node for And {
         Ok(&self.holder)
     }
 
-    fn debug(&self) -> String {
+    fn print(&self) -> String {
         format!("And({:?})", self.operands)
     }
 }
