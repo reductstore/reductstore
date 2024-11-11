@@ -5,7 +5,6 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Context, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
-use std::fmt::Debug;
 
 /// A node representing a logical AND operation.
 pub(crate) struct And {
