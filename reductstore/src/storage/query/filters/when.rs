@@ -27,6 +27,6 @@ where
                 .map(|l| (l.name.as_str(), l.value.as_str()))
                 .collect(),
         );
-        Ok(*self.condition.apply(&context)?.as_bool())
+        Ok(self.condition.apply(&context)?.as_bool())
     }
 }

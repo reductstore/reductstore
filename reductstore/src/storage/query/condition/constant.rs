@@ -48,7 +48,7 @@ mod tests {
 
         #[test]
         fn apply() {
-            let constant = Constant::new(true.into());
+            let constant = Constant::new(Value::Bool(true));
             let context = Context::default();
             let result = constant.apply(&context).unwrap();
             assert_eq!(result, Value::Bool(true));
@@ -56,7 +56,7 @@ mod tests {
 
         #[test]
         fn print() {
-            let constant = Constant::new(true.into());
+            let constant = Constant::new(Value::Bool(true));
             let result = constant.print();
             assert_eq!(result, "Bool(true)");
         }

@@ -14,7 +14,7 @@ impl Node for And {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
         for operand in self.operands.iter() {
             let value = operand.apply(context)?;
-            if !*value.as_bool() {
+            if !value.as_bool() {
                 return Ok(Value::Bool(false));
             }
         }

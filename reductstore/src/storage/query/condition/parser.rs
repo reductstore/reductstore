@@ -4,10 +4,11 @@
 use crate::storage::query::condition::constant::Constant;
 use crate::storage::query::condition::operators::And;
 use crate::storage::query::condition::reference::Reference;
+use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::BoxedNode;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
-use serde_json::{Map, Value as JsonValue};
+use serde_json::{Map, Number, Value as JsonValue};
 
 /// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
@@ -35,7 +36,17 @@ impl Parser {
                 Ok(And::boxed(expressions))
             }
 
-            JsonValue::Bool(value) => Ok(Constant::boxed((*value).into())),
+            JsonValue::Bool(value) => Ok(Constant::boxed(Value::Bool(*value))),
+            JsonValue::Number(value) => {
+                if value.is_i64() || value.is_u64() {
+                    Ok(Constant::boxed(Value::Int(value.as_i64().unwrap())))
+                } else {
+                    Err(unprocessable_entity!(
+                        "Float values are not supported: {}",
+                        json
+                    ))
+                }
+            }
             JsonValue::String(value) => {
                 if value.starts_with("&") {
                     Ok(Reference::boxed(value[1..].to_string()))
@@ -117,6 +128,16 @@ mod tests {
         let parser = Parser {};
         let node = parser.parse(&json).unwrap();
         let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
+        assert!(node.apply(&context).unwrap().as_bool());
+    }
+
+    #[test]
+    fn test_parse_int() {
+        let json = serde_json::from_str(r#"{"$and": [1, -2]}"#).unwrap();
+
+        let parser = Parser {};
+        let node = parser.parse(&json).unwrap();
+        let context = Context::default();
         assert!(node.apply(&context).unwrap().as_bool());
     }
 
