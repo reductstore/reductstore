@@ -1,6 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use log::warn;
 use reduct_base::msg::replication_api::ReplicationSettings;
 
 use crate::replication::TransactionNotification;
@@ -101,8 +102,10 @@ impl TransactionFilter {
 
         // filter out notifications
         for filter in self.query_filters.iter_mut() {
-            if !filter.filter(notification) {
-                return false;
+            match filter.filter(notification) {
+                Ok(false) => return false,
+                Err(err) => warn!("Error filtering transaction: {}", err),
+                _ => {}
             }
         }
 

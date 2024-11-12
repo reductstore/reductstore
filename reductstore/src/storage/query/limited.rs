@@ -7,6 +7,7 @@ use crate::storage::query::historical::HistoricalQuery;
 
 use crate::storage::entry::RecordReader;
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::no_content;
 use std::sync::{Arc, RwLock};
 
 /// A query that is limited to a certain number of records.
@@ -16,11 +17,11 @@ pub(crate) struct LimitedQuery {
 }
 
 impl LimitedQuery {
-    pub fn new(start: u64, stop: u64, options: QueryOptions) -> LimitedQuery {
-        LimitedQuery {
-            query: HistoricalQuery::new(start, stop, options.clone()),
+    pub fn try_new(start: u64, stop: u64, options: QueryOptions) -> Result<Self, ReductError> {
+        Ok(LimitedQuery {
+            query: HistoricalQuery::try_new(start, stop, options.clone())?,
             limit_count: options.limit.unwrap(),
-        }
+        })
     }
 }
 
@@ -30,10 +31,7 @@ impl Query for LimitedQuery {
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         if self.limit_count == 0 {
-            return Err(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            });
+            return Err(no_content!("No content"));
         }
 
         self.limit_count -= 1;
@@ -58,14 +56,15 @@ mod tests {
 
     #[rstest]
     fn test_limit(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = LimitedQuery::new(
+        let mut query = LimitedQuery::try_new(
             0,
             u64::MAX,
             QueryOptions {
                 limit: Some(1),
                 ..Default::default()
             },
-        );
+        )
+        .unwrap();
 
         let reader = query.next(block_manager.clone()).unwrap();
         assert_eq!(reader.timestamp(), 0);

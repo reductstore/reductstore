@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use reduct_base::error::ReductError;
 
 /// Filter that passes records with a timestamp within a specific range
 pub struct TimeRangeFilter {
@@ -29,7 +30,7 @@ impl<P> RecordFilter<P> for TimeRangeFilter
 where
     P: FilterPoint,
 {
-    fn filter(&mut self, record: &P) -> bool {
+    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
         let ts = record.timestamp() as u64;
         let ret = ts >= self.start && ts < self.stop;
         if ret {
@@ -37,7 +38,7 @@ where
             self.start = ts + 1;
         }
 
-        ret
+        Ok(ret)
     }
 }
 
@@ -55,9 +56,9 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record), "First time should pass");
+        assert!(filter.filter(&record).unwrap(), "First time should pass");
         assert!(
-            !filter.filter(&record),
+            !filter.filter(&record).unwrap(),
             "Second time should not pass, as we have already returned the record"
         );
     }
@@ -70,7 +71,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record), "Record should not pass");
+        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
     }
 
     #[rstest]
@@ -81,7 +82,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record), "Record should pass");
+        assert!(filter.filter(&record).unwrap(), "Record should pass");
     }
 
     #[rstest]
@@ -92,6 +93,6 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record), "Record should not pass");
+        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
     }
 }

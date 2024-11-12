@@ -11,8 +11,8 @@ pub(super) struct Constant {
 }
 
 impl Node for Constant {
-    fn apply(&mut self, context: &Context) -> Result<&Value, ReductError> {
-        Ok(&self.value)
+    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+        Ok(self.value.clone())
     }
 
     fn print(&self) -> String {
@@ -51,7 +51,7 @@ mod tests {
             let mut constant = Constant::new(true.into());
             let context = Context::default();
             let result = constant.apply(&context).unwrap();
-            assert_eq!(result, &Value::Bool(true));
+            assert_eq!(result, Value::Bool(true));
         }
 
         #[test]

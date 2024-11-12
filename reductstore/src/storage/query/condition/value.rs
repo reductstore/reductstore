@@ -9,7 +9,7 @@ pub(crate) enum Value {
 
 impl Value {
     /// Parses a string into a value.
-    pub(crate) fn parse(value: &String) -> Option<Value> {
+    pub(crate) fn parse(value: &str) -> Option<Value> {
         if let Ok(value) = value.parse::<bool>() {
             Some(Value::Bool(value))
         } else {
@@ -49,9 +49,9 @@ impl PartialOrd for Value {
 }
 
 impl Value {
-    pub fn as_bool(&self) -> Option<&bool> {
+    pub fn as_bool(&self) -> &bool {
         match self {
-            Value::Bool(value) => Some(value),
+            Value::Bool(value) => value,
         }
     }
 }
@@ -126,7 +126,7 @@ mod tests {
         fn as_bool() {
             let value = Value::Bool(true);
             let result = value.as_bool();
-            assert_eq!(result, Some(&true));
+            assert_eq!(result, &true);
         }
     }
 }

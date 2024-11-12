@@ -9,24 +9,23 @@ use reduct_base::{not_found, unprocessable_entity};
 /// A node representing a reference to a label in the context.
 pub(super) struct Reference {
     name: String,
-    holder: Option<Value>,
 }
 
 impl Node for Reference {
-    fn apply(&mut self, context: &Context) -> Result<&Value, ReductError> {
-        let value = context
+    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+        let label_value = context
             .labels
-            .get(&self.name)
+            .get(self.name.as_str())
             .ok_or(not_found!("Reference '{}' not found"))?;
 
-        self.holder = Value::parse(value);
-        if let Some(holder) = &self.holder {
-            Ok(holder)
+        let value = Value::parse(label_value);
+        if let Some(value) = value {
+            Ok(value)
         } else {
             Err(unprocessable_entity!(
                 "Reference '{}' with value '{}' could not be parsed",
                 self.name,
-                value
+                label_value
             ))
         }
     }
@@ -38,7 +37,7 @@ impl Node for Reference {
 
 impl Reference {
     pub fn new(name: String) -> Self {
-        Reference { name, holder: None }
+        Reference { name }
     }
 
     pub fn boxed(name: String) -> Box<Self> {
@@ -55,11 +54,9 @@ mod tests {
     fn apply() {
         let mut reference = Reference::new("label".to_string());
         let mut context = Context::default();
-        context
-            .labels
-            .insert("label".to_string(), "true".to_string());
+        context.labels.insert("label", "true");
         let result = reference.apply(&context).unwrap();
-        assert_eq!(result, &Value::Bool(true));
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[test]
@@ -74,9 +71,7 @@ mod tests {
     fn apply_invalid_value() {
         let mut reference = Reference::new("label".to_string());
         let mut context = Context::default();
-        context
-            .labels
-            .insert("label".to_string(), "invalid".to_string());
+        context.labels.insert("label", "invalid");
         let result = reference.apply(&context);
         assert!(result.is_err());
     }

@@ -2,31 +2,25 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::{Context, Node};
+use crate::storage::query::condition::{BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
 /// A node representing a logical AND operation.
 pub(crate) struct And {
-    operands: Vec<Box<dyn Node>>,
-    holder: Value,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for And {
-    fn apply(&mut self, context: &Context) -> Result<&Value, ReductError> {
-        self.holder = true.into();
-        for operand in self.operands.iter_mut() {
+    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+        for operand in self.operands.iter() {
             let value = operand.apply(context)?;
-            if !*value
-                .as_bool()
-                .ok_or(unprocessable_entity!("Expected boolean value"))?
-            {
-                self.holder = false.into();
-                break;
+            if !*value.as_bool() {
+                return Ok(Value::Bool(false));
             }
         }
 
-        Ok(&self.holder)
+        Ok(Value::Bool(true))
     }
 
     fn print(&self) -> String {
@@ -35,14 +29,11 @@ impl Node for And {
 }
 
 impl And {
-    pub fn new(operands: Vec<Box<dyn Node>>) -> Self {
-        And {
-            operands,
-            holder: Value::Bool(false),
-        }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        And { operands }
     }
 
-    pub fn boxed(operands: Vec<Box<dyn Node>>) -> Box<Self> {
+    pub fn boxed(operands: Vec<BoxedNode>) -> BoxedNode {
         Box::new(And::new(operands))
     }
 }

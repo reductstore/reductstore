@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use reduct_base::error::ReductError;
 
 /// Filter that passes every N-th record
 pub struct EachSecondFilter {
@@ -25,13 +26,13 @@ impl<P> RecordFilter<P> for EachSecondFilter
 where
     P: FilterPoint,
 {
-    fn filter(&mut self, point: &P) -> bool {
+    fn filter(&mut self, point: &P) -> Result<bool, ReductError> {
         let ret = point.timestamp() - self.last_time >= (self.s * 1_000_000.0) as i64;
         if ret {
             self.last_time = point.timestamp().clone();
         }
 
-        ret
+        Ok(ret)
     }
 }
 
@@ -51,22 +52,22 @@ mod tests {
             nanos: 0,
         });
 
-        assert!(filter.filter(&record));
-        assert!(!filter.filter(&record));
+        assert!(filter.filter(&record).unwrap());
+        assert!(!filter.filter(&record).unwrap());
 
         record.timestamp = Some(Timestamp {
             seconds: 2,
             nanos: 0,
         });
 
-        assert!(!filter.filter(&record));
+        assert!(!filter.filter(&record).unwrap());
 
         record.timestamp = Some(Timestamp {
             seconds: 3,
             nanos: 0,
         });
 
-        assert!(filter.filter(&record));
-        assert!(!filter.filter(&record));
+        assert!(filter.filter(&record).unwrap());
+        assert!(!filter.filter(&record).unwrap());
     }
 }

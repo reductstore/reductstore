@@ -4,7 +4,7 @@
 use crate::storage::query::condition::constant::Constant;
 use crate::storage::query::condition::operators::And;
 use crate::storage::query::condition::reference::Reference;
-use crate::storage::query::condition::Node;
+use crate::storage::query::condition::{BoxedNode, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Value as JsonValue};
@@ -13,7 +13,7 @@ use serde_json::{Map, Value as JsonValue};
 pub(crate) struct Parser {}
 
 impl Parser {
-    pub fn parse(&self, json: &JsonValue) -> Result<Box<dyn Node>, ReductError> {
+    pub fn parse(&self, json: &JsonValue) -> Result<BoxedNode, ReductError> {
         match json {
             JsonValue::Object(map) => {
                 let mut expressions = vec![];
@@ -51,7 +51,7 @@ impl Parser {
         &self,
         operator: &str,
         json_operands: &Vec<JsonValue>,
-    ) -> Result<Box<dyn Node>, ReductError> {
+    ) -> Result<BoxedNode, ReductError> {
         let mut operands = vec![];
         for operand in json_operands {
             operands.push(self.parse(operand)?);
@@ -63,7 +63,7 @@ impl Parser {
         &self,
         left_operand: &str,
         op_right_operand: &Map<String, JsonValue>,
-    ) -> Result<Box<dyn Node>, ReductError> {
+    ) -> Result<BoxedNode, ReductError> {
         let left_operand = self.parse(&JsonValue::String(left_operand.to_string()))?;
         if op_right_operand.len() != 1 {
             return Err(unprocessable_entity!(
@@ -77,10 +77,7 @@ impl Parser {
         Self::parse_operator(operator, operands)
     }
 
-    fn parse_operator(
-        operator: &str,
-        operands: Vec<Box<dyn Node>>,
-    ) -> Result<Box<dyn Node>, ReductError> {
+    fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         match operator {
             "$and" => Ok(And::boxed(operands)),
             _ => Err(unprocessable_entity!(
@@ -88,6 +85,12 @@ impl Parser {
                 operator
             )),
         }
+    }
+}
+
+impl Parser {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -104,7 +107,7 @@ mod tests {
         let parser = Parser {};
         let mut node = parser.parse(&json).unwrap();
         let context = Context::default();
-        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+        assert!(node.apply(&context).unwrap().as_bool());
     }
 
     #[test]
@@ -113,11 +116,8 @@ mod tests {
 
         let parser = Parser {};
         let mut node = parser.parse(&json).unwrap();
-        let context = Context::new(HashMap::from_iter(vec![(
-            "label".to_string(),
-            "true".to_string(),
-        )]));
-        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+        let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
+        assert!(node.apply(&context).unwrap().as_bool());
     }
 
     #[test]
@@ -127,11 +127,8 @@ mod tests {
 
         let parser = Parser {};
         let mut node = parser.parse(&json).unwrap();
-        let context = Context::new(HashMap::from_iter(vec![(
-            "label".to_string(),
-            "true".to_string(),
-        )]));
-        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+        let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
+        assert!(node.apply(&context).unwrap().as_bool());
     }
 
     #[test]

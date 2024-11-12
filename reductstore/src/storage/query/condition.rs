@@ -16,12 +16,12 @@ mod value;
 ///
 /// The context contains a set of labels that can be referenced by conditions.
 #[derive(Debug, Default)]
-struct Context {
-    labels: HashMap<String, String>,
+pub(crate) struct Context<'a> {
+    labels: HashMap<&'a str, &'a str>,
 }
 
-impl Context {
-    pub fn new(labels: HashMap<String, String>) -> Self {
+impl<'a> Context<'a> {
+    pub fn new(labels: HashMap<&'a str, &'a str>) -> Self {
         Context { labels }
     }
 }
@@ -29,9 +29,9 @@ impl Context {
 /// A node in a condition tree.
 ///
 /// Nodes can be evaluated in a context to produce a value.
-trait Node {
+pub(crate) trait Node {
     /// Evaluates the node in the given context.
-    fn apply(&mut self, context: &Context) -> Result<&Value, ReductError>;
+    fn apply(&self, context: &Context) -> Result<Value, ReductError>;
 
     /// Returns a string representation of the node.
     fn print(&self) -> String;
@@ -42,3 +42,13 @@ impl Debug for dyn Node {
         write!(f, "{}", self.print())
     }
 }
+
+pub(crate) type BoxedNode = Box<dyn Node + Send + Sync>;
+
+impl Debug for BoxedNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.print())
+    }
+}
+
+pub(crate) use parser::Parser;

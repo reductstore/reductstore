@@ -36,11 +36,11 @@ pub(in crate::storage) fn build_query(
     }
 
     Ok(if let Some(_) = options.limit {
-        Box::new(limited::LimitedQuery::new(start, stop, options))
+        Box::new(limited::LimitedQuery::try_new(start, stop, options)?)
     } else if options.continuous {
-        Box::new(continuous::ContinuousQuery::new(start, options))
+        Box::new(continuous::ContinuousQuery::try_new(start, options)?)
     } else {
-        Box::new(historical::HistoricalQuery::new(start, stop, options))
+        Box::new(historical::HistoricalQuery::try_new(start, stop, options)?)
     })
 }
 
