@@ -37,14 +37,12 @@ impl Parser {
             }
 
             JsonValue::Bool(value) => Ok(Constant::boxed(Value::Bool(*value))),
+
             JsonValue::Number(value) => {
                 if value.is_i64() || value.is_u64() {
                     Ok(Constant::boxed(Value::Int(value.as_i64().unwrap())))
                 } else {
-                    Err(unprocessable_entity!(
-                        "Float values are not supported: {}",
-                        json
-                    ))
+                    Ok(Constant::boxed(Value::Float(value.as_f64().unwrap())))
                 }
             }
             JsonValue::String(value) => {
@@ -134,6 +132,16 @@ mod tests {
     #[test]
     fn test_parse_int() {
         let json = serde_json::from_str(r#"{"$and": [1, -2]}"#).unwrap();
+
+        let parser = Parser {};
+        let node = parser.parse(&json).unwrap();
+        let context = Context::default();
+        assert!(node.apply(&context).unwrap().as_bool());
+    }
+
+    #[test]
+    fn test_parse_float() {
+        let json = serde_json::from_str(r#"{"$and": [1.1, -2.2]}"#).unwrap();
 
         let parser = Parser {};
         let node = parser.parse(&json).unwrap();
