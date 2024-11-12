@@ -3,9 +3,7 @@
 
 use crate::storage::query::condition::{BoxedNode, Context, Node};
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
-use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::unprocessable_entity;
 
 pub struct WhenFilter {
     condition: BoxedNode,

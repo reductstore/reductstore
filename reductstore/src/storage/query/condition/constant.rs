@@ -48,7 +48,7 @@ mod tests {
 
         #[test]
         fn apply() {
-            let mut constant = Constant::new(true.into());
+            let constant = Constant::new(true.into());
             let context = Context::default();
             let result = constant.apply(&context).unwrap();
             assert_eq!(result, Value::Bool(true));

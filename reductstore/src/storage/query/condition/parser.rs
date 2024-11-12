@@ -4,7 +4,7 @@
 use crate::storage::query::condition::constant::Constant;
 use crate::storage::query::condition::operators::And;
 use crate::storage::query::condition::reference::Reference;
-use crate::storage::query::condition::{BoxedNode, Node};
+use crate::storage::query::condition::BoxedNode;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Value as JsonValue};
@@ -105,7 +105,7 @@ mod tests {
         let json = serde_json::from_str(r#"{"$and": [true, {"$and": [true, true]}]}"#).unwrap();
 
         let parser = Parser {};
-        let mut node = parser.parse(&json).unwrap();
+        let node = parser.parse(&json).unwrap();
         let context = Context::default();
         assert!(node.apply(&context).unwrap().as_bool());
     }
@@ -115,7 +115,7 @@ mod tests {
         let json = serde_json::from_str(r#"{"&label": {"$and": true}}"#).unwrap();
 
         let parser = Parser {};
-        let mut node = parser.parse(&json).unwrap();
+        let node = parser.parse(&json).unwrap();
         let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
         assert!(node.apply(&context).unwrap().as_bool());
     }
@@ -126,7 +126,7 @@ mod tests {
             serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
 
         let parser = Parser {};
-        let mut node = parser.parse(&json).unwrap();
+        let node = parser.parse(&json).unwrap();
         let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
         assert!(node.apply(&context).unwrap().as_bool());
     }

@@ -7,7 +7,6 @@ use reduct_base::error::ReductError;
 use std::collections::HashMap;
 
 use crate::storage::entry::RecordReader;
-use crate::storage::query::condition::{Node, Parser};
 use reduct_base::msg::entry_api::QueryEntry;
 use serde_json::Value;
 use std::sync::{Arc, RwLock};

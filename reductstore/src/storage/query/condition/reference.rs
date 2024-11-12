@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn apply() {
-        let mut reference = Reference::new("label".to_string());
+        let reference = Reference::new("label".to_string());
         let mut context = Context::default();
         context.labels.insert("label", "true");
         let result = reference.apply(&context).unwrap();
@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn apply_not_found() {
-        let mut reference = Reference::new("label".to_string());
+        let reference = Reference::new("label".to_string());
         let context = Context::default();
         let result = reference.apply(&context);
         assert!(result.is_err());
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn apply_invalid_value() {
-        let mut reference = Reference::new("label".to_string());
+        let reference = Reference::new("label".to_string());
         let mut context = Context::default();
         context.labels.insert("label", "invalid");
         let result = reference.apply(&context);
