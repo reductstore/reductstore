@@ -36,3 +36,41 @@ impl And {
         Box::new(And::new(operands))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::query::condition::constant::Constant;
+    use crate::storage::query::condition::value::Value;
+    use rstest::rstest;
+
+    #[rstest]
+    fn apply() {
+        let and = And::new(vec![
+            Constant::boxed(Value::Bool(true)),
+            Constant::boxed(Value::Int(1)),
+            Constant::boxed(Value::Float(-2.0)),
+            Constant::boxed(Value::String("xxxx".to_string())),
+        ]);
+
+        let result = and.apply(&Context::default()).unwrap();
+        assert_eq!(result, Value::Bool(true));
+
+        let and = And::new(vec![
+            Constant::boxed(Value::Bool(true)),
+            Constant::boxed(Value::Bool(false)),
+            Constant::boxed(Value::Bool(true)),
+        ]);
+
+        let result = and.apply(&Context::default()).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[rstest]
+    fn apply_empty() {
+        let and = And::new(vec![]);
+
+        let result = and.apply(&Context::default()).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+}

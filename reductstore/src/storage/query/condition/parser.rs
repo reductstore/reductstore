@@ -33,6 +33,7 @@ impl Parser {
                     }
                 }
 
+                // We use AND operator to aggregate results from all expressions
                 Ok(And::boxed(expressions))
             }
 
@@ -49,7 +50,7 @@ impl Parser {
                 if value.starts_with("&") {
                     Ok(Reference::boxed(value[1..].to_string()))
                 } else {
-                    Err(unprocessable_entity!("Invalid JSON value: {}", json))
+                    Ok(Constant::boxed(Value::String(value.clone())))
                 }
             }
             _ => Err(unprocessable_entity!("Invalid JSON value: {}", json)),
