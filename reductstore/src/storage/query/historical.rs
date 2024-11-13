@@ -283,6 +283,10 @@ mod tests {
                     name: "record".to_string(),
                     value: "2".to_string(),
                 },
+                Label {
+                    name: "flag".to_string(),
+                    value: "false".to_string(),
+                },
             ]
         );
         assert_eq!(records[0].1, "0123456789");

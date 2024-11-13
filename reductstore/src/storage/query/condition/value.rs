@@ -128,6 +128,16 @@ impl Value {
             }
         }
     }
+
+    /// Converts the value to a string.
+    pub fn as_string(&self) -> Result<String, ReductError> {
+        match self {
+            Value::Bool(value) => Ok(value.to_string()),
+            Value::Int(value) => Ok(value.to_string()),
+            Value::Float(value) => Ok(value.to_string()),
+            Value::String(value) => Ok(value.clone()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -400,6 +410,17 @@ mod tests {
         #[case(Value::String("string".to_string()), Err(unprocessable_entity!("Value 'string' could not be parsed as float")))]
         fn as_float(#[case] value: Value, #[case] expected: Result<f64, ReductError>) {
             let result = value.as_float();
+            assert_eq!(result, expected);
+        }
+
+        #[rstest]
+        #[case(Value::Bool(true), Ok("true".to_string()))]
+        #[case(Value::Bool(false), Ok("false".to_string()))]
+        #[case(Value::Int(42), Ok("42".to_string()))]
+        #[case(Value::Float(42.0), Ok("42".to_string()))]
+        #[case(Value::String("string".to_string()), Ok("string".to_string()))]
+        fn as_string(#[case] value: Value, #[case] expected: Result<String, ReductError>) {
+            let result = value.as_string();
             assert_eq!(result, expected);
         }
     }
