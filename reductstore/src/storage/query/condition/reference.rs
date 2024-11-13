@@ -19,15 +19,7 @@ impl Node for Reference {
             .ok_or(not_found!("Reference '{}' not found"))?;
 
         let value = Value::parse(label_value);
-        if let Some(value) = value {
-            Ok(value)
-        } else {
-            Err(unprocessable_entity!(
-                "Reference '{}' with value '{}' could not be parsed",
-                self.name,
-                label_value
-            ))
-        }
+        Ok(value)
     }
 
     fn print(&self) -> String {
@@ -63,15 +55,6 @@ mod tests {
     fn apply_not_found() {
         let reference = Reference::new("label".to_string());
         let context = Context::default();
-        let result = reference.apply(&context);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn apply_invalid_value() {
-        let reference = Reference::new("label".to_string());
-        let mut context = Context::default();
-        context.labels.insert("label", "invalid");
         let result = reference.apply(&context);
         assert!(result.is_err());
     }

@@ -8,7 +8,7 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::BoxedNode;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
-use serde_json::{Map, Number, Value as JsonValue};
+use serde_json::{Map, Value as JsonValue};
 
 /// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
@@ -107,73 +107,64 @@ impl Parser {
 mod tests {
     use super::*;
     use crate::storage::query::condition::Context;
+    use rstest::{fixture, rstest};
     use std::collections::HashMap;
 
-    #[test]
-    fn test_parser_array_syntax() {
+    #[rstest]
+    fn test_parser_array_syntax(parser: Parser, context: Context) {
         let json = serde_json::from_str(r#"{"$and": [true, {"$and": [true, true]}]}"#).unwrap();
-
-        let parser = Parser {};
         let node = parser.parse(&json).unwrap();
-        let context = Context::default();
-        assert!(node.apply(&context).unwrap().as_bool());
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
-    #[test]
-    fn test_parser_object_syntax() {
+    #[rstest]
+    fn test_parser_object_syntax(parser: Parser) {
         let json = serde_json::from_str(r#"{"&label": {"$and": true}}"#).unwrap();
-
-        let parser = Parser {};
         let node = parser.parse(&json).unwrap();
         let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
-        assert!(node.apply(&context).unwrap().as_bool());
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
-    #[test]
-    fn test_parse_int() {
+    #[rstest]
+    fn test_parse_int(parser: Parser, context: Context) {
         let json = serde_json::from_str(r#"{"$and": [1, -2]}"#).unwrap();
-
-        let parser = Parser {};
         let node = parser.parse(&json).unwrap();
-        let context = Context::default();
-        assert!(node.apply(&context).unwrap().as_bool());
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
-    #[test]
-    fn test_parse_float() {
+    #[rstest]
+    fn test_parse_float(parser: Parser, context: Context) {
         let json = serde_json::from_str(r#"{"$and": [1.1, -2.2]}"#).unwrap();
-
-        let parser = Parser {};
         let node = parser.parse(&json).unwrap();
-        let context = Context::default();
-        assert!(node.apply(&context).unwrap().as_bool());
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
-    #[test]
-    fn test_parser_multiline() {
+    #[rstest]
+    fn test_parse_string(parser: Parser, context: Context) {
+        let json = serde_json::from_str(r#"{"$and": ["a", "b"]}"#).unwrap();
+        let node = parser.parse(&json).unwrap();
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parser_multiline(parser: Parser) {
         let json =
             serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
-
-        let parser = Parser {};
         let node = parser.parse(&json).unwrap();
         let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
-        assert!(node.apply(&context).unwrap().as_bool());
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
-    #[test]
-    fn test_parser_invalid_json() {
+    #[rstest]
+    fn test_parser_invalid_json(parser: Parser) {
         let json = serde_json::from_str(r#"{"$and": [true, true], "invalid": "json"}"#).unwrap();
-
-        let parser = Parser {};
         let result = parser.parse(&json);
         assert_eq!(result.err().unwrap().to_string(), "[UnprocessableEntity] A filed must contain array or object: {\"$and\":[true,true],\"invalid\":\"json\"}");
     }
 
-    #[test]
-    fn test_parser_invalid_operator() {
+    #[rstest]
+    fn test_parser_invalid_operator(parser: Parser) {
         let json = serde_json::from_str(r#"{"$xx": [true, true]}"#).unwrap();
-
-        let parser = Parser {};
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -181,15 +172,23 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parser_invalid_object_notation() {
+    #[rstest]
+    fn test_parser_invalid_object_notation(parser: Parser) {
         let json = serde_json::from_str(r#"{"&ref": {"$and": true, "x": "y"}}"#).unwrap();
-
-        let parser = Parser {};
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Object notation must have exactly one operator"
         );
+    }
+
+    #[fixture]
+    fn parser() -> Parser {
+        Parser::new()
+    }
+
+    #[fixture]
+    fn context() -> Context<'static> {
+        Context::default()
     }
 }
