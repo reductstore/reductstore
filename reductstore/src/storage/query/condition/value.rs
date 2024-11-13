@@ -92,6 +92,7 @@ impl Value {
     }
 
     /// Converts the value to an integer.
+    #[allow(dead_code)]
     pub fn as_int(&self) -> Result<i64, ReductError> {
         match self {
             Value::Bool(value) => Ok(*value as i64),
@@ -111,6 +112,7 @@ impl Value {
     }
 
     /// Converts the value to a float.
+    #[allow(dead_code)]
     pub fn as_float(&self) -> Result<f64, ReductError> {
         match self {
             Value::Bool(value) => Ok(*value as i64 as f64),
@@ -130,6 +132,7 @@ impl Value {
     }
 
     /// Converts the value to a string.
+    #[allow(dead_code)]
     pub fn as_string(&self) -> Result<String, ReductError> {
         match self {
             Value::Bool(value) => Ok(value.to_string()),
