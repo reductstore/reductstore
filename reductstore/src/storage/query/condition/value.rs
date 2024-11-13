@@ -169,6 +169,83 @@ mod tests {
         }
     }
 
+    mod partial_eq {
+        use super::*;
+
+        #[rstest]
+        #[case(Value::Bool(true), Value::Bool(true), true)]
+        #[case(Value::Bool(true), Value::Bool(false), false)]
+        #[case(Value::Bool(false), Value::Bool(true), false)]
+        #[case(Value::Bool(true), Value::Int(1), true)]
+        #[case(Value::Bool(true), Value::Int(0), false)]
+        #[case(Value::Bool(true), Value::Int(-1), false)]
+        #[case(Value::Bool(true), Value::Float(1.0), true)]
+        #[case(Value::Bool(true), Value::Float(0.0), false)]
+        #[case(Value::Bool(true), Value::Float(-1.0), false)]
+        #[case(Value::Bool(true), Value::String("string".to_string()), false)]
+        #[case(Value::Bool(false), Value::String("string".to_string()), false)]
+        #[case(Value::Bool(true), Value::String("true".to_string()), false)]
+        fn partial_eq_bool(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
+            let result = left == right;
+            assert_eq!(result, expected);
+        }
+
+        #[rstest]
+        #[case(Value::Int(1), Value::Int(1), true)]
+        #[case(Value::Int(1), Value::Int(-1), false)]
+        #[case(Value::Int(-1), Value::Int(-1), true)]
+        #[case(Value::Int(-1), Value::Int(1), false)]
+        #[case(Value::Int(1), Value::Bool(true), true)]
+        #[case(Value::Int(1), Value::Bool(false), false)]
+        #[case(Value::Int(0), Value::Bool(true), false)]
+        #[case(Value::Int(0), Value::Bool(false), true)]
+        #[case(Value::Int(-1), Value::Bool(true), false)]
+        #[case(Value::Int(-1), Value::Bool(false), false)]
+        #[case(Value::Int(1), Value::Float(1.0), true)]
+        #[case(Value::Int(1), Value::Float(0.0), false)]
+        #[case(Value::Int(1), Value::Float(-1.0), false)]
+        #[case(Value::Int(1), Value::String("string".to_string()), false)]
+        #[case(Value::Int(-1), Value::String("string".to_string()), false)]
+        fn partial_eq_int(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
+            let result = left == right;
+            assert_eq!(result, expected);
+        }
+
+        #[rstest]
+        #[case(Value::Float(1.0), Value::Float(1.0), true)]
+        #[case(Value::Float(1.0), Value::Float(-1.0), false)]
+        #[case(Value::Float(-1.0), Value::Float(-1.0), true)]
+        #[case(Value::Float(-1.0), Value::Float(1.0), false)]
+        #[case(Value::Float(1.0), Value::Bool(true), true)]
+        #[case(Value::Float(1.0), Value::Bool(false), false)]
+        #[case(Value::Float(0.0), Value::Bool(true), false)]
+        #[case(Value::Float(0.0), Value::Bool(false), true)]
+        #[case(Value::Float(-1.0), Value::Bool(true), false)]
+        #[case(Value::Float(-1.0), Value::Bool(false), false)]
+        #[case(Value::Float(1.0), Value::Int(1), true)]
+        #[case(Value::Float(1.0), Value::Int(0), false)]
+        #[case(Value::Float(1.0), Value::Int(-1), false)]
+        #[case(Value::Float(1.0), Value::String("string".to_string()), false)]
+        #[case(Value::Float(-1.0), Value::String("string".to_string()), false)]
+        fn partial_eq_float(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
+            let result = left == right;
+            assert_eq!(result, expected);
+        }
+
+        #[rstest]
+        #[case(Value::String("a".to_string()), Value::String("a".to_string()), true)]
+        #[case(Value::String("a".to_string()), Value::String("b".to_string()), false)]
+        #[case(Value::String("b".to_string()), Value::String("a".to_string()), false)]
+        #[case(Value::String("a".to_string()), Value::Bool(true), false)]
+        #[case(Value::String("a".to_string()), Value::Bool(false), false)]
+        #[case(Value::String("a".to_string()), Value::Int(1), false)]
+        #[case(Value::String("a".to_string()), Value::Float(1.0), false)]
+        fn partial_eq_string(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
+            let result = left == right;
+            assert_eq!(result, expected);
+        }
+    }
+
     mod partial_cmp {
         use super::*;
         use std::cmp::Ordering;
@@ -287,6 +364,8 @@ mod tests {
         #[case(Value::Float(1.5), Ok(true))]
         #[case(Value::Float(0.0), Ok(false))]
         #[case(Value::Float(-1.5), Ok(true))]
+        #[case(Value::String("string".to_string()), Ok(true))]
+        #[case(Value::String("".to_string()), Ok(false))]
         fn as_bool(#[case] value: Value, #[case] expected: Result<bool, ReductError>) {
             let result = value.as_bool();
             assert_eq!(result, expected);
@@ -301,6 +380,8 @@ mod tests {
         #[case(Value::Float(1.5), Ok(1))]
         #[case(Value::Float(0.0), Ok(0))]
         #[case(Value::Float(-1.5), Ok(-1))]
+        #[case(Value::String("42".to_string()), Ok(42))]
+        #[case(Value::String("string".to_string()), Err(unprocessable_entity!("Value 'string' could not be parsed as integer")))]
         fn as_int(#[case] value: Value, #[case] expected: Result<i64, ReductError>) {
             let result = value.as_int();
             assert_eq!(result, expected);
@@ -315,6 +396,8 @@ mod tests {
         #[case(Value::Float(1.5), Ok(1.5))]
         #[case(Value::Float(0.0), Ok(0.0))]
         #[case(Value::Float(-1.5), Ok(-1.5))]
+        #[case(Value::String("42.0".to_string()), Ok(42.0))]
+        #[case(Value::String("string".to_string()), Err(unprocessable_entity!("Value 'string' could not be parsed as float")))]
         fn as_float(#[case] value: Value, #[case] expected: Result<f64, ReductError>) {
             let result = value.as_float();
             assert_eq!(result, expected);

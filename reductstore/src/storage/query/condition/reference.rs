@@ -4,7 +4,7 @@
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Context, Node};
 use reduct_base::error::ReductError;
-use reduct_base::{not_found, unprocessable_entity};
+use reduct_base::not_found;
 
 /// A node representing a reference to a label in the context.
 pub(super) struct Reference {

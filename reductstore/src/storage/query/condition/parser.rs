@@ -183,6 +183,16 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_parser_invalid_value(parser: Parser) {
+        let json = serde_json::from_str(r#"{"&ref": {"$and": []}}"#).unwrap();
+        let result = parser.parse(&json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Invalid JSON value: []"
+        );
+    }
+
     #[fixture]
     fn parser() -> Parser {
         Parser::new()

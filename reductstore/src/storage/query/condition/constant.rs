@@ -11,7 +11,7 @@ pub(super) struct Constant {
 }
 
 impl Node for Constant {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&self, _context: &Context) -> Result<Value, ReductError> {
         Ok(self.value.clone())
     }
 

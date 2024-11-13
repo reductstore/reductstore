@@ -351,6 +351,23 @@ mod tests {
         assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
     }
 
+    #[rstest]
+    fn test_when_filter(block_manager: Arc<RwLock<BlockManager>>) {
+        let mut query = HistoricalQuery::try_new(
+            0,
+            1001,
+            QueryOptions {
+                when: Some(serde_json::from_str(r#"{"$and": ["&flag"]}"#).unwrap()),
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+        let records = read_to_vector(&mut query, block_manager);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+    }
+
     fn read_to_vector(
         query: &mut HistoricalQuery,
         block_manager: Arc<RwLock<BlockManager>>,

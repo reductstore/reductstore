@@ -131,6 +131,10 @@ pub(crate) mod tests {
                         name: "record".to_string(),
                         value: "1".to_string(),
                     },
+                    Label {
+                        name: "flag".to_string(),
+                        value: "true".to_string(),
+                    },
                 ],
                 content_type: "".to_string(),
             });
@@ -151,6 +155,10 @@ pub(crate) mod tests {
                     Label {
                         name: "record".to_string(),
                         value: "2".to_string(),
+                    },
+                    Label {
+                        name: "flag".to_string(),
+                        value: "false".to_string(),
                     },
                 ],
                 content_type: "".to_string(),
