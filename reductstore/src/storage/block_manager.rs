@@ -110,7 +110,6 @@ impl BlockManager {
             let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
             let mut buf = vec![];
 
-            // parse the block descriptor
             let mut lock = file.write()?;
             lock.read_to_end(&mut buf)?;
 
@@ -121,7 +120,8 @@ impl BlockManager {
             if let Some(block_crc) = self.block_index.get_block(block_id).unwrap().crc64 {
                 // we check crc if the crc is stored in the index for backward compatibility
                 if block_crc != crc.sum64() {
-                    error!("Block descriptor {:?} is corrupted. Remove it and its data block, then restart the database", path);
+                    error!("Block descriptor {:?} is corrupted: index CRC {} missmatch with calculated CRC {}.\
+                     Remove it and its data block, then restart the database", path, block_crc, crc.sum64());
                     return Err(internal_server_error!(
                         "Block descriptor {:?} is corrupted",
                         path
@@ -129,6 +129,7 @@ impl BlockManager {
                 }
             }
 
+            // parse the block descriptor
             let block_from_disk = BlockProto::decode(Bytes::from(buf)).map_err(|e| {
                 internal_server_error!("Failed to decode block descriptor {:?}: {}", path, e)
             })?;
@@ -219,8 +220,9 @@ impl BlockManager {
     /// * `ReductError` - If the block is still in use or file system operation failed.
     pub fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
         self.wal.append(block_id, WalEntry::RemoveBlock)?;
+        self.block_index.remove_block(block_id);
+        self.block_index.save()?;
 
-        self.save_block_on_disk(self.load_block(block_id)?)?;
         self.block_cache.remove(&block_id);
 
         let path = self.path_to_data(block_id);
@@ -228,9 +230,6 @@ impl BlockManager {
 
         let path = self.path_to_desc(block_id);
         FILE_CACHE.remove(&path)?;
-
-        self.block_index.remove_block(block_id);
-        self.block_index.save()?;
 
         self.wal.remove(block_id)?;
         Ok(())
