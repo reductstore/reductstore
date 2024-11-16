@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-539: Fix transaction log file descriptor, [PR-643](https://github.com/reductstore/reductstore/pull/643)
+
 ## [1.12.3] - 2024-10-26
 
 ### Fixed
