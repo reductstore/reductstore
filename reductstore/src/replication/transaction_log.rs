@@ -227,7 +227,7 @@ impl TransactionLog {
 
         {
             let file = FILE_CACHE
-                .read(&self.file_path, SeekFrom::Start(8))?
+                .write_or_create(&self.file_path, SeekFrom::Start(8))?
                 .upgrade()?;
             let mut file = file.write()?;
             file.write_all(&self.read_pos.to_be_bytes())?;
@@ -363,13 +363,14 @@ mod tests {
 
     #[rstest]
     fn test_recovery_empty_cache(path: PathBuf) {
-        TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
-        FILE_CACHE.discard_recursive(&path).unwrap(); // discard the cache to simulate restart
-
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
             .unwrap();
+
+        FILE_CACHE.discard_recursive(&path).unwrap(); // discard the cache to simulate restart
+
+        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
 
         // check if the transaction log is still working after cache discard
         assert_eq!(
