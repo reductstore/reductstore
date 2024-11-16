@@ -18,17 +18,17 @@ pub struct ContinuousQuery {
 }
 
 impl ContinuousQuery {
-    pub fn new(start: u64, options: QueryOptions) -> ContinuousQuery {
+    pub fn try_new(start: u64, options: QueryOptions) -> Result<Self, ReductError> {
         if !options.continuous {
             panic!("Continuous query must be continuous");
         }
 
-        ContinuousQuery {
-            query: HistoricalQuery::new(start, u64::MAX, options.clone()),
+        Ok(ContinuousQuery {
+            query: HistoricalQuery::try_new(start, u64::MAX, options.clone())?,
             next_start: start,
             count: 0,
             options,
-        }
+        })
     }
 }
 impl Query for ContinuousQuery {
@@ -46,7 +46,8 @@ impl Query for ContinuousQuery {
                 status: ErrorCode::NoContent,
                 ..
             }) => {
-                self.query = HistoricalQuery::new(self.next_start, u64::MAX, self.options.clone());
+                self.query =
+                    HistoricalQuery::try_new(self.next_start, u64::MAX, self.options.clone())?;
                 Err(ReductError {
                     status: ErrorCode::NoContent,
                     message: "No content".to_string(),
@@ -68,14 +69,15 @@ mod tests {
 
     #[rstest]
     fn test_query(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = ContinuousQuery::new(
+        let mut query = ContinuousQuery::try_new(
             900,
             QueryOptions {
                 ttl: std::time::Duration::from_millis(100),
                 continuous: true,
                 ..QueryOptions::default()
             },
-        );
+        )
+        .unwrap();
         {
             let reader = query.next(block_manager.clone()).unwrap();
             assert_eq!(reader.timestamp(), 1000);

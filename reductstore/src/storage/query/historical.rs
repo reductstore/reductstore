@@ -11,9 +11,10 @@ use crate::storage::entry::RecordReader;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
+use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter,
-    RecordFilter, RecordStateFilter, TimeRangeFilter,
+    RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 
 impl FilterPoint for Record {
@@ -46,7 +47,11 @@ pub struct HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    pub fn new(start_time: u64, stop_time: u64, options: QueryOptions) -> HistoricalQuery {
+    pub fn try_new(
+        start_time: u64,
+        stop_time: u64,
+        options: QueryOptions,
+    ) -> Result<Self, ReductError> {
         let mut filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>> = vec![
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
             Box::new(RecordStateFilter::new(RecordState::Finished)),
@@ -68,14 +73,20 @@ impl HistoricalQuery {
             filters.push(Box::new(EachNFilter::new(each_n)));
         }
 
-        HistoricalQuery {
+        if let Some(when) = options.when {
+            let parser = Parser::new();
+            let condition = parser.parse(&when)?;
+            filters.push(Box::new(WhenFilter::new(condition)));
+        }
+
+        Ok(HistoricalQuery {
             start_time,
             stop_time,
             records_from_current_block: VecDeque::new(),
             current_block: None,
             filters,
             only_metadata: options.only_metadata,
-        }
+        })
     }
 }
 
@@ -148,7 +159,11 @@ impl HistoricalQuery {
         block
             .record_index()
             .values()
-            .filter(|record| self.filters.iter_mut().all(|filter| filter.filter(record)))
+            .filter(|record| {
+                self.filters
+                    .iter_mut()
+                    .all(|filter| filter.filter(record).unwrap_or(false))
+            }) // TODO: we need an option to make it strict
             .map(|record| record.clone())
             .collect()
     }
@@ -170,7 +185,7 @@ mod tests {
 
     #[rstest]
     fn test_query_ok_1_rec(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
+        let mut query = HistoricalQuery::try_new(0, 5, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
@@ -180,7 +195,7 @@ mod tests {
 
     #[rstest]
     fn test_query_ok_2_recs(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(0, 1000, QueryOptions::default());
+        let mut query = HistoricalQuery::try_new(0, 1000, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
@@ -192,7 +207,7 @@ mod tests {
 
     #[rstest]
     fn test_query_ok_3_recs(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(0, 1001, QueryOptions::default());
+        let mut query = HistoricalQuery::try_new(0, 1001, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 3);
@@ -206,7 +221,7 @@ mod tests {
 
     #[rstest]
     fn test_query_include(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(
+        let mut query = HistoricalQuery::try_new(
             0,
             1001,
             QueryOptions {
@@ -216,7 +231,8 @@ mod tests {
                 ]),
                 ..QueryOptions::default()
             },
-        );
+        )
+        .unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
@@ -239,7 +255,7 @@ mod tests {
 
     #[rstest]
     fn test_query_exclude(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(
+        let mut query = HistoricalQuery::try_new(
             0,
             1001,
             QueryOptions {
@@ -249,7 +265,8 @@ mod tests {
                 ]),
                 ..QueryOptions::default()
             },
-        );
+        )
+        .unwrap();
 
         let records = read_to_vector(&mut query, block_manager);
 
@@ -266,6 +283,10 @@ mod tests {
                     name: "record".to_string(),
                     value: "2".to_string(),
                 },
+                Label {
+                    name: "flag".to_string(),
+                    value: "false".to_string(),
+                },
             ]
         );
         assert_eq!(records[0].1, "0123456789");
@@ -273,7 +294,7 @@ mod tests {
 
     #[rstest]
     fn test_ignoring_errored_records(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(0, 5, QueryOptions::default());
+        let mut query = HistoricalQuery::try_new(0, 5, QueryOptions::default()).unwrap();
         {
             let block_ref = block_manager.write().unwrap().load_block(0).unwrap();
             {
@@ -300,14 +321,15 @@ mod tests {
 
     #[rstest]
     fn test_each_s_filter(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(
+        let mut query = HistoricalQuery::try_new(
             0,
             1001,
             QueryOptions {
                 each_s: Some(0.00001),
                 ..QueryOptions::default()
             },
-        );
+        )
+        .unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
@@ -317,19 +339,37 @@ mod tests {
 
     #[rstest]
     fn test_each_n_records(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::new(
+        let mut query = HistoricalQuery::try_new(
             0,
             1001,
             QueryOptions {
                 each_n: Some(2),
                 ..QueryOptions::default()
             },
-        );
+        )
+        .unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
         assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
+    }
+
+    #[rstest]
+    fn test_when_filter(block_manager: Arc<RwLock<BlockManager>>) {
+        let mut query = HistoricalQuery::try_new(
+            0,
+            1001,
+            QueryOptions {
+                when: Some(serde_json::from_str(r#"{"$and": ["&flag"]}"#).unwrap()),
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+        let records = read_to_vector(&mut query, block_manager);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
     }
 
     fn read_to_vector(

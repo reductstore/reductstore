@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::record::State;
+use reduct_base::error::ReductError;
 
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
 
@@ -29,8 +30,9 @@ impl<P> RecordFilter<P> for RecordStateFilter
 where
     P: FilterPoint,
 {
-    fn filter(&mut self, record: &P) -> bool {
-        *record.state() == self.state as i32
+    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
+        let result = *record.state() == self.state as i32;
+        Ok(result)
     }
 }
 
@@ -49,7 +51,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record), "Record should pass");
+        assert!(filter.filter(&record).unwrap(), "Record should pass");
     }
 
     #[rstest]
@@ -60,6 +62,6 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record), "Record should not pass");
+        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
     }
 }

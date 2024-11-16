@@ -1,6 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
 use crate::storage::query::filters::{FilterPoint, RecordFilter};
@@ -29,13 +30,15 @@ impl<P> RecordFilter<P> for ExcludeLabelFilter
 where
     P: FilterPoint,
 {
-    fn filter(&mut self, record: &P) -> bool {
-        !self.labels.iter().all(|(key, value)| {
+    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
+        let result = !self.labels.iter().all(|(key, value)| {
             record
                 .labels()
                 .iter()
                 .any(|label| label.name == *key && label.value == *value)
-        })
+        });
+
+        Ok(result)
     }
 }
 
@@ -61,7 +64,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record), "Record should not pass");
+        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
     }
 
     #[rstest]
@@ -78,7 +81,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record), "Record should pass");
+        assert!(filter.filter(&record).unwrap(), "Record should pass");
     }
 
     #[rstest]
@@ -106,7 +109,7 @@ mod tests {
         };
 
         assert!(
-            !filter.filter(&record),
+            !filter.filter(&record).unwrap(),
             "Record should not pass because it has key1=value1 and key2=value2"
         );
 
@@ -119,7 +122,7 @@ mod tests {
         };
 
         assert!(
-            filter.filter(&record),
+            filter.filter(&record).unwrap(),
             "Record should pass because it has only key1=value1"
         );
     }

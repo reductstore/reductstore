@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use crate::storage::entry::RecordReader;
 use reduct_base::msg::entry_api::QueryEntry;
+use serde_json::Value;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -54,6 +55,8 @@ pub struct QueryOptions {
     pub each_s: Option<f64>,
     /// Only metadata
     pub only_metadata: bool,
+    /// Condition
+    pub when: Option<Value>,
 }
 
 impl From<QueryEntry> for QueryOptions {
@@ -67,6 +70,7 @@ impl From<QueryEntry> for QueryOptions {
             each_n: query.each_n,
             each_s: query.each_s,
             only_metadata: query.only_metadata.unwrap_or(false),
+            when: query.when,
         }
     }
 }
@@ -82,6 +86,7 @@ impl Default for QueryOptions {
             each_n: None,
             each_s: None,
             only_metadata: false,
+            when: None,
         }
     }
 }
@@ -126,6 +131,10 @@ pub(crate) mod tests {
                         name: "record".to_string(),
                         value: "1".to_string(),
                     },
+                    Label {
+                        name: "flag".to_string(),
+                        value: "true".to_string(),
+                    },
                 ],
                 content_type: "".to_string(),
             });
@@ -146,6 +155,10 @@ pub(crate) mod tests {
                     Label {
                         name: "record".to_string(),
                         value: "2".to_string(),
+                    },
+                    Label {
+                        name: "flag".to_string(),
+                        value: "false".to_string(),
                     },
                 ],
                 content_type: "".to_string(),
