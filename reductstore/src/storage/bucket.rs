@@ -14,6 +14,7 @@ use crate::storage::bucket::settings::{
 };
 use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
+use crate::storage::storage::check_name_convention;
 use log::debug;
 use prost::bytes::Bytes;
 use prost::Message;
@@ -131,6 +132,7 @@ impl Bucket {
     ///
     /// * `&mut Entry` - The entry or an HTTPError
     pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
+        check_name_convention(key)?;
         let mut entries = self.entries.write()?;
         if !entries.contains_key(key) {
             let settings = self.settings.read()?;
@@ -265,6 +267,7 @@ impl Bucket {
         let settings = self.settings();
 
         unique(&self.task_group(), "rename entry", move || {
+            check_name_convention(&new_name)?;
             if new_path.exists() {
                 return Err(conflict!(
                     "Entry '{}' already exists in bucket '{}'",
@@ -378,6 +381,29 @@ mod tests {
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
+    mod get_or_create {
+        use super::*;
+        use reduct_base::unprocessable_entity;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_or_create_entry(bucket: Bucket) {
+            let entry = bucket.get_or_create_entry("test-1").unwrap();
+            assert_eq!(entry.upgrade().unwrap().name(), "test-1");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_or_create_entry_invalid_name(bucket: Bucket) {
+            assert_eq!(
+                bucket.get_or_create_entry("test-1/").err(),
+                Some(unprocessable_entity!(
+                    "Bucket or entry name can contain only letters, digests and [-,_] symbols"
+                ))
+            );
+        }
+    }
+
     mod remove_entry {
         use super::*;
 
@@ -409,6 +435,7 @@ mod tests {
 
     mod rename_entry {
         use super::*;
+        use reduct_base::unprocessable_entity;
 
         #[rstest]
         #[tokio::test]
@@ -451,6 +478,17 @@ mod tests {
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2").await.err(),
                 Some(conflict!("Entry 'test-2' already exists in bucket 'test'"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rename_invalid_name(bucket: Bucket) {
+            assert_eq!(
+                bucket.rename_entry("test-1", "test-2/").await.err(),
+                Some(unprocessable_entity!(
+                    "Bucket or entry name can contain only letters, digests and [-,_] symbols"
+                ))
             );
         }
 

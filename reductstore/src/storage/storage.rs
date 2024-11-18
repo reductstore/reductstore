@@ -114,7 +114,7 @@ impl Storage {
         name: &str,
         settings: BucketSettings,
     ) -> Result<Weak<Bucket>, ReductError> {
-        Self::check_bucket_name(name)?;
+        check_name_convention(name)?;
         let mut buckets = self.buckets.write()?;
         if buckets.contains_key(name) {
             return Err(conflict!("Bucket '{}' already exists", name));
@@ -188,7 +188,7 @@ impl Storage {
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
         let check_and_prepare_bucket = || {
-            Self::check_bucket_name(new_name)?;
+            check_name_convention(new_name)?;
             let buckets = self.buckets.read().unwrap();
             if let Some(bucket) = buckets.get(new_name) {
                 return Err(conflict!("Bucket '{}' already exists", bucket.name()));
@@ -273,16 +273,16 @@ impl Storage {
     pub fn data_path(&self) -> &PathBuf {
         &self.data_path
     }
+}
 
-    fn check_bucket_name(name: &str) -> Result<(), ReductError> {
-        let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
-        if !regex.is_match(name) {
-            return Err(unprocessable_entity!(
-                "Bucket name can contain only letters, digests and [-,_] symbols",
-            ));
-        }
-        Ok(())
+pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
+    let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
+    if !regex.is_match(name) {
+        return Err(unprocessable_entity!(
+            "Bucket or entry name can contain only letters, digests and [-,_] symbols",
+        ));
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(
             result.err(),
             Some(unprocessable_entity!(
-                "Bucket name can contain only letters, digests and [-,_] symbols"
+                "Bucket or entry name can contain only letters, digests and [-,_] symbols"
             ))
         );
     }
@@ -557,7 +557,7 @@ mod tests {
             assert_eq!(
                 result,
                 Err(unprocessable_entity!(
-                    "Bucket name can contain only letters, digests and [-,_] symbols"
+                    "Bucket or entry name can contain only letters, digests and [-,_] symbols"
                 ))
             );
         }
