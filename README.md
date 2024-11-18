@@ -1,17 +1,17 @@
 # ReductStore
 
-## A high-performance time series database for blob data
+## The Fastest Time Series Object Storage for AI Infrastructure
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
 [![Docker Pulls](https://img.shields.io/docker/pulls/reduct/store)](https://hub.docker.com/r/reduct/store)
 [![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
 [![codecov](https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ)](https://codecov.io/gh/reductstore/reductstore)
-[![Community](https://img.shields.io/discourse/users?server=https%3A%2F%2Fcommunity.reduct.store
+[![Community](https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store
 )](https://community.reduct.store)
 
 
-ReductStore is a time series database that is specifically designed for storing and managing large amounts of blob data. It boasts high performance for both writing and real-time querying, with the added benefit of batching data. This makes it an ideal solution for edge computing, computer vision, and IoT applications where network latency is a concern. For more information, please visit [https://www.reduct.store/](https://www.reduct.store/).
+ReductStore is a time series object store designed specifically for storing and managing large volumes of unstructured data. It provides high performance for both writing and real-time querying, with the added benefit of batching data. This makes it an ideal solution for edge, industrial and IoT AI applications where fast access to data is critical. For more information, please visit [https://www.reduct.store/](https://www.reduct.store/).
 
 ## Why Does It Exist?
 
@@ -29,15 +29,13 @@ It guarantees that your data will not overflow your hard disk and batches record
 
 ## Features
 
-- Storing and accessing unstructured data as time series
-- No limit for maximum size of blob
-- Real-time FIFO bucket quota based on size to avoid disk space shortage
 - HTTP(S) API
-- Append-only replication
-- Optimized for small objects (less than 1 MB)
+- Storing and accessing unstructured data as time series
+- No limit for maximum size of objects
+- Append-only data replication
 - Labeling data for annotation and filtering
-- Iterative data querying
 - Batching records in an HTTP response for write and read operations
+- Real-time FIFO bucket quota based on size to avoid disk space shortage
 - Embedded Web Console
 - Token authorization for managing data access
 
@@ -52,6 +50,7 @@ docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 Alternatively, you can opt for Cargo:
 
 ```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh  # Install the latest Rust
 apt install protobuf-compiler
 cargo install reductstore
 RS_DATA_PATH=./data reductstore
