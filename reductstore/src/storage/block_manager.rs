@@ -536,7 +536,7 @@ impl BlockManager {
             let len = buf.len() as u64;
             lock.set_len(len)?;
             lock.write_all(&buf)?;
-            lock.flush()?;
+            lock.sync_all()?; // fix https://github.com/reductstore/reductstore/issues/642
             len
         };
 
