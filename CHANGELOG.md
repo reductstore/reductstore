@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 
 - Fix CI actions after Ubuntu update, [PR-604](https://github.com/reductstore/reductstore/pull/604)
+- RS-536: Update README.md, [PR-649](https://github.com/reductstore/reductstore/pull/649)
 
 ## [1.12.3] - 2024-10-26
 
