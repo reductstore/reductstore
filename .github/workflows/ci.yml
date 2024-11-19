@@ -106,36 +106,33 @@ jobs:
           path: target/${{ matrix.target }}/tests
 
 
-#
-#  unit_tests:
-#    name: Build and Run Unit Tests
-#    needs:
-#      - rust_fmt
-#    strategy:
-#      matrix:
-#        os: [ ubuntu-latest, macos-latest, windows-latest ]
-#    runs-on: ${{ matrix.os }}
-#    env:
-#      RUST_BACKTRACE: 1
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: arduino/setup-protoc@v3
-#        with:
-#          version: '26.x'
-#          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-#
-#      - name: Install Rust
-#        uses: dtolnay/rust-toolchain@stable
-#        with:
-#          toolchain: ${{ env.MINIMAL_RUST_VERSION }}
-#
-#      - name: Install rustfmt
-#        run: rustup component add rustfmt
-#
-#      - uses: ilammy/setup-nasm@v1
-#
-#      - name: Run Tests
-#        run: cargo test --release -p reductstore
+
+  unit_tests:
+    name: Run Unit Tests
+    needs:
+      - rust_fmt
+      - build_binaries
+    strategy:
+      matrix:
+        os: [ ubuntu-latest,windows-latest ]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tests-${{ matrix.target }}
+          path: target/${{ matrix.target }}/tests
+
+      - name: Run tests
+        shell: bash
+        run: run-parts --verbose target/${{ matrix.target }}/tests
 
 
 
