@@ -74,6 +74,9 @@ jobs:
         with:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
 
+      - name: Install toolchain
+        run: rustup target add ${{ matrix.target }}
+
       - uses: ilammy/setup-nasm@v1
 
       - name: Install cargo-export
