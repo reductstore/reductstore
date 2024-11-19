@@ -62,6 +62,9 @@ jobs:
                   compiler: "gcc"
                 - target: "x86_64-pc-windows-gnu"
                   compiler: "gcc-mingw-w64-x86-64"
+                - target: "x86_64-apple-darwin"
+                  compiler: "gcc"
+
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v3
@@ -106,7 +109,6 @@ jobs:
           path: target/${{ matrix.target }}/tests
 
 
-
   unit_tests:
     name: Run Unit Tests
     needs:
@@ -114,12 +116,14 @@ jobs:
       - build_binaries
     strategy:
       matrix:
-        os: [ ubuntu-latest,windows-latest ]
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.os }}
     env:
@@ -127,7 +131,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: tests-${{ matrix.target }}
+          name: reductstore-tests-${{ matrix.target }}
           path: target/${{ matrix.target }}/tests
 
       - name: Run tests
