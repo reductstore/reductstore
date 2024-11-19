@@ -63,7 +63,7 @@ jobs:
                 - target: "x86_64-pc-windows-gnu"
                   compiler: "gcc-mingw-w64-x86-64"
                 - target: "x86_64-apple-darwin"
-                  compiler: "gcc"
+                  compiler: "clang"
 
     steps:
       - uses: actions/checkout@v4
