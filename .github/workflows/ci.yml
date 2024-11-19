@@ -94,16 +94,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reductstore-${{ matrix.target }}
-          path: target/${{matrix.target}}/reductstore${{ matrix.os == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
+          path: target/${{matrix.target}}/release/reductstore${{ matrix.os == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
 
       - name: Build and export tests
-        run: cargo export target/tests -- test --release --target ${{ matrix.target }}
+        run: cargo export target/${{ matrix.target }}/tests -- test --release --target ${{ matrix.target }}
 
       - name: Upload tests
         uses: actions/upload-artifact@v4
         with:
           name: reductstore-tests-${{ matrix.target }}
-          path: target/tests
+          path: target/${{ matrix.target }}/tests
 
 
 #
