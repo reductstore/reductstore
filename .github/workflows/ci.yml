@@ -77,6 +77,11 @@ jobs:
       - name: Install toolchain
         run: rustup target add ${{ matrix.target }}
 
+      - name: Install gcc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.compiler }}
+
       - uses: ilammy/setup-nasm@v1
 
       - name: Install cargo-export
