@@ -57,7 +57,7 @@ jobs:
     strategy:
         matrix:
             os: [ ubuntu-latest, macos-latest ] # we need build on macos to build for apple
-            target: [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu" ]
+            target: [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-apple-darwin" ]
             include:
                 - os: ubuntu-latest
                   target: "x86_64-unknown-linux-gnu"
