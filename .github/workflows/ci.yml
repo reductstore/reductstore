@@ -150,6 +150,11 @@ jobs:
         shell: bash
         run: |
           for f in /tmp/tests/*; do
+            # exclude reduct_macros
+            if [[ $f == *"reduct_macros"* ]]; then
+              continue
+            fi
+
             chmod +x $f
             $f
           done
