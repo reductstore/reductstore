@@ -51,16 +51,26 @@ jobs:
           name: image
           path: /tmp/image.tar
 
-  unit_tests:
-    name: Build and Run Unit Tests
+  build_binaries:
+    name: Build Binaries
+    runs-on: ${{ matrix.os }}
     needs:
       - rust_fmt
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
-    runs-on: ${{ matrix.os }}
-    env:
-      RUST_BACKTRACE: 1
+        target: [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-apple-darwin" ]
+        include:
+          - target: "x86_64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc"
+          - target: "x86_64-pc-windows-gnu"
+            os: windows-2022
+            compiler: "gcc-mingw-w64-x86-64"
+          - target: "x86_64-apple-darwin"
+            os: macos-13
+            compiler: "gcc"
+
+
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v3
@@ -73,22 +83,82 @@ jobs:
         with:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
 
-      - name: Install rustfmt
-        run: rustup component add rustfmt
+      - name: Install toolchain
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install gcc
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.compiler }}
+
+      - name: Install gcc
+        if: ${{ matrix.os == 'macos-latest' }}
+        run: |
+          brew install ${{ matrix.compiler }}
 
       - uses: ilammy/setup-nasm@v1
 
-      - name: Run Tests
-        run: cargo test --release -p reductstore
+      - name: Install cargo-export
+        run: cargo install cargo-export
 
       - name: Build binary
-        run: cargo build --release -p reductstore
+        run: cargo build --release -p reductstore --target ${{ matrix.target }}
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: reductstore-${{ matrix.os }}
-          path: target/release/reductstore${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          name: reductstore-${{ matrix.target }}
+          path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
+
+      - name: Build and export tests
+        run: cargo export target/${{ matrix.target }}/tests -- test --release --target ${{ matrix.target }}
+
+      - name: Upload tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: reductstore-tests-${{ matrix.target }}
+          path: target/${{ matrix.target }}/tests
+
+
+  unit_tests:
+    name: Run Unit Tests
+    needs:
+      - rust_fmt
+      - build_binaries
+    strategy:
+      matrix:
+        os: [ ubuntu-24.04, windows-2022, macos-13 ]
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            target: x86_64-pc-windows-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reductstore-tests-${{ matrix.target }}
+          path: ./tmp/tests
+
+      - name: Run tests
+        shell: bash
+        run: |
+          set -e -x
+          for f in ./tmp/tests/*; do
+            # exclude reduct_macros
+            if [[ $f == *"reduct_macros"* ]]; then
+              continue
+            fi
+
+            chmod +x $f
+            $f
+          done
 
   coverage:
     name: Generate Code Coverage
@@ -121,9 +191,6 @@ jobs:
           files: lcov.info
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
-
-
-
 
   api_tests:
     name: API Tests
@@ -170,7 +237,7 @@ jobs:
           sleep 5
 
       - name: Build API tests
-        run:  |
+        run: |
           docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
           docker build -t api ./integration_tests/api
 
@@ -640,7 +707,7 @@ jobs:
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: reductstore-ubuntu-latest
+          name: reductstore-x86_64-unknown-linux-gnu
           path: /tmp/
       - name: Load Linux image and get binary
         run: |
@@ -658,12 +725,13 @@ jobs:
       - name: Download Macos artifact
         uses: actions/download-artifact@v4
         with:
-          name: reductstore-macos-latest
+          name: reductstore-x86_64-apple-darwin
           path: /tmp/
       - name: Archive MacOs binary
         run: |
           cd /tmp
           tar -czvf reductstore.macos-amd64.tar.gz  reductstore
+
       - name: Upload MacOs artifact
         uses: actions/upload-release-asset@v1
         env:
@@ -677,7 +745,7 @@ jobs:
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: reductstore-windows-latest
+          name: reductstore-x86_64-pc-windows-gnu
           path: /tmp/
       - name: Archive Windows binary
         run: |

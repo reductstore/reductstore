@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix CI actions after Ubuntu update, [PR-604](https://github.com/reductstore/reductstore/pull/604)
 - RS-536: Update README.md, [PR-649](https://github.com/reductstore/reductstore/pull/649)
+- RS-193: Cross-compilation in CI/CD, [PR-651](https://github.com/reductstore/reductstore/pull/651)
 
 ## [1.12.3] - 2024-10-26
 
@@ -837,14 +838,10 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-<<<<<<< HEAD
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.2...HEAD
-=======
 [Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.3...HEAD
 
 [1.12.3]: https://github.com/reductstore/reductstore/compare/v1.12.2...v1.12.3
->>>>>>> stable
 
 [1.12.2]: https://github.com/reductstore/reductstore/compare/v1.12.1...v1.12.2
 
