@@ -144,13 +144,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: reductstore-tests-${{ matrix.target }}
-          path: /tmp/tests
+          path: ./tmp/tests
 
       - name: Run tests
         shell: bash
         run: |
-          cd /tmp/tests
-          for f in *; do
+          set -e -x
+          for f in ./tmp/tests; do
             # exclude reduct_macros
             if [[ $f == *"reduct_macros"* ]]; then
               continue
