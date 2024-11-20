@@ -68,6 +68,7 @@ jobs:
                   compiler: "gcc-mingw-w64-x86-64"
                 - target: "x86_64-apple-darwin"
                   os: macos-latest
+                  compiler: "gcc"
 
 
     steps:
@@ -90,6 +91,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.compiler }}
+
+      - name: Install gcc
+        if : ${{ matrix.os == 'macos-latest' }}
+        run: |
+          brew install ${{ matrix.compiler }}
 
       - uses: ilammy/setup-nasm@v1
 
