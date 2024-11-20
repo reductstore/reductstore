@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-536: Update README.md, [PR-649](https://github.com/reductstore/reductstore/pull/649)
 - RS-193: Cross-compilation in CI/CD, [PR-651](https://github.com/reductstore/reductstore/pull/651)
 
+## [1.12.4] - 2024-11-20
+
+### Fixed
+
+- RS-539: Fix transaction log file descriptor, [PR-643](https://github.com/reductstore/reductstore/pull/643)
+- RS-540: Fix synchronization of a new block, [PR-652](https://github.com/reductstore/reductstore/pull/652)
+
 ## [1.12.3] - 2024-10-26
 
 ### Fixed
@@ -839,7 +846,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.4...HEAD
+
+[1.12.4]: https://github.com/reductstore/reductstore/compare/v1.12.3...v1.12.4
 
 [1.12.3]: https://github.com/reductstore/reductstore/compare/v1.12.2...v1.12.3
 
