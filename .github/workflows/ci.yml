@@ -149,7 +149,8 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          for f in /tmp/tests/*; do
+          cd /tmp/tests
+          for f in *; do
             # exclude reduct_macros
             if [[ $f == *"reduct_macros"* ]]; then
               continue
