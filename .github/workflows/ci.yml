@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -e -x
-          for f in ./tmp/tests; do
+          for f in ./tmp/tests/*; do
             # exclude reduct_macros
             if [[ $f == *"reduct_macros"* ]]; then
               continue
