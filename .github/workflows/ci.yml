@@ -61,13 +61,13 @@ jobs:
             target: [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-apple-darwin" ]
             include:
                 - target: "x86_64-unknown-linux-gnu"
-                  os: ubuntu-latest
+                  os: ubuntu-24.04
                   compiler: "gcc"
                 - target: "x86_64-pc-windows-gnu"
-                  os: ubuntu-latest
+                  os: windows-2022
                   compiler: "gcc-mingw-w64-x86-64"
                 - target: "x86_64-apple-darwin"
-                  os: macos-latest
+                  os: macos-13
                   compiler: "gcc"
 
 
@@ -128,13 +128,13 @@ jobs:
       - build_binaries
     strategy:
       matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        os: [ ubuntu-24.04, windows-2022, macos-13 ]
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-          - os: windows-latest
+          - os: windows-2022
             target: x86_64-pc-windows-gnu
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.os }}
@@ -149,7 +149,6 @@ jobs:
       - name: Run tests
         shell: bash
         run: run-parts --verbose target/${{ matrix.target }}/tests
-
 
 
 #
