@@ -54,19 +54,21 @@ jobs:
   build_binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
+    needs:
+      - rust_fmt
     strategy:
         matrix:
-            os: [ ubuntu-latest, macos-latest ] # we need build on macos to build for apple
+            target: [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-apple-darwin" ]
             include:
-                - os: ubuntu-latest
-                  target: "x86_64-unknown-linux-gnu"
+                - target: "x86_64-unknown-linux-gnu"
+                  os: ubuntu-latest
                   compiler: "gcc"
-                - os: ubuntu-latest
-                  target: "x86_64-pc-windows-gnu"
+                - target: "x86_64-pc-windows-gnu"
+                  os: ubuntu-latest
                   compiler: "gcc-mingw-w64-x86-64"
-                - os: macos-latest
-                  target: "x86_64-apple-darwin"
-                  compiler: ""
+                - target: "x86_64-apple-darwin"
+                  os: macos-latest
+
 
     steps:
       - uses: actions/checkout@v4
