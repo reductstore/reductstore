@@ -144,11 +144,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: reductstore-tests-${{ matrix.target }}
-          path: target/${{ matrix.target }}/tests
+          path: /tmp/tests
 
       - name: Run tests
         shell: bash
-        run: run-parts --verbose target/${{ matrix.target }}/tests
+        run: |
+          for f in /tmp/tests/*; do
+            bash "$f"
+          done
 
 
 #

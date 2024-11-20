@@ -837,14 +837,10 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-<<<<<<< HEAD
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.2...HEAD
-=======
 [Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.3...HEAD
 
 [1.12.3]: https://github.com/reductstore/reductstore/compare/v1.12.2...v1.12.3
->>>>>>> stable
 
 [1.12.2]: https://github.com/reductstore/reductstore/compare/v1.12.1...v1.12.2
 
