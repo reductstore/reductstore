@@ -53,17 +53,20 @@ jobs:
 
   build_binaries:
     name: Build Binaries
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
         matrix:
+            os: [ ubuntu-latest, macos-latest ] # we need build on macos to build for apple
             target: [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu" ]
             include:
-                - target: "x86_64-unknown-linux-gnu"
+                - os: ubuntu-latest
+                  target: "x86_64-unknown-linux-gnu"
                   compiler: "gcc"
-                - target: "x86_64-pc-windows-gnu"
+                - os: ubuntu-latest
+                  target: "x86_64-pc-windows-gnu"
                   compiler: "gcc-mingw-w64-x86-64"
-                - target: "x86_64-apple-darwin"
-                  compiler: "clang"
+                - os: macos-latest
+                  target: "x86_64-apple-darwin"
 
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +84,7 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       - name: Install gcc
+        if : ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.compiler }}
