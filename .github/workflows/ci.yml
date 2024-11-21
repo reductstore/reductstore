@@ -64,7 +64,7 @@ jobs:
             os: ubuntu-24.04
             compiler: "gcc"
           - target: "x86_64-pc-windows-gnu"
-            os: windows-2022
+            os: ubuntu-24.04
             compiler: "gcc-mingw-w64-x86-64"
           - target: "x86_64-apple-darwin"
             os: macos-13
