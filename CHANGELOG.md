@@ -15,11 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-528: Conditional query engine, [PR-640](https://github.com/reductstore/reductstore/pull/640)
 - RS-524: Check naming convention before creating or renaming entry, [PR-650](https://github.com/reductstore/reductstore/pull/650)
 
+### Changed
+
+- Update Web Console up to v1.8.0, [PR-655](https://github.com/reductstore/reductstore/pull/655)
+
 ### Internal
 
 - Fix CI actions after Ubuntu update, [PR-604](https://github.com/reductstore/reductstore/pull/604)
 - RS-536: Update README.md, [PR-649](https://github.com/reductstore/reductstore/pull/649)
 - RS-193: Cross-compilation in CI/CD, [PR-651](https://github.com/reductstore/reductstore/pull/651)
+
 
 ## [1.12.4] - 2024-11-20
 
