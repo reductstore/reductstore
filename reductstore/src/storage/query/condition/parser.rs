@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::And;
+use crate::storage::query::condition::operators::logical::{And, Or};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::BoxedNode;
@@ -90,6 +90,7 @@ impl Parser {
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         match operator {
             "$and" => Ok(And::boxed(operands)),
+            "$or" => Ok(Or::boxed(operands)),
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -191,6 +192,24 @@ mod tests {
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Invalid JSON value: []"
         );
+    }
+
+    mod parse_operators {
+        use super::*;
+        #[rstest]
+        #[case("$and", vec![true, true])]
+        #[case("$or", vec![true, true])]
+        fn test_parse_operator(
+            parser: Parser,
+            context: Context,
+            #[case] operator: &str,
+            #[case] operands: Vec<bool>,
+        ) {
+            let json =
+                serde_json::from_str(&format!(r#"{{"{}": {:?}}}"#, operator, operands)).unwrap();
+            let node = parser.parse(&json).unwrap();
+            assert!(node.apply(&context).unwrap().as_bool().unwrap());
+        }
     }
 
     #[fixture]
