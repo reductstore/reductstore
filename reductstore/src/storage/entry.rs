@@ -225,7 +225,7 @@ impl Entry {
 
         match try_unique(
             &format!("{}/{}", self.task_group(), oldest_block_id),
-            "try remove oldest block",
+            "try to remove oldest block",
             Duration::from_millis(5),
             move || {
                 let mut bm = block_manager.write().unwrap();
