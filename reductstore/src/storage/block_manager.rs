@@ -6,7 +6,7 @@ pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod wal;
 
 mod block_cache;
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 
@@ -15,7 +15,7 @@ use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
-use crate::storage::proto::{record, ts_to_us, Block as BlockProto, Record};
+use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use block_index::BlockIndex;
 use crc64fast::Digest;
@@ -130,9 +130,18 @@ impl BlockManager {
             }
 
             // parse the block descriptor
-            let block_from_disk = BlockProto::decode(Bytes::from(buf)).map_err(|e| {
+            let mut block_from_disk = BlockProto::decode(Bytes::from(buf)).map_err(|e| {
                 internal_server_error!("Failed to decode block descriptor {:?}: {}", path, e)
             })?;
+
+            if block_from_disk.begin_time.is_none() {
+                warn!(
+                    "Block descriptor {:?} has no begin time. It might be recovered from the WAL",
+                    path
+                );
+                block_from_disk.begin_time = Some(us_to_ts(&block_id));
+            }
+
             cached_block = Some(Arc::new(RwLock::new(block_from_disk.into())));
         }
 
