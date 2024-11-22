@@ -22,7 +22,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
@@ -226,6 +226,7 @@ impl Entry {
         match try_unique(
             &format!("{}/{}", self.task_group(), oldest_block_id),
             "try remove oldest block",
+            Duration::from_millis(5),
             move || {
                 let mut bm = block_manager.write().unwrap();
                 bm.remove_block(oldest_block_id)?;

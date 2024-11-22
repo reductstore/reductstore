@@ -12,7 +12,7 @@ use std::num::NonZero;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
-use std::thread::{available_parallelism, JoinHandle};
+use std::thread::{available_parallelism, sleep, JoinHandle};
 use std::time::Duration;
 pub(crate) use task_group::TaskGroup;
 pub(crate) use task_handle::TaskHandle;
@@ -84,17 +84,22 @@ where
 pub(crate) fn try_unique<T>(
     group_path: &str,
     description: &str,
+    timeout: Duration,
     task: impl FnOnce() -> T + Send + 'static,
 ) -> Option<TaskHandle<T>>
 where
     T: Send + 'static,
 {
     let path = group_path.split('/').collect::<Vec<&str>>();
-    if THREAD_POOL.task_group.lock().unwrap().is_ready(&path, true) {
-        Some(unique(group_path, description, task))
-    } else {
-        None
+    let now = std::time::Instant::now();
+    while now.elapsed() < timeout {
+        if THREAD_POOL.task_group.lock().unwrap().is_ready(&path, true) {
+            return Some(unique(group_path, description, task));
+        }
+        sleep(Duration::from_micros(10));
     }
+
+    None
 }
 
 pub(crate) enum GroupDepth {
