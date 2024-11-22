@@ -3,7 +3,7 @@
 
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::Entry;
-use log::debug;
+use log::{debug, info, warn};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::QuotaType;
 use reduct_base::{bad_request, internal_server_error};
@@ -55,7 +55,7 @@ impl Bucket {
                         break;
                     }
                     Err(e) => {
-                        debug!("Failed to remove oldest block from entry '{}': {}", name, e);
+                        warn!("Failed to remove oldest block from entry '{}': {}", name, e);
                     }
                 }
             }
