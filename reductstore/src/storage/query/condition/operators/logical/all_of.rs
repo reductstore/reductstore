@@ -5,29 +5,29 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 
-/// A node representing a logical Or operation.
-pub(crate) struct Or {
+/// A node representing a logical AND or ALL_OF operation.
+pub(crate) struct AllOf {
     operands: Vec<BoxedNode>,
 }
 
-impl Node for Or {
+impl Node for AllOf {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
         for operand in self.operands.iter() {
             let value = operand.apply(context)?;
-            if value.as_bool()? {
-                return Ok(Value::Bool(true));
+            if !value.as_bool()? {
+                return Ok(Value::Bool(false));
             }
         }
 
-        Ok(Value::Bool(false))
+        Ok(Value::Bool(true))
     }
 
     fn print(&self) -> String {
-        format!("Or({:?})", self.operands)
+        format!("AllOf({:?})", self.operands)
     }
 }
 
-impl Or {
+impl AllOf {
     pub fn new(operands: Vec<BoxedNode>) -> Self {
         Self { operands }
     }
@@ -46,8 +46,8 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let and = Or::new(vec![
-            Constant::boxed(Value::Bool(false)),
+        let and = AllOf::new(vec![
+            Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
             Constant::boxed(Value::String("xxxx".to_string())),
@@ -56,10 +56,10 @@ mod tests {
         let result = and.apply(&Context::default()).unwrap();
         assert_eq!(result, Value::Bool(true));
 
-        let and = Or::new(vec![
+        let and = AllOf::new(vec![
+            Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
-            Constant::boxed(Value::Bool(false)),
-            Constant::boxed(Value::Bool(false)),
+            Constant::boxed(Value::Bool(true)),
         ]);
 
         let result = and.apply(&Context::default()).unwrap();
@@ -68,9 +68,14 @@ mod tests {
 
     #[rstest]
     fn apply_empty() {
-        let and = Or::new(vec![]);
+        let result = AllOf::new(vec![]).apply(&Context::default()).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
 
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
+    #[rstest]
+    fn print() {
+        let and = AllOf::new(vec![Constant::boxed(Value::Bool(true))]);
+
+        assert_eq!(and.print(), "AllOf([Bool(true)])");
     }
 }

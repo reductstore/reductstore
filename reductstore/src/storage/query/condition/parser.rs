@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::logical::{And, Or};
+use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OnlyOneOf};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::BoxedNode;
@@ -34,7 +34,7 @@ impl Parser {
                 }
 
                 // We use AND operator to aggregate results from all expressions
-                Ok(And::boxed(expressions))
+                Ok(AllOf::boxed(expressions))
             }
 
             JsonValue::Bool(value) => Ok(Constant::boxed(Value::Bool(*value))),
@@ -89,8 +89,15 @@ impl Parser {
 
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         match operator {
-            "$and" => Ok(And::boxed(operands)),
-            "$or" => Ok(Or::boxed(operands)),
+            // Logical operators
+            "$and" => Ok(AllOf::boxed(operands)),
+            "$all_of" => Ok(AllOf::boxed(operands)),
+            "$or" => Ok(AnyOf::boxed(operands)),
+            "$any_of" => Ok(AnyOf::boxed(operands)),
+            "$not" => Ok(NoneOf::boxed(operands)),
+            "$none_of" => Ok(NoneOf::boxed(operands)),
+            "$xor" => Ok(OnlyOneOf::boxed(operands)),
+            "$only_one_of" => Ok(OnlyOneOf::boxed(operands)),
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -197,18 +204,25 @@ mod tests {
     mod parse_operators {
         use super::*;
         #[rstest]
-        #[case("$and", vec![true, true])]
-        #[case("$or", vec![true, true])]
+        #[case("$and", vec![true, false], Value::Bool(false))]
+        #[case("$all_of", vec![true, false], Value::Bool(false))]
+        #[case("$or", vec![true, false], Value::Bool(true))]
+        #[case("$any_of", vec![true, false], Value::Bool(true))]
+        #[case("$not", vec![true], Value::Bool(false))]
+        #[case("$none_of", vec![true, true], Value::Bool(false))]
+        #[case("$xor", vec![true, true], Value::Bool(false))]
+        #[case("$only_one_of", vec![true, true], Value::Bool(false))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
             #[case] operator: &str,
             #[case] operands: Vec<bool>,
+            #[case] expected: Value,
         ) {
             let json =
                 serde_json::from_str(&format!(r#"{{"{}": {:?}}}"#, operator, operands)).unwrap();
             let node = parser.parse(&json).unwrap();
-            assert!(node.apply(&context).unwrap().as_bool().unwrap());
+            assert_eq!(node.apply(&context).unwrap(), expected);
         }
     }
 
