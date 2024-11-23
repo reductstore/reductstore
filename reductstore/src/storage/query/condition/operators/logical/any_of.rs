@@ -46,38 +46,31 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let and = AnyOf::new(vec![
+        let or = AnyOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
             Constant::boxed(Value::String("xxxx".to_string())),
         ]);
+        assert_eq!(or.apply(&Context::default()).unwrap(), Value::Bool(true));
 
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(true));
-
-        let and = AnyOf::new(vec![
+        let or = AnyOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
         ]);
-
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(or.apply(&Context::default()).unwrap(), Value::Bool(false));
     }
 
     #[rstest]
     fn apply_empty() {
-        let and = AnyOf::new(vec![]);
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        let or = AnyOf::new(vec![]);
+        assert_eq!(or.apply(&Context::default()).unwrap(), Value::Bool(false));
     }
 
     #[rstest]
     fn print() {
-        let and = AnyOf::new(vec![Constant::boxed(Value::Bool(true))]);
-
-        let result = and.print();
-        assert_eq!(result, "AnyOf([Bool(true)])");
+        let or = AnyOf::new(vec![Constant::boxed(Value::Bool(true))]);
+        assert_eq!(or.print(), "AnyOf([Bool(true)])");
     }
 }

@@ -47,39 +47,33 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let and = OnlyOneOf::new(vec![
+        let xor = OnlyOneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
             Constant::boxed(Value::String("xxxx".to_string())),
         ]);
 
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(xor.apply(&Context::default()).unwrap(), Value::Bool(false));
 
-        let and = OnlyOneOf::new(vec![
+        let xor = OnlyOneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
         ]);
 
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(xor.apply(&Context::default()).unwrap(), Value::Bool(true));
     }
 
     #[rstest]
     fn apply_empty() {
-        let and = OnlyOneOf::new(vec![]);
-
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        let xor = OnlyOneOf::new(vec![]);
+        assert_eq!(xor.apply(&Context::default()).unwrap(), Value::Bool(false));
     }
 
     #[rstest]
     fn print() {
-        let and = OnlyOneOf::new(vec![Constant::boxed(Value::Bool(false))]);
-
-        let result = and.print();
-        assert_eq!(result, "OnlyOneOf([Bool(false)])");
+        let xor = OnlyOneOf::new(vec![Constant::boxed(Value::Bool(false))]);
+        assert_eq!(xor.print(), "OnlyOneOf([Bool(false)])");
     }
 }

@@ -46,39 +46,31 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let and = NoneOf::new(vec![
+        let not = NoneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
             Constant::boxed(Value::String("xxxx".to_string())),
         ]);
+        assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(false));
 
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
-
-        let and = NoneOf::new(vec![
+        let not = NoneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
         ]);
-
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(true));
     }
 
     #[rstest]
     fn apply_empty() {
-        let and = NoneOf::new(vec![]);
-
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        let not = NoneOf::new(vec![]);
+        assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(true));
     }
 
     #[rstest]
     fn print() {
-        let and = NoneOf::new(vec![Constant::boxed(Value::Bool(false))]);
-
-        let result = and.print();
-        assert_eq!(result, "NoneOf([Bool(false)])");
+        let not = NoneOf::new(vec![Constant::boxed(Value::Bool(false))]);
+        assert_eq!(not.print(), "NoneOf([Bool(false)])");
     }
 }

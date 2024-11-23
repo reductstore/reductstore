@@ -52,18 +52,14 @@ mod tests {
             Constant::boxed(Value::Float(-2.0)),
             Constant::boxed(Value::String("xxxx".to_string())),
         ]);
-
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(and.apply(&Context::default()).unwrap(), Value::Bool(true));
 
         let and = AllOf::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(true)),
         ]);
-
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(and.apply(&Context::default()).unwrap(), Value::Bool(false));
     }
 
     #[rstest]
@@ -75,7 +71,6 @@ mod tests {
     #[rstest]
     fn print() {
         let and = AllOf::new(vec![Constant::boxed(Value::Bool(true))]);
-
         assert_eq!(and.print(), "AllOf([Bool(true)])");
     }
 }
