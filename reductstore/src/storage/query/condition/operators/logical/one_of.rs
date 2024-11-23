@@ -5,12 +5,12 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 
-/// A node representing a logical XOR or ONLY_ONE_OF operation.
-pub(crate) struct OnlyOneOf {
+/// A node representing a logical XOR or ONE_OF operation.
+pub(crate) struct OneOf {
     operands: Vec<BoxedNode>,
 }
 
-impl Node for OnlyOneOf {
+impl Node for OneOf {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
         let mut count = 0;
         for operand in self.operands.iter() {
@@ -24,11 +24,11 @@ impl Node for OnlyOneOf {
     }
 
     fn print(&self) -> String {
-        format!("OnlyOneOf({:?})", self.operands)
+        format!("OneOf({:?})", self.operands)
     }
 }
 
-impl OnlyOneOf {
+impl OneOf {
     pub fn new(operands: Vec<BoxedNode>) -> Self {
         Self { operands }
     }
@@ -47,7 +47,7 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let xor = OnlyOneOf::new(vec![
+        let xor = OneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
@@ -56,7 +56,7 @@ mod tests {
 
         assert_eq!(xor.apply(&Context::default()).unwrap(), Value::Bool(false));
 
-        let xor = OnlyOneOf::new(vec![
+        let xor = OneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
@@ -67,13 +67,13 @@ mod tests {
 
     #[rstest]
     fn apply_empty() {
-        let xor = OnlyOneOf::new(vec![]);
+        let xor = OneOf::new(vec![]);
         assert_eq!(xor.apply(&Context::default()).unwrap(), Value::Bool(false));
     }
 
     #[rstest]
     fn print() {
-        let xor = OnlyOneOf::new(vec![Constant::boxed(Value::Bool(false))]);
-        assert_eq!(xor.print(), "OnlyOneOf([Bool(false)])");
+        let xor = OneOf::new(vec![Constant::boxed(Value::Bool(false))]);
+        assert_eq!(xor.print(), "OneOf([Bool(false)])");
     }
 }

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OnlyOneOf};
+use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::BoxedNode;
@@ -96,8 +96,8 @@ impl Parser {
             "$any_of" => Ok(AnyOf::boxed(operands)),
             "$not" => Ok(NoneOf::boxed(operands)),
             "$none_of" => Ok(NoneOf::boxed(operands)),
-            "$xor" => Ok(OnlyOneOf::boxed(operands)),
-            "$only_one_of" => Ok(OnlyOneOf::boxed(operands)),
+            "$xor" => Ok(OneOf::boxed(operands)),
+            "$one_of" => Ok(OneOf::boxed(operands)),
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -211,7 +211,7 @@ mod tests {
         #[case("$not", vec![true], Value::Bool(false))]
         #[case("$none_of", vec![true, true], Value::Bool(false))]
         #[case("$xor", vec![true, true], Value::Bool(false))]
-        #[case("$only_one_of", vec![true, true], Value::Bool(false))]
+        #[case("$one_of", vec![true, true], Value::Bool(false))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
