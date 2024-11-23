@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-527: POST /:bucket/:entry/q endpoint to query with JSON request, [PR-635](https://github.com/reductstore/reductstore/pull/635)
 - RS-528: Conditional query engine, [PR-640](https://github.com/reductstore/reductstore/pull/640)
 - RS-524: Check naming convention before creating or renaming entry, [PR-650](https://github.com/reductstore/reductstore/pull/650)
+- RS-545: Implement logical operators in conditional query, [PR-656](https://github.com/reductstore/reductstore/pull/656)
 
 ### Changed
 
