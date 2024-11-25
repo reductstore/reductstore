@@ -5,7 +5,7 @@ use crate::storage::query::condition::constant::Constant;
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::BoxedNode;
+use crate::storage::query::condition::{Boxed, BoxedNode};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Value as JsonValue};
@@ -34,7 +34,7 @@ impl Parser {
                 }
 
                 // We use AND operator to aggregate results from all expressions
-                Ok(AllOf::boxed(expressions))
+                Ok(AllOf::boxed(expressions)?)
             }
 
             JsonValue::Bool(value) => Ok(Constant::boxed(Value::Bool(*value))),
@@ -90,14 +90,17 @@ impl Parser {
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         match operator {
             // Logical operators
-            "$and" => Ok(AllOf::boxed(operands)),
-            "$all_of" => Ok(AllOf::boxed(operands)),
-            "$or" => Ok(AnyOf::boxed(operands)),
-            "$any_of" => Ok(AnyOf::boxed(operands)),
-            "$not" => Ok(NoneOf::boxed(operands)),
-            "$none_of" => Ok(NoneOf::boxed(operands)),
-            "$xor" => Ok(OneOf::boxed(operands)),
-            "$one_of" => Ok(OneOf::boxed(operands)),
+            "$and" => AllOf::boxed(operands),
+            "$all_of" => AllOf::boxed(operands),
+            "$or" => AnyOf::boxed(operands),
+            "$any_of" => AnyOf::boxed(operands),
+            "$not" => NoneOf::boxed(operands),
+            "$none_of" => NoneOf::boxed(operands),
+            "$xor" => OneOf::boxed(operands),
+            "$one_of" => OneOf::boxed(operands),
+
+            // comparison operators
+            "$eq" => unimplemented!(),
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
