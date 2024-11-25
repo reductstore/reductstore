@@ -641,6 +641,21 @@ mod tests {
         }
 
         #[rstest]
+        fn test_recover_being_time_from_id(mut block_manager: BlockManager, block_id: u64) {
+            block_manager.start_new_block(block_id, 1024).unwrap();
+            block_manager.block_cache.remove(&block_id);
+
+            let path = block_manager.path_to_desc(block_id);
+            std::fs::write(&path, b"").unwrap();
+
+            let result = block_manager.load_block(block_id);
+            assert!(
+                result.ok(),
+                "It's ok to recover begin time from block id for blocks which aren't synced yet"
+            );
+        }
+
+        #[rstest]
         fn test_start_reading(mut block_manager: BlockManager, block_id: u64) {
             let block = block_manager.start_new_block(block_id, 1024).unwrap();
             let block_id = block.read().unwrap().block_id();
