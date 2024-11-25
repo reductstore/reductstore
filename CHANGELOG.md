@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update Web Console up to v1.8.0, [PR-655](https://github.com/reductstore/reductstore/pull/655)
 
+
+### Fixed
+
+- RS-544: Fix keeping quota error, [PR-654](https://github.com/reductstore/reductstore/pull/654)
+
 ### Internal
 
 - Fix CI actions after Ubuntu update, [PR-604](https://github.com/reductstore/reductstore/pull/604)
