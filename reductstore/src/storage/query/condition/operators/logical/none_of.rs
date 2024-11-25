@@ -5,16 +5,16 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 
-/// A node representing a logical AND operation.
-pub(crate) struct And {
+/// A node representing a logical NOT or NONE_OF operation.
+pub(crate) struct NoneOf {
     operands: Vec<BoxedNode>,
 }
 
-impl Node for And {
+impl Node for NoneOf {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
         for operand in self.operands.iter() {
             let value = operand.apply(context)?;
-            if !value.as_bool()? {
+            if value.as_bool()? {
                 return Ok(Value::Bool(false));
             }
         }
@@ -23,17 +23,17 @@ impl Node for And {
     }
 
     fn print(&self) -> String {
-        format!("And({:?})", self.operands)
+        format!("NoneOf({:?})", self.operands)
     }
 }
 
-impl And {
+impl NoneOf {
     pub fn new(operands: Vec<BoxedNode>) -> Self {
-        And { operands }
+        Self { operands }
     }
 
     pub fn boxed(operands: Vec<BoxedNode>) -> BoxedNode {
-        Box::new(And::new(operands))
+        Box::new(Self::new(operands))
     }
 }
 
@@ -46,31 +46,31 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let and = And::new(vec![
-            Constant::boxed(Value::Bool(true)),
+        let not = NoneOf::new(vec![
+            Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
             Constant::boxed(Value::String("xxxx".to_string())),
         ]);
+        assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(false));
 
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(true));
-
-        let and = And::new(vec![
-            Constant::boxed(Value::Bool(true)),
+        let not = NoneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
-            Constant::boxed(Value::Bool(true)),
+            Constant::boxed(Value::Bool(false)),
+            Constant::boxed(Value::Bool(false)),
         ]);
-
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(true));
     }
 
     #[rstest]
     fn apply_empty() {
-        let and = And::new(vec![]);
+        let not = NoneOf::new(vec![]);
+        assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(true));
+    }
 
-        let result = and.apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Bool(true));
+    #[rstest]
+    fn print() {
+        let not = NoneOf::new(vec![Constant::boxed(Value::Bool(false))]);
+        assert_eq!(not.print(), "NoneOf([Bool(false)])");
     }
 }
