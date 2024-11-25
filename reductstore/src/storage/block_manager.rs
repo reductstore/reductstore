@@ -650,7 +650,7 @@ mod tests {
 
             let result = block_manager.load_block(block_id);
             assert!(
-                result.ok(),
+                result.is_ok(),
                 "It's ok to recover begin time from block id for blocks which aren't synced yet"
             );
         }
