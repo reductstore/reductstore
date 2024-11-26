@@ -4,7 +4,9 @@
 mod eq;
 mod gt;
 mod gte;
+mod lt;
 
 pub(crate) use eq::Eq;
 pub(crate) use gt::Gt;
 pub(crate) use gte::Gte;
+pub(crate) use lt::Lt;
