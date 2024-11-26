@@ -3,7 +3,7 @@
 
 use crate::storage::query::condition::constant::Constant;
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
-use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt};
+use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode};
@@ -105,6 +105,7 @@ impl Parser {
             "$gt" => Gt::boxed(operands),
             "$gte" => Gte::boxed(operands),
             "$lt" => Lt::boxed(operands),
+            "$lte" => Lte::boxed(operands),
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -223,6 +224,7 @@ mod tests {
         #[case("$gt", vec![true, false], Value::Bool(true))]
         #[case("$gte", vec![true, false], Value::Bool(true))]
         #[case("$lt", vec![true, false], Value::Bool(false))]
+        #[case("$lte", vec![true, false], Value::Bool(false))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
