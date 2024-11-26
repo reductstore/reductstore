@@ -37,6 +37,10 @@ pub(crate) trait Node {
     fn print(&self) -> String;
 }
 
+pub(crate) trait Boxed: Node {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError>;
+}
+
 impl Debug for dyn Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.print())

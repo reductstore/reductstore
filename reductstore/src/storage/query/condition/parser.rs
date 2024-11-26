@@ -2,10 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
+use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::BoxedNode;
+use crate::storage::query::condition::{Boxed, BoxedNode};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Value as JsonValue};
@@ -34,7 +35,7 @@ impl Parser {
                 }
 
                 // We use AND operator to aggregate results from all expressions
-                Ok(AllOf::boxed(expressions))
+                Ok(AllOf::boxed(expressions)?)
             }
 
             JsonValue::Bool(value) => Ok(Constant::boxed(Value::Bool(*value))),
@@ -90,14 +91,22 @@ impl Parser {
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         match operator {
             // Logical operators
-            "$and" => Ok(AllOf::boxed(operands)),
-            "$all_of" => Ok(AllOf::boxed(operands)),
-            "$or" => Ok(AnyOf::boxed(operands)),
-            "$any_of" => Ok(AnyOf::boxed(operands)),
-            "$not" => Ok(NoneOf::boxed(operands)),
-            "$none_of" => Ok(NoneOf::boxed(operands)),
-            "$xor" => Ok(OneOf::boxed(operands)),
-            "$one_of" => Ok(OneOf::boxed(operands)),
+            "$and" => AllOf::boxed(operands),
+            "$all_of" => AllOf::boxed(operands),
+            "$or" => AnyOf::boxed(operands),
+            "$any_of" => AnyOf::boxed(operands),
+            "$not" => NoneOf::boxed(operands),
+            "$none_of" => NoneOf::boxed(operands),
+            "$xor" => OneOf::boxed(operands),
+            "$one_of" => OneOf::boxed(operands),
+
+            // comparison operators
+            "$eq" => Eq::boxed(operands),
+            "$gt" => Gt::boxed(operands),
+            "$gte" => Gte::boxed(operands),
+            "$lt" => Lt::boxed(operands),
+            "$lte" => Lte::boxed(operands),
+            "$ne" => Ne::boxed(operands),
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -212,6 +221,12 @@ mod tests {
         #[case("$none_of", vec![true, true], Value::Bool(false))]
         #[case("$xor", vec![true, true], Value::Bool(false))]
         #[case("$one_of", vec![true, true], Value::Bool(false))]
+        #[case("$eq", vec![true, true], Value::Bool(true))]
+        #[case("$gt", vec![true, false], Value::Bool(true))]
+        #[case("$gte", vec![true, false], Value::Bool(true))]
+        #[case("$lt", vec![true, false], Value::Bool(false))]
+        #[case("$lte", vec![true, false], Value::Bool(false))]
+        #[case("$ne", vec![true, false], Value::Bool(true))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,

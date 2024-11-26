@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::{BoxedNode, Context, Node};
+use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 
 /// A node representing a logical XOR or ONE_OF operation.
@@ -28,13 +28,15 @@ impl Node for OneOf {
     }
 }
 
+impl Boxed for OneOf {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+        Ok(Box::new(Self::new(operands)))
+    }
+}
+
 impl OneOf {
     pub fn new(operands: Vec<BoxedNode>) -> Self {
         Self { operands }
-    }
-
-    pub fn boxed(operands: Vec<BoxedNode>) -> BoxedNode {
-        Box::new(Self::new(operands))
     }
 }
 
