@@ -57,6 +57,8 @@ pub struct QueryOptions {
     pub only_metadata: bool,
     /// Condition
     pub when: Option<Value>,
+    /// Strict condition
+    pub strict: bool,
 }
 
 impl From<QueryEntry> for QueryOptions {
@@ -71,6 +73,7 @@ impl From<QueryEntry> for QueryOptions {
             each_s: query.each_s,
             only_metadata: query.only_metadata.unwrap_or(false),
             when: query.when,
+            strict: query.strict.unwrap_or(false),
         }
     }
 }
@@ -87,6 +90,7 @@ impl Default for QueryOptions {
             each_s: None,
             only_metadata: false,
             when: None,
+            strict: false,
         }
     }
 }

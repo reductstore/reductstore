@@ -44,6 +44,8 @@ pub struct HistoricalQuery {
     filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>>,
     /// Request only metadata without the content.
     only_metadata: bool,
+    /// Strict mode
+    strict: bool,
 }
 
 impl HistoricalQuery {
@@ -86,6 +88,7 @@ impl HistoricalQuery {
             current_block: None,
             filters,
             only_metadata: options.only_metadata,
+            strict: options.strict,
         })
     }
 }
@@ -124,7 +127,7 @@ impl Query for HistoricalQuery {
                 let block_ref = bm.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
-                let mut found_records = self.filter_records_from_current_block();
+                let mut found_records = self.filter_records_from_current_block()?;
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
                 self.records_from_current_block.extend(found_records);
                 if !self.records_from_current_block.is_empty() {
@@ -154,18 +157,36 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    fn filter_records_from_current_block(&mut self) -> Vec<Record> {
-        let block = self.current_block.as_ref().unwrap().read().unwrap();
-        block
-            .record_index()
-            .values()
-            .filter(|record| {
-                self.filters
-                    .iter_mut()
-                    .all(|filter| filter.filter(record).unwrap_or(false))
-            }) // TODO: we need an option to make it strict
-            .map(|record| record.clone())
-            .collect()
+    fn filter_records_from_current_block(&mut self) -> Result<Vec<Record>, ReductError> {
+        let block = self.current_block.as_ref().unwrap().read()?;
+        let mut filtered_records = Vec::new();
+        for record in block.record_index().values() {
+            let mut include_record = true;
+            for filter in self.filters.iter_mut() {
+                match filter.filter(record) {
+                    Ok(false) => {
+                        include_record = false;
+                        break;
+                    }
+                    Ok(true) => {}
+                    Err(err) => {
+                        if self.strict {
+                            // in strict mode, we return an error if a filter fails
+                            return Err(err);
+                        }
+
+                        // in non-strict mode, we ignore the record with the failed filter
+                        include_record = false;
+                        break;
+                    }
+                }
+            }
+            if include_record {
+                filtered_records.push(record.clone());
+            }
+        }
+
+        Ok(filtered_records)
     }
 }
 
