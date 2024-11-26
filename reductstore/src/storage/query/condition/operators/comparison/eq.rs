@@ -44,4 +44,38 @@ impl Boxed for Eq {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use rstest::rstest;
+    use crate::storage::query::condition::constant::Constant;
+
+    #[rstest]
+    #[case(Value::Bool(true), Value::Bool(true), Value::Bool(true))]
+    #[case(Value::Bool(true), Value::Bool(false), Value::Bool(false))]
+    #[case(Value::Int(1), Value::Int(1), Value::Bool(true))]
+    #[case(Value::Int(1), Value::Int(2), Value::Bool(false))]
+    #[case(Value::Float(1.0), Value::Float(1.0), Value::Bool(true))]
+    #[case(Value::Float(1.0), Value::Float(2.0), Value::Bool(false))]
+    #[case(Value::String("a".to_string()), Value::String("a".to_string()), Value::Bool(true))]
+    #[case(Value::String("a".to_string()), Value::String("b".to_string()), Value::Bool(false))]
+    #[case(Value::Int(1), Value::Float(1.0), Value::Bool(true))]
+    #[case(Value::Int(1), Value::Float(2.0), Value::Bool(false))]
+    #[case(Value::Bool(true), Value::Int(1), Value::Bool(true))]
+    #[case(Value::Bool(true), Value::Int(2), Value::Bool(false))]
+    #[case(Value::Bool(true), Value::Float(0.0), Value::Bool(false))]
+    fn apply(
+        #[case] op_1: Value,
+        #[case] op_2: Value,
+        #[case] expected: Value,
+    ) {
+        let eq = Eq::new(Constant::boxed(op_1), Constant::boxed(op_2));
+        assert_eq!(eq.apply(&Context::default()).unwrap(), expected);
+    }
+
+    #[rstest]
+    fn print() {
+        let eq = Eq::new(Constant::boxed(Value::Bool(true)), Constant::boxed(Value::Bool(false)));
+        assert_eq!(eq.print(), "Eq(Bool(true), Bool(false))");
+    }
+
+}
