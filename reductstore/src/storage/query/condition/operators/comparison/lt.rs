@@ -6,7 +6,7 @@ use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
-/// A node representing a logical equality operation.
+/// Lt node representing a logical less than operation.
 pub(crate) struct Lt {
     op_1: BoxedNode,
     op_2: BoxedNode,
