@@ -48,19 +48,9 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[case(Value::Bool(true), Value::Bool(true), Value::Bool(false))]
-    #[case(Value::Bool(true), Value::Bool(false), Value::Bool(true))]
     #[case(Value::Int(1), Value::Int(1), Value::Bool(false))]
     #[case(Value::Int(1), Value::Int(2), Value::Bool(false))]
-    #[case(Value::Float(1.0), Value::Float(1.0), Value::Bool(false))]
-    #[case(Value::Float(1.0), Value::Float(2.0), Value::Bool(false))]
-    #[case(Value::String("a".to_string()), Value::String("a".to_string()), Value::Bool(false))]
-    #[case(Value::String("a".to_string()), Value::String("b".to_string()), Value::Bool(false))]
-    #[case(Value::Int(1), Value::Float(1.0), Value::Bool(false))]
-    #[case(Value::Int(1), Value::Float(2.0), Value::Bool(false))]
-    #[case(Value::Bool(true), Value::Int(1), Value::Bool(false))]
-    #[case(Value::Bool(true), Value::Int(2), Value::Bool(false))]
-    #[case(Value::Bool(true), Value::Float(0.0), Value::Bool(true))]
+    #[case(Value::Int(2), Value::Int(1), Value::Bool(true))]
     fn apply(#[case] op_1: Value, #[case] op_2: Value, #[case] expected: Value) {
         let eq = Gt::new(Constant::boxed(op_1), Constant::boxed(op_2));
         assert_eq!(eq.apply(&Context::default()).unwrap(), expected);

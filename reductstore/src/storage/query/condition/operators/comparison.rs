@@ -3,6 +3,8 @@
 
 mod eq;
 mod gt;
+mod gte;
 
 pub(crate) use eq::Eq;
 pub(crate) use gt::Gt;
+pub(crate) use gte::Gte;
