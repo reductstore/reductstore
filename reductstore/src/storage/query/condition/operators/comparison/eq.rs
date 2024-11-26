@@ -44,18 +44,14 @@ impl Boxed for Eq {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstest::rstest;
     use crate::storage::query::condition::constant::Constant;
+    use rstest::rstest;
 
     #[rstest]
     #[case(Value::Int(1), Value::Int(1), Value::Bool(true))]
     #[case(Value::Int(1), Value::Int(2), Value::Bool(false))]
     #[case(Value::Int(2), Value::Int(1), Value::Bool(false))]
-    fn apply(
-        #[case] op_1: Value,
-        #[case] op_2: Value,
-        #[case] expected: Value,
-    ) {
+    fn apply(#[case] op_1: Value, #[case] op_2: Value, #[case] expected: Value) {
         let eq = Eq::new(Constant::boxed(op_1), Constant::boxed(op_2));
         assert_eq!(eq.apply(&Context::default()).unwrap(), expected);
     }
@@ -64,13 +60,18 @@ mod tests {
     fn only_two_operands() {
         let operands: Vec<BoxedNode> = vec![Constant::boxed(Value::Bool(true))];
         let result = Eq::boxed(operands);
-        assert_eq!(result.err().unwrap(), unprocessable_entity!("$eq requires exactly two operands"));
+        assert_eq!(
+            result.err().unwrap(),
+            unprocessable_entity!("$eq requires exactly two operands")
+        );
     }
 
     #[rstest]
     fn print() {
-        let eq = Eq::new(Constant::boxed(Value::Bool(true)), Constant::boxed(Value::Bool(false)));
+        let eq = Eq::new(
+            Constant::boxed(Value::Bool(true)),
+            Constant::boxed(Value::Bool(false)),
+        );
         assert_eq!(eq.print(), "Eq(Bool(true), Bool(false))");
     }
-
 }

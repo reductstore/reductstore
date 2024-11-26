@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
+use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode};
