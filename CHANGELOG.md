@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-524: Check naming convention before creating or renaming entry, [PR-650](https://github.com/reductstore/reductstore/pull/650)
 - RS-545: Implement logical operators in conditional query, [PR-656](https://github.com/reductstore/reductstore/pull/656)
 - RS-529: Implement comparison operators in conditional query, [PR-662](https://github.com/reductstore/reductstore/pull/662)
+- RS-538: Add strict mode for conditional query, [PR-663](https://github.com/reductstore/reductstore/pull/663)
 
 ### Changed
 
