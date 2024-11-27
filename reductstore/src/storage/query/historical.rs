@@ -196,11 +196,11 @@ mod tests {
 
     use rstest::rstest;
 
-    use reduct_base::error::ErrorCode;
-
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{record, us_to_ts};
     use crate::storage::query::base::tests::block_manager;
+    use reduct_base::error::ErrorCode;
+    use reduct_base::{no_content, not_found};
 
     use super::*;
 
@@ -333,10 +333,7 @@ mod tests {
 
         assert_eq!(
             query.next(block_manager.clone()).err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
+            Some(no_content!("No content"))
         );
     }
 
@@ -391,6 +388,43 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+    }
+
+    #[rstest]
+    fn test_when_filter_strict(block_manager: Arc<RwLock<BlockManager>>) {
+        let mut query = HistoricalQuery::try_new(
+            0,
+            1001,
+            QueryOptions {
+                when: Some(serde_json::from_str(r#"{"$and": ["&NOT_EXIST"]}"#).unwrap()),
+                strict: true,
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            query.next(block_manager.clone()).err(),
+            Some(not_found!("Reference 'NOT_EXIST' not found"))
+        );
+    }
+
+    #[rstest]
+    fn test_when_filter_non_strict(block_manager: Arc<RwLock<BlockManager>>) {
+        let mut query = HistoricalQuery::try_new(
+            0,
+            1001,
+            QueryOptions {
+                when: Some(serde_json::from_str(r#"{"$and": ["&NOT_EXIST"]}"#).unwrap()),
+                strict: false,
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            query.next(block_manager.clone()).err(),
+            Some(no_content!("No content")),
+            "errored condition should be ignored in non-strict mode"
+        );
     }
 
     fn read_to_vector(

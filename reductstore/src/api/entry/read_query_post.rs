@@ -48,9 +48,13 @@ pub(crate) async fn read_query_json(
 mod tests {
     use super::*;
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use reduct_base::error::ErrorCode;
+    use crate::core::weak::Weak;
+    use crate::storage::query::QueryRx;
+    use reduct_base::error::{ErrorCode, ReductError};
     use reduct_base::msg::entry_api::QueryType;
     use rstest::*;
+    use serde_json::json;
+    use tokio::sync::RwLock;
 
     #[rstest]
     #[tokio::test]
@@ -66,37 +70,66 @@ mod tests {
             ..Default::default()
         };
 
-        let result = read_query_json(
-            State(Arc::clone(&components)),
-            path_to_entry_1,
-            request,
-            headers,
-        )
-        .await;
-
-        let query: QueryInfo = result.unwrap().into();
-        let entry = components
-            .storage
-            .get_bucket("bucket-1")
-            .unwrap()
-            .upgrade()
-            .unwrap()
-            .get_entry("entry-1")
-            .unwrap()
-            .upgrade()
-            .unwrap();
-
-        let rx = entry
-            .get_query_receiver(query.id)
+        let rx = get_query_receiver(path_to_entry_1, headers, components, request)
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
         let mut rx = rx.write().await;
         assert!(rx.recv().await.unwrap().unwrap().last());
-
         assert_eq!(
             rx.recv().await.unwrap().err().unwrap().status,
             ErrorCode::NoContent
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_strict_request(
+        #[future] components: Arc<Components>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let components = components.await;
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            when: Some(json!({
+                "$gt": [1, "&NOT_EXIST"]
+            })),
+            strict: Some(true),
+            ..Default::default()
+        };
+
+        let rx = get_query_receiver(path_to_entry_1, headers, components, request)
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut rx = rx.write().await;
+        assert_eq!(
+            rx.recv().await.unwrap().err().unwrap().to_string(),
+            "[NotFound] Reference 'NOT_EXIST' not found"
+        );
+    }
+
+    async fn get_query_receiver(
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+        components: Arc<Components>,
+        request: QueryEntry,
+    ) -> Result<Weak<RwLock<QueryRx>>, ReductError> {
+        let response =
+            read_query_json(State(components.clone()), path_to_entry_1, request, headers)
+                .await
+                .unwrap();
+        let query: QueryInfo = response.into();
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")?
+            .upgrade()?
+            .get_entry("entry-1")?
+            .upgrade()?;
+
+        entry.get_query_receiver(query.id)
     }
 }
