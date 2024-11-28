@@ -16,7 +16,7 @@ impl Node for Reference {
         let label_value = context
             .labels
             .get(self.name.as_str())
-            .ok_or(not_found!("Reference '{}' not found"))?;
+            .ok_or(not_found!("Reference '{}' not found", self.name))?;
 
         let value = Value::parse(label_value);
         Ok(value)
@@ -56,7 +56,11 @@ mod tests {
         let reference = Reference::new("label".to_string());
         let context = Context::default();
         let result = reference.apply(&context);
-        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("Reference 'label' not found"));
     }
 
     #[test]

@@ -85,4 +85,7 @@ pub struct QueryEntry {
 
     /// Conditional query
     pub when: Option<Value>,
+    /// Strict conditional query
+    /// If true, the query returns an error if any condition cannot be evaluated
+    pub strict: Option<bool>,
 }
