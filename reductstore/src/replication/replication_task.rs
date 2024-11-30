@@ -137,13 +137,19 @@ impl ReplicationTask {
                         }
 
                         info!("Creating a new transaction log: {:?}", path);
-                        thr_log_map.write().unwrap().insert(
-                            entry_name,
-                            RwLock::new(
-                                TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)
-                                    .unwrap(),
-                            ),
-                        );
+                        match TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE) {
+                            Ok(log) => {
+                                thr_log_map
+                                    .write()
+                                    .unwrap()
+                                    .insert(entry_name, RwLock::new(log));
+                            }
+
+                            Err(err) => {
+                                error!("Failed to create transaction log: {:?}", err);
+                                sleep(Duration::from_secs(10));
+                            }
+                        }
                     }
                 }
             }

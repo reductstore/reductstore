@@ -80,7 +80,7 @@ pub struct QueryEntry {
     pub ttl: Option<u64>,
     /// Retrieve only metadata
     pub only_metadata: Option<bool>,
-    /// Continue query from last result
+    /// Continuous query, it doesn't stop until the TTL is reached
     pub continuous: Option<bool>,
 
     /// Conditional query
