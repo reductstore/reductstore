@@ -450,7 +450,6 @@ mod tests {
         notification: TransactionNotification,
         settings: ReplicationSettings,
     ) {
-        Logger::init("DEBUG");
         remote_bucket
             .expect_write_batch()
             .return_const(Ok(ErrorRecordMap::new()));
