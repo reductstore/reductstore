@@ -68,7 +68,7 @@ byteorder = "1.5.0"
 crossbeam-channel = "0.5.0"
 num_cpus = "1.16.0"
 axum-macros = "0.4.2"
-aws-lc-rs="1.11.0"
+aws-lc-rs="1.11.1"
 
 [build-dependencies]
 prost-build = "0.13.1"
