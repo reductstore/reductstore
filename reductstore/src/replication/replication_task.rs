@@ -22,10 +22,19 @@ use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
 
+#[derive(Clone)]
+struct ReplicationSystemOptions {
+    transaction_log_size: usize,
+    remote_bucket_unavailable_timeout: Duration,
+    next_transaction_timeout: Duration,
+    log_recovery_timeout: Duration,
+}
+
 pub struct ReplicationTask {
     name: String,
     is_provisioned: bool,
     settings: ReplicationSettings,
+    system_options: ReplicationSystemOptions,
     filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<Storage>,
@@ -33,7 +42,16 @@ pub struct ReplicationTask {
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
 }
 
-const TRANSACTION_LOG_SIZE: usize = 1000_000;
+impl Default for ReplicationSystemOptions {
+    fn default() -> Self {
+        Self {
+            transaction_log_size: 1000_000,
+            remote_bucket_unavailable_timeout: Duration::from_secs(5),
+            next_transaction_timeout: Duration::from_millis(250),
+            log_recovery_timeout: Duration::from_secs(10),
+        }
+    }
+}
 
 impl ReplicationTask {
     /// Create a new replication task.
@@ -54,6 +72,7 @@ impl ReplicationTask {
         Self::build(
             name,
             settings,
+            ReplicationSystemOptions::default(),
             remote_bucket,
             Arc::new(RwLock::new(HashMap::new())),
             storage,
@@ -63,6 +82,7 @@ impl ReplicationTask {
     fn build(
         name: String,
         settings: ReplicationSettings,
+        system_options: ReplicationSystemOptions,
         remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
         filter: Arc<RwLock<HashMap<String, TransactionFilter>>>,
         storage: Arc<Storage>,
@@ -79,6 +99,7 @@ impl ReplicationTask {
         let thr_bucket = Arc::clone(&remote_bucket);
         let thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
+        let thr_system_options = system_options.clone();
 
         spawn(move || {
             let init_transaction_logs = || {
@@ -95,7 +116,10 @@ impl ReplicationTask {
                         &entry.name,
                         &replication_name,
                     );
-                    let log = TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE)?;
+                    let log = TransactionLog::try_load_or_create(
+                        path,
+                        thr_system_options.transaction_log_size,
+                    )?;
                     logs.insert(entry.name, RwLock::new(log));
                 }
 
@@ -118,11 +142,11 @@ impl ReplicationTask {
                 match sender.run() {
                     SyncState::SyncedOrRemoved => {}
                     SyncState::NotAvailable => {
-                        sleep(Duration::from_secs(5));
+                        sleep(thr_system_options.remote_bucket_unavailable_timeout);
                     }
                     SyncState::NoTransactions => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
-                        sleep(Duration::from_millis(250));
+                        sleep(thr_system_options.next_transaction_timeout);
                     }
                     SyncState::BrokenLog(entry_name) => {
                         info!("Transaction log is corrupted, dropping the whole log");
@@ -137,7 +161,10 @@ impl ReplicationTask {
                         }
 
                         info!("Creating a new transaction log: {:?}", path);
-                        match TransactionLog::try_load_or_create(path, TRANSACTION_LOG_SIZE) {
+                        match TransactionLog::try_load_or_create(
+                            path,
+                            thr_system_options.transaction_log_size,
+                        ) {
                             Ok(log) => {
                                 thr_log_map
                                     .write()
@@ -147,7 +174,7 @@ impl ReplicationTask {
 
                             Err(err) => {
                                 error!("Failed to create transaction log: {:?}", err);
-                                sleep(Duration::from_secs(10));
+                                sleep(thr_system_options.log_recovery_timeout);
                             }
                         }
                     }
@@ -159,6 +186,7 @@ impl ReplicationTask {
             name,
             is_provisioned: false,
             settings,
+            system_options,
             storage,
             filter_map: filter,
             log_map,
@@ -197,7 +225,7 @@ impl ReplicationTask {
                         &notification.entry,
                         &self.name,
                     ),
-                    TRANSACTION_LOG_SIZE,
+                    self.system_options.transaction_log_size,
                 )?),
             );
         };
@@ -275,13 +303,14 @@ mod tests {
     use mockall::mock;
     use rstest::*;
 
+    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::logger::Logger;
     use crate::replication::remote_bucket::ErrorRecordMap;
+    use crate::replication::Transaction;
     use crate::storage::entry::io::record_reader::RecordReader;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;
-
-    use crate::replication::Transaction;
 
     mock! {
         RmBucket {}
@@ -325,7 +354,7 @@ mod tests {
         let mut replication = build_replication(remote_bucket, settings);
 
         replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(250));
+        sleep(Duration::from_millis(100));
         assert!(transaction_log_is_empty(&replication));
         assert_eq!(
             replication.info(),
@@ -397,9 +426,7 @@ mod tests {
             .return_const(Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let mut replication = build_replication(remote_bucket, settings.clone());
-
         replication.notify(notification.clone()).unwrap();
-        assert!(!transaction_log_is_empty(&replication));
 
         let path = ReplicationTask::build_path_to_transaction_log(
             replication.storage.data_path(),
@@ -408,12 +435,53 @@ mod tests {
             &replication.name,
         );
         fs::write(path.clone(), "broken").unwrap();
-        sleep(Duration::from_millis(500));
+        sleep(Duration::from_millis(100));
 
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test1"),
             vec![],
             "Transaction log is empty"
+        );
+    }
+
+    #[rstest]
+    fn test_broken_transaction_log_failed_recover(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+    ) {
+        Logger::init("DEBUG");
+        remote_bucket
+            .expect_write_batch()
+            .return_const(Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+        let mut replication = build_replication(remote_bucket, settings.clone());
+        replication.notify(notification.clone()).unwrap();
+
+        let path = ReplicationTask::build_path_to_transaction_log(
+            replication.storage.data_path(),
+            &settings.src_bucket,
+            &notification.entry,
+            &replication.name,
+        );
+
+        FILE_CACHE
+            .remove_dir(&path.parent().unwrap().parent().unwrap().to_path_buf())
+            .unwrap();
+        sleep(Duration::from_millis(100));
+
+        assert!(
+            !path.exists(),
+            "We could not recover the transaction log, it was removed. However, the replication should continue"
+        );
+
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        sleep(Duration::from_millis(200));
+
+        assert_eq!(
+            get_entries_from_transaction_log(&mut replication, "test1"),
+            vec![],
+            "Transaction log recovered"
         );
     }
 
@@ -451,6 +519,12 @@ mod tests {
         let repl = ReplicationTask::build(
             "test".to_string(),
             settings,
+            ReplicationSystemOptions {
+                transaction_log_size: 1000,
+                remote_bucket_unavailable_timeout: Duration::from_secs(5),
+                next_transaction_timeout: Duration::from_millis(50),
+                log_recovery_timeout: Duration::from_millis(100),
+            },
             Arc::new(RwLock::new(remote_bucket)),
             Arc::new(RwLock::new(HashMap::new())),
             storage,

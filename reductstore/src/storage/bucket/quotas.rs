@@ -55,7 +55,7 @@ impl Bucket {
                         break;
                     }
                     Err(e) => {
-                        warn!("Failed to remove oldest block from entry '{}': {}", name, e);
+                        debug!("Failed to remove oldest block from entry '{}': {}", name, e);
                     }
                 }
             }
