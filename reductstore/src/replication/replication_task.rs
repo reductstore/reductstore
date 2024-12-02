@@ -304,7 +304,7 @@ mod tests {
     use rstest::*;
 
     use crate::core::file_cache::FILE_CACHE;
-    use crate::core::logger::Logger;
+
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
     use crate::storage::entry::io::record_reader::RecordReader;
