@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-544: Fix keeping quota error, [PR-654](https://github.com/reductstore/reductstore/pull/654)
 - Fix replication crash if bucket is removed, [PR-664](https://github.com/reductstore/reductstore/pull/664)
+- Fix order of condition operands in object syntax, [PR-670](https://github.com/reductstore/reductstore/pull/670)
 
 ### Internal
 

@@ -84,7 +84,7 @@ impl Parser {
 
         let (operator, operand) = op_right_operand.iter().next().unwrap();
         let right_operand = self.parse(operand)?;
-        let operands = vec![right_operand, left_operand];
+        let operands = vec![left_operand, right_operand];
         Self::parse_operator(operator, operands)
     }
 
@@ -130,16 +130,16 @@ mod tests {
 
     #[rstest]
     fn test_parser_array_syntax(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": [true, {"$and": [true, true]}]}"#).unwrap();
+        let json = serde_json::from_str(r#"{"$and": [true, {"$gt": [20, 10]}]}"#).unwrap();
         let node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parser_object_syntax(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&label": {"$and": true}}"#).unwrap();
+        let json = serde_json::from_str(r#"{"&label": {"$gt": 10}}"#).unwrap();
         let node = parser.parse(&json).unwrap();
-        let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
+        let context = Context::new(HashMap::from_iter(vec![("label", "20")]));
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
