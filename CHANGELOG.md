@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.13.0] - 2024-12-04
+
 ### Added
 
 - RS-439: Snap hooks for new configuration parameters, [PR-628](https://github.com/reductstore/reductstore/pull/628)
@@ -861,7 +864,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.12.4...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.0...HEAD
+
+[1.13.0]: https://github.com/reductstore/reductstore/compare/v1.12.4...v1.13.0
 
 [1.12.4]: https://github.com/reductstore/reductstore/compare/v1.12.3...v1.12.4
 
