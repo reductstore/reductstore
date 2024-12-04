@@ -61,28 +61,38 @@ For a more in-depth guide, visit the **[Getting Started](https://reduct.store/do
 After initializing the instance, dive in with one of our **[Client SDKs](#client-sdks)** to write or retrieve data. To illustrate, here's a Python sample:
 
 ```python
-import time
-import asyncio
-from reduct import Client, Bucket
+from reduct import Client, BucketSettings, QuotaType
 
 async def main():
-    # Create a client for interacting with a ReductStore service
-    async with Client("http://localhost:8383") as client:
-        # Create a bucket and store a reference to it in the `bucket` variable
-        bucket: Bucket = await client.create_bucket("my-bucket", exist_ok=True)
+    # 1. Create a ReductStore client
+    async with Client("http://localhost:8383", api_token="my-token") as client:
+        # 2. Get or create a bucket with 1Gb quota
+        bucket = await client.create_bucket(
+            "my-bucket",
+            BucketSettings(quota_type=QuotaType.FIFO, quota_size=1_000_000_000),
+            exist_ok=True,
+        )
 
-        # Write data to the bucket
-        ts = time.time_ns() / 1000
-        await bucket.write("entry-1", b"Hey!!", ts)
+        # 3. Write some data with timestamps and labels to the 'entry-1' entry
+        await bucket.write("sensor-1", b"<Blob data>", timestamp="2024-01-01T10:00:00Z",
+                           labels={"score": 10})
+        await bucket.write("sensor-1", b"<Blob data>", timestamp="2024-01-01T10:00:01Z",
+                           labels={"score": 20})
 
-        # Read data from the bucket
-        async with bucket.read("entry-1", ts) as record:
-            data = await record.read_all()
-            print(data)
+        # 4. Query the data by time range and condition
+        async for record in bucket.query("sensor-1",
+                                         start="2024-01-01T10:00:00Z",
+                                         end="2024-01-01T10:00:02Z",
+                                         when={"&score": {"$gt": 20}}):
+            print(f"Record timestamp: {record.timestamp}")
+            print(f"Record size: {record.size}")
+            print(await record.read_all())
 
-# Run the main function
-loop = asyncio.get_event_loop()
-loop.run_until_complete(main())
+
+# 5. Run the main function
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
 ```
 
 ## Client SDKs
