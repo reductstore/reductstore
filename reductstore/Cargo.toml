@@ -45,7 +45,7 @@ regex = "1.11.1"
 bytes = "1.9.0"
 axum = { version = "0.7.9", features = ["default", "macros"] }
 axum-extra = { version = "0.9.6", features = ["default", "typed-header"] }
-tokio = { version = "1.41.1", features = ["full"] }
+tokio = { version = "1.42.0", features = ["full"] }
 tokio-util = "0.7.12"
 tokio-stream = "0.1.17"
 hyper = { version = "1.5.1", features = ["full"] }
