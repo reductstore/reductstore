@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+### Changed
+
+- Update Web Console up to v1.8.1 with HARD quota
+
 ## [1.13.0] - 2024-12-04
 
 ### Added
