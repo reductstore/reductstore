@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2024-12-16
+
+### Changed
+
+- Update Web Console up to v1.8.1 with HARD quota
 
 ## [1.13.0] - 2024-12-04
 
@@ -864,7 +869,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.1...HEAD
+
+[1.13.1]: https://github.com/reductstore/reductstore/compare/v1.13.0...v1.13.1
 
 [1.13.0]: https://github.com/reductstore/reductstore/compare/v1.12.4...v1.13.0
 
