@@ -30,7 +30,7 @@ reduct-base = { path = "../reduct_base", version = "1.11.0" }
 reduct-macros = { path = "../reduct_macros", version = "1.11.0" }
 
 log = "0.4.22"
-chrono = { version = "0.4.38", features = ["serde"] }
+chrono = { version = "0.4.39", features = ["serde"] }
 thread-id = "5.0.0"
 zip = "2.2.1"
 tempfile = "3.14.0"
@@ -74,7 +74,7 @@ aws-lc-rs="1.11.1"
 prost-build = "0.13.1"
 prost-wkt-build = "0.6.0"
 reqwest = { version = "0.12.9", default-features = false, features = ["rustls-tls", "blocking"] }
-chrono = "0.4.38"
+chrono = "0.4.39"
 
 [dev-dependencies]
 mockall = "0.13.1"
