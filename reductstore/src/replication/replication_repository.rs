@@ -638,8 +638,8 @@ mod tests {
         #[rstest]
         fn test_from_proto(settings: ReplicationSettings) {
             let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, settings);
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, restored_settings);
         }
 
         #[rstest]
@@ -647,8 +647,8 @@ mod tests {
             let mut settings = settings;
             settings.each_n = Some(10);
             let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, settings);
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, restored_settings);
         }
 
         #[rstest]
@@ -656,8 +656,26 @@ mod tests {
             let mut settings = settings;
             settings.each_s = Some(10.0);
             let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, settings);
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, restored_settings);
+        }
+
+        #[rstest]
+        fn test_from_when_proto(settings: ReplicationSettings) {
+            let mut settings = settings;
+            settings.when = Some(serde_json::json!({"$and": [true, true]}));
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(settings, restored_settings);
+        }
+
+        #[rstest]
+        fn test_from_when_proto_invalid(settings: ReplicationSettings) {
+            let mut proto_settings = ProtoReplicationSettings::from(settings.clone());
+            proto_settings.when = Some("invalid".to_string());
+
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert!(restored_settings.when.is_none());
         }
     }
 

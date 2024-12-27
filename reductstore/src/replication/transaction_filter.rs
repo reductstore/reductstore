@@ -288,6 +288,37 @@ mod tests {
         assert!(!filter.filter(&notification));
     }
 
+    #[rstest]
+    fn test_transaction_filter_when_non_strict(notification: TransactionNotification) {
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                when: Some(serde_json::json!({"$eq": ["&z", "y"]})),
+                ..ReplicationSettings::default()
+            },
+        );
+
+        assert!(
+            !filter.filter(&notification),
+            "label doesn't exist but we consider it as false"
+        );
+    }
+
+    #[rstest]
+    fn test_transaction_filter_invalid_when(notification: TransactionNotification) {
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y", "z"]})),
+                ..ReplicationSettings::default()
+            },
+        );
+
+        assert!(filter.query_filters.is_empty());
+    }
+
     #[fixture]
     fn notification() -> TransactionNotification {
         let labels = vec![
