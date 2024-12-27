@@ -8,6 +8,7 @@ use crate::auth::token_repository::{create_token_repository, ManageTokens};
 use crate::core::env::{Env, GetEnv};
 use crate::license::parse_license;
 use crate::replication::{create_replication_repo, ManageReplications};
+use crate::storage::query::condition::Parser;
 use crate::storage::storage::Storage;
 use bytesize::ByteSize;
 use log::{error, info, warn};
@@ -285,6 +286,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
                 exclude: Labels::default(),
                 each_n: None,
                 each_s: None,
+                when: None,
             };
             replications.insert(id, (name, replication));
         }
@@ -341,10 +343,18 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
+                warn!(
+                    "The include parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
+                    id
+                );
                 replication.include.insert(key, value);
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
+                warn!(
+                    "The exclude parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
+                    id
+                );
                 replication.exclude.insert(key, value);
             }
 
@@ -356,6 +366,12 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
             {
                 replication.each_s = Some(each_s);
+            }
+
+            if let Some(when) =
+                env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
+            {
+                replication.when = Some(when);
             }
         }
 
@@ -811,6 +827,10 @@ mod tests {
                 .expect_get()
                 .with(eq("RS_REPLICATION_1_EACH_S"))
                 .return_const(Ok("0.5".to_string()));
+            env_with_replications
+                .expect_get()
+                .with(eq("RS_REPLICATION_1_WHEN"))
+                .return_const(Ok(r#"{"$and":[true, false]}"#.to_string()));
 
             env_with_replications
                 .expect_get()
@@ -836,6 +856,10 @@ mod tests {
             );
             assert_eq!(replication.settings().each_n, Some(10));
             assert_eq!(replication.settings().each_s, Some(0.5));
+            assert_eq!(
+                replication.settings().when,
+                Some(serde_json::json!({"$and": [true, false]}))
+            );
             assert!(replication.is_provisioned());
         }
 

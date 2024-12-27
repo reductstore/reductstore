@@ -5,6 +5,7 @@
 use crate::msg::diagnostics::Diagnostics;
 use crate::Labels;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -33,6 +34,9 @@ pub struct ReplicationSettings {
     /// Replication a record every S seconds
     #[serde(default)]
     pub each_s: Option<f64>,
+    /// When condition
+    #[serde(default)]
+    pub when: Option<Value>,
 }
 
 /// Replication info

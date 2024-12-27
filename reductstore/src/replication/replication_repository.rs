@@ -9,6 +9,7 @@ use crate::replication::proto::{
 };
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
+use crate::storage::query::condition::Parser;
 use crate::storage::storage::Storage;
 use bytes::Bytes;
 use log::{debug, error};
@@ -18,6 +19,7 @@ use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
 use reduct_base::{not_found, unprocessable_entity};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -45,6 +47,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
                 .collect(),
             each_s: settings.each_s.unwrap_or(0.0),
             each_n: settings.each_n.unwrap_or(0),
+            when: settings.when.map(|value| value.to_string()),
         }
     }
 }
@@ -74,6 +77,20 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
             },
             each_n: if settings.each_n > 0 {
                 Some(settings.each_n)
+            } else {
+                None
+            },
+            when: if let Some(when) = settings.when {
+                match serde_json::from_str(&when) {
+                    Ok(value) => Some(value),
+                    Err(err) => {
+                        error!(
+                            "Failed to parse 'when' field: {} in replication settings: {}",
+                            err, when
+                        );
+                        None
+                    }
+                }
             } else {
                 None
             },
@@ -284,6 +301,17 @@ impl ReplicationRepository {
                 "Source and destination buckets must be different",
             ));
         }
+
+        // check syntax of when condition
+        if let Some(when) = &settings.when {
+            if let Err(e) = Parser::new().parse(when) {
+                return Err(unprocessable_entity!(
+                    "Invalid replication condition: {}",
+                    e
+                ));
+            }
+        }
+
         let replication =
             ReplicationTask::new(name.to_string(), settings, Arc::clone(&self.storage));
         self.replications.insert(name.to_string(), replication);
@@ -378,6 +406,22 @@ mod tests {
                     "Source bucket 'bucket-2' for replication 'test' does not exist"
                 )),
                 "Should not create replication with non existing source bucket"
+            );
+        }
+
+        #[rstest]
+        fn test_replication_with_invalid_when_condition(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut settings = settings;
+            settings.when = Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]}));
+            assert_eq!(
+                repo.create_replication("test", settings),
+                Err(unprocessable_entity!(
+                    "Invalid replication condition: [UnprocessableEntity] Operator '$UNKNOWN_OP' not supported"
+                )),
+                "Should not create replication with invalid when condition"
             );
         }
 
@@ -630,6 +674,7 @@ mod tests {
             exclude: Labels::default(),
             each_n: None,
             each_s: None,
+            when: None,
         }
     }
 

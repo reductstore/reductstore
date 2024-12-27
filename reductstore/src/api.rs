@@ -231,6 +231,7 @@ mod tests {
                     exclude: Default::default(),
                     each_n: None,
                     each_s: None,
+                    when: None,
                 },
             )
             .unwrap();
