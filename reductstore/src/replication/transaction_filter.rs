@@ -306,8 +306,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_transaction_filter_invalid_when(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(
+    fn test_transaction_filter_invalid_when() {
+        let filter = TransactionFilter::new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
