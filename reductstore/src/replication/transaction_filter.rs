@@ -294,7 +294,7 @@ mod tests {
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
-                when: Some(serde_json::json!({"$eq": ["&z", "y"]})),
+                when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
                 ..ReplicationSettings::default()
             },
         );
@@ -317,6 +317,18 @@ mod tests {
         );
 
         assert!(filter.query_filters.is_empty());
+    }
+
+    mod filter_point {
+
+        use super::*;
+
+        #[rstest]
+        fn test_filter_point(notification: TransactionNotification) {
+            assert_eq!(notification.timestamp(), 0);
+            assert_eq!(notification.labels(), &notification.labels);
+            assert_eq!(notification.state(), &0);
+        }
     }
 
     #[fixture]
