@@ -6,9 +6,10 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 
 use crate::replication::TransactionNotification;
 use crate::storage::proto::record::Label;
+use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter,
-    RecordFilter,
+    RecordFilter, WhenFilter,
 };
 
 /// Filter for transaction notifications.
@@ -41,7 +42,7 @@ impl TransactionFilter {
     /// * `entries` - Entries to filter. Supports wildcards. If empty, all entries are matched.
     /// * `include` - Labels to include. All must match. If empty, all labels are matched.
     /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
-    pub(super) fn new(settings: ReplicationSettings) -> Self {
+    pub(super) fn new(name: &str, settings: ReplicationSettings) -> Self {
         let mut query_filters: Vec<Box<dyn RecordFilter<TransactionNotification> + Send + Sync>> =
             vec![];
         if !settings.include.is_empty() {
@@ -58,6 +59,18 @@ impl TransactionFilter {
 
         if let Some(each_s) = settings.each_s {
             query_filters.push(Box::new(EachSecondFilter::new(each_s)));
+        }
+
+        if let Some(when) = settings.when {
+            match Parser::new().parse(&when) {
+                Ok(condition) => {
+                    query_filters.push(Box::new(WhenFilter::new(condition)));
+                }
+                Err(err) => warn!(
+                    "Error parsing when condition in {} replication task: {}",
+                    name, err
+                ),
+            }
         }
 
         Self {
@@ -104,7 +117,10 @@ impl TransactionFilter {
         for filter in self.query_filters.iter_mut() {
             match filter.filter(notification) {
                 Ok(false) => return false,
-                Err(err) => warn!("Error filtering transaction: {}", err),
+                Err(err) => {
+                    warn!("Error filtering transaction notification: {}", err);
+                    return false;
+                }
                 _ => {}
             }
         }
@@ -124,19 +140,25 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(ReplicationSettings {
-            src_bucket: "bucket".to_string(),
-            ..ReplicationSettings::default()
-        });
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                ..ReplicationSettings::default()
+            },
+        );
         assert!(filter.filter(&notification));
     }
 
     #[rstest]
     fn test_transaction_filter_bucket(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(ReplicationSettings {
-            src_bucket: "other".to_string(),
-            ..ReplicationSettings::default()
-        });
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "other".to_string(),
+                ..ReplicationSettings::default()
+            },
+        );
         assert!(!filter.filter(&notification));
     }
 
@@ -151,11 +173,14 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(ReplicationSettings {
-            src_bucket: "bucket".to_string(),
-            entries,
-            ..ReplicationSettings::default()
-        });
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                entries,
+                ..ReplicationSettings::default()
+            },
+        );
         assert_eq!(filter.filter(&notification), expected);
     }
 
@@ -171,11 +196,14 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(ReplicationSettings {
-            src_bucket: "bucket".to_string(),
-            include: Labels::from_iter(include),
-            ..ReplicationSettings::default()
-        });
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                include: Labels::from_iter(include),
+                ..ReplicationSettings::default()
+            },
+        );
         assert_eq!(filter.filter(&notification), expected);
     }
 
@@ -190,21 +218,27 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(ReplicationSettings {
-            src_bucket: "bucket".to_string(),
-            exclude: Labels::from_iter(exclude),
-            ..ReplicationSettings::default()
-        });
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                exclude: Labels::from_iter(exclude),
+                ..ReplicationSettings::default()
+            },
+        );
         assert_eq!(filter.filter(&notification), expected);
     }
 
     #[rstest]
     fn test_transaction_filter_each_n(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(ReplicationSettings {
-            src_bucket: "bucket".to_string(),
-            each_n: Some(2),
-            ..ReplicationSettings::default()
-        });
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                each_n: Some(2),
+                ..ReplicationSettings::default()
+            },
+        );
 
         assert!(filter.filter(&notification));
         assert!(!filter.filter(&notification));
@@ -213,11 +247,14 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter_each_s(mut notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(ReplicationSettings {
-            src_bucket: "bucket".to_string(),
-            each_s: Some(1.0),
-            ..ReplicationSettings::default()
-        });
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                each_s: Some(1.0),
+                ..ReplicationSettings::default()
+            },
+        );
 
         assert!(filter.filter(&notification));
         notification.event = Transaction::WriteRecord(1);
@@ -226,6 +263,72 @@ mod tests {
         assert!(!filter.filter(&notification));
         notification.event = Transaction::WriteRecord(1000_002);
         assert!(filter.filter(&notification));
+    }
+
+    #[rstest]
+    fn test_transaction_filter_when(notification: TransactionNotification) {
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                when: Some(serde_json::json!({"$eq": ["&x", "y"]})),
+                ..ReplicationSettings::default()
+            },
+        );
+
+        assert!(filter.filter(&notification));
+        filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                when: Some(serde_json::json!({"$eq": ["&x", "z"]})),
+                ..ReplicationSettings::default()
+            },
+        );
+        assert!(!filter.filter(&notification));
+    }
+
+    #[rstest]
+    fn test_transaction_filter_when_non_strict(notification: TransactionNotification) {
+        let mut filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
+                ..ReplicationSettings::default()
+            },
+        );
+
+        assert!(
+            !filter.filter(&notification),
+            "label doesn't exist but we consider it as false"
+        );
+    }
+
+    #[rstest]
+    fn test_transaction_filter_invalid_when() {
+        let filter = TransactionFilter::new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y", "z"]})),
+                ..ReplicationSettings::default()
+            },
+        );
+
+        assert!(filter.query_filters.is_empty());
+    }
+
+    mod filter_point {
+
+        use super::*;
+
+        #[rstest]
+        fn test_filter_point(notification: TransactionNotification) {
+            assert_eq!(notification.timestamp(), 0);
+            assert_eq!(notification.labels(), &notification.labels);
+            assert_eq!(notification.state(), &0);
+        }
     }
 
     #[fixture]

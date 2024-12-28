@@ -646,6 +646,7 @@ mod tests {
             exclude: Labels::new(),
             each_n: None,
             each_s: None,
+            when: None,
         }
     }
 }
