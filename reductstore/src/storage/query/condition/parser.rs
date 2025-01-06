@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
+use crate::storage::query::condition::operators::arithmetic::Add;
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
 use crate::storage::query::condition::reference::Reference;
@@ -90,6 +91,9 @@ impl Parser {
 
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         match operator {
+            // Arithmetic operators
+            "$add" => Add::boxed(operands),
+
             // Logical operators
             "$and" => AllOf::boxed(operands),
             "$all_of" => AllOf::boxed(operands),
@@ -107,6 +111,7 @@ impl Parser {
             "$lt" => Lt::boxed(operands),
             "$lte" => Lte::boxed(operands),
             "$ne" => Ne::boxed(operands),
+
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -213,6 +218,9 @@ mod tests {
     mod parse_operators {
         use super::*;
         #[rstest]
+        // Arithmetic operators
+        #[case("$add", vec![true, false], Value::Int(1))]
+        // Logical operators
         #[case("$and", vec![true, false], Value::Bool(false))]
         #[case("$all_of", vec![true, false], Value::Bool(false))]
         #[case("$or", vec![true, false], Value::Bool(true))]
@@ -221,6 +229,7 @@ mod tests {
         #[case("$none_of", vec![true, true], Value::Bool(false))]
         #[case("$xor", vec![true, true], Value::Bool(false))]
         #[case("$one_of", vec![true, true], Value::Bool(false))]
+        // Comparison operators
         #[case("$eq", vec![true, true], Value::Bool(true))]
         #[case("$gt", vec![true, false], Value::Bool(true))]
         #[case("$gte", vec![true, false], Value::Bool(true))]
