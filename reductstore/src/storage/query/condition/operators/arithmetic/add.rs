@@ -33,7 +33,7 @@ impl Node for Add {
                     Value::Float(v) => {
                         sum = Some(Value::Float(s as f64 + v));
                     }
-                    Value::String(v) => {
+                    Value::String(_) => {
                         return Err(unprocessable_entity!("Cannot add string to integer"));
                     }
                 },
@@ -48,14 +48,14 @@ impl Node for Add {
                 },
 
                 Some(Value::String(s)) => match value {
-                    Value::Bool(v) => {
+                    Value::Bool(_) => {
                         return Err(unprocessable_entity!("Cannot add boolean to string"));
                     }
-                    Value::Int(v) => {
+                    Value::Int(_) => {
                         return Err(unprocessable_entity!("Cannot add integer to string"));
                     }
 
-                    Value::Float(v) => {
+                    Value::Float(_) => {
                         return Err(unprocessable_entity!("Cannot add float to string"));
                     }
                     Value::String(v) => sum = Some(Value::String(format!("{}{}", s, v))),

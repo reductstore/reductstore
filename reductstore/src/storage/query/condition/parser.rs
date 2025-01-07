@@ -93,6 +93,7 @@ impl Parser {
         match operator {
             // Arithmetic operators
             "$add" => Add::boxed(operands),
+            "$sub" => Add::boxed(operands),
 
             // Logical operators
             "$and" => AllOf::boxed(operands),
@@ -220,6 +221,7 @@ mod tests {
         #[rstest]
         // Arithmetic operators
         #[case("$add", vec![true, false], Value::Int(1))]
+        #[case("$sub", vec![true, true], Value::Int(0))]
         // Logical operators
         #[case("$and", vec![true, false], Value::Bool(false))]
         #[case("$all_of", vec![true, false], Value::Bool(false))]
