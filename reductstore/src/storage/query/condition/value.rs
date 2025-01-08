@@ -3,6 +3,7 @@
 
 mod add;
 mod cmp;
+mod div;
 mod mult;
 mod sub;
 
@@ -10,6 +11,7 @@ use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
 pub(crate) use add::Add;
+pub(crate) use div::Div;
 pub(crate) use mult::Mult;
 pub(crate) use sub::Sub;
 
@@ -77,7 +79,6 @@ impl Value {
     }
 
     /// Converts the value to a float.
-    #[allow(dead_code)]
     pub fn as_float(&self) -> Result<f64, ReductError> {
         match self {
             Value::Bool(value) => Ok(*value as i64 as f64),
@@ -104,6 +105,14 @@ impl Value {
             Value::Int(value) => Ok(value.to_string()),
             Value::Float(value) => Ok(value.to_string()),
             Value::String(value) => Ok(value.clone()),
+        }
+    }
+
+    /// Check if it is a string
+    pub fn is_string(&self) -> bool {
+        match self {
+            Value::String(_) => true,
+            _ => false,
         }
     }
 }
