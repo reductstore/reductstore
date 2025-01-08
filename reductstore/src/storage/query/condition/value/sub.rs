@@ -17,13 +17,13 @@ pub(crate) trait Sub {
     /// # Returns
     ///
     /// The difference of the two values or an error if the values cannot be subtracted.
-    fn sub(self, other: Self) -> Result<Self, ReductError>
+    fn subtract(self, other: Self) -> Result<Self, ReductError>
     where
         Self: Sized;
 }
 
 impl Sub for Value {
-    fn sub(self, other: Self) -> Result<Self, ReductError> {
+    fn subtract(self, other: Self) -> Result<Self, ReductError> {
         let mut result = self;
         match result {
             Value::Bool(s) => match other {
@@ -53,21 +53,21 @@ impl Sub for Value {
                 }
             },
 
-            Value::String(_) => match other {
-                Value::Bool(_) => {
-                    return Err(unprocessable_entity!("Cannot subtract string from boolean"));
-                }
-                Value::Int(_) => {
-                    return Err(unprocessable_entity!("Cannot subtract string from integer"));
-                }
+            Value::String(_) => {
+                return match other {
+                    Value::Bool(_) => {
+                        Err(unprocessable_entity!("Cannot subtract string from boolean"))
+                    }
+                    Value::Int(_) => {
+                        Err(unprocessable_entity!("Cannot subtract string from integer"))
+                    }
 
-                Value::Float(_) => {
-                    return Err(unprocessable_entity!("Cannot subtract string from float"));
+                    Value::Float(_) => {
+                        Err(unprocessable_entity!("Cannot subtract string from float"))
+                    }
+                    Value::String(_) => Err(unprocessable_entity!("Cannot subtract string")),
                 }
-                Value::String(_) => {
-                    return Err(unprocessable_entity!("Cannot subtract string"));
-                }
-            },
+            }
         }
 
         Ok(result)
@@ -86,7 +86,7 @@ mod tests {
     #[case(Value::Int(1), Value::Float(1.0), Value::Float(0.0))]
     #[case(Value::Float(1.0), Value::Float(1.0), Value::Float(0.0))]
     fn sub(#[case] value: Value, #[case] other: Value, #[case] expected: Value) {
-        let result = value.sub(other).unwrap();
+        let result = value.subtract(other).unwrap();
         assert_eq!(result, expected);
     }
 
@@ -100,7 +100,7 @@ mod tests {
     #[case(Value::String("string".to_string()), Value::String("string".to_string()), unprocessable_entity!("Cannot subtract string"))]
 
     fn sub_err(#[case] value: Value, #[case] other: Value, #[case] expected: ReductError) {
-        let result = value.sub(other);
+        let result = value.subtract(other);
         assert_eq!(result, Err(expected));
     }
 }

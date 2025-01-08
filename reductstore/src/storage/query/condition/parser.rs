@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::arithmetic::{Add, Sub};
+use crate::storage::query::condition::operators::arithmetic::{Add, Mult, Sub};
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
 use crate::storage::query::condition::reference::Reference;
@@ -94,6 +94,7 @@ impl Parser {
             // Arithmetic operators
             "$add" => Add::boxed(operands),
             "$sub" => Sub::boxed(operands),
+            "$mult" => Mult::boxed(operands),
 
             // Logical operators
             "$and" => AllOf::boxed(operands),
@@ -222,6 +223,7 @@ mod tests {
         // Arithmetic operators
         #[case("$add", vec![true, false], Value::Int(1))]
         #[case("$sub", vec![true, true], Value::Int(0))]
+        #[case("$mult", vec![true, false], Value::Int(0))]
         // Logical operators
         #[case("$and", vec![true, false], Value::Bool(false))]
         #[case("$all_of", vec![true, false], Value::Bool(false))]

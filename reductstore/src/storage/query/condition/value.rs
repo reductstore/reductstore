@@ -3,12 +3,14 @@
 
 mod add;
 mod cmp;
+mod mult;
 mod sub;
 
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
 pub(crate) use add::Add;
+pub(crate) use mult::Mult;
 pub(crate) use sub::Sub;
 
 /// A value that can be used in a condition.

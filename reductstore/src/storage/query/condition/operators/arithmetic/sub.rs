@@ -17,7 +17,7 @@ impl Node for Sub {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
         let value_1 = self.op_1.apply(context)?;
         let value_2 = self.op_2.apply(context)?;
-        value_1.sub(value_2)
+        value_1.subtract(value_2)
     }
 
     fn print(&self) -> String {
