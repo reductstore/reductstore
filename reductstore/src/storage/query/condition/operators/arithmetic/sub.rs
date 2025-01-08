@@ -1,6 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::storage::query::condition::value::Sub as SubTrait;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
@@ -8,70 +9,36 @@ use reduct_base::unprocessable_entity;
 
 /// A node representing an arithmetic subtraction operation.
 pub(crate) struct Sub {
-    operands: Vec<BoxedNode>,
+    op_1: BoxedNode,
+    op_2: BoxedNode,
 }
 
 impl Node for Sub {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let mut first = None;
-
-        for operand in self.operands.iter() {
-            let value = operand.apply(context)?;
-            match first {
-                Some(Value::Bool(s)) => match value {
-                    Value::Bool(v) => first = Some(Value::Int(s as i64 - v as i64)),
-                    Value::Int(v) => first = Some(Value::Int(s as i64 - v)),
-                    Value::Float(v) => first = Some(Value::Float(s as i8 as f64 - v)),
-                    Value::String(_) => {
-                        return Err(unprocessable_entity!("Cannot subtract string from boolean"));
-                    }
-                },
-
-                Some(Value::Int(s)) => match value {
-                    Value::Bool(v) => first = Some(Value::Int(s - v as i64)),
-                    Value::Int(v) => first = Some(Value::Int(s - v)),
-                    Value::Float(v) => {
-                        first = Some(Value::Float(s as f64 - v));
-                    }
-                    Value::String(_) => {
-                        return Err(unprocessable_entity!("Cannot subtract string from integer"));
-                    }
-                },
-
-                Some(Value::Float(s)) => match value {
-                    Value::Bool(v) => first = Some(Value::Float(s - v as i8 as f64)),
-                    Value::Int(v) => first = Some(Value::Float(s - v as f64)),
-                    Value::Float(v) => first = Some(Value::Float(s - v)),
-                    Value::String(_) => {
-                        return Err(unprocessable_entity!("Cannot subtract string from float"));
-                    }
-                },
-
-                Some(Value::String(_)) => {
-                    return Err(unprocessable_entity!("Cannot subtract string"))
-                }
-
-                None => first = Some(value),
-            }
-        }
-
-        Ok(first.unwrap_or(Value::Int(0)))
+        let value_1 = self.op_1.apply(context)?;
+        let value_2 = self.op_2.apply(context)?;
+        value_1.sub(value_2)
     }
 
     fn print(&self) -> String {
-        format!("Sub({:?})", self.operands)
+        format!("Sub({:?}, {:?})", self.op_1, self.op_2)
     }
 }
 
 impl Boxed for Sub {
-    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
-        Ok(Box::new(Self::new(operands)))
+    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+        if operands.len() != 2 {
+            return Err(unprocessable_entity!("$sub requires exactly two operands"));
+        }
+        let op_2 = operands.pop().unwrap();
+        let op_1 = operands.pop().unwrap();
+        Ok(Box::new(Sub::new(op_1, op_2)))
     }
 }
 
 impl Sub {
-    pub fn new(operands: Vec<BoxedNode>) -> Self {
-        Self { operands }
+    pub fn new(op_1: BoxedNode, op_2: BoxedNode) -> Self {
+        Self { op_1, op_2 }
     }
 }
 
@@ -83,150 +50,32 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn apply_bool() {
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Bool(true)),
-            Constant::boxed(Value::Bool(true)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(0));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Bool(true)),
+    fn apply_ok() {
+        let sub = Sub::new(
+            Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Int(2)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(-1));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Bool(true)),
-            Constant::boxed(Value::Float(2.0)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Float(-1.0));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Bool(true)),
-            Constant::boxed(Value::String("xxx".to_string())),
-        ]);
-
-        assert_eq!(
-            op.apply(&Context::default()),
-            Err(unprocessable_entity!("Cannot subtract string from boolean"))
         );
+        assert_eq!(sub.apply(&Context::default()).unwrap(), Value::Int(-1));
     }
 
     #[rstest]
-    fn apply_int() {
-        let op = Sub::new(vec![
+    fn apply_bad() {
+        let sub = Sub::new(
             Constant::boxed(Value::Int(1)),
-            Constant::boxed(Value::Bool(true)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(0));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Int(1)),
-            Constant::boxed(Value::Int(2)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(-1));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Int(1)),
-            Constant::boxed(Value::Float(2.0)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Float(-1.0));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Int(1)),
-            Constant::boxed(Value::String("xxx".to_string())),
-        ]);
-
+            Constant::boxed(Value::String("foo".to_string())),
+        );
         assert_eq!(
-            op.apply(&Context::default()),
+            sub.apply(&Context::default()),
             Err(unprocessable_entity!("Cannot subtract string from integer"))
         );
     }
 
     #[rstest]
-    fn apply_float() {
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Float(1.0)),
-            Constant::boxed(Value::Bool(true)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Float(0.0));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Float(1.0)),
-            Constant::boxed(Value::Int(2)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Float(-1.0));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Float(1.0)),
-            Constant::boxed(Value::Float(2.0)),
-        ]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Float(-1.0));
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::Float(1.0)),
-            Constant::boxed(Value::String("xxx".to_string())),
-        ]);
-
-        assert_eq!(
-            op.apply(&Context::default()),
-            Err(unprocessable_entity!("Cannot subtract string from float"))
-        );
-    }
-
-    #[rstest]
-    fn apply_string() {
-        let op = Sub::new(vec![
-            Constant::boxed(Value::String("a".to_string())),
-            Constant::boxed(Value::Bool(true)),
-        ]);
-
-        assert_eq!(
-            op.apply(&Context::default()),
-            Err(unprocessable_entity!("Cannot subtract string"))
-        );
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::String("a".to_string())),
-            Constant::boxed(Value::Int(1)),
-        ]);
-
-        assert_eq!(
-            op.apply(&Context::default()),
-            Err(unprocessable_entity!("Cannot subtract string"))
-        );
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::String("a".to_string())),
-            Constant::boxed(Value::Float(1.0)),
-        ]);
-
-        assert_eq!(
-            op.apply(&Context::default()),
-            Err(unprocessable_entity!("Cannot subtract string"))
-        );
-
-        let op = Sub::new(vec![
-            Constant::boxed(Value::String("a".to_string())),
-            Constant::boxed(Value::String("b".to_string())),
-        ]);
-
-        assert_eq!(
-            op.apply(&Context::default()),
-            Err(unprocessable_entity!("Cannot subtract string"))
-        );
-    }
-
-    #[rstest]
-    fn apply_empty() {
-        let result = Sub::new(vec![]).apply(&Context::default()).unwrap();
-        assert_eq!(result, Value::Int(0));
-    }
-
-    #[rstest]
     fn print() {
-        let and = Sub::new(vec![Constant::boxed(Value::Bool(true))]);
-        assert_eq!(and.print(), "Sub([Bool(true)])");
+        let op = Sub::new(
+            Constant::boxed(Value::Bool(true)),
+            Constant::boxed(Value::Bool(true)),
+        );
+        assert_eq!(op.print(), "Sub(Bool(true), Bool(true))");
     }
 }
