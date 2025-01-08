@@ -1,6 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+mod abs;
 mod add;
 mod cmp;
 mod div;
@@ -12,6 +13,7 @@ mod sub;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
+pub(crate) use abs::Abs;
 pub(crate) use add::Add;
 pub(crate) use div::Div;
 pub(crate) use div_num::DivNum;
