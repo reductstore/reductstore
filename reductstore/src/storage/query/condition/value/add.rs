@@ -80,8 +80,11 @@ mod tests {
     #[case(Value::Bool(true), Value::Bool(false), Value::Int(1))]
     #[case(Value::Bool(true), Value::Int(2), Value::Int(3))]
     #[case(Value::Bool(true), Value::Float(2.0), Value::Float(3.0))]
+    #[case(Value::Int(2), Value::Bool(true), Value::Int(3))]
     #[case(Value::Int(2), Value::Int(3), Value::Int(5))]
     #[case(Value::Int(2), Value::Float(3.0), Value::Float(5.0))]
+    #[case(Value::Float(2.0), Value::Bool(true), Value::Float(3.0))]
+    #[case(Value::Float(2.0), Value::Int(3), Value::Float(5.0))]
     #[case(Value::Float(2.0), Value::Float(3.0), Value::Float(5.0))]
     #[case(Value::String("hello".to_string()), Value::String("world".to_string()), Value::String("helloworld".to_string()))]
     fn test_add_ok(#[case] a: Value, #[case] b: Value, #[case] expected: Value) {
