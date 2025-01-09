@@ -84,8 +84,11 @@ mod tests {
     #[case(Value::Bool(true), Value::Bool(false), Value::Int(0))]
     #[case(Value::Bool(true), Value::Int(2), Value::Int(2))]
     #[case(Value::Bool(true), Value::Float(2.0), Value::Float(2.0))]
+    #[case(Value::Int(2), Value::Bool(true), Value::Int(2))]
     #[case(Value::Int(2), Value::Int(2), Value::Int(4))]
     #[case(Value::Int(2), Value::Float(2.0), Value::Float(4.0))]
+    #[case(Value::Float(2.0), Value::Bool(true), Value::Float(2.0))]
+    #[case(Value::Float(2.0), Value::Int(2), Value::Float(4.0))]
     #[case(Value::Float(2.0), Value::Float(2.0), Value::Float(4.0))]
     fn multiply(#[case] value: Value, #[case] other: Value, #[case] expected: Value) {
         let result = value.multiply(other).unwrap();

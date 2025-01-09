@@ -82,8 +82,11 @@ mod tests {
     #[case(Value::Bool(true), Value::Bool(false), Value::Int(1))]
     #[case(Value::Bool(true), Value::Int(1), Value::Int(0))]
     #[case(Value::Bool(true), Value::Float(1.0), Value::Float(0.0))]
+    #[case(Value::Int(1), Value::Bool(true), Value::Int(0))]
     #[case(Value::Int(1), Value::Int(1), Value::Int(0))]
     #[case(Value::Int(1), Value::Float(1.0), Value::Float(0.0))]
+    #[case(Value::Float(1.0), Value::Bool(true), Value::Float(0.0))]
+    #[case(Value::Float(1.0), Value::Int(1), Value::Float(0.0))]
     #[case(Value::Float(1.0), Value::Float(1.0), Value::Float(0.0))]
     fn sub(#[case] value: Value, #[case] other: Value, #[case] expected: Value) {
         let result = value.subtract(other).unwrap();

@@ -71,6 +71,15 @@ mod tests {
     }
 
     #[rstest]
+    fn apply_empty() {
+        let op = Rem::boxed(vec![]);
+        assert_eq!(
+            op.err(),
+            Some(unprocessable_entity!("$rem requires exactly two operands"))
+        );
+    }
+
+    #[rstest]
     fn print() {
         let op = Rem::new(
             Constant::boxed(Value::Bool(true)),

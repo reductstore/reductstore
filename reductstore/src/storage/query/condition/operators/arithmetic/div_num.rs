@@ -73,6 +73,17 @@ mod tests {
     }
 
     #[rstest]
+    fn apply_empty() {
+        let op = DivNum::boxed(vec![]);
+        assert_eq!(
+            op.err(),
+            Some(unprocessable_entity!(
+                "$div_num requires exactly two operands"
+            ))
+        );
+    }
+
+    #[rstest]
     fn print() {
         let op = DivNum::new(
             Constant::boxed(Value::Bool(true)),

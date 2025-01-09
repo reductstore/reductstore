@@ -71,6 +71,15 @@ mod tests {
     }
 
     #[rstest]
+    fn apply_empty() {
+        let op = Div::boxed(vec![]);
+        assert_eq!(
+            op.err(),
+            Some(unprocessable_entity!("$div requires exactly two operands"))
+        );
+    }
+
+    #[rstest]
     fn print() {
         let op = Div::new(
             Constant::boxed(Value::Bool(true)),

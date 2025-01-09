@@ -71,6 +71,15 @@ mod tests {
     }
 
     #[rstest]
+    fn apply_empty() {
+        let op = Sub::boxed(vec![]);
+        assert_eq!(
+            op.err(),
+            Some(unprocessable_entity!("$sub requires exactly two operands"))
+        );
+    }
+
+    #[rstest]
     fn print() {
         let op = Sub::new(
             Constant::boxed(Value::Bool(true)),

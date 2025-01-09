@@ -94,6 +94,7 @@ mod tests {
     #[case(Value::String("string".to_string()), Value::Bool(true), unprocessable_entity!("Cannot divide string by boolean"))]
     #[case(Value::String("string".to_string()), Value::Int(1), unprocessable_entity!("Cannot divide string by integer"))]
     #[case(Value::String("string".to_string()), Value::Float(2.0), unprocessable_entity!("Cannot divide string by float"))]
+    #[case(Value::String("string".to_string()), Value::String("string".to_string()), unprocessable_entity!("Cannot divide string"))]
     fn rem_err(#[case] value: Value, #[case] other: Value, #[case] expected: ReductError) {
         let result = value.remainder(other);
         assert_eq!(result, Err(expected));
