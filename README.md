@@ -32,8 +32,9 @@ It guarantees that your data will not overflow your hard disk and batches record
 - HTTP(S) API
 - Storing and accessing unstructured data as time series
 - No limit for maximum size of objects
-- Append-only data replication
 - Labeling data for annotation and filtering
+- JSON-based query language for filtering data
+- Append-only data replication
 - Batching records in an HTTP response for write and read operations
 - Real-time FIFO bucket quota based on size to avoid disk space shortage
 - Embedded Web Console
@@ -82,7 +83,7 @@ async def main():
         # 4. Query the data by time range and condition
         async for record in bucket.query("sensor-1",
                                          start="2024-01-01T10:00:00Z",
-                                         end="2024-01-01T10:00:02Z",
+                                         stop="2024-01-01T10:00:02Z",
                                          when={"&score": {"$gt": 20}}):
             print(f"Record timestamp: {record.timestamp}")
             print(f"Record size: {record.size}")
