@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-577: Fix parsing of nested conditions, [PR-704](https://github.com/reductstore/reductstore/pull/704)
+
 ## [1.13.1] - 2024-12-16
 
 ### Changed
