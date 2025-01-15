@@ -20,7 +20,7 @@ impl Node for StartsWith {
     }
 
     fn print(&self) -> String {
-        format!("StartWith({:?}, {:?})", self.op_1, self.op_2)
+        format!("StartsWith({:?}, {:?})", self.op_1, self.op_2)
     }
 }
 
@@ -47,6 +47,7 @@ impl Boxed for StartsWith {
 mod tests {
     use super::*;
     use crate::storage::query::condition::constant::Constant;
+    use crate::storage::query::condition::operators::string::EndsWith;
     use rstest::rstest;
 
     #[rstest]
@@ -64,5 +65,14 @@ mod tests {
             StartsWith::boxed(operands).err().unwrap(),
             unprocessable_entity!("$starts_with requires exactly two operands")
         );
+    }
+
+    #[rstest]
+    fn print() {
+        let op = StartsWith::new(
+            Constant::boxed(Value::String("test".to_string())),
+            Constant::boxed(Value::String("es".to_string())),
+        );
+        assert_eq!(op.print(), "StartsWith(String(\"test\"), String(\"es\"))");
     }
 }

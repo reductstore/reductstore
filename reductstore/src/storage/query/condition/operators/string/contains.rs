@@ -47,6 +47,7 @@ impl Boxed for Contains {
 mod tests {
     use super::*;
     use crate::storage::query::condition::constant::Constant;
+    use crate::storage::query::condition::operators::logical::AllOf;
     use rstest::rstest;
 
     #[rstest]
@@ -65,5 +66,14 @@ mod tests {
             Contains::boxed(operands).err().unwrap(),
             unprocessable_entity!("$contains requires exactly two operands")
         );
+    }
+
+    #[rstest]
+    fn print() {
+        let op = Contains::new(
+            Constant::boxed(Value::String("test".to_string())),
+            Constant::boxed(Value::String("es".to_string())),
+        );
+        assert_eq!(op.print(), "Contains(String(\"test\"), String(\"es\"))");
     }
 }

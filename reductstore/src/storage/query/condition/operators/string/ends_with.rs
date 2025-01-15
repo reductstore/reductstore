@@ -47,6 +47,7 @@ impl Boxed for EndsWith {
 mod tests {
     use super::*;
     use crate::storage::query::condition::constant::Constant;
+    use crate::storage::query::condition::operators::string::Contains;
     use rstest::rstest;
 
     #[rstest]
@@ -64,5 +65,14 @@ mod tests {
             EndsWith::boxed(operands).err().unwrap(),
             unprocessable_entity!("$ends_with requires exactly two operands")
         );
+    }
+
+    #[rstest]
+    fn print() {
+        let op = EndsWith::new(
+            Constant::boxed(Value::String("test".to_string())),
+            Constant::boxed(Value::String("es".to_string())),
+        );
+        assert_eq!(op.print(), "EndsWith(String(\"test\"), String(\"es\"))");
     }
 }
