@@ -260,6 +260,7 @@ mod tests {
         #[case("$ne", "[-10, 10]", Value::Bool(true))]
         // String operators
         #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
+
         fn test_parse_operator(
             parser: Parser,
             context: Context,

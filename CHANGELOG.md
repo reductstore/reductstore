@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-550: Add support for when condition on replication task, [PR-687](https://github.com/reductstore/reductstore/pull/687)
 - RS-531: Support for arithmetical operators in conditional query, [PR-696](https://github.com/reductstore/reductstore/pull/696)
 
+## [1.13.2] - 2025-01-15
+
+### Fixed
+
+- RS-577: Fix parsing of nested conditions, [PR-704](https://github.com/reductstore/reductstore/pull/704)
+
 ## [1.13.1] - 2024-12-16
 
 ### Changed
@@ -874,7 +880,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.2...HEAD
+
+[1.13.2]: https://github.com/reductstore/reductstore/compare/v1.13.1...v1.13.2
 
 [1.13.1]: https://github.com/reductstore/reductstore/compare/v1.13.0...v1.13.1
 
