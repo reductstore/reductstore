@@ -47,7 +47,7 @@ impl Boxed for EndsWith {
 mod tests {
     use super::*;
     use crate::storage::query::condition::constant::Constant;
-    use crate::storage::query::condition::operators::string::Contains;
+
     use rstest::rstest;
 
     #[rstest]

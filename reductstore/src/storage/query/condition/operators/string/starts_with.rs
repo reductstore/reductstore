@@ -47,7 +47,7 @@ impl Boxed for StartsWith {
 mod tests {
     use super::*;
     use crate::storage::query::condition::constant::Constant;
-    use crate::storage::query::condition::operators::string::EndsWith;
+
     use rstest::rstest;
 
     #[rstest]

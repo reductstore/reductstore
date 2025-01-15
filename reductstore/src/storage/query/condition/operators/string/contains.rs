@@ -47,7 +47,7 @@ impl Boxed for Contains {
 mod tests {
     use super::*;
     use crate::storage::query::condition::constant::Constant;
-    use crate::storage::query::condition::operators::logical::AllOf;
+
     use rstest::rstest;
 
     #[rstest]
