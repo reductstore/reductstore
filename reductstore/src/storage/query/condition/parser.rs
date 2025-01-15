@@ -7,6 +7,7 @@ use crate::storage::query::condition::operators::arithmetic::{
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
+use crate::storage::query::condition::operators::string::Contains;
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode};
@@ -19,6 +20,11 @@ pub(crate) struct Parser {}
 
 impl Parser {
     pub fn parse(&self, json: &JsonValue) -> Result<BoxedNode, ReductError> {
+        let expressions = self.parse_intern(json)?;
+        Ok(AllOf::boxed(expressions)?)
+    }
+
+    fn parse_intern(&self, json: &JsonValue) -> Result<Vec<BoxedNode>, ReductError> {
         match json {
             JsonValue::Object(map) => {
                 let mut expressions = vec![];
@@ -38,23 +44,23 @@ impl Parser {
                 }
 
                 // We use AND operator to aggregate results from all expressions
-                Ok(AllOf::boxed(expressions)?)
+                Ok(expressions)
             }
 
-            JsonValue::Bool(value) => Ok(Constant::boxed(Value::Bool(*value))),
+            JsonValue::Bool(value) => Ok(vec![Constant::boxed(Value::Bool(*value))]),
 
             JsonValue::Number(value) => {
                 if value.is_i64() || value.is_u64() {
-                    Ok(Constant::boxed(Value::Int(value.as_i64().unwrap())))
+                    Ok(vec![Constant::boxed(Value::Int(value.as_i64().unwrap()))])
                 } else {
-                    Ok(Constant::boxed(Value::Float(value.as_f64().unwrap())))
+                    Ok(vec![Constant::boxed(Value::Float(value.as_f64().unwrap()))])
                 }
             }
             JsonValue::String(value) => {
                 if value.starts_with("&") {
-                    Ok(Reference::boxed(value[1..].to_string()))
+                    Ok(vec![Reference::boxed(value[1..].to_string())])
                 } else {
-                    Ok(Constant::boxed(Value::String(value.clone())))
+                    Ok(vec![Constant::boxed(Value::String(value.clone()))])
                 }
             }
             _ => Err(unprocessable_entity!("Invalid JSON value: {}", json)),
@@ -68,7 +74,7 @@ impl Parser {
     ) -> Result<BoxedNode, ReductError> {
         let mut operands = vec![];
         for operand in json_operands {
-            operands.push(self.parse(operand)?);
+            operands.extend(self.parse_intern(operand)?);
         }
         Self::parse_operator(operator, operands)
     }
@@ -78,7 +84,7 @@ impl Parser {
         left_operand: &str,
         op_right_operand: &Map<String, JsonValue>,
     ) -> Result<BoxedNode, ReductError> {
-        let left_operand = self.parse(&JsonValue::String(left_operand.to_string()))?;
+        let mut left_operand = self.parse_intern(&JsonValue::String(left_operand.to_string()))?;
         if op_right_operand.len() != 1 {
             return Err(unprocessable_entity!(
                 "Object notation must have exactly one operator"
@@ -86,9 +92,9 @@ impl Parser {
         }
 
         let (operator, operand) = op_right_operand.iter().next().unwrap();
-        let right_operand = self.parse(operand)?;
-        let operands = vec![left_operand, right_operand];
-        Self::parse_operator(operator, operands)
+        let right_operand = self.parse_intern(operand)?;
+        left_operand.extend(right_operand);
+        Self::parse_operator(operator, left_operand)
     }
 
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
@@ -112,7 +118,7 @@ impl Parser {
             "$xor" => OneOf::boxed(operands),
             "$one_of" => OneOf::boxed(operands),
 
-            // comparison operators
+            // Comparison operators
             "$eq" => Eq::boxed(operands),
             "$gt" => Gt::boxed(operands),
             "$gte" => Gte::boxed(operands),
@@ -120,6 +126,8 @@ impl Parser {
             "$lte" => Lte::boxed(operands),
             "$ne" => Ne::boxed(operands),
 
+            // String operators
+            "$contains" => Contains::boxed(operands),
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -227,40 +235,51 @@ mod tests {
         use super::*;
         #[rstest]
         // Arithmetic operators
-        #[case("$add", vec![true, false], Value::Int(1))]
-        #[case("$sub", vec![true, true], Value::Int(0))]
-        #[case("$mult", vec![true, false], Value::Int(0))]
-        #[case("$div", vec![true, true], Value::Float(1.0))]
-        #[case("$div_num", vec![true, true], Value::Int(1))]
-        #[case("$rem", vec![true, true], Value::Int(0))]
-        #[case("$abs", vec![true], Value::Int(1))]
+        #[case("$add", "[1, 2.0]", Value::Float(3.0))]
+        #[case("$sub", "[1, 2]", Value::Int(-1))]
+        #[case("$mult", "[2, 3]", Value::Int(6))]
+        #[case("$div", "[3, 2]", Value::Float(1.5))]
+        #[case("$div_num", "[3, 2]", Value::Int(1))]
+        #[case("$rem", "[-10, 6]", Value::Int(-4))]
+        #[case("$abs", "[-10]", Value::Int(10))]
         // Logical operators
-        #[case("$and", vec![true, false], Value::Bool(false))]
-        #[case("$all_of", vec![true, false], Value::Bool(false))]
-        #[case("$or", vec![true, false], Value::Bool(true))]
-        #[case("$any_of", vec![true, false], Value::Bool(true))]
-        #[case("$not", vec![true], Value::Bool(false))]
-        #[case("$none_of", vec![true, true], Value::Bool(false))]
-        #[case("$xor", vec![true, true], Value::Bool(false))]
-        #[case("$one_of", vec![true, true], Value::Bool(false))]
+        #[case("$and", "[true, false]", Value::Bool(false))]
+        #[case("$all_of", "[true, false]", Value::Bool(false))]
+        #[case("$or", "[true, false]", Value::Bool(true))]
+        #[case("$any_of", "[true, false]", Value::Bool(true))]
+        #[case("$not", "[true]", Value::Bool(false))]
+        #[case("$none_of", "[true, true]", Value::Bool(false))]
+        #[case("$xor", "[true, true]", Value::Bool(false))]
+        #[case("$one_of", "[true, true]", Value::Bool(false))]
         // Comparison operators
-        #[case("$eq", vec![true, true], Value::Bool(true))]
-        #[case("$gt", vec![true, false], Value::Bool(true))]
-        #[case("$gte", vec![true, false], Value::Bool(true))]
-        #[case("$lt", vec![true, false], Value::Bool(false))]
-        #[case("$lte", vec![true, false], Value::Bool(false))]
-        #[case("$ne", vec![true, false], Value::Bool(true))]
+        #[case("$eq", "[10, 10]", Value::Bool(true))]
+        #[case("$gt", "[20, 10]", Value::Bool(true))]
+        #[case("$gte", "[20, 10]", Value::Bool(true))]
+        #[case("$lt", "[20, 10]", Value::Bool(false))]
+        #[case("$lte", "[20, 10]", Value::Bool(false))]
+        #[case("$ne", "[-10, 10]", Value::Bool(true))]
+        // String operators
+        #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
             #[case] operator: &str,
-            #[case] operands: Vec<bool>,
+            #[case] operands: &str,
             #[case] expected: Value,
         ) {
-            let json =
-                serde_json::from_str(&format!(r#"{{"{}": {:?}}}"#, operator, operands)).unwrap();
+            let json = serde_json::from_str(&format!(
+                r#"{{"$eq":[{}, {{"{}": {} }}] }}"#,
+                expected.as_string().unwrap(),
+                operator,
+                operands
+            ))
+            .unwrap();
             let node = parser.parse(&json).unwrap();
-            assert_eq!(node.apply(&context).unwrap(), expected);
+            assert!(
+                node.apply(&context).unwrap().as_bool().unwrap(),
+                "{}",
+                node.print()
+            );
         }
     }
 
