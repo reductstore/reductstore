@@ -7,7 +7,7 @@ use crate::storage::query::condition::operators::arithmetic::{
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
-use crate::storage::query::condition::operators::string::Contains;
+use crate::storage::query::condition::operators::string::{Contains, StartsWith};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode};
@@ -128,6 +128,8 @@ impl Parser {
 
             // String operators
             "$contains" => Contains::boxed(operands),
+            "$starts_with" => StartsWith::boxed(operands),
+
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -260,6 +262,7 @@ mod tests {
         #[case("$ne", "[-10, 10]", Value::Bool(true))]
         // String operators
         #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
+        #[case("$starts_with", "[\"abc\", \"ab\"]", Value::Bool(true))]
 
         fn test_parse_operator(
             parser: Parser,

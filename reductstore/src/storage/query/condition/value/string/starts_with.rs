@@ -4,25 +4,25 @@
 use crate::storage::query::condition::value::Value;
 use reduct_base::error::ReductError;
 
-pub(crate) trait Contains {
-    /// Checks if the value contains a string representation of another value.
+pub(crate) trait StartsWith {
+    /// Checks if the first value starts with the second value.
     ///
-    /// It converts the both values to string and checks if the first value contains the second value.
+    /// It converts the both values to string before checking.
     ///
     /// # Arguments
     ///
     /// * `self` - The value to check.
     /// * `other` - The value to check for.
-    fn contains(self, other: Self) -> Result<bool, ReductError>
+    fn starts_with(self, other: Self) -> Result<bool, ReductError>
     where
         Self: Sized;
 }
 
-impl Contains for Value {
-    fn contains(self, other: Self) -> Result<bool, ReductError> {
+impl StartsWith for Value {
+    fn starts_with(self, other: Self) -> Result<bool, ReductError> {
         let other = other.as_string()?;
         let self_string = self.as_string()?;
-        Ok(self_string.contains(&other))
+        Ok(self_string.starts_with(&other))
     }
 }
 
@@ -32,25 +32,17 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[case(Value::String("test".to_string()), Value::String("es".to_string()), true)]
     #[case(Value::String("test".to_string()), Value::String("te".to_string()), true)]
-    #[case(Value::String("test".to_string()), Value::String("st".to_string()), true)]
-    #[case(Value::String("test".to_string()), Value::String("t".to_string()), true)]
-    #[case(Value::String("test".to_string()), Value::String("test".to_string()), true)]
-    #[case(Value::String("test".to_string()), Value::String("test1".to_string()), false)]
-    #[case(Value::String("test".to_string()), Value::String("test2".to_string()), false)]
-    #[case(Value::String("test".to_string()), Value::String("test3".to_string()), false)]
-    #[case(Value::String("test".to_string()), Value::String("test4".to_string()), false)]
-    #[case(Value::String("test".to_string()), Value::String("test5".to_string()), false)]
+    #[case(Value::String("test".to_string()), Value::String("es".to_string()), false)]
     fn test_logic(#[case] value: Value, #[case] other: Value, #[case] expected: bool) {
-        let result = value.contains(other).unwrap();
+        let result = value.starts_with(other).unwrap();
         assert_eq!(result, expected);
     }
 
     #[rstest]
     #[case(Value::Bool(true), Value::String("t".to_string()), true)]
-    #[case(Value::Bool(false), Value::String("t".to_string()), false)]
-    #[case(Value::Int(1), Value::String("0".to_string()), false)]
+    #[case(Value::Bool(false), Value::String("a".to_string()), false)]
+    #[case(Value::Int(10), Value::String("0".to_string()), false)]
     #[case(Value::Int(0), Value::String("0".to_string()), true)]
     #[case(Value::Float(1.0), Value::String("2.".to_string()), false)]
     #[case(Value::Float(0.5), Value::String("0.".to_string()), true)]
@@ -61,7 +53,7 @@ mod tests {
     #[case(Value::String("test".to_string()), Value::Float(1.0), false)]
     #[case(Value::String("1.0000".to_string()), Value::Float(1.0), true)]
     fn test_convertion(#[case] value: Value, #[case] other: Value, #[case] expected: bool) {
-        let result = value.contains(other).unwrap();
+        let result = value.starts_with(other).unwrap();
         assert_eq!(result, expected);
     }
 }

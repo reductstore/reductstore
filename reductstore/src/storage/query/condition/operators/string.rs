@@ -2,5 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 mod contains;
+mod starts_with;
 
 pub(crate) use contains::Contains;
+pub(crate) use starts_with::StartsWith;
