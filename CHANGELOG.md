@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-550: Add support for when condition on replication task, [PR-687](https://github.com/reductstore/reductstore/pull/687)
 - RS-531: Support for arithmetical operators in conditional query, [PR-696](https://github.com/reductstore/reductstore/pull/696)
+- RS-530: Implement string operators in conditional query, [PR-705](https://github.com/reductstore/reductstore/pull/705)
 
 ## [1.13.2] - 2025-01-15
 

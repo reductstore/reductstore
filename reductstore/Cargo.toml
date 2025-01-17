@@ -66,13 +66,9 @@ crc64fast = "1.1.0"
 rustls = "0.23.21"
 byteorder = "1.5.0"
 crossbeam-channel = "0.5.14"
-num_cpus = "1.16.0"
-axum-macros = "0.5.0"
-aws-lc-rs="1.11.1"
 
 [build-dependencies]
 prost-build = "0.13.1"
-prost-wkt-build = "0.6.0"
 reqwest = { version = "0.12.11", default-features = false, features = ["rustls-tls", "blocking"] }
 chrono = "0.4.39"
 

@@ -1,25 +1,25 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-mod abs;
-mod add;
 mod cmp;
-mod div;
-mod div_num;
-mod mult;
-mod rem;
-mod sub;
+
+mod arithmetic;
+mod string;
 
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
-pub(crate) use abs::Abs;
-pub(crate) use add::Add;
-pub(crate) use div::Div;
-pub(crate) use div_num::DivNum;
-pub(crate) use mult::Mult;
-pub(crate) use rem::Rem;
-pub(crate) use sub::Sub;
+pub(crate) use arithmetic::abs::Abs;
+pub(crate) use arithmetic::add::Add;
+pub(crate) use arithmetic::div::Div;
+pub(crate) use arithmetic::div_num::DivNum;
+pub(crate) use arithmetic::mult::Mult;
+pub(crate) use arithmetic::rem::Rem;
+pub(crate) use arithmetic::sub::Sub;
+
+pub(crate) use string::contains::Contains;
+pub(crate) use string::ends_with::EndsWith;
+pub(crate) use string::starts_with::StartsWith;
 
 /// A value that can be used in a condition.
 #[derive(Debug, Clone)]

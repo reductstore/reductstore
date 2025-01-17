@@ -157,7 +157,7 @@ jobs:
             fi
 
             chmod +x $f
-            $f
+            $f --nocapture
           done
 
   coverage:

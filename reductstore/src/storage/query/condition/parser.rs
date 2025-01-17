@@ -7,6 +7,7 @@ use crate::storage::query::condition::operators::arithmetic::{
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
+use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode};
@@ -125,6 +126,11 @@ impl Parser {
             "$lte" => Lte::boxed(operands),
             "$ne" => Ne::boxed(operands),
 
+            // String operators
+            "$contains" => Contains::boxed(operands),
+            "$starts_with" => StartsWith::boxed(operands),
+            "$ends_with" => EndsWith::boxed(operands),
+
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
                 operator
@@ -231,6 +237,14 @@ mod tests {
     mod parse_operators {
         use super::*;
         #[rstest]
+        // Arithmetic operators
+        #[case("$add", "[1, 2.0]", Value::Float(3.0))]
+        #[case("$sub", "[1, 2]", Value::Int(-1))]
+        #[case("$mult", "[2, 3]", Value::Int(6))]
+        #[case("$div", "[3, 2]", Value::Float(1.5))]
+        #[case("$div_num", "[3, 2]", Value::Int(1))]
+        #[case("$rem", "[-10, 6]", Value::Int(-4))]
+        #[case("$abs", "[-10]", Value::Int(10))]
         // Logical operators
         #[case("$and", "[true, false]", Value::Bool(false))]
         #[case("$all_of", "[true, false]", Value::Bool(false))]
@@ -247,6 +261,10 @@ mod tests {
         #[case("$lt", "[20, 10]", Value::Bool(false))]
         #[case("$lte", "[20, 10]", Value::Bool(false))]
         #[case("$ne", "[-10, 10]", Value::Bool(true))]
+        // String operators
+        #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
+        #[case("$starts_with", "[\"abc\", \"ab\"]", Value::Bool(true))]
+        #[case("$ends_with", "[\"abc\", \"bc\"]", Value::Bool(true))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
