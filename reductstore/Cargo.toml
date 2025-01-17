@@ -43,7 +43,7 @@ serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.135"
 regex = "1.11.1"
 bytes = "1.9.0"
-axum = { version = "0.7.9", features = ["default", "macros"] }
+axum = { version = "0.8.1", features = ["default", "macros"] }
 axum-extra = { version = "0.10.0", features = ["default", "typed-header"] }
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = "0.7.13"
