@@ -1,15 +1,14 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::cache::Cache;
+use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use std::fs::{remove_dir_all, remove_file, rename, File};
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock, Weak};
 use std::time::Duration;
-
-use crate::core::cache::Cache;
-use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
@@ -177,12 +176,13 @@ impl FileCache {
     /// This function will return an error if the file does not exist or if there is an issue
     /// removing the file from the file system.
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+        let mut cache = self.cache.write()?;
+        cache.remove(path);
+
         if path.try_exists()? {
             remove_file(path)?;
         }
-        let mut cache = self.cache.write()?;
 
-        cache.remove(path);
         Ok(())
     }
 
