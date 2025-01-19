@@ -297,6 +297,14 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
+    fn test_create_folder(path: PathBuf) {
+        let path = path.join("test");
+        assert!(!path.exists());
+        let _ = Storage::load(path.clone(), None);
+        assert!(path.exists(), "Engine creates a folder if it doesn't exist");
+    }
+
+    #[rstest]
     fn test_info(storage: Storage) {
         sleep(Duration::from_secs(1)); // uptime is 1 second
 
