@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-555: Close WAL file before removal it from disk, [PR-706](https://github.com/reductstore/reductstore/pull/706)
+
 ## [1.13.2] - 2025-01-15
 
 ### Fixed
