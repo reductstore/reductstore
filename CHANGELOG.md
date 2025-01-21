@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.3] - 2025-01-21
+
 ### Fixed
 
 - RS-555: Close WAL file before removal it from disk, [PR-706](https://github.com/reductstore/reductstore/pull/706)
@@ -880,7 +882,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.3...HEAD
+
+[1.13.3]: https://github.com/reductstore/reductstore/compare/v1.13.2...v1.13.3
 
 [1.13.2]: https://github.com/reductstore/reductstore/compare/v1.13.1...v1.13.2
 
