@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-555: Close WAL file before removal it from disk, [PR-706](https://github.com/reductstore/reductstore/pull/706)
+- RS-583: Remove contents of folder before remove it, [PR-711](https://github.com/reductstore/reductstore/pull/711)
 
 ## [1.13.2] - 2025-01-15
 
