@@ -1,15 +1,14 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::fs::{remove_dir_all, remove_file, rename, File};
-use std::io::{Seek, SeekFrom};
-use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, RwLock, Weak};
-use std::time::Duration;
-
 use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::fs::{read_dir, remove_dir, remove_file, rename, File};
+use std::io::{Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, RwLock, Weak};
+use std::time::Duration;
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
@@ -177,18 +176,22 @@ impl FileCache {
     /// This function will return an error if the file does not exist or if there is an issue
     /// removing the file from the file system.
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+        let mut cache = self.cache.write()?;
+        cache.remove(path);
+
         if path.try_exists()? {
             remove_file(path)?;
         }
-        let mut cache = self.cache.write()?;
 
-        cache.remove(path);
         Ok(())
     }
 
     pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
         if path.try_exists()? {
-            remove_dir_all(path)?;
+            // Remove all files in the directory recursively
+            // due to some file systems not supporting removing non-empty directories
+            Self::remove_dir_contents(path)?;
+            remove_dir(path)?;
         }
         self.discard_recursive(path)
     }
@@ -221,9 +224,24 @@ impl FileCache {
     ///
     /// A `Result` which is `Ok` if the file was successfully renamed, or an `Err` containing
     pub fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
-        rename(old_path, new_path)?;
         let mut cache = self.cache.write()?;
         cache.remove(old_path);
+        rename(old_path, new_path)?;
+        Ok(())
+    }
+
+    fn remove_dir_contents<P: AsRef<Path>>(path: P) -> Result<(), ReductError> {
+        for entry in read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if entry.file_type()?.is_dir() {
+                Self::remove_dir_contents(&path)?;
+                remove_dir(path)?;
+            } else {
+                remove_file(path)?;
+            }
+        }
         Ok(())
     }
 }

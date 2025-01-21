@@ -49,7 +49,7 @@ impl Storage {
     /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
     pub fn load(data_path: PathBuf, license: Option<License>) -> Storage {
         if !data_path.try_exists().unwrap_or(false) {
-            info!("Folder '{:?}' doesn't exist. Create it.", data_path);
+            info!("Folder {:?} doesn't exist. Create it.", data_path);
             std::fs::create_dir_all(&data_path).unwrap();
         }
 
@@ -295,6 +295,14 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[rstest]
+    fn test_create_folder(path: PathBuf) {
+        let path = path.join("test");
+        assert!(!path.exists());
+        let _ = Storage::load(path.clone(), None);
+        assert!(path.exists(), "Engine creates a folder if it doesn't exist");
+    }
 
     #[rstest]
     fn test_info(storage: Storage) {
