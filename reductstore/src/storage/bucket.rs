@@ -22,7 +22,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
@@ -31,7 +31,7 @@ use std::sync::{Arc, RwLock};
 pub(crate) struct Bucket {
     name: String,
     path: PathBuf,
-    entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
+    entries: Arc<RwLock<HashMap<String, Arc<Entry>>>>,
     settings: RwLock<BucketSettings>,
     is_provisioned: AtomicBool,
 }
@@ -61,7 +61,7 @@ impl Bucket {
         let bucket = Bucket {
             name: name.to_string(),
             path,
-            entries: Arc::new(RwLock::new(BTreeMap::new())),
+            entries: Arc::new(RwLock::new(HashMap::new())),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
         };
