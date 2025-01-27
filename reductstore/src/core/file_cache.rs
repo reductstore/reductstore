@@ -4,9 +4,9 @@
 use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use std::fs::{read_dir, remove_dir, remove_dir_all, remove_file, rename, File};
+use std::fs::{remove_dir_all, remove_file, rename, File};
 use std::io::{Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock, Weak};
 use std::time::Duration;
 
