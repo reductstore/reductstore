@@ -4,7 +4,7 @@
 use crate::core::cache::Cache;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use std::fs::{read_dir, remove_dir, remove_file, rename, File};
+use std::fs::{read_dir, remove_dir, remove_dir_all, remove_file, rename, File};
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, RwLock, Weak};
@@ -189,10 +189,7 @@ impl FileCache {
     pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
         self.discard_recursive(path)?;
         if path.try_exists()? {
-            // Remove all files in the directory recursively
-            // due to some file systems not supporting removing non-empty directories
-            Self::remove_dir_contents(path)?;
-            remove_dir(path)?;
+            remove_dir_all(path)?;
         }
 
         Ok(())
@@ -229,21 +226,6 @@ impl FileCache {
         let mut cache = self.cache.write()?;
         cache.remove(old_path);
         rename(old_path, new_path)?;
-        Ok(())
-    }
-
-    fn remove_dir_contents<P: AsRef<Path>>(path: P) -> Result<(), ReductError> {
-        for entry in read_dir(path)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if entry.file_type()?.is_dir() {
-                Self::remove_dir_contents(&path)?;
-                remove_dir(path)?;
-            } else {
-                remove_file(path)?;
-            }
-        }
         Ok(())
     }
 }
