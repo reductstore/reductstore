@@ -187,13 +187,15 @@ impl FileCache {
     }
 
     pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
+        self.discard_recursive(path)?;
         if path.try_exists()? {
             // Remove all files in the directory recursively
             // due to some file systems not supporting removing non-empty directories
             Self::remove_dir_contents(path)?;
             remove_dir(path)?;
         }
-        self.discard_recursive(path)
+
+        Ok(())
     }
 
     pub fn discard_recursive(&self, path: &PathBuf) -> Result<(), ReductError> {

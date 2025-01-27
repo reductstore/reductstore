@@ -58,9 +58,15 @@ impl Storage {
         for entry in std::fs::read_dir(&data_path).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                let bucket = Bucket::restore(path.clone())
-                    .expect(format!("Failed to restore bucket '{:?}'", path).as_str());
-                buckets.insert(bucket.name().to_string(), Arc::new(bucket));
+                match Bucket::restore(path.clone()) {
+                    Ok(bucket) => {
+                        let bucket = Arc::new(bucket);
+                        buckets.insert(bucket.name().to_string(), bucket);
+                    }
+                    Err(e) => {
+                        error!("Failed to restore bucket from {:?}: {}", path, e);
+                    }
+                }
             }
         }
 
