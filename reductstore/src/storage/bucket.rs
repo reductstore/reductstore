@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 mod quotas;
-mod settings;
+pub(super) mod settings;
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};

@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-531: Support for arithmetical operators in conditional query, [PR-696](https://github.com/reductstore/reductstore/pull/696)
 - RS-530: Implement string operators in conditional query, [PR-705](https://github.com/reductstore/reductstore/pull/705)
 
+## [1.13.4] - 2025-01-27
+
+### Fixed
+
+- RS-583: Close file descriptors before removing a folder, [PR-714](https://github.com/reductstore/reductstore/pull/714)
+>>>>>>> stable
+
 ## [1.13.3] - 2025-01-21
 
 ### Fixed
@@ -888,7 +895,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.4...HEAD
+
+[1.13.4]: https://github.com/reductstore/reductstore/compare/v1.13.3...v1.13.4
 
 [1.13.3]: https://github.com/reductstore/reductstore/compare/v1.13.2...v1.13.3
 
