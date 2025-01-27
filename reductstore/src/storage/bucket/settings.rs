@@ -13,7 +13,7 @@ use std::io::Write;
 
 pub(super) const DEFAULT_MAX_RECORDS: u64 = 1024;
 pub(super) const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
-pub(super) const SETTINGS_NAME: &str = "bucket.settings";
+pub(crate) const SETTINGS_NAME: &str = "bucket.settings";
 
 impl From<BucketSettings> for crate::storage::proto::BucketSettings {
     fn from(settings: BucketSettings) -> Self {

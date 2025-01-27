@@ -58,9 +58,15 @@ impl Storage {
         for entry in std::fs::read_dir(&data_path).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                let bucket = Bucket::restore(path.clone())
-                    .expect(format!("Failed to restore bucket '{:?}'", path).as_str());
-                buckets.insert(bucket.name().to_string(), Arc::new(bucket));
+                match Bucket::restore(path.clone()) {
+                    Ok(bucket) => {
+                        let bucket = Arc::new(bucket);
+                        buckets.insert(bucket.name().to_string(), bucket);
+                    }
+                    Err(e) => {
+                        error!("Failed to restore bucket from {:?}: {}", path, e);
+                    }
+                }
             }
         }
 
@@ -327,66 +333,6 @@ mod tests {
     }
 
     #[rstest]
-    fn test_recover_from_fs(storage: Storage) {
-        let bucket_settings = BucketSettings {
-            quota_size: Some(100),
-            quota_type: Some(QuotaType::FIFO),
-            ..Bucket::defaults()
-        };
-        let bucket = storage
-            .create_bucket("test", bucket_settings.clone())
-            .unwrap()
-            .upgrade_and_unwrap();
-        assert_eq!(bucket.name(), "test");
-
-        macro_rules! write_entry {
-            ($bucket:expr, $entry_name:expr, $record_ts:expr) => {
-                let entry = $bucket
-                    .get_or_create_entry($entry_name)
-                    .unwrap()
-                    .upgrade_and_unwrap();
-                let sender = entry
-                    .begin_write($record_ts, 10, "text/plain".to_string(), Labels::new())
-                    .wait()
-                    .unwrap();
-                sender
-                    .tx()
-                    .blocking_send(Ok(Some(Bytes::from("0123456789"))))
-                    .unwrap();
-
-                sender.tx().blocking_send(Ok(None)).unwrap();
-            };
-        }
-
-        write_entry!(bucket, "entry-1", 1000);
-        write_entry!(bucket, "entry-2", 2000);
-        write_entry!(bucket, "entry-2", 5000);
-
-        sleep(Duration::from_millis(10)); // to make sure that write tasks are completed
-        storage.sync_fs().unwrap();
-        let storage = Storage::load(storage.data_path.clone(), None);
-        assert_eq!(
-            storage.info().unwrap(),
-            ServerInfo {
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                bucket_count: 1,
-                usage: 142,
-                uptime: 0,
-                oldest_record: 1000,
-                latest_record: 5000,
-                defaults: Defaults {
-                    bucket: Bucket::defaults(),
-                },
-                license: None,
-            }
-        );
-
-        let bucket = storage.get_bucket("test").unwrap().upgrade_and_unwrap();
-        assert_eq!(bucket.name(), "test");
-        assert_eq!(bucket.settings(), bucket_settings);
-    }
-
-    #[rstest]
     fn test_license_info(storage: Storage) {
         let license = License {
             licensee: "ReductSoftware UG".to_string(),
@@ -400,6 +346,103 @@ mod tests {
 
         let storage = Storage::load(storage.data_path, Some(license.clone()));
         assert_eq!(storage.info().unwrap().license, Some(license));
+    }
+
+    mod recovery {
+        use super::*;
+        use crate::storage::bucket::settings::SETTINGS_NAME;
+        #[rstest]
+        fn test_recover_from_fs(storage: Storage) {
+            let bucket_settings = BucketSettings {
+                quota_size: Some(100),
+                quota_type: Some(QuotaType::FIFO),
+                ..Bucket::defaults()
+            };
+            let bucket = storage
+                .create_bucket("test", bucket_settings.clone())
+                .unwrap()
+                .upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "test");
+
+            macro_rules! write_entry {
+                ($bucket:expr, $entry_name:expr, $record_ts:expr) => {
+                    let entry = $bucket
+                        .get_or_create_entry($entry_name)
+                        .unwrap()
+                        .upgrade_and_unwrap();
+                    let sender = entry
+                        .begin_write($record_ts, 10, "text/plain".to_string(), Labels::new())
+                        .wait()
+                        .unwrap();
+                    sender
+                        .tx()
+                        .blocking_send(Ok(Some(Bytes::from("0123456789"))))
+                        .unwrap();
+
+                    sender.tx().blocking_send(Ok(None)).unwrap();
+                };
+            }
+
+            write_entry!(bucket, "entry-1", 1000);
+            write_entry!(bucket, "entry-2", 2000);
+            write_entry!(bucket, "entry-2", 5000);
+
+            sleep(Duration::from_millis(10)); // to make sure that write tasks are completed
+            storage.sync_fs().unwrap();
+            let storage = Storage::load(storage.data_path.clone(), None);
+            assert_eq!(
+                storage.info().unwrap(),
+                ServerInfo {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    bucket_count: 1,
+                    usage: 142,
+                    uptime: 0,
+                    oldest_record: 1000,
+                    latest_record: 5000,
+                    defaults: Defaults {
+                        bucket: Bucket::defaults(),
+                    },
+                    license: None,
+                }
+            );
+
+            let bucket = storage.get_bucket("test").unwrap().upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "test");
+            assert_eq!(bucket.settings(), bucket_settings);
+        }
+
+        #[rstest]
+        fn test_ignore_broken_buket(storage: Storage) {
+            let bucket_settings = BucketSettings {
+                quota_size: Some(100),
+                quota_type: Some(QuotaType::FIFO),
+                ..Bucket::defaults()
+            };
+            let bucket = storage
+                .create_bucket("test", bucket_settings.clone())
+                .unwrap()
+                .upgrade_and_unwrap();
+            assert_eq!(bucket.name(), "test");
+
+            let path = storage.data_path.join("test");
+            std::fs::remove_file(path.join(SETTINGS_NAME)).unwrap();
+            let storage = Storage::load(storage.data_path.clone(), None);
+            assert_eq!(
+                storage.info().unwrap(),
+                ServerInfo {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    bucket_count: 0,
+                    usage: 0,
+                    uptime: 0,
+                    oldest_record: u64::MAX,
+                    latest_record: 0,
+                    defaults: Defaults {
+                        bucket: Bucket::defaults(),
+                    },
+                    license: None,
+                }
+            );
+        }
     }
 
     #[rstest]
