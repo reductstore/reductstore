@@ -33,7 +33,7 @@ log = "0.4.22"
 chrono = { version = "0.4.39", features = ["serde"] }
 thread-id = "5.0.0"
 zip = "2.2.1"
-tempfile = "3.14.0"
+tempfile = "3.16.0"
 hex = "0.4.3"
 prost = "0.13.1"
 prost-wkt = "0.6.0"
