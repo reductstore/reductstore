@@ -241,7 +241,7 @@ impl Stream for ReadersWrapper {
         }
 
         let mut index = 0;
-        while !self.readers.is_empty() {
+        while index < self.readers.len() {
             if let Poll::Ready(data) = self.readers[index].rx().poll_recv(_cx) {
                 match data {
                     Some(Ok(chunk)) => {
