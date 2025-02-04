@@ -4,6 +4,7 @@
 mod cmp;
 
 mod arithmetic;
+mod misc;
 mod string;
 
 use reduct_base::error::ReductError;
@@ -20,6 +21,8 @@ pub(crate) use arithmetic::sub::Sub;
 pub(crate) use string::contains::Contains;
 pub(crate) use string::ends_with::EndsWith;
 pub(crate) use string::starts_with::StartsWith;
+
+pub(crate) use misc::cast::Cast;
 
 /// A value that can be used in a condition.
 #[derive(Debug, Clone)]
