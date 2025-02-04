@@ -16,7 +16,7 @@ use futures_util::Stream;
 
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
@@ -111,7 +111,10 @@ async fn fetch_and_response_batched_records(
     let mut header_size = 0u64;
     let mut body_size = 0u64;
     let mut headers = HeaderMap::new();
+    headers.reserve(MAX_RECORDS + 3);
     let mut readers = Vec::new();
+    readers.reserve(MAX_RECORDS);
+
     let mut last = false;
     let bucket_name = bucket.name().to_string();
     let rx = bucket
@@ -237,8 +240,9 @@ impl Stream for ReadersWrapper {
             return Poll::Ready(None);
         }
 
+        let mut index = 0;
         while !self.readers.is_empty() {
-            if let Poll::Ready(data) = self.readers[0].rx().poll_recv(_cx) {
+            if let Poll::Ready(data) = self.readers[index].rx().poll_recv(_cx) {
                 match data {
                     Some(Ok(chunk)) => {
                         return Poll::Ready(Some(Ok(chunk)));
@@ -246,7 +250,7 @@ impl Stream for ReadersWrapper {
                     Some(Err(err)) => {
                         return Poll::Ready(Some(Err(HttpError::from(err))));
                     }
-                    None => self.readers.remove(0),
+                    None => index += 1,
                 };
             } else {
                 return Poll::Pending;
