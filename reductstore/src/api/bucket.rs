@@ -15,7 +15,6 @@ use crate::api::bucket::remove::remove_bucket;
 use crate::api::bucket::rename::rename_bucket;
 use crate::api::bucket::update::update_bucket;
 use crate::api::{Components, HttpError};
-use axum::async_trait;
 use axum::body::Body;
 use axum::extract::FromRequest;
 use axum::http::Request;
@@ -42,7 +41,6 @@ impl Default for BucketSettingsAxum {
 #[derive(IntoResponse, Twin)]
 pub struct FullBucketInfoAxum(FullBucketInfo);
 
-#[async_trait]
 impl<S> FromRequest<S> for BucketSettingsAxum
 where
     Bytes: FromRequest<S>,
@@ -67,12 +65,12 @@ where
 
 pub(crate) fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
-        .route("/:bucket_name", get(get_bucket))
-        .route("/:bucket_name", head(head_bucket))
-        .route("/:bucket_name", post(create_bucket))
-        .route("/:bucket_name", put(update_bucket))
-        .route("/:bucket_name", delete(remove_bucket))
-        .route("/:bucket_name/rename", put(rename_bucket))
+        .route("/{bucket_name}", get(get_bucket))
+        .route("/{bucket_name}", head(head_bucket))
+        .route("/{bucket_name}", post(create_bucket))
+        .route("/{bucket_name}", put(update_bucket))
+        .route("/{bucket_name}", delete(remove_bucket))
+        .route("/{bucket_name}/rename", put(rename_bucket))
 }
 
 #[cfg(test)]

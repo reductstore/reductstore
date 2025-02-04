@@ -7,7 +7,6 @@ mod list;
 pub mod me;
 mod remove;
 
-use axum::async_trait;
 use axum::extract::FromRequest;
 use axum::http::Request;
 use bytes::Bytes;
@@ -40,7 +39,6 @@ pub struct TokenListAxum(TokenList);
 #[derive(IntoResponse, Twin)]
 pub struct PermissionsAxum(Permissions);
 
-#[async_trait]
 impl<S> FromRequest<S> for PermissionsAxum
 where
     Bytes: FromRequest<S>,
@@ -64,7 +62,7 @@ where
 pub(crate) fn create_token_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/", get(list_tokens))
-        .route("/:token_name", post(create_token))
-        .route("/:token_name", get(get_token))
-        .route("/:token_name", delete(remove_token))
+        .route("/{token_name}", post(create_token))
+        .route("/{token_name}", get(get_token))
+        .route("/{token_name}", delete(remove_token))
 }
