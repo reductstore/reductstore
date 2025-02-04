@@ -25,7 +25,6 @@ use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;
 use crate::api::Components;
 use crate::api::HttpError;
-use axum::async_trait;
 use axum::extract::{FromRequest, Path, Query, State};
 
 use axum_extra::headers::HeaderMapExt;
@@ -67,7 +66,6 @@ impl MethodExtractor {
     }
 }
 
-#[async_trait]
 impl<S> FromRequest<S> for MethodExtractor
 where
     S: Send + Sync + 'static,
@@ -89,7 +87,6 @@ pub struct RemoveQueryInfoAxum(RemoveQueryInfo);
 #[derive(IntoResponse, Twin)]
 pub struct QueryEntryAxum(QueryEntry);
 
-#[async_trait]
 impl<S> FromRequest<S> for QueryEntryAxum
 where
     Bytes: FromRequest<S>,
@@ -141,32 +138,35 @@ async fn query_entry_router(
 
 pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
-        .route("/:bucket_name/:entry_name", post(write_record))
+        .route("/{bucket_name}/{entry_name}", post(write_record))
         .route(
-            "/:bucket_name/:entry_name/batch",
+            "/{bucket_name}/{entry_name}/batch",
             post(write_batched_records),
         )
-        .route("/:bucket_name/:entry_name", patch(update_record))
+        .route("/{bucket_name}/{entry_name}", patch(update_record))
         .route(
-            "/:bucket_name/:entry_name/batch",
+            "/{bucket_name}/{entry_name}/batch",
             patch(update_batched_records),
         )
-        .route("/:bucket_name/:entry_name", get(read_record))
-        .route("/:bucket_name/:entry_name", head(read_record))
-        .route("/:bucket_name/:entry_name/batch", get(read_batched_records))
+        .route("/{bucket_name}/{entry_name}", get(read_record))
+        .route("/{bucket_name}/{entry_name}", head(read_record))
         .route(
-            "/:bucket_name/:entry_name/batch",
+            "/{bucket_name}/{entry_name}/batch",
+            get(read_batched_records),
+        )
+        .route(
+            "/{bucket_name}/{entry_name}/batch",
             head(read_batched_records),
         )
-        .route("/:bucket_name/:entry_name/q", get(read_query::read_query)) // deprecated
-        .route("/:bucket_name/:entry_name", delete(remove_entry_router))
+        .route("/{bucket_name}/{entry_name}/q", get(read_query::read_query)) // deprecated
+        .route("/{bucket_name}/{entry_name}", delete(remove_entry_router))
         .route(
-            "/:bucket_name/:entry_name/batch",
+            "/{bucket_name}/{entry_name}/batch",
             delete(remove_batched_records),
         )
-        .route("/:bucket_name/:entry_name/q", delete(remove_query)) // deprecated
-        .route("/:bucket_name/:entry_name/rename", put(rename_entry))
-        .route("/:bucket_name/:entry_name/q", post(query_entry_router))
+        .route("/{bucket_name}/{entry_name}/q", delete(remove_query)) // deprecated
+        .route("/{bucket_name}/{entry_name}/rename", put(rename_entry))
+        .route("/{bucket_name}/{entry_name}/q", post(query_entry_router))
 }
 
 #[cfg(test)]

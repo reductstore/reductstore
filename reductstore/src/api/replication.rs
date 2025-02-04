@@ -14,7 +14,6 @@ use crate::api::replication::get::get_replication;
 use crate::api::replication::list::list_replications;
 use crate::api::replication::remove::remove_replication;
 use crate::api::replication::update::update_replication;
-use async_trait::async_trait;
 use axum::body::Body;
 use axum::extract::FromRequest;
 use axum::http::Request;
@@ -29,7 +28,6 @@ use std::sync::Arc;
 #[derive(IntoResponse, Twin)]
 pub struct ReplicationSettingsAxum(ReplicationSettings);
 
-#[async_trait]
 impl<S> FromRequest<S> for ReplicationSettingsAxum
 where
     Bytes: FromRequest<S>,
@@ -61,10 +59,10 @@ pub struct ReplicationFullInfoAxum(FullReplicationInfo);
 pub(crate) fn create_replication_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/", get(list_replications))
-        .route("/:replication_name", get(get_replication))
-        .route("/:replication_name", post(create_replication))
-        .route("/:replication_name", put(update_replication))
-        .route("/:replication_name", delete(remove_replication))
+        .route("/{replication_name}", get(get_replication))
+        .route("/{replication_name}", post(create_replication))
+        .route("/{replication_name}", put(update_replication))
+        .route("/{replication_name}", delete(remove_replication))
 }
 
 #[cfg(test)]

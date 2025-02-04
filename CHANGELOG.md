@@ -18,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-583: Close file descriptors before removing a folder, [PR-714](https://github.com/reductstore/reductstore/pull/714)
->>>>>>> stable
 
 ## [1.13.3] - 2025-01-21
 
