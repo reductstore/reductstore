@@ -7,7 +7,7 @@ use crate::storage::query::condition::operators::arithmetic::{
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, NoneOf, OneOf};
-use crate::storage::query::condition::operators::misc::{Cast, Exists};
+use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
@@ -135,6 +135,7 @@ impl Parser {
             // Misc
             "$exists" => Exists::boxed(operands),
             "$cast" => Cast::boxed(operands),
+            "$ref" => Ref::boxed(operands),
 
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
@@ -271,8 +272,9 @@ mod tests {
         #[case("$starts_with", "[\"abc\", \"ab\"]", Value::Bool(true))]
         #[case("$ends_with", "[\"abc\", \"bc\"]", Value::Bool(true))]
         // Misc
-        #[case("$exists", "[\"label\"]", Value::Bool(false))]
+        #[case("$exists", "[\"label\"]", Value::Bool(true))]
         #[case("$cast", "[10.0, \"int\"]", Value::Int(10))]
+        #[case("$ref", "[\"label\"]", Value::Int(10))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
@@ -303,6 +305,8 @@ mod tests {
 
     #[fixture]
     fn context() -> Context<'static> {
-        Context::default()
+        let mut context = Context::default();
+        context.labels.insert("label", "10");
+        context
     }
 }

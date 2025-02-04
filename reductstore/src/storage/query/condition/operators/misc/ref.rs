@@ -4,38 +4,39 @@
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
-use reduct_base::unprocessable_entity;
+use reduct_base::{not_found, unprocessable_entity};
 
-/// A node representing an exists operation that checks if a label exists in the context.
-pub(crate) struct Exists {
+/// A node representing a ref operation that accesses a label in the context.
+pub(crate) struct Ref {
     op: BoxedNode,
 }
 
-impl Node for Exists {
+impl Node for Ref {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value = self.op.apply(context)?.as_string()?;
-        Ok(Value::Bool(context.labels.contains_key(value.as_str())))
+        let label = self.op.apply(context)?.as_string()?;
+        context.labels.get(label.as_str()).map_or_else(
+            || Err(not_found!("Label '{:?}' not found", label)),
+            |v| Ok(Value::parse(v)),
+        )
     }
 
     fn print(&self) -> String {
-        format!("Exists({:?})", self.op)
+        format!("Ref({:?})", self.op)
     }
 }
 
-impl Boxed for Exists {
+impl Boxed for Ref {
     fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 1 {
-            return Err(unprocessable_entity!(
-                "$exists requires exactly one operand"
-            ));
+            return Err(unprocessable_entity!("$ref requires exactly one operand"));
         }
 
         let op = operands.pop().unwrap();
-        Ok(Box::new(Exists::new(op)))
+        Ok(Box::new(Ref::new(op)))
     }
 }
 
-impl Exists {
+impl Ref {
     pub fn new(op: BoxedNode) -> Self {
         Self { op }
     }
@@ -51,26 +52,28 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Exists::new(Constant::boxed(Value::String("foo".to_string())));
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Bool(false));
+        let op = Ref::new(Constant::boxed(Value::String("foo".to_string())));
 
         let mut context = Context::default();
         context.labels.insert("foo", "bar");
-        assert_eq!(op.apply(&context).unwrap(), Value::Bool(true));
+        assert_eq!(
+            op.apply(&context).unwrap(),
+            Value::String("bar".to_string())
+        );
     }
 
     #[rstest]
     fn apply_empty() {
-        let result = Exists::boxed(vec![]);
+        let result = Ref::boxed(vec![]);
         assert_eq!(
             result.err().unwrap(),
-            unprocessable_entity!("$exists requires exactly one operand")
+            unprocessable_entity!("$ref requires exactly one operand")
         );
     }
 
     #[rstest]
     fn print() {
-        let and = Exists::new(Constant::boxed(Value::Bool(true)));
-        assert_eq!(and.print(), "Exists(Bool(true))");
+        let and = Ref::new(Constant::boxed(Value::String("foo".to_string())));
+        assert_eq!(and.print(), "Ref(String(\"foo\"))");
     }
 }
