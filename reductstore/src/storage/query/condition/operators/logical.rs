@@ -3,6 +3,7 @@
 
 mod all_of;
 mod any_of;
+mod r#in;
 mod none_of;
 mod one_of;
 
@@ -10,3 +11,4 @@ pub(crate) use all_of::AllOf;
 pub(crate) use any_of::AnyOf;
 pub(crate) use none_of::NoneOf;
 pub(crate) use one_of::OneOf;
+pub(crate) use r#in::In;
