@@ -6,7 +6,7 @@ use crate::storage::query::condition::operators::arithmetic::{
     Abs, Add, Div, DivNum, Mult, Rem, Sub,
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
-use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, NoneOf, OneOf};
+use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, Nin, NoneOf, OneOf};
 use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
@@ -119,6 +119,7 @@ impl Parser {
             "$xor" => OneOf::boxed(operands),
             "$one_of" => OneOf::boxed(operands),
             "$in" => In::boxed(operands),
+            "$nin" => Nin::boxed(operands),
 
             // Comparison operators
             "$eq" => Eq::boxed(operands),
@@ -262,6 +263,7 @@ mod tests {
         #[case("$xor", "[true, true]", Value::Bool(false))]
         #[case("$one_of", "[true, true]", Value::Bool(false))]
         #[case("$in", "[\"a\", \"a\", \"b\"]", Value::Bool(true))]
+        #[case("$nin", "[\"a\", \"a\", \"b\"]", Value::Bool(false))]
         // Comparison operators
         #[case("$eq", "[10, 10]", Value::Bool(true))]
         #[case("$gt", "[20, 10]", Value::Bool(true))]
