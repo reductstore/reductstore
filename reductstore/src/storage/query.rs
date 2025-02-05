@@ -73,7 +73,7 @@ pub(super) fn spawn_query_task(
 
                 if tx.capacity() == 0 {
                     trace!("Query '{}' task channel full", group);
-                    return Some(Duration::from_millis(10));
+                    return Some(Duration::from_micros(10));
                 }
 
                 let next_result = query.lock().unwrap().next(block_manager.clone());

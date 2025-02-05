@@ -13,15 +13,16 @@ use futures_util::StreamExt;
 
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::entry::{RecordDrainer, WriteRecordContent};
+use crate::storage::bucket::Bucket;
+use crate::storage::entry::{Entry, RecordDrainer, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
-use reduct_base::{bad_request, internal_server_error};
+use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -67,7 +68,7 @@ pub(crate) async fn write_batched_records(
         let mut record_count = timed_headers.len();
         let mut written = 0;
         let (mut rx_writer, prepare_write_stream) =
-            spawn_getting_writers(&components, &bucket_name, &entry_name, timed_headers);
+            spawn_getting_writers(&components, &bucket_name, &entry_name, timed_headers)?;
         let mut ctx = rx_writer
             .recv()
             .await
@@ -166,26 +167,24 @@ pub(crate) async fn write_batched_records(
 
 fn spawn_getting_writers(
     components: &Arc<Components>,
-    bucket_name: &String,
-    entry_name: &String,
+    bucket_name: &str,
+    entry_name: &str,
     timed_headers: Vec<(u64, RecordHeader)>,
-) -> (Receiver<WriteContext>, JoinHandle<ErrorMap>) {
-    let (tx_writer, rx_writer) = tokio::sync::mpsc::channel(1);
-    let copy_components = Arc::clone(&components);
-    let copy_bucket_name = bucket_name.clone();
-    let copy_entry_name = entry_name.clone();
+) -> Result<(Receiver<WriteContext>, JoinHandle<ErrorMap>), ReductError> {
+    let (tx_writer, rx_writer) = tokio::sync::mpsc::channel(64);
+
+    let bucket = components
+        .storage
+        .get_bucket(&bucket_name)?
+        .upgrade_and_unwrap();
+
+    let entry_name = entry_name.to_string();
     let prepare_write_stream = tokio::spawn(async move {
         let mut error_map = BTreeMap::new();
+
         for (time, header) in timed_headers {
-            let writer = start_writing(
-                copy_components.clone(),
-                &copy_bucket_name,
-                &copy_entry_name,
-                time,
-                &header,
-                &mut error_map,
-            )
-            .await;
+            let writer =
+                start_writing(&entry_name, bucket.clone(), time, &header, &mut error_map).await;
 
             tx_writer
                 .send(WriteContext {
@@ -199,7 +198,8 @@ fn spawn_getting_writers(
         }
         error_map
     });
-    (rx_writer, prepare_write_stream)
+
+    Ok((rx_writer, prepare_write_stream))
 }
 
 async fn write_chunk(
@@ -241,15 +241,13 @@ fn check_content_length(
     if total_content_length
         != headers
             .get("content-length")
-            .ok_or(ReductError::unprocessable_entity(
-                "content-length header is required",
-            ))?
+            .ok_or(unprocessable_entity!("content-length header is required",))?
             .to_str()
             .unwrap()
             .parse::<usize>()
-            .map_err(|_| ReductError::unprocessable_entity("Invalid content-length header"))?
+            .map_err(|_| unprocessable_entity!("Invalid content-length header"))?
     {
-        return Err(ReductError::unprocessable_entity(
+        return Err(unprocessable_entity!(
             "content-length header does not match the sum of the content-lengths in the headers",
         )
         .into());
@@ -259,16 +257,13 @@ fn check_content_length(
 }
 
 async fn start_writing(
-    components: Arc<Components>,
-    bucket_name: &str,
     entry_name: &str,
+    bucket: Arc<Bucket>,
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
 ) -> Box<dyn WriteRecordContent + Sync + Send> {
     let get_writer = async {
-        let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
-
         bucket
             .begin_write(
                 entry_name,
