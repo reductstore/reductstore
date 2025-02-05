@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::{Entry, RecordDrainer, WriteRecordContent};
+use crate::storage::entry::{RecordDrainer, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
@@ -22,7 +22,7 @@ use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeade
 use reduct_base::error::ReductError;
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
