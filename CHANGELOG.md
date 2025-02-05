@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Fixed
+
+- RS-585: Fix performance regression for querying records, [PR-721](https://github.com/reductstore/reductstore/pull/721)
+
 ## [1.13.4] - 2025-01-27
 
 ### Fixed
