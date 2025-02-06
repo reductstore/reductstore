@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- RS-550: Add support for when condition on replication task, [PR-687](https://github.com/reductstore/reductstore/pull/687)
-- RS-531: Support for arithmetical operators in conditional query, [PR-696](https://github.com/reductstore/reductstore/pull/696)
-- RS-530: Implement string operators in conditional query, [PR-705](https://github.com/reductstore/reductstore/pull/705)
+- RS-550: Support for when condition on replication task, [PR-687](https://github.com/reductstore/reductstore/pull/687)
+- RS-531: Arithmetical operators in conditional query, [PR-696](https://github.com/reductstore/reductstore/pull/696)
+- RS-530: String operators in conditional query, [PR-705](https://github.com/reductstore/reductstore/pull/705)
+- RS-549: `$in/$nin` logical operators in conditional query, [PR-722](https://github.com/reductstore/reductstore/pull/722)
 
 ## [1.13.5] - 2025-02-05
 

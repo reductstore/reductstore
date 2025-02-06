@@ -16,7 +16,7 @@ use futures_util::Stream;
 
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
