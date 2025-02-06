@@ -6,7 +6,7 @@ use crate::core::thread_pool::GroupDepth::BLOCK;
 use crate::core::thread_pool::{group_from_path, shared_child_isolated};
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::proto::record;
-use crate::storage::storage::CHANNEL_BUFFER_SIZE;
+use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use bytes::Bytes;
 use log::error;
 use reduct_base::bad_request;
@@ -22,9 +22,12 @@ pub(crate) trait WriteRecordContent {
     fn tx(&self) -> &RecordTx;
 }
 
+type Rx = Receiver<Result<Option<Bytes>, ReductError>>;
+
 /// RecordWriter is responsible for writing the content of a record to the storage.
 pub(crate) struct RecordWriter {
     tx: RecordTx,
+    lazy_write: Option<(Rx, WriteContext)>, // we write to file when the writer is dropped for small records
 }
 
 struct WriteContext {
@@ -88,7 +91,10 @@ impl RecordWriter {
 
         let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
 
-        let me = RecordWriter { tx };
+        let mut me = RecordWriter {
+            tx,
+            lazy_write: None,
+        };
 
         let ctx = WriteContext {
             bucket_name,
@@ -102,14 +108,18 @@ impl RecordWriter {
             task_group,
         };
 
-        shared_child_isolated(&ctx.task_group.clone(), "write record content", move || {
-            Self::receive(rx, ctx);
-        });
+        if content_size >= MAX_IO_BUFFER_SIZE as u64 {
+            shared_child_isolated(&ctx.task_group.clone(), "write record content", move || {
+                Self::receive(rx, ctx);
+            });
+        } else {
+            me.lazy_write = Some((rx, ctx));
+        }
 
         Ok(me)
     }
 
-    fn receive(mut rx: Receiver<Result<Option<Bytes>, ReductError>>, ctx: WriteContext) {
+    fn receive(mut rx: Rx, ctx: WriteContext) {
         let mut recv = || {
             let mut written_bytes = 0u64;
             while let Some(chunk) = rx.blocking_recv() {
@@ -164,6 +174,16 @@ impl RecordWriter {
                 "Failed to finish writing {}/{}/{} record: {}",
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err
             );
+        }
+    }
+}
+
+impl Drop for RecordWriter {
+    fn drop(&mut self) {
+        if let Some((rx, ctx)) = self.lazy_write.take() {
+            spawn(move || {
+                Self::receive(rx, ctx);
+            });
         }
     }
 }

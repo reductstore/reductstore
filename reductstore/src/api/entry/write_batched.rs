@@ -103,7 +103,6 @@ pub(crate) async fn write_batched_records(
                         {
                             debug!("Timeout while sending EOF: {}", err);
                         }
-                        ctx.writer.tx().closed().await;
 
                         components.replication_repo.write().await.notify(
                             TransactionNotification {
