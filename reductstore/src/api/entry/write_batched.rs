@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::{RecordDrainer, RecordWriter, WriteRecordContent};
+use crate::storage::entry::{RecordDrainer, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
@@ -23,7 +23,7 @@ use reduct_base::error::ReductError;
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -218,12 +218,8 @@ async fn write_chunk(
     writer
         .send_timeout(Ok(Some(chunk)), IO_OPERATION_TIMEOUT)
         .await
-        .map_err(|_| {
-            ReductError::new(
-                ErrorCode::InternalServerError,
-                "Failed to write to the storage",
-            )
-        })?;
+        .map_err(|err| internal_server_error!("Timeout while sending data: {:?}", err))?
+        .map_err(|err| internal_server_error!("Failed to write the record: {:?}", err))?;
     Ok(rest)
 }
 
@@ -291,6 +287,7 @@ mod tests {
     use crate::storage::proto::record::Label;
     use axum_extra::headers::HeaderValue;
 
+    use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
     #[rstest]

@@ -16,13 +16,10 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
 use std::sync::{Arc, RwLock};
-use std::thread::{spawn, JoinHandle};
 use std::time::Duration;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::task::block_in_place;
 use tokio::time::error::Elapsed;
-use tokio::time::Timeout;
 
 type Chunk = Result<Option<Bytes>, ReductError>;
 type Rx = Receiver<Chunk>;
@@ -34,6 +31,7 @@ pub(crate) trait WriteRecordContent {
     /// Stops the writer if the chunk is an error or None.
     async fn send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>>;
 
+    #[cfg(test)]
     fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>>;
 
     async fn send_timeout(
@@ -198,29 +196,11 @@ impl RecordWriter {
 }
 
 /// Drains the record content and discards it.
-pub(crate) struct RecordDrainer {
-    tx: RecordTx,
-
-    #[allow(dead_code)]
-    io_task_handle: JoinHandle<()>,
-}
+pub(crate) struct RecordDrainer {}
 
 impl RecordDrainer {
     pub fn new() -> Self {
-        let (tx, mut rx) = channel(1);
-        let handle = spawn(move || {
-            while let Some(chunk) = rx.blocking_recv() {
-                if let Ok(None) = chunk {
-                    // sync the channel
-                    break;
-                }
-            }
-        });
-
-        RecordDrainer {
-            tx,
-            io_task_handle: handle,
-        }
+        RecordDrainer {}
     }
 }
 
@@ -228,19 +208,20 @@ impl RecordDrainer {
 impl WriteRecordContent for RecordDrainer {
     async fn send(
         &mut self,
-        chunk: Result<Option<Bytes>, ReductError>,
+        _chunk: Result<Option<Bytes>, ReductError>,
     ) -> Result<(), SendError<Chunk>> {
         Ok(())
     }
 
-    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>> {
+    #[cfg(test)]
+    fn blocking_send(&mut self, _chunk: Chunk) -> Result<(), SendError<Chunk>> {
         Ok(())
     }
 
     async fn send_timeout(
         &mut self,
-        chunk: Chunk,
-        timeout: Duration,
+        _chunk: Chunk,
+        _timeout: Duration,
     ) -> Result<Result<(), SendError<Chunk>>, Elapsed> {
         Ok(Ok(()))
     }
@@ -267,6 +248,7 @@ impl WriteRecordContent for RecordWriter {
         Ok(())
     }
 
+    #[cfg(test)]
     fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>> {
         let stop = chunk.is_err() || chunk.as_ref().unwrap().is_none();
         self.tx.blocking_send(chunk)?;
@@ -470,8 +452,6 @@ mod tests {
 
     mod record_drainer {
         use super::*;
-        use std::time::Duration;
-        use tokio::time::sleep;
 
         #[rstest]
         #[tokio::test]

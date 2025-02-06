@@ -577,7 +577,6 @@ mod tests {
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
-    use std::thread::spawn;
 
     use crate::storage::entry::{RecordWriter, WriteRecordContent};
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
