@@ -297,16 +297,12 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap();
         for time in 10..100 {
-            let writer = entry
+            let mut writer = entry
                 .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
                 .await
                 .unwrap();
-            writer
-                .tx()
-                .send(Ok(Some(Bytes::from("Hey!!!"))))
-                .await
-                .unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
+            writer.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
         }
 
         // let threads finish writing

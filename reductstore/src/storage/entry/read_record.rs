@@ -65,8 +65,6 @@ mod tests {
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;
-    use std::thread::sleep;
-    use std::time::Duration;
 
     #[rstest]
     #[tokio::test]
@@ -100,16 +98,15 @@ mod tests {
 
     #[rstest]
     fn test_begin_read_broken(entry: Entry) {
-        let sender = entry
+        let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait()
             .unwrap();
         sender
-            .tx()
             .blocking_send(Ok(Some(Bytes::from(vec![0; 50]))))
             .unwrap();
+        sender.blocking_send(Ok(None)).unwrap();
 
-        sleep(Duration::from_millis(100));
         let reader = entry.begin_read(1000000).wait();
         assert_eq!(
             reader.err(),
@@ -121,12 +118,11 @@ mod tests {
 
     #[rstest]
     fn test_begin_read_still_written(entry: Entry) {
-        let sender = entry
+        let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait()
             .unwrap();
         sender
-            .tx()
             .blocking_send(Ok(Some(Bytes::from(vec![0; 5]))))
             .unwrap();
 

@@ -370,16 +370,15 @@ mod tests {
                         .get_or_create_entry($entry_name)
                         .unwrap()
                         .upgrade_and_unwrap();
-                    let sender = entry
+                    let mut sender = entry
                         .begin_write($record_ts, 10, "text/plain".to_string(), Labels::new())
                         .wait()
                         .unwrap();
                     sender
-                        .tx()
                         .blocking_send(Ok(Some(Bytes::from("0123456789"))))
                         .unwrap();
 
-                    sender.tx().blocking_send(Ok(None)).unwrap();
+                    sender.blocking_send(Ok(None)).unwrap();
                 };
             }
 
@@ -553,17 +552,16 @@ mod tests {
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
 
-            let writer = bucket
+            let mut writer = bucket
                 .begin_write("entry-1", 0, 10, "text/plain".to_string(), Labels::new())
                 .wait()
                 .unwrap();
             writer
-                .tx()
                 .send(Ok(Some(Bytes::from("0123456789"))))
                 .await
                 .unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
-            writer.tx().closed().await;
+            writer.send(Ok(None)).await.unwrap();
+
             let result = storage.rename_bucket("test", "new").wait();
             assert_eq!(result, Ok(()));
 

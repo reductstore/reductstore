@@ -538,12 +538,16 @@ mod tests {
 
         #[rstest]
         fn test_entry_which_has_writer(entry: Entry) {
-            let sender = entry
-                .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
+            let mut sender = entry
+                .begin_write(
+                    1000000,
+                    MAX_IO_BUFFER_SIZE + 1,
+                    "text/plain".to_string(),
+                    Labels::new(),
+                )
                 .wait()
                 .unwrap();
             sender
-                .tx()
                 .blocking_send(Ok(Some(Bytes::from_static(b"456789"))))
                 .unwrap();
 
@@ -556,7 +560,7 @@ mod tests {
             );
             let info = entry.info().unwrap();
             assert_eq!(info.block_count, 1);
-            assert_eq!(info.size, 28);
+            assert_eq!(info.size, 524309);
         }
 
         #[rstest]
@@ -611,35 +615,23 @@ mod tests {
     }
 
     pub fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) {
-        let sender = entry
+        let mut sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
             .wait()
             .unwrap();
-        sender
-            .tx()
-            .blocking_send(Ok(Some(Bytes::from(data))))
-            .unwrap();
-        sender
-            .tx()
-            .blocking_send(Ok(None))
-            .expect("Failed to send None");
+        sender.blocking_send(Ok(Some(Bytes::from(data)))).unwrap();
+        sender.blocking_send(Ok(None)).expect("Failed to send None");
         drop(sender);
         sleep(Duration::from_millis(25)); // let the record be written
     }
 
     pub fn write_record_with_labels(entry: &mut Entry, time: u64, data: Vec<u8>, labels: Labels) {
-        let sender = entry
+        let mut sender = entry
             .begin_write(time, data.len(), "text/plain".to_string(), labels)
             .wait()
             .unwrap();
-        sender
-            .tx()
-            .blocking_send(Ok(Some(Bytes::from(data))))
-            .unwrap();
-        sender
-            .tx()
-            .blocking_send(Ok(None))
-            .expect("Failed to send None");
+        sender.blocking_send(Ok(Some(Bytes::from(data)))).unwrap();
+        sender.blocking_send(Ok(None)).expect("Failed to send None");
     }
 
     pub(super) fn write_stub_record(entry: &mut Entry, time: u64) {

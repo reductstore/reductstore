@@ -82,11 +82,11 @@ pub(crate) async fn write_record(
     };
 
     match check_request_and_get_sender.await {
-        Ok((ts, labels, writer)) => {
-            let tx = writer.tx();
+        Ok((ts, labels, mut writer)) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
-                    tx.send_timeout($chunk, IO_OPERATION_TIMEOUT)
+                    writer
+                        .send_timeout($chunk, IO_OPERATION_TIMEOUT)
                         .await
                         .map(|_| ())
                         .map_err(|e| {
@@ -113,11 +113,9 @@ pub(crate) async fn write_record(
                 send_chunk!(chunk);
             }
 
-            if let Err(err) = tx.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
+            if let Err(err) = writer.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
                 debug!("Timeout while sending EOF: {}", err);
             }
-
-            tx.closed().await; //sync with the storage
 
             components
                 .replication_repo

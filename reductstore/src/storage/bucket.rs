@@ -540,7 +540,7 @@ mod tests {
         time: u64,
         content: &'static [u8],
     ) -> Result<(), ReductError> {
-        let sender = bucket
+        let mut sender = bucket
             .begin_write(
                 entry_name,
                 time,
@@ -550,16 +550,13 @@ mod tests {
             )
             .await?;
         sender
-            .tx()
             .send(Ok(Some(Bytes::from(content))))
             .await
             .map_err(|e| internal_server_error!("Failed to send data: {}", e))?;
         sender
-            .tx()
             .send(Ok(None))
             .await
             .map_err(|e| internal_server_error!("Failed to sync channel: {}", e))?;
-        sender.tx().closed().await;
         Ok(())
     }
 

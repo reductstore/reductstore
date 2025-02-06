@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -23,7 +23,7 @@ use reduct_base::error::ReductError;
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -82,7 +82,7 @@ pub(crate) async fn write_batched_records(
 
             while !chunk.is_empty() {
                 match write_chunk(
-                    ctx.writer.tx(),
+                    &mut ctx.writer,
                     chunk,
                     &mut written,
                     ctx.header.content_length.clone(),
@@ -97,13 +97,11 @@ pub(crate) async fn write_batched_records(
                         // finish writing the current record and start a new one
                         if let Err(err) = ctx
                             .writer
-                            .tx()
                             .send_timeout(Ok(None), IO_OPERATION_TIMEOUT)
                             .await
                         {
                             debug!("Timeout while sending EOF: {}", err);
                         }
-                        ctx.writer.tx().closed().await;
 
                         components.replication_repo.write().await.notify(
                             TransactionNotification {
@@ -203,7 +201,7 @@ fn spawn_getting_writers(
 }
 
 async fn write_chunk(
-    sender: &Sender<Result<Option<Bytes>, ReductError>>,
+    writer: &mut Box<dyn WriteRecordContent + Sync + Send>,
     chunk: Bytes,
     written: &mut usize,
     content_size: usize,
@@ -217,15 +215,11 @@ async fn write_chunk(
         (chuck_to_write, Some(chunk.slice(to_write..)))
     };
 
-    sender
+    writer
         .send_timeout(Ok(Some(chunk)), IO_OPERATION_TIMEOUT)
         .await
-        .map_err(|_| {
-            ReductError::new(
-                ErrorCode::InternalServerError,
-                "Failed to write to the storage",
-            )
-        })?;
+        .map_err(|err| internal_server_error!("Timeout while sending data: {:?}", err))?
+        .map_err(|err| internal_server_error!("Failed to write the record: {:?}", err))?;
     Ok(rest)
 }
 
@@ -293,6 +287,7 @@ mod tests {
     use crate::storage::proto::record::Label;
     use axum_extra::headers::HeaderValue;
 
+    use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -466,7 +461,7 @@ mod tests {
     ) {
         let components = components.await;
         {
-            let writer = components
+            let mut writer = components
                 .storage
                 .get_bucket("bucket-1")
                 .unwrap()
@@ -475,12 +470,10 @@ mod tests {
                 .await
                 .unwrap();
             writer
-                .tx()
                 .send(Ok(Some(Bytes::from(vec![0; 20]))))
                 .await
                 .unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
-            writer.tx().closed().await;
+            writer.send(Ok(None)).await.unwrap();
         }
 
         headers.insert("content-length", "48".parse().unwrap());
