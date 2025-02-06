@@ -500,15 +500,12 @@ mod tests {
         let mut time = 10;
         for entry in ["test1", "test2"] {
             for _ in 0..3 {
-                let writer = bucket
+                let mut writer = bucket
                     .begin_write(entry, time, 4, "text/plain".to_string(), Labels::new())
                     .wait()
                     .unwrap();
-                writer
-                    .tx()
-                    .blocking_send(Ok(Some(Bytes::from("test"))))
-                    .unwrap();
-                writer.tx().blocking_send(Ok(None)).unwrap_or(());
+                writer.blocking_send(Ok(Some(Bytes::from("test")))).unwrap();
+                writer.blocking_send(Ok(None)).unwrap_or(());
                 time += 10;
             }
 

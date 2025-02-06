@@ -363,15 +363,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_begin_override_errored(entry: Entry) {
-        let sender = entry
+        let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
             .unwrap();
 
-        sender.tx().send(Ok(None)).await.unwrap();
-        sender.tx().closed().await;
+        sender.send(Ok(None)).await.unwrap();
 
-        let sender = entry
+        let mut sender = entry
             .begin_write(
                 1000000,
                 10,
@@ -381,7 +380,6 @@ mod tests {
             .await
             .unwrap();
         sender
-            .tx()
             .send(Ok(Some(Bytes::from(vec![0; 10]))))
             .await
             .unwrap();
@@ -406,13 +404,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_begin_not_override_if_different_size(entry: Entry) {
-        let sender = entry
+        let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
             .unwrap();
-
-        sender.tx().send(Ok(None)).await.unwrap();
-        sender.tx().closed().await;
+        sender.send(Ok(None)).await.unwrap();
 
         let err = entry
             .begin_write(

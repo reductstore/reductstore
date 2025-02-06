@@ -577,6 +577,7 @@ mod tests {
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
+    use std::thread::spawn;
 
     use crate::storage::entry::{RecordWriter, WriteRecordContent};
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
@@ -689,9 +690,9 @@ mod tests {
             block_id: u64,
         ) {
             let block_manager = Arc::new(RwLock::new(block_manager));
-            let writer = RecordWriter::try_new(Arc::clone(&block_manager), block, 0).unwrap();
+            let mut writer = RecordWriter::try_new(Arc::clone(&block_manager), block, 0).unwrap();
 
-            writer.tx().send(Ok(None)).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(10)).await; // wait for thread to finish
 
             let block_ref = block_manager.write().unwrap().load_block(block_id).unwrap();
@@ -726,14 +727,10 @@ mod tests {
                 .unwrap()
                 .insert_or_update_record(record.clone());
 
-            let writer =
+            let mut writer =
                 RecordWriter::try_new(Arc::clone(&block_manager), block, 1000_000).unwrap();
-            writer
-                .tx()
-                .send(Ok(Some(Bytes::from("hallo"))))
-                .await
-                .unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
+            writer.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
             sleep(Duration::from_millis(10)); // wait for thread to finish
 
             // must save record in WAL
@@ -993,14 +990,15 @@ mod tests {
             .map(char::from)
             .collect();
 
-        let writer =
-            RecordWriter::try_new(Arc::clone(&block_manager), block_ref.clone(), record_time)
-                .unwrap();
+        let block_copy = block_ref.clone();
+        let body_copy = record_body.clone();
+        let bm_copy = Arc::clone(block_manager);
+        let mut writer = RecordWriter::try_new(bm_copy, block_copy, record_time).unwrap();
         writer
-            .tx()
-            .blocking_send(Ok(Some(Bytes::from(record_body.clone()))))
+            .blocking_send(Ok(Some(Bytes::from(body_copy))))
             .unwrap();
-        writer.tx().blocking_send(Ok(None)).unwrap();
+        writer.blocking_send(Ok(None)).unwrap();
+
         std::thread::sleep(Duration::from_millis(10)); // wait for thread to finish
         block_manager
             .write()

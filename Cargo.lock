@@ -1924,7 +1924,6 @@ dependencies = [
  "tempfile",
  "thread-id",
  "tokio",
- "tokio-util",
  "tower 0.5.2",
  "tower-http",
  "url",

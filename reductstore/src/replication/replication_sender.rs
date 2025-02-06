@@ -388,7 +388,7 @@ mod tests {
             .push_back(Transaction::WriteRecord(20))
             .unwrap();
 
-        let writer = sender
+        let mut writer = sender
             .storage
             .create_bucket("src", BucketSettings::default())
             .unwrap()
@@ -404,11 +404,8 @@ mod tests {
             sender.run()
         });
 
-        writer
-            .tx()
-            .blocking_send(Ok(Some(Bytes::from("xxxx"))))
-            .unwrap();
-        writer.tx().blocking_send(Ok(None)).unwrap_or(());
+        writer.blocking_send(Ok(Some(Bytes::from("xxxx")))).unwrap();
+        writer.blocking_send(Ok(None)).unwrap_or(());
         sleep(Duration::from_millis(100));
 
         let diagnostics = hourly_diagnostics.read().unwrap().diagnostics();
@@ -582,7 +579,7 @@ mod tests {
             Err(_err) => sender.storage.get_bucket("src").unwrap(),
         };
 
-        let writer = bucket
+        let mut writer = bucket
             .upgrade_and_unwrap()
             .begin_write(
                 "test",
@@ -594,12 +591,11 @@ mod tests {
             .wait()
             .unwrap();
         writer
-            .tx()
             .blocking_send(Ok(Some(Bytes::from(
                 (0..size).map(|_| 'x').collect::<String>(),
             ))))
             .unwrap();
-        writer.tx().blocking_send(Ok(None)).unwrap_or(());
+        writer.blocking_send(Ok(None)).unwrap_or(());
     }
 
     fn build_sender(

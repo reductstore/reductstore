@@ -241,7 +241,7 @@ mod tests {
     ) {
         let components = components.await;
         {
-            let writer = components
+            let mut writer = components
                 .storage
                 .get_bucket("bucket-1")
                 .unwrap()
@@ -250,12 +250,10 @@ mod tests {
                 .await
                 .unwrap();
             writer
-                .tx()
                 .send(Ok(Some(Bytes::from(vec![0; 20]))))
                 .await
                 .unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
-            writer.tx().closed().await;
+            writer.send(Ok(None)).await.unwrap();
         }
 
         headers.insert("content-length", "0".parse().unwrap());

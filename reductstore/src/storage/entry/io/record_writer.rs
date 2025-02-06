@@ -7,6 +7,7 @@ use crate::core::thread_pool::{group_from_path, shared_child_isolated};
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::proto::record;
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
 use reduct_base::bad_request;
@@ -16,13 +17,31 @@ use std::io::SeekFrom;
 use std::io::Write;
 use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
+use std::time::Duration;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{channel, Receiver};
+use tokio::task::block_in_place;
+use tokio::time::error::Elapsed;
+use tokio::time::Timeout;
 
+type Chunk = Result<Option<Bytes>, ReductError>;
+type Rx = Receiver<Chunk>;
+
+#[async_trait]
 pub(crate) trait WriteRecordContent {
-    fn tx(&self) -> &RecordTx;
-}
+    /// Sends a chunk of the record content.
+    ///
+    /// Stops the writer if the chunk is an error or None.
+    async fn send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>>;
 
-type Rx = Receiver<Result<Option<Bytes>, ReductError>>;
+    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>>;
+
+    async fn send_timeout(
+        &mut self,
+        chunk: Chunk,
+        timeout: Duration,
+    ) -> Result<Result<(), SendError<Chunk>>, Elapsed>;
+}
 
 /// RecordWriter is responsible for writing the content of a record to the storage.
 pub(crate) struct RecordWriter {
@@ -178,16 +197,6 @@ impl RecordWriter {
     }
 }
 
-impl Drop for RecordWriter {
-    fn drop(&mut self) {
-        if let Some((rx, ctx)) = self.lazy_write.take() {
-            spawn(move || {
-                Self::receive(rx, ctx);
-            });
-        }
-    }
-}
-
 /// Drains the record content and discards it.
 pub(crate) struct RecordDrainer {
     tx: RecordTx,
@@ -215,15 +224,68 @@ impl RecordDrainer {
     }
 }
 
+#[async_trait]
 impl WriteRecordContent for RecordDrainer {
-    fn tx(&self) -> &RecordTx {
-        &self.tx
+    async fn send(
+        &mut self,
+        chunk: Result<Option<Bytes>, ReductError>,
+    ) -> Result<(), SendError<Chunk>> {
+        Ok(())
+    }
+
+    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>> {
+        Ok(())
+    }
+
+    async fn send_timeout(
+        &mut self,
+        chunk: Chunk,
+        timeout: Duration,
+    ) -> Result<Result<(), SendError<Chunk>>, Elapsed> {
+        Ok(Ok(()))
     }
 }
 
+#[async_trait]
 impl WriteRecordContent for RecordWriter {
-    fn tx(&self) -> &RecordTx {
-        &self.tx
+    async fn send(
+        &mut self,
+        chunk: Result<Option<Bytes>, ReductError>,
+    ) -> Result<(), SendError<Chunk>> {
+        let stop = chunk.is_err() || chunk.as_ref().unwrap().is_none();
+        self.tx.send(chunk).await?;
+
+        if stop {
+            if let Some((rx, ctx)) = self.lazy_write.take() {
+                // tokio::spawn(async move {  Self::receive(rx, ctx); });
+                tokio::task::spawn_blocking(|| Self::receive(rx, ctx));
+                // Self::receive(rx, ctx);
+            }
+            self.tx.closed().await;
+        }
+
+        Ok(())
+    }
+
+    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>> {
+        let stop = chunk.is_err() || chunk.as_ref().unwrap().is_none();
+        self.tx.blocking_send(chunk)?;
+
+        if stop {
+            if let Some((rx, ctx)) = self.lazy_write.take() {
+                Self::receive(rx, ctx);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn send_timeout(
+        &mut self,
+        chunk: Chunk,
+        timeout: Duration,
+    ) -> Result<Result<(), SendError<Chunk>>, Elapsed> {
+        tokio::time::timeout(timeout, self.send(chunk)).await
     }
 }
 
@@ -246,31 +308,31 @@ mod tests {
         use tempfile::tempdir;
         use tokio::time::sleep;
 
+        const SMALL_RECORD_TIME: u64 = 1;
+        const BIG_RECORD_TIME: u64 = 2;
+
         #[rstest]
         #[tokio::test]
-        async fn test_ok(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
-            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1).unwrap();
+        async fn test_small_ok(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+            let mut writer =
+                RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
 
-            sleep(Duration::from_millis(100)).await;
-            let path = block_manager.read().unwrap().path().clone();
-            assert!(
-                find_task_group(&get_task_group(&path, 1)).is_some(),
-                "task is running"
-            );
+            writer.send(Ok(Some(Bytes::from("te")))).await.unwrap();
+            writer.send(Ok(Some(Bytes::from("st")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
 
-            writer.tx().send(Ok(Some(Bytes::from("te")))).await.unwrap();
-            writer.tx().send(Ok(Some(Bytes::from("st")))).await.unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
-
-            sleep(Duration::from_millis(100)).await;
-            assert!(
-                find_task_group(&get_task_group(&path, 1)).is_none(),
-                "task is finished"
-            );
-
-            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager
+                .read()
+                .unwrap()
+                .load_block(SMALL_RECORD_TIME)
+                .unwrap();
             assert_eq!(
-                block_ref.read().unwrap().get_record(1).unwrap().state,
+                block_ref
+                    .read()
+                    .unwrap()
+                    .get_record(SMALL_RECORD_TIME)
+                    .unwrap()
+                    .state,
                 record::State::Finished as i32
             );
 
@@ -285,14 +347,60 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_too_long(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
-            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1).unwrap();
+        async fn test_big_ok(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+            let mut writer =
+                RecordWriter::try_new(block_manager.clone(), block_ref, BIG_RECORD_TIME).unwrap();
+
+            sleep(Duration::from_millis(100)).await;
+            let path = block_manager.read().unwrap().path().clone();
+            assert!(
+                find_task_group(&get_task_group(&path, 1)).is_some(),
+                "task is running"
+            );
+
+            let content = vec![0xaau8; MAX_IO_BUFFER_SIZE + 1];
             writer
-                .tx()
+                .send(Ok(Some(Bytes::from(content.clone()))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            sleep(Duration::from_millis(100)).await;
+            assert!(
+                find_task_group(&get_task_group(&path, 1)).is_none(),
+                "task is finished"
+            );
+
+            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
+            assert_eq!(
+                block_ref
+                    .read()
+                    .unwrap()
+                    .get_record(BIG_RECORD_TIME)
+                    .unwrap()
+                    .state,
+                record::State::Finished as i32
+            );
+
+            let mut block_content = vec![0u8; content.len() + 4];
+            fs::File::open(block_manager.read().unwrap().path().join("1.blk"))
+                .unwrap()
+                .read(&mut block_content)
+                .unwrap();
+
+            assert_eq!(content, block_content[4..]);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_too_long(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+            let mut writer =
+                RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
+            writer
                 .send(Ok(Some(Bytes::from("xxxxxxxxx"))))
                 .await
                 .unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -306,10 +414,10 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_too_short(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
-            let writer = RecordWriter::try_new(block_manager.clone(), block_ref, 1).unwrap();
-            writer.tx().send(Ok(Some(Bytes::from("xx")))).await.unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
-
+            let mut writer =
+                RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
+            writer.send(Ok(Some(Bytes::from("xx")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
@@ -340,9 +448,18 @@ mod tests {
                 .start_new_block(1, 1000)
                 .unwrap();
             block_ref.write().unwrap().insert_or_update_record(Record {
-                timestamp: Some(us_to_ts(&1)),
+                timestamp: Some(us_to_ts(&SMALL_RECORD_TIME)),
                 begin: 0,
                 end: 4,
+                state: record::State::Started as i32,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
+
+            block_ref.write().unwrap().insert_or_update_record(Record {
+                timestamp: Some(us_to_ts(&BIG_RECORD_TIME)),
+                begin: 4,
+                end: MAX_IO_BUFFER_SIZE as u64 + 5,
                 state: record::State::Started as i32,
                 labels: vec![],
                 content_type: "".to_string(),
@@ -358,13 +475,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_drop() {
-            let drainer = RecordDrainer::new();
-            assert!(!drainer.io_task_handle.is_finished(), "wait for data");
-
-            drainer.tx().send(Ok(None)).await.unwrap();
-            sleep(Duration::from_millis(100)).await;
-            assert!(drainer.io_task_handle.is_finished(), "task is finished");
+        async fn test_does_nothing() {
+            let mut drainer = RecordDrainer::new();
+            drainer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+            drainer.send(Ok(None)).await.unwrap();
         }
     }
 }

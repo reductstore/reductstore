@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::{RecordDrainer, WriteRecordContent};
+use crate::storage::entry::{RecordDrainer, RecordWriter, WriteRecordContent};
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
@@ -82,7 +82,7 @@ pub(crate) async fn write_batched_records(
 
             while !chunk.is_empty() {
                 match write_chunk(
-                    ctx.writer.tx(),
+                    &mut ctx.writer,
                     chunk,
                     &mut written,
                     ctx.header.content_length.clone(),
@@ -97,7 +97,6 @@ pub(crate) async fn write_batched_records(
                         // finish writing the current record and start a new one
                         if let Err(err) = ctx
                             .writer
-                            .tx()
                             .send_timeout(Ok(None), IO_OPERATION_TIMEOUT)
                             .await
                         {
@@ -202,7 +201,7 @@ fn spawn_getting_writers(
 }
 
 async fn write_chunk(
-    sender: &Sender<Result<Option<Bytes>, ReductError>>,
+    writer: &mut Box<dyn WriteRecordContent + Sync + Send>,
     chunk: Bytes,
     written: &mut usize,
     content_size: usize,
@@ -216,7 +215,7 @@ async fn write_chunk(
         (chuck_to_write, Some(chunk.slice(to_write..)))
     };
 
-    sender
+    writer
         .send_timeout(Ok(Some(chunk)), IO_OPERATION_TIMEOUT)
         .await
         .map_err(|_| {
@@ -465,7 +464,7 @@ mod tests {
     ) {
         let components = components.await;
         {
-            let writer = components
+            let mut writer = components
                 .storage
                 .get_bucket("bucket-1")
                 .unwrap()
@@ -474,12 +473,10 @@ mod tests {
                 .await
                 .unwrap();
             writer
-                .tx()
                 .send(Ok(Some(Bytes::from(vec![0; 20]))))
                 .await
                 .unwrap();
-            writer.tx().send(Ok(None)).await.unwrap();
-            writer.tx().closed().await;
+            writer.send(Ok(None)).await.unwrap();
         }
 
         headers.insert("content-length", "48".parse().unwrap());
