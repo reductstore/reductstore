@@ -16,7 +16,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::{bad_request, Labels};
+use reduct_base::{bad_request, internal_server_error, Labels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::timeout;
@@ -88,10 +88,11 @@ pub(crate) async fn write_record(
                     writer
                         .send_timeout($chunk, IO_OPERATION_TIMEOUT)
                         .await
-                        .map(|_| ())
-                        .map_err(|e| {
-                            error!("Error while writing data: {}", e);
-                            HttpError::from(bad_request!("Error while writing data: {}", e))
+                        .map_err(|err| {
+                            internal_server_error!("Timeout while sending data: {:?}", err)
+                        })?
+                        .map_err(|err| {
+                            internal_server_error!("Failed to write the record: {:?}", err)
                         })?;
                 };
             }

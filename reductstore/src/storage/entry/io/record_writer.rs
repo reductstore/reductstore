@@ -106,13 +106,6 @@ impl RecordWriter {
         let record_index = block.get_record(time).unwrap();
         let content_size = record_index.end - record_index.begin;
 
-        let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
-
-        let mut me = RecordWriter {
-            tx,
-            lazy_write: None,
-        };
-
         let ctx = WriteContext {
             bucket_name,
             entry_name,
@@ -125,13 +118,25 @@ impl RecordWriter {
             task_group,
         };
 
-        if content_size >= MAX_IO_BUFFER_SIZE as u64 {
+        let me = if content_size >= MAX_IO_BUFFER_SIZE as u64 {
+            let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
             shared_child_isolated(&ctx.task_group.clone(), "write record content", move || {
                 Self::receive(rx, ctx);
             });
+            RecordWriter {
+                tx,
+                lazy_write: None,
+            }
         } else {
-            me.lazy_write = Some((rx, ctx));
-        }
+            // for small records we write the content in the same thread
+            // to avoid the overhead of creating a new task
+            // the channel buffer the whole record content, so we need to limit the buffer size for the smallest chunks (8KB)
+            let (tx, rx) = channel(MAX_IO_BUFFER_SIZE / 8_000);
+            RecordWriter {
+                tx,
+                lazy_write: Some((rx, ctx)),
+            }
+        };
 
         Ok(me)
     }
@@ -238,9 +243,7 @@ impl WriteRecordContent for RecordWriter {
 
         if stop {
             if let Some((rx, ctx)) = self.lazy_write.take() {
-                // tokio::spawn(async move {  Self::receive(rx, ctx); });
                 tokio::task::spawn_blocking(|| Self::receive(rx, ctx));
-                // Self::receive(rx, ctx);
             }
             self.tx.closed().await;
         }
