@@ -64,7 +64,15 @@ impl Parser {
                     Ok(vec![Constant::boxed(Value::String(value.clone()))])
                 }
             }
-            _ => Err(unprocessable_entity!("Invalid JSON value: {}", json)),
+
+            JsonValue::Array(_) => Err(unprocessable_entity!(
+                "Array type is not supported: {}",
+                json
+            )),
+            JsonValue::Null => Err(unprocessable_entity!(
+                "Null type is not supported: {}",
+                json
+            )),
         }
     }
 
@@ -233,12 +241,22 @@ mod tests {
     }
 
     #[rstest]
-    fn test_parser_invalid_value(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&ref": {"$and": []}}"#).unwrap();
+    fn test_parser_invalid_array_type(parser: Parser) {
+        let json = serde_json::from_str(r#"{"&label": {"$in": [10, 20]}}"#).unwrap();
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
-            "[UnprocessableEntity] Invalid JSON value: []"
+            "[UnprocessableEntity] Array type is not supported: [10,20]"
+        );
+    }
+
+    #[rstest]
+    fn test_parser_invalid_null(parser: Parser) {
+        let json = serde_json::from_str(r#"{"&ref": {"$and": null}}"#).unwrap();
+        let result = parser.parse(&json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Null type is not supported: null"
         );
     }
 
