@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-530: String operators in conditional query, [PR-705](https://github.com/reductstore/reductstore/pull/705)
 - RS-549: `$in/$nin` logical operators in conditional query, [PR-722](https://github.com/reductstore/reductstore/pull/722)
 
+
+### Changed
+
+- RS-598: Optimize write operation for small records, [PR-723](https://github.com/reductstore/reductstore/pull/723)
+
 ## [1.13.5] - 2025-02-05
 
 ### Fixed
