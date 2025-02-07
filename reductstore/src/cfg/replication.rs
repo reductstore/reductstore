@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(repo.replications().len(), 0);
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_replications_needs_dst_bucket(mut env_with_replications: MockEnvGetter) {
         env_with_replications
@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(repo.replications().len(), 0);
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_replications_needs_dst_host(mut env_with_replications: MockEnvGetter) {
         env_with_replications
@@ -308,13 +308,13 @@ mod tests {
         assert_eq!(repo.replications().len(), 0);
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_replications_needs_valid_dst_host(mut env_with_replications: MockEnvGetter) {
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-            .return_const(Err(VarError::NotPresent));
+            .return_const(Ok("bucket1".to_string()));
 
         env_with_replications
             .expect_get()
@@ -417,6 +417,16 @@ mod tests {
                 "replication1".to_string(),
             );
 
+            map.insert(
+                "RS_REPLICATION_1_INCLUDE_KEY".to_string(),
+                "bucket1".to_string(),
+            );
+
+            map.insert(
+                "RS_REPLICATION_1_EXCLUDE_KEY".to_string(),
+                "bucket1".to_string(),
+            );
+
             map
         });
 
@@ -447,6 +457,16 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_1_DST_TOKEN"))
             .return_const(Ok("TOKEN".to_string()));
+
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_INCLUDE_KEY"))
+            .return_const(Ok("value".to_string()));
+
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_EXCLUDE_KEY"))
+            .return_const(Ok("value".to_string()));
 
         mock_getter
     }

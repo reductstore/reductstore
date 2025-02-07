@@ -83,13 +83,21 @@ mod tests {
     use crate::cfg::tests::MockEnvGetter;
     use crate::storage::bucket::Bucket;
     use mockall::predicate::eq;
+    use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::QuotaType::FIFO;
+    use reduct_base::not_found;
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::env::VarError;
-    #[rstest]
+    use test_log::test as log_test;
+
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_buckets(mut env_with_buckets: MockEnvGetter) {
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("bucket1".to_string()));
         env_with_buckets
             .expect_get()
             .with(eq("RS_BUCKET_1_QUOTA_TYPE"))
@@ -127,9 +135,14 @@ mod tests {
         assert_eq!(bucket1.settings().max_block_records, Some(1000));
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_buckets_defaults(mut env_with_buckets: MockEnvGetter) {
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("bucket1".to_string()));
+
         env_with_buckets
             .expect_get()
             .return_const(Err(VarError::NotPresent));
@@ -149,6 +162,27 @@ mod tests {
         );
     }
 
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_buckets_bad_name(mut env_with_buckets: MockEnvGetter) {
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("$$$$$".to_string()));
+
+        env_with_buckets
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = Cfg::from_env(env_with_buckets);
+        let components = cfg.build().unwrap();
+
+        assert_eq!(
+            components.storage.get_bucket("$$$$$").err().unwrap(),
+            not_found!("Bucket '$$$$$' is not found")
+        );
+    }
+
     #[fixture]
     fn env_with_buckets() -> MockEnvGetter {
         let tmp = tempfile::tempdir().unwrap();
@@ -162,10 +196,7 @@ mod tests {
             map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
             map
         });
-        mock_getter
-            .expect_get()
-            .with(eq("RS_BUCKET_1_NAME"))
-            .return_const(Ok("bucket1".to_string()));
+
         mock_getter
     }
 }
