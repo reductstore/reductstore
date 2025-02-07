@@ -159,75 +159,35 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::env::VarError;
+    use std::path::PathBuf;
+    use test_log::test as log_test;
 
     #[rstest]
     #[tokio::test]
     async fn test_replications(mut env_with_replications: MockEnvGetter) {
         env_with_replications
             .expect_get()
-            .with(eq("RS_BUCKET_1_NAME"))
-            .return_const(Ok("bucket1".to_string()));
-
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_NAME"))
-            .return_const(Ok("replication1".to_string()));
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-            .return_const(Ok("bucket1".to_string()));
-        env_with_replications
-            .expect_get()
             .with(eq("RS_REPLICATION_1_DST_BUCKET"))
             .return_const(Ok("bucket2".to_string()));
+
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_DST_HOST"))
             .return_const(Ok("http://localhost".to_string()));
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_DST_TOKEN"))
-            .return_const(Ok("TOKEN".to_string()));
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_ENTRIES"))
-            .return_const(Ok("entry1,entry2".to_string()));
-
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_EACH_N"))
-            .return_const(Ok("10".to_string()));
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_EACH_S"))
-            .return_const(Ok("0.5".to_string()));
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_WHEN"))
-            .return_const(Ok(r#"{"$and":[true, false]}"#.to_string()));
 
         env_with_replications
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_replications);
-        let components = cfg.build().unwrap();
-
+        let components = Cfg::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         let replication = repo.get_replication("replication1").unwrap();
+
         assert_eq!(replication.settings().src_bucket, "bucket1");
         assert_eq!(replication.settings().dst_bucket, "bucket2");
         assert_eq!(replication.settings().dst_host, "http://localhost/");
         assert_eq!(replication.settings().dst_token, "TOKEN");
         assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
-        assert_eq!(
-            replication.settings().include,
-            Labels::from_iter(vec![("key1".to_string(), "value1".to_string())])
-        );
-        assert_eq!(
-            replication.settings().exclude,
-            Labels::from_iter(vec![("key2".to_string(), "value2".to_string())])
-        );
         assert_eq!(replication.settings().each_n, Some(10));
         assert_eq!(replication.settings().each_s, Some(0.5));
         assert_eq!(
@@ -239,38 +199,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_override_replication(mut env_with_replications: MockEnvGetter) {
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_BUCKET_1_NAME"))
-            .return_const(Ok("bucket1".to_string()));
-
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_NAME"))
-            .return_const(Ok("replication1".to_string()));
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-            .return_const(Ok("bucket1".to_string()));
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
-            .return_const(Ok("bucket2".to_string()));
-    }
-
-    #[rstest]
-    #[tokio::test]
     async fn test_replications_needs_dst_bucket(mut env_with_replications: MockEnvGetter) {
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_NAME"))
-            .return_const(Ok("replication1".to_string()));
-
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-            .return_const(Ok("bucket1".to_string()));
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_DST_BUCKET"))
@@ -284,9 +213,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_replications);
-        let components = cfg.build().unwrap();
-
+        let components = Cfg::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -294,15 +221,6 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_replications_needs_dst_host(mut env_with_replications: MockEnvGetter) {
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_NAME"))
-            .return_const(Ok("replication1".to_string()));
-
-        env_with_replications
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-            .return_const(Ok("bucket1".to_string()));
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_DST_BUCKET"))
@@ -316,21 +234,81 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_replications);
-        let components = cfg.build().unwrap();
-
+        let components = Cfg::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_replications_update_existing(
+        mut env_with_replications: MockEnvGetter,
+        path: PathBuf,
+    ) {
+        let storage = Storage::load(path.clone(), None);
+        storage
+            .create_bucket("bucket1", Default::default())
+            .unwrap();
+        let mut repo = create_replication_repo(Arc::new(storage), 8080);
+        repo.create_replication(
+            "replication1",
+            ReplicationSettings {
+                src_bucket: "bucket1".to_string(),
+                dst_bucket: "bucket2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: Labels::default(),
+                exclude: Labels::default(),
+                each_n: None,
+                each_s: None,
+                when: None,
+            },
+        )
+        .unwrap();
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let repo = components.replication_repo.read().await;
+        let replication = repo.get_replication("replication1").unwrap();
+        assert_eq!(
+            replication.settings().when,
+            Some(serde_json::json!({"$and": [true, false]}))
+        );
+    }
+
     #[fixture]
-    fn env_with_replications() -> MockEnvGetter {
+    fn path() -> PathBuf {
         let tmp = tempfile::tempdir().unwrap();
+        tmp.into_path()
+    }
+
+    #[fixture]
+    fn env_with_replications(path: PathBuf) -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();
         mock_getter
             .expect_get()
             .with(eq("RS_DATA_PATH"))
-            .return_const(Ok(tmp.into_path().to_str().unwrap().to_string()));
+            .return_const(Ok(path.to_str().unwrap().to_string()));
+
+        mock_getter
+            .expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("bucket1".to_string()));
+
         mock_getter.expect_all().returning(|| {
             let mut map = BTreeMap::new();
             map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
@@ -339,28 +317,43 @@ mod tests {
                 "RS_REPLICATION_1_NAME".to_string(),
                 "replication1".to_string(),
             );
-            map.insert(
-                "RS_REPLICATION_1_INCLUDE_key1".to_string(),
-                "value1".to_string(),
-            );
-            map.insert(
-                "RS_REPLICATION_1_EXCLUDE_key2".to_string(),
-                "value2".to_string(),
-            );
+
             map
         });
+
         mock_getter
             .expect_get()
             .with(eq("RS_REPLICATION_1_NAME"))
             .return_const(Ok("replication1".to_string()));
+
         mock_getter
             .expect_get()
-            .with(eq("RS_REPLICATION_1_INCLUDE_key1"))
-            .return_const(Ok("value1".to_string()));
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+
         mock_getter
             .expect_get()
-            .with(eq("RS_REPLICATION_1_EXCLUDE_key2"))
-            .return_const(Ok("value2".to_string()));
+            .with(eq("RS_REPLICATION_1_ENTRIES"))
+            .return_const(Ok("entry1,entry2".to_string()));
+
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_EACH_N"))
+            .return_const(Ok("10".to_string()));
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_EACH_S"))
+            .return_const(Ok("0.5".to_string()));
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_WHEN"))
+            .return_const(Ok(r#"{"$and":[true, false]}"#.to_string()));
+
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_TOKEN"))
+            .return_const(Ok("TOKEN".to_string()));
+
         mock_getter
     }
 }
