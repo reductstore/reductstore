@@ -16,7 +16,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::{bad_request, internal_server_error, Labels};
+use reduct_base::{bad_request, Labels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::timeout;

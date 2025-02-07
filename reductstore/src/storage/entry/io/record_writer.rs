@@ -17,9 +17,7 @@ use std::io::SeekFrom;
 use std::io::Write;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::time::error::Elapsed;
 
 type Chunk = Result<Option<Bytes>, ReductError>;
 type Rx = Receiver<Chunk>;
