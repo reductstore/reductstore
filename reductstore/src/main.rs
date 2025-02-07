@@ -74,11 +74,7 @@ async fn launch_server() {
         cfg.port as u16,
     );
 
-    let app = create_axum_app(
-        &cfg.api_base_path,
-        &cfg.cors_allow_origin,
-        Arc::new(components),
-    );
+    let app = create_axum_app(&cfg, Arc::new(components));
 
     // Ensure that the process exits with a non-zero exit code on panic.
     let default_panic = std::panic::take_hook();
@@ -87,12 +83,26 @@ async fn launch_server() {
         std::process::exit(1);
     }));
 
+    macro_rules! apply_http_settings {
+        ($server:expr) => {{
+            let mut server = $server.handle(handle);
+            server
+                .http_builder()
+                .http1()
+                .max_headers(cfg.io_settings.batch_max_records + 15);
+            server
+                .http_builder()
+                .http1()
+                .max_buf_size(cfg.io_settings.batch_max_metadata_size);
+            server
+        }};
+    }
+
     if cfg.cert_path.is_empty() {
-        axum_server::bind(addr)
-            .handle(handle)
+        apply_http_settings!(axum_server::bind(addr))
             .serve(app.into_make_service())
             .await
-            .unwrap();
+            .expect("Failed to start HTTP server");
     } else {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
@@ -100,8 +110,7 @@ async fn launch_server() {
         let config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.cert_key_path)
             .await
             .expect("Failed to load TLS certificate");
-        axum_server::bind_rustls(addr, config)
-            .handle(handle)
+        apply_http_settings!(axum_server::bind_rustls(addr, config))
             .serve(app.into_make_service())
             .await
             .expect("Failed to start HTTPS server");

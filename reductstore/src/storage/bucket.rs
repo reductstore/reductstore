@@ -56,8 +56,8 @@ impl Bucket {
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         std::fs::create_dir_all(&path)?;
-
         let settings = Self::fill_settings(settings, Self::defaults());
+
         let bucket = Bucket {
             name: name.to_string(),
             path,

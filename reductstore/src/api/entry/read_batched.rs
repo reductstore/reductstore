@@ -14,6 +14,7 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::cfg::io::IoSettings;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
 use log::{debug, warn};
@@ -64,6 +65,7 @@ pub(crate) async fn read_batched_records(
         entry_name,
         query_id,
         method.name == "HEAD",
+        &components.io_settings,
     )
     .await
 }
@@ -73,14 +75,8 @@ async fn fetch_and_response_batched_records(
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
+    io_settings: &IoSettings,
 ) -> Result<impl IntoResponse, HttpError> {
-    const MAX_HEADER_SIZE: u64 = 6_000; // many http servers have a default limit of 8kb
-    const MAX_BODY_SIZE: u64 = 16_000_000; // 16mb just not to be too big
-    const MAX_RECORDS: usize = 85; // some clients have a limit of 100 headers
-
-    const BATCH_TIMEOUT: Duration = Duration::from_secs(5); // 5 seconds for the batch
-    const RECORD_TIMEOUT: Duration = Duration::from_secs(1); // 1 second for each record
-
     let make_header = |reader: &RecordReader| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
         let mut meta_data = vec![
@@ -108,12 +104,12 @@ async fn fetch_and_response_batched_records(
         (name, value)
     };
 
-    let mut header_size = 0u64;
+    let mut header_size = 0usize;
     let mut body_size = 0u64;
     let mut headers = HeaderMap::new();
-    headers.reserve(MAX_RECORDS + 3);
+    headers.reserve(io_settings.batch_max_records + 3);
     let mut readers = Vec::new();
-    readers.reserve(MAX_RECORDS);
+    readers.reserve(io_settings.batch_max_records);
 
     let mut last = false;
     let bucket_name = bucket.name().to_string();
@@ -127,7 +123,7 @@ async fn fetch_and_response_batched_records(
         let reader = match next_record_reader(
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
-            RECORD_TIMEOUT,
+            io_settings.batch_records_timeout,
         )
         .await
         {
@@ -139,16 +135,16 @@ async fn fetch_and_response_batched_records(
             Ok(reader) => {
                 {
                     let (name, value) = make_header(&reader);
-                    header_size += (name.as_str().len() + value.to_str().unwrap().len() + 2) as u64;
+                    header_size += name.as_str().len() + value.to_str().unwrap().len() + 2;
                     body_size += reader.content_length();
                     headers.insert(name, value);
                 }
                 readers.push(reader);
 
-                if header_size > MAX_HEADER_SIZE
-                    || body_size > MAX_BODY_SIZE
-                    || readers.len() > MAX_RECORDS
-                    || start_time.elapsed() > BATCH_TIMEOUT
+                if header_size > io_settings.batch_max_metadata_size
+                    || body_size > io_settings.batch_max_size
+                    || readers.len() > io_settings.batch_max_records
+                    || start_time.elapsed() > io_settings.batch_timeout
                 {
                     // This is not correct, because we should check sizes before adding the record
                     // but we can't know the size in advance and after next() we can't go back

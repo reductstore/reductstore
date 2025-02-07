@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-531: Arithmetical operators in conditional query, [PR-696](https://github.com/reductstore/reductstore/pull/696)
 - RS-530: String operators in conditional query, [PR-705](https://github.com/reductstore/reductstore/pull/705)
 - RS-549: `$in/$nin` logical operators in conditional query, [PR-722](https://github.com/reductstore/reductstore/pull/722)
-
+- RS-597: Configuration parameters for batch and HTTP limits, [PR-725](https://github.com/reductstore/reductstore/pull/725)
 
 ### Changed
 
