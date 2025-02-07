@@ -167,6 +167,11 @@ mod tests {
     async fn test_replications(mut env_with_replications: MockEnvGetter) {
         env_with_replications
             .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env_with_replications
+            .expect_get()
             .with(eq("RS_REPLICATION_1_DST_BUCKET"))
             .return_const(Ok("bucket2".to_string()));
 
@@ -197,9 +202,68 @@ mod tests {
         assert!(replication.is_provisioned());
     }
 
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_replications_needs_src_bucket(mut env_with_replications: MockEnvGetter) {
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Err(VarError::NotPresent));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let repo = components.replication_repo.read().await;
+        assert_eq!(repo.replications().len(), 0);
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_replications_src_not_exist(mut env_with_replications: MockEnvGetter) {
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("NOT-EXIST".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let repo = components.replication_repo.read().await;
+        assert_eq!(repo.replications().len(), 0);
+    }
+
     #[rstest]
     #[tokio::test]
     async fn test_replications_needs_dst_bucket(mut env_with_replications: MockEnvGetter) {
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Err(VarError::NotPresent));
+
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_DST_BUCKET"))
@@ -223,6 +287,11 @@ mod tests {
     async fn test_replications_needs_dst_host(mut env_with_replications: MockEnvGetter) {
         env_with_replications
             .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Err(VarError::NotPresent));
+
+        env_with_replications
+            .expect_get()
             .with(eq("RS_REPLICATION_1_DST_BUCKET"))
             .return_const(Ok("bucket2".to_string()));
         env_with_replications
@@ -241,11 +310,37 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_replications_update_existing(
-        mut env_with_replications: MockEnvGetter,
-        path: PathBuf,
-    ) {
-        let storage = Storage::load(path.clone(), None);
+    async fn test_replications_needs_valid_dst_host(mut env_with_replications: MockEnvGetter) {
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Err(VarError::NotPresent));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("invalid-url".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let repo = components.replication_repo.read().await;
+        assert_eq!(repo.replications().len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replications_update_existing(mut env_with_replications: MockEnvGetter) {
+        let storage = Storage::load(
+            env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+            None,
+        );
         storage
             .create_bucket("bucket1", Default::default())
             .unwrap();
@@ -267,6 +362,10 @@ mod tests {
         )
         .unwrap();
 
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_DST_BUCKET"))
@@ -325,11 +424,6 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_1_NAME"))
             .return_const(Ok("replication1".to_string()));
-
-        mock_getter
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-            .return_const(Ok("bucket1".to_string()));
 
         mock_getter
             .expect_get()
