@@ -416,6 +416,7 @@ mod tests {
                         .send_timeout(Ok(Some(Bytes::from("x"))), Duration::from_millis(10))
                         .await?;
                 }
+
                 Ok::<(), ReductError>(())
             };
 
@@ -471,10 +472,20 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_does_nothing() {
+        async fn test_send() {
             let mut drainer = RecordDrainer::new();
             drainer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
             drainer.send(Ok(None)).await.unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_send_timeout() {
+            let mut drainer = RecordDrainer::new();
+            drainer
+                .send_timeout(Ok(Some(Bytes::from("test"))), Duration::from_millis(10))
+                .await
+                .unwrap();
         }
     }
 }
