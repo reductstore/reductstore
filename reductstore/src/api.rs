@@ -105,11 +105,6 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub(crate) struct ApiSettings {
-    pub api_base_path: String,
-    pub cors_allow_origin: Vec<String>,
-}
-
 pub fn create_axum_app(cfg: &Cfg<StdEnvGetter>, components: Arc<Components>) -> Router {
     let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
     let cors = configure_cors(&cfg.cors_allow_origin);
@@ -243,6 +238,7 @@ mod tests {
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
             replication_repo: RwLock::new(replication_repo),
+            io_settings: IoSettings::default(),
         };
 
         Arc::new(components)

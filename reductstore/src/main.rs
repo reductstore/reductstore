@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use axum_server::tls_rustls::RustlsConfig;
 
-use axum_server::{Handle, Server};
+use axum_server::Handle;
 use log::info;
 use reductstore::api::create_axum_app;
 use reductstore::cfg::Cfg;
@@ -89,7 +89,7 @@ async fn launch_server() {
             server
                 .http_builder()
                 .http1()
-                .max_headers(cfg.io_settings.batch_max_records + 20);
+                .max_headers(cfg.io_settings.batch_max_records + 15);
             server
                 .http_builder()
                 .http1()
