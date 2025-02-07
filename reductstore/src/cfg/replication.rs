@@ -162,7 +162,7 @@ mod tests {
     use std::path::PathBuf;
     use test_log::test as log_test;
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_replications(mut env_with_replications: MockEnvGetter) {
         env_with_replications
