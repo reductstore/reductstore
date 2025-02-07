@@ -217,9 +217,7 @@ async fn write_chunk(
 
     writer
         .send_timeout(Ok(Some(chunk)), IO_OPERATION_TIMEOUT)
-        .await
-        .map_err(|err| internal_server_error!("Timeout while sending data: {:?}", err))?
-        .map_err(|err| internal_server_error!("Failed to write the record: {:?}", err))?;
+        .await?;
     Ok(rest)
 }
 

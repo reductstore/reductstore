@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-598: Optimize write operation for small records, [PR-723](https://github.com/reductstore/reductstore/pull/723)
 
+### Fixed
+
+- Fix deadlock in write operation for small records, [PR-724](https://github.com/reductstore/reductstore/pull/724)
+
 ## [1.13.5] - 2025-02-05
 
 ### Fixed
