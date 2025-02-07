@@ -13,6 +13,9 @@ use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
+use crate::cfg::io::IoSettings;
+use crate::cfg::Cfg;
+use crate::core::env::StdEnvGetter;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;
@@ -42,6 +45,7 @@ pub struct Components {
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub base_path: String,
+    pub io_settings: IoSettings,
 }
 
 #[derive(Twin, PartialEq)]
@@ -101,34 +105,35 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(
-    api_base_path: &String,
-    cors_allow_origin: &Vec<String>,
-    components: Arc<Components>,
-) -> Router {
+pub(crate) struct ApiSettings {
+    pub api_base_path: String,
+    pub cors_allow_origin: Vec<String>,
+}
+
+pub fn create_axum_app(cfg: &Cfg<StdEnvGetter>, components: Arc<Components>) -> Router {
     let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
-    let cors = configure_cors(cors_allow_origin);
+    let cors = configure_cors(&cfg.cors_allow_origin);
 
     let app = Router::new()
         // Server API
         .nest(
-            &format!("{}api/v1", api_base_path),
+            &format!("{}api/v1", cfg.api_base_path),
             create_server_api_routes(),
         )
         // Token API
         .nest(
-            &format!("{}api/v1/tokens", api_base_path),
+            &format!("{}api/v1/tokens", cfg.api_base_path),
             create_token_api_routes(),
         )
         // Bucket API + Entry API
-        .nest(&format!("{}api/v1/b", api_base_path), b_route)
+        .nest(&format!("{}api/v1/b", cfg.api_base_path), b_route)
         // Replication API
         .nest(
-            &format!("{}api/v1/replications", api_base_path),
+            &format!("{}api/v1/replications", cfg.api_base_path),
             create_replication_api_routes(),
         )
         // UI
-        .route(&format!("{}", api_base_path), get(redirect_to_index))
+        .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
         .fallback(get(show_ui))
         .layer(from_fn(default_headers))
         .layer(from_fn(print_statuses))
@@ -137,7 +142,7 @@ pub fn create_axum_app(
     app
 }
 
-fn configure_cors(cors_allow_origin: &[String]) -> CorsLayer {
+fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
     let cors_layer = CorsLayer::new()
         .allow_methods(Any)
         .allow_headers(Any)

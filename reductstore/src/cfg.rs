@@ -2,12 +2,14 @@
 // Licensed under the Business Source License 1.1
 
 mod bucket;
+pub mod io;
 mod replication;
 mod token;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
+use crate::cfg::io::IoSettings;
 use crate::core::env::{Env, GetEnv};
 use log::info;
 use reduct_base::error::ReductError;
@@ -37,7 +39,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ReplicationSettings>,
-
+    pub io_settings: IoSettings,
     env: Env<EnvGetter>,
 }
 
@@ -58,7 +60,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications: Self::parse_replications(&mut env),
-
+            io_settings: Self::parse_io_settings(&mut env),
             env,
         };
 
@@ -78,6 +80,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             console,
             replication_repo: tokio::sync::RwLock::new(replication_engine),
             base_path: self.api_base_path.clone(),
+            io_settings: self.io_settings.clone(),
         })
     }
 
