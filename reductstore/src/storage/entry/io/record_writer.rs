@@ -10,8 +10,8 @@ use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
-use reduct_base::bad_request;
 use reduct_base::error::ReductError;
+use reduct_base::{bad_request, internal_server_error};
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
@@ -29,16 +29,12 @@ pub(crate) trait WriteRecordContent {
     /// Sends a chunk of the record content.
     ///
     /// Stops the writer if the chunk is an error or None.
-    async fn send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>>;
+    async fn send(&mut self, chunk: Chunk) -> Result<(), ReductError>;
 
     #[cfg(test)]
-    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>>;
+    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), ReductError>;
 
-    async fn send_timeout(
-        &mut self,
-        chunk: Chunk,
-        timeout: Duration,
-    ) -> Result<Result<(), SendError<Chunk>>, Elapsed>;
+    async fn send_timeout(&mut self, chunk: Chunk, timeout: Duration) -> Result<(), ReductError>;
 }
 
 /// RecordWriter is responsible for writing the content of a record to the storage.
@@ -214,32 +210,27 @@ impl WriteRecordContent for RecordDrainer {
     async fn send(
         &mut self,
         _chunk: Result<Option<Bytes>, ReductError>,
-    ) -> Result<(), SendError<Chunk>> {
+    ) -> Result<(), ReductError> {
         Ok(())
     }
 
     #[cfg(test)]
-    fn blocking_send(&mut self, _chunk: Chunk) -> Result<(), SendError<Chunk>> {
+    fn blocking_send(&mut self, _chunk: Chunk) -> Result<(), ReductError> {
         Ok(())
     }
 
-    async fn send_timeout(
-        &mut self,
-        _chunk: Chunk,
-        _timeout: Duration,
-    ) -> Result<Result<(), SendError<Chunk>>, Elapsed> {
-        Ok(Ok(()))
+    async fn send_timeout(&mut self, _chunk: Chunk, _timeout: Duration) -> Result<(), ReductError> {
+        Ok(())
     }
 }
 
 #[async_trait]
 impl WriteRecordContent for RecordWriter {
-    async fn send(
-        &mut self,
-        chunk: Result<Option<Bytes>, ReductError>,
-    ) -> Result<(), SendError<Chunk>> {
+    async fn send(&mut self, chunk: Result<Option<Bytes>, ReductError>) -> Result<(), ReductError> {
         let stop = chunk.is_err() || chunk.as_ref().unwrap().is_none();
-        self.tx.send(chunk).await?;
+        self.tx.send(chunk).await.map_err(|err| {
+            internal_server_error!("Failed to write the record to internal buffer: {:?}", err)
+        })?;
 
         if stop {
             if let Some((rx, ctx)) = self.lazy_write.take() {
@@ -252,9 +243,11 @@ impl WriteRecordContent for RecordWriter {
     }
 
     #[cfg(test)]
-    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), SendError<Chunk>> {
+    fn blocking_send(&mut self, chunk: Chunk) -> Result<(), ReductError> {
         let stop = chunk.is_err() || chunk.as_ref().unwrap().is_none();
-        self.tx.blocking_send(chunk)?;
+        self.tx.blocking_send(chunk).map_err(|err| {
+            internal_server_error!("Failed to write the record to internal buffer: {:?}", err)
+        })?;
 
         if stop {
             if let Some((rx, ctx)) = self.lazy_write.take() {
@@ -265,12 +258,12 @@ impl WriteRecordContent for RecordWriter {
         Ok(())
     }
 
-    async fn send_timeout(
-        &mut self,
-        chunk: Chunk,
-        timeout: Duration,
-    ) -> Result<Result<(), SendError<Chunk>>, Elapsed> {
-        tokio::time::timeout(timeout, self.send(chunk)).await
+    async fn send_timeout(&mut self, chunk: Chunk, timeout: Duration) -> Result<(), ReductError> {
+        tokio::time::timeout(timeout, self.send(chunk))
+            .await
+            .map_err(|_| {
+                internal_server_error!("Timeout while writing the record to internal buffer")
+            })?
     }
 }
 
@@ -409,6 +402,28 @@ mod tests {
             assert_eq!(
                 block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_timeout(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+            let mut writer =
+                RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
+
+            let result = async {
+                // we overload the channel buffer
+                for _ in 0..100 {
+                    writer
+                        .send_timeout(Ok(Some(Bytes::from("x"))), Duration::from_millis(10))
+                        .await?;
+                }
+                Ok::<(), ReductError>(())
+            };
+
+            assert_eq!(
+                result.await.err().unwrap(),
+                internal_server_error!("Timeout while writing the record to internal buffer")
             );
         }
 

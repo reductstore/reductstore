@@ -85,15 +85,7 @@ pub(crate) async fn write_record(
         Ok((ts, labels, mut writer)) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
-                    writer
-                        .send_timeout($chunk, IO_OPERATION_TIMEOUT)
-                        .await
-                        .map_err(|err| {
-                            internal_server_error!("Timeout while sending data: {:?}", err)
-                        })?
-                        .map_err(|err| {
-                            internal_server_error!("Failed to write the record: {:?}", err)
-                        })?;
+                    writer.send_timeout($chunk, IO_OPERATION_TIMEOUT).await?;
                 };
             }
 
