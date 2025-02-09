@@ -6,7 +6,7 @@ use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
 use std::time::Duration;
 
-const DEFAULT_BATCH_MAX_SIZE: u64 = 8000;
+const DEFAULT_BATCH_MAX_SIZE: u64 = 8000000;
 const DEFAULT_BATCH_MAX_RECORDS: usize = 85;
 const DEFAULT_BATCH_MAX_METADATA_SIZE: u64 = 512000;
 const DEFAULT_BATCH_TIMEOUT_S: u64 = 5;
