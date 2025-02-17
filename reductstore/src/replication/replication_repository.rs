@@ -1,6 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::DEFAULT_PORT;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
@@ -102,8 +103,8 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
 pub(crate) struct ReplicationRepository {
     replications: HashMap<String, ReplicationTask>,
     storage: Arc<Storage>,
-    config_path: PathBuf,
-    listening_port: u16,
+    repo_path: PathBuf,
+    config: ReplicationConfig,
 }
 
 impl ManageReplications for ReplicationRepository {
@@ -201,21 +202,21 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) fn load_or_create(storage: Arc<Storage>, listening_port: u16) -> Self {
-        let config_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
+    pub(crate) fn load_or_create(storage: Arc<Storage>, config: ReplicationConfig) -> Self {
+        let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
 
         let mut repo = Self {
             replications: HashMap::new(),
             storage,
-            config_path,
-            listening_port,
+            repo_path,
+            config,
         };
 
-        match std::fs::read(&repo.config_path) {
+        match std::fs::read(&repo.repo_path) {
             Ok(data) => {
                 debug!(
                     "Reading replication repository from {}",
-                    repo.config_path.as_os_str().to_str().unwrap_or("...")
+                    repo.repo_path.as_os_str().to_str().unwrap_or("...")
                 );
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(data))
                     .expect("Error decoding replication repository");
@@ -230,7 +231,7 @@ impl ReplicationRepository {
             Err(_) => {
                 debug!(
                     "Creating a new token repository {}",
-                    repo.config_path.as_os_str().to_str().unwrap_or("...")
+                    repo.repo_path.as_os_str().to_str().unwrap_or("...")
                 );
                 repo.save_repo()
                     .expect("Failed to create a new token repository");
@@ -256,10 +257,10 @@ impl ReplicationRepository {
             .encode(&mut buf)
             .expect("Error encoding replication repository");
 
-        std::fs::write(&self.config_path, buf).map_err(|e| {
+        std::fs::write(&self.repo_path, buf).map_err(|e| {
             ReductError::internal_server_error(&format!(
                 "Failed to write replication repository to {}: {}",
-                self.config_path.as_os_str().to_str().unwrap_or("..."),
+                self.repo_path.as_os_str().to_str().unwrap_or("..."),
                 e
             ))
         })
@@ -293,7 +294,8 @@ impl ReplicationRepository {
 
         // check if target and source buckets are the same
         if settings.src_bucket == settings.dst_bucket
-            && self.listening_port == dest_url.port_or_known_default().unwrap_or(DEFAULT_PORT)
+            && self.config.listening_port
+                == dest_url.port_or_known_default().unwrap_or(DEFAULT_PORT)
             && ["127.0.0.1", "localhost", "0.0.0.0"].contains(&dest_url.host_str().unwrap_or(""))
         {
             return Err(unprocessable_entity!(
@@ -311,8 +313,12 @@ impl ReplicationRepository {
             }
         }
 
-        let replication =
-            ReplicationTask::new(name.to_string(), settings, Arc::clone(&self.storage));
+        let replication = ReplicationTask::new(
+            name.to_string(),
+            settings,
+            &self.config,
+            Arc::clone(&self.storage),
+        );
         self.replications.insert(name.to_string(), replication);
         self.save_repo()
     }
@@ -426,11 +432,16 @@ mod tests {
 
         #[rstest]
         fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
-            let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), DEFAULT_PORT);
+            let mut repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                ReplicationConfig::default(),
+            );
             repo.create_replication("test", settings.clone()).unwrap();
 
-            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), DEFAULT_PORT);
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                ReplicationConfig::default(),
+            );
             assert_eq!(repo.replications().len(), 1);
             assert_eq!(
                 repo.get_replication("test").unwrap().settings(),
@@ -553,7 +564,10 @@ mod tests {
             assert_eq!(repo.replications().len(), 0);
 
             // check if replication is removed from file
-            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), DEFAULT_PORT);
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                ReplicationConfig::default(),
+            );
             assert_eq!(
                 repo.replications().len(),
                 0,
@@ -709,6 +723,6 @@ mod tests {
 
     #[fixture]
     fn repo(storage: Arc<Storage>) -> ReplicationRepository {
-        ReplicationRepository::load_or_create(storage, DEFAULT_PORT)
+        ReplicationRepository::load_or_create(storage, ReplicationConfig::default())
     }
 }

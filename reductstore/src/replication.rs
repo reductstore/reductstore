@@ -3,14 +3,14 @@
 
 use std::sync::Arc;
 
+use crate::cfg::replication::ReplicationConfig;
+use crate::replication::replication_task::ReplicationTask;
+use crate::storage::proto::record::Label;
+use crate::storage::storage::Storage;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
-
-use crate::replication::replication_task::ReplicationTask;
-use crate::storage::proto::record::Label;
-use crate::storage::storage::Storage;
 
 mod diagnostics;
 pub mod proto;
@@ -132,10 +132,10 @@ pub trait ManageReplications {
 }
 
 /// Create a new replication repository
-/// A fabric method to create a new replication repository and return it as a trait object.
+/// A factory method to create a new replication repository and return it as a trait object.
 pub(crate) fn create_replication_repo(
     storage: Arc<Storage>,
-    listening_port: u16,
+    config: ReplicationConfig,
 ) -> Box<dyn ManageReplications + Send + Sync> {
-    Box::new(replication_repository::ReplicationRepository::load_or_create(storage, listening_port))
+    Box::new(replication_repository::ReplicationRepository::load_or_create(storage, config))
 }

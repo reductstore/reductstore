@@ -17,7 +17,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         &self,
         storage: Arc<Storage>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_repo(Arc::clone(&storage), self.port);
+        let mut repo = create_replication_repo(Arc::clone(&storage), self.replication_conf.clone());
         for (name, settings) in &self.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {
@@ -154,6 +154,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::replication::ReplicationConfig;
     use crate::cfg::tests::MockEnvGetter;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
@@ -344,7 +345,14 @@ mod tests {
         storage
             .create_bucket("bucket1", Default::default())
             .unwrap();
-        let mut repo = create_replication_repo(Arc::new(storage), 8080);
+        let mut repo = create_replication_repo(
+            Arc::new(storage),
+            ReplicationConfig {
+                connection_timeout: std::time::Duration::from_secs(10),
+                replication_log_size: 500,
+                listening_port: 8080,
+            },
+        );
         repo.create_replication(
             "replication1",
             ReplicationSettings {

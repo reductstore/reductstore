@@ -3,11 +3,13 @@
 
 pub mod io;
 mod provision;
+pub mod replication;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
-use crate::cfg::io::IoSettings;
+use crate::cfg::io::IoConfig;
+use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
 use log::info;
 use reduct_base::error::ReductError;
@@ -37,17 +39,19 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ReplicationSettings>,
-    pub io_settings: IoSettings,
+    pub io_conf: IoConfig,
+    pub replication_conf: ReplicationConfig,
     env: Env<EnvGetter>,
 }
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub fn from_env(env_getter: EnvGetter) -> Self {
         let mut env = Env::new(env_getter);
+        let port: u16 = env.get("RS_PORT", DEFAULT_PORT);
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host: env.get("RS_HOST", DEFAULT_HOST.to_string()),
-            port: env.get("RS_PORT", DEFAULT_PORT),
+            port: port.clone(),
             api_base_path: env.get("RS_API_BASE_PATH", "/".to_string()),
             data_path: env.get("RS_DATA_PATH", "/data".to_string()),
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
@@ -58,7 +62,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications: Self::parse_replications(&mut env),
-            io_settings: Self::parse_io_settings(&mut env),
+            io_conf: Self::parse_io_config(&mut env),
+            replication_conf: Self::parse_replication_config(&mut env, port),
             env,
         };
 
@@ -78,7 +83,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             console,
             replication_repo: tokio::sync::RwLock::new(replication_engine),
             base_path: self.api_base_path.clone(),
-            io_settings: self.io_settings.clone(),
+            io_settings: self.io_conf.clone(),
         })
     }
 
