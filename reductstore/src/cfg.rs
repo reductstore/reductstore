@@ -1,10 +1,8 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-mod bucket;
 pub mod io;
-mod replication;
-mod token;
+mod provision;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;

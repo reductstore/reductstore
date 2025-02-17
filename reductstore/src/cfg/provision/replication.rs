@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
-    pub(super) fn provision_replication_repo(
+    pub(in crate::cfg) fn provision_replication_repo(
         &self,
         storage: Arc<Storage>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
@@ -39,7 +39,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         }
         Ok(repo)
     }
-    pub(super) fn parse_replications(
+    pub(in crate::cfg) fn parse_replications(
         env: &mut Env<EnvGetter>,
     ) -> HashMap<String, ReplicationSettings> {
         let mut replications = HashMap::<String, (String, ReplicationSettings)>::new();
