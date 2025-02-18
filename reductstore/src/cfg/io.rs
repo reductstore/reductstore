@@ -12,9 +12,9 @@ const DEFAULT_BATCH_MAX_METADATA_SIZE: u64 = 512000;
 const DEFAULT_BATCH_TIMEOUT_S: u64 = 5;
 const DEFAULT_BATCH_RECORDS_TIMEOUT_S: u64 = 1;
 
-/// IO settings
+/// IO configuration
 #[derive(Clone, Debug, PartialEq)]
-pub struct IoSettings {
+pub struct IoConfig {
     /// Maximum size of a batch in bytes sent from the server
     pub batch_max_size: u64,
     /// Maximum number of records in a batch sent from the server and client
@@ -27,9 +27,9 @@ pub struct IoSettings {
     pub batch_records_timeout: Duration,
 }
 
-impl Default for IoSettings {
+impl Default for IoConfig {
     fn default() -> Self {
-        IoSettings {
+        IoConfig {
             batch_max_size: DEFAULT_BATCH_MAX_SIZE,
             batch_max_records: DEFAULT_BATCH_MAX_RECORDS,
             batch_max_metadata_size: DEFAULT_BATCH_MAX_METADATA_SIZE as usize,
@@ -40,8 +40,8 @@ impl Default for IoSettings {
 }
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
-    pub(super) fn parse_io_settings(env: &mut Env<EnvGetter>) -> IoSettings {
-        IoSettings {
+    pub(super) fn parse_io_config(env: &mut Env<EnvGetter>) -> IoConfig {
+        IoConfig {
             batch_max_size: env
                 .get_optional::<ByteSize>("RS_IO_BATCH_MAX_SIZE")
                 .unwrap_or(ByteSize::b(DEFAULT_BATCH_MAX_SIZE))
@@ -74,7 +74,7 @@ mod tests {
     use std::env::VarError;
 
     #[rstest]
-    fn test_io_settings() {
+    fn test_io_config() {
         let mut env_getter = MockEnvGetter::new();
 
         env_getter
@@ -98,7 +98,7 @@ mod tests {
             .with(eq("RS_IO_BATCH_RECORDS_TIMEOUT_S"))
             .return_const(Ok("5".to_string()));
 
-        let io_settings = IoSettings {
+        let io_settings = IoConfig {
             batch_max_size: 1000000,
             batch_max_records: 10,
             batch_max_metadata_size: 1000,
@@ -108,23 +108,23 @@ mod tests {
 
         assert_eq!(
             io_settings,
-            Cfg::<MockEnvGetter>::parse_io_settings(&mut Env::new(env_getter))
+            Cfg::<MockEnvGetter>::parse_io_config(&mut Env::new(env_getter))
         );
     }
 
     #[rstest]
-    fn test_default_io_settings() {
+    fn test_default_io_config() {
         let mut env_getter = MockEnvGetter::new();
 
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let io_settings = IoSettings::default();
+        let io_settings = IoConfig::default();
 
         assert_eq!(
             io_settings,
-            Cfg::<MockEnvGetter>::parse_io_settings(&mut Env::new(env_getter))
+            Cfg::<MockEnvGetter>::parse_io_config(&mut Env::new(env_getter))
         );
     }
 }

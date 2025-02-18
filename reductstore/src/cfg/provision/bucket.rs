@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
-    pub(super) fn provision_buckets(&self) -> Storage {
+    pub(in crate::cfg) fn provision_buckets(&self) -> Storage {
         let license = parse_license(self.license_path.clone());
         let storage = Storage::load(PathBuf::from(self.data_path.clone()), license);
         for (name, settings) in &self.buckets {
@@ -50,7 +50,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         storage
     }
 
-    pub(super) fn parse_buckets(env: &mut Env<EnvGetter>) -> HashMap<String, BucketSettings> {
+    pub(in crate::cfg) fn parse_buckets(
+        env: &mut Env<EnvGetter>,
+    ) -> HashMap<String, BucketSettings> {
         let mut buckets = HashMap::<String, (String, BucketSettings)>::new();
         for (id, name) in env.matches("RS_BUCKET_(.*)_NAME") {
             buckets.insert(id, (name, BucketSettings::default()));

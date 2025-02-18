@@ -13,7 +13,7 @@ use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
-use crate::cfg::io::IoSettings;
+use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::env::StdEnvGetter;
 use crate::replication::ManageReplications;
@@ -45,7 +45,7 @@ pub struct Components {
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub base_path: String,
-    pub io_settings: IoSettings,
+    pub io_settings: IoConfig,
 }
 
 #[derive(Twin, PartialEq)]
@@ -170,7 +170,7 @@ mod tests {
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
-    use crate::cfg::DEFAULT_PORT;
+    use crate::cfg::replication::ReplicationConfig;
     use crate::replication::create_replication_repo;
 
     use super::*;
@@ -212,7 +212,8 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let storage = Arc::new(storage);
-        let mut replication_repo = create_replication_repo(Arc::clone(&storage), DEFAULT_PORT);
+        let mut replication_repo =
+            create_replication_repo(Arc::clone(&storage), ReplicationConfig::default());
         replication_repo
             .create_replication(
                 "api-test",
@@ -238,7 +239,7 @@ mod tests {
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
             base_path: "/".to_string(),
             replication_repo: RwLock::new(replication_repo),
-            io_settings: IoSettings::default(),
+            io_settings: IoConfig::default(),
         };
 
         Arc::new(components)

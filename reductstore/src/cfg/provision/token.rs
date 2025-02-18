@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
-    pub(super) fn provision_tokens(&self) -> Box<dyn ManageTokens + Send + Sync> {
+    pub(in crate::cfg) fn provision_tokens(&self) -> Box<dyn ManageTokens + Send + Sync> {
         let mut token_repo =
             create_token_repository(PathBuf::from(self.data_path.clone()), &self.api_token);
 
@@ -45,7 +45,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         token_repo
     }
 
-    pub(super) fn parse_tokens(env: &mut Env<EnvGetter>) -> HashMap<String, Token> {
+    pub(in crate::cfg) fn parse_tokens(env: &mut Env<EnvGetter>) -> HashMap<String, Token> {
         let mut tokens = HashMap::<String, Token>::new();
         for (id, name) in env.matches("RS_TOKEN_(.*)_NAME") {
             let token = Token {

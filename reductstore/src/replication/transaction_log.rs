@@ -3,7 +3,7 @@
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::Transaction;
-use log::error;
+use log::{debug, error, warn};
 use reduct_base::error::ReductError;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -61,14 +61,15 @@ impl TransactionLog {
     ///
     /// A new transaction log instance or an error.
     pub fn try_load_or_create(path: PathBuf, capacity: usize) -> Result<Self, ReductError> {
+        let init_capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
+
         let instance = if !path.try_exists()? {
             let file = FILE_CACHE
                 .write_or_create(&path, SeekFrom::Current(0))?
                 .upgrade()?;
             let mut file = file.write()?;
 
-            let capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
-            file.set_len(capacity_in_bytes as u64)?;
+            file.set_len(init_capacity_in_bytes as u64)?;
             file.seek(SeekFrom::Start(0))?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
@@ -76,7 +77,7 @@ impl TransactionLog {
 
             Self {
                 file_path: path,
-                capacity_in_bytes,
+                capacity_in_bytes: init_capacity_in_bytes,
                 write_pos: HEADER_SIZE,
                 read_pos: HEADER_SIZE,
             }
@@ -89,6 +90,24 @@ impl TransactionLog {
             let write_pos = u64::from_be_bytes(buf[0..8].try_into().unwrap()) as usize;
             let read_pos = u64::from_be_bytes(buf[8..16].try_into().unwrap()) as usize;
             let capacity_in_bytes = file.metadata()?.len() as usize;
+            let capacity_in_bytes = if init_capacity_in_bytes != capacity_in_bytes {
+                // If the capacity is changed, we need to check if the log is empty
+                // then we can change the capacity.
+                if read_pos == write_pos {
+                    debug!(
+                        "Transaction log {:?}' size changed from {} to {} bytes",
+                        path, capacity_in_bytes, init_capacity_in_bytes
+                    );
+                    file.set_len(init_capacity_in_bytes as u64)?;
+                    init_capacity_in_bytes
+                } else {
+                    warn!("Cannot change the capacity of the transaction log {:?} from {} to {} bytes because it is not empty", path, capacity_in_bytes, init_capacity_in_bytes);
+                    capacity_in_bytes
+                }
+            } else {
+                capacity_in_bytes
+            };
+
             Self {
                 file_path: path,
                 capacity_in_bytes,
@@ -241,6 +260,7 @@ impl TransactionLog {
 mod tests {
     use super::*;
     use rstest::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[rstest]
@@ -379,6 +399,40 @@ mod tests {
         );
         assert_eq!(transaction_log.pop_front(1).unwrap(), 1);
         assert!(transaction_log.is_empty());
+    }
+
+    #[rstest]
+    fn test_resize_empty_log(path: PathBuf) {
+        TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 3 + HEADER_SIZE
+        );
+
+        TransactionLog::try_load_or_create(path.clone(), 5).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 5 + HEADER_SIZE
+        );
+    }
+
+    #[rstest]
+    fn test_resize_non_empty_log(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        transaction_log
+            .push_back(Transaction::WriteRecord(1))
+            .unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 3 + HEADER_SIZE
+        );
+
+        TransactionLog::try_load_or_create(path.clone(), 5).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 3 + HEADER_SIZE,
+            "The log is not empty, so the capacity should not be changed."
+        );
     }
 
     #[fixture]

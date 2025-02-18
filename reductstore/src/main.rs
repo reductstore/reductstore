@@ -89,11 +89,11 @@ async fn launch_server() {
             server
                 .http_builder()
                 .http1()
-                .max_headers(cfg.io_settings.batch_max_records + 15);
+                .max_headers(cfg.io_conf.batch_max_records + 15);
             server
                 .http_builder()
                 .http1()
-                .max_buf_size(cfg.io_settings.batch_max_metadata_size);
+                .max_buf_size(cfg.io_conf.batch_max_metadata_size);
             server
         }};
     }

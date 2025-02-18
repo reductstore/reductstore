@@ -10,10 +10,7 @@ use std::time::Duration;
 
 use log::{error, info};
 
-use reduct_base::error::ReductError;
-use reduct_base::msg::diagnostics::Diagnostics;
-use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
-
+use crate::cfg::replication::ReplicationConfig;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
@@ -21,10 +18,13 @@ use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
 use crate::storage::storage::Storage;
+use reduct_base::error::ReductError;
+use reduct_base::msg::diagnostics::Diagnostics;
+use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
 
 #[derive(Clone)]
 struct ReplicationSystemOptions {
-    transaction_log_size: usize,
+    transaction_log_size: usize, // in records
     remote_bucket_unavailable_timeout: Duration,
     next_transaction_timeout: Duration,
     log_recovery_timeout: Duration,
@@ -55,7 +55,12 @@ impl Default for ReplicationSystemOptions {
 
 impl ReplicationTask {
     /// Create a new replication task.
-    pub(super) fn new(name: String, settings: ReplicationSettings, storage: Arc<Storage>) -> Self {
+    pub(super) fn new(
+        name: String,
+        settings: ReplicationSettings,
+        config: &ReplicationConfig,
+        storage: Arc<Storage>,
+    ) -> Self {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
             dst_host: remote_host,
@@ -69,10 +74,16 @@ impl ReplicationTask {
             remote_token.as_str(),
         );
 
+        let system_options = ReplicationSystemOptions {
+            transaction_log_size: config.replication_log_size,
+            remote_bucket_unavailable_timeout: config.connection_timeout.clone(),
+            ..Default::default()
+        };
+
         Self::build(
             name,
             settings,
-            ReplicationSystemOptions::default(),
+            system_options,
             remote_bucket,
             Arc::new(RwLock::new(HashMap::new())),
             storage,

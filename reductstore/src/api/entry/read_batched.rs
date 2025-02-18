@@ -14,7 +14,7 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
-use crate::cfg::io::IoSettings;
+use crate::cfg::io::IoConfig;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
 use log::{debug, warn};
@@ -75,7 +75,7 @@ async fn fetch_and_response_batched_records(
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
-    io_settings: &IoSettings,
+    io_settings: &IoConfig,
 ) -> Result<impl IntoResponse, HttpError> {
     let make_header = |reader: &RecordReader| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
