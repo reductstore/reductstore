@@ -3,7 +3,7 @@
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::Transaction;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use reduct_base::error::ReductError;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
