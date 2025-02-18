@@ -4,7 +4,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{sleep, spawn};
 use std::time::Duration;
 
@@ -40,6 +41,7 @@ pub struct ReplicationTask {
     storage: Arc<Storage>,
     remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
+    stop_flag: Arc<AtomicBool>,
 }
 
 impl Default for ReplicationSystemOptions {
@@ -99,10 +101,10 @@ impl ReplicationTask {
         storage: Arc<Storage>,
     ) -> Self {
         let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
-
         let hourly_diagnostics = Arc::new(RwLock::new(DiagnosticsCounter::new(
             Duration::from_secs(3600),
         )));
+        let stop_flag = Arc::new(AtomicBool::new(false));
 
         let config = settings.clone();
         let replication_name = name.clone();
@@ -111,6 +113,7 @@ impl ReplicationTask {
         let thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
         let thr_system_options = system_options.clone();
+        let thr_stop_flag = Arc::clone(&stop_flag);
 
         spawn(move || {
             let init_transaction_logs = || {
@@ -149,7 +152,7 @@ impl ReplicationTask {
                 thr_bucket,
             );
 
-            loop {
+            while !thr_stop_flag.load(Ordering::Relaxed) {
                 match sender.run() {
                     SyncState::SyncedOrRemoved => {}
                     SyncState::NotAvailable => {
@@ -203,6 +206,7 @@ impl ReplicationTask {
             log_map,
             remote_bucket,
             hourly_diagnostics,
+            stop_flag,
         }
     }
 
@@ -301,6 +305,13 @@ impl ReplicationTask {
         name: &str,
     ) -> PathBuf {
         storage_path.join(format!("{}/{}/{}.log", bucket, entry, name))
+    }
+}
+
+impl Drop for ReplicationTask {
+    fn drop(&mut self) {
+        // stop the replication thread
+        self.stop_flag.store(true, Ordering::Relaxed);
     }
 }
 
