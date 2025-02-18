@@ -580,8 +580,8 @@ mod tests {
 
     use crate::storage::entry::{RecordWriter, WriteRecordContent};
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
-    use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use rand::distr::Alphanumeric;
+    use rand::{rng, Rng};
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -983,7 +983,7 @@ mod tests {
             .unwrap()
             .insert_or_update_record(record.clone());
 
-        let record_body: String = thread_rng()
+        let record_body: String = rng()
             .sample_iter(&Alphanumeric)
             .take(record_size)
             .map(char::from)
