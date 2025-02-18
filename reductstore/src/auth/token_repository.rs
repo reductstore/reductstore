@@ -295,9 +295,9 @@ impl ManageTokens for TokenRepository {
         let created_at = DateTime::<Utc>::from(SystemTime::now());
 
         // Create a random hex string
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let value: String = (0..32)
-            .map(|_| format!("{:x}", rng.gen_range(0..16)))
+            .map(|_| format!("{:x}", rng.random_range(0..16)))
             .collect();
         let value = format!("{}-{}", name, value);
         let token = Token {
