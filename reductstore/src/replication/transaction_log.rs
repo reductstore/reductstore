@@ -260,6 +260,7 @@ impl TransactionLog {
 mod tests {
     use super::*;
     use rstest::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[rstest]
@@ -398,6 +399,40 @@ mod tests {
         );
         assert_eq!(transaction_log.pop_front(1).unwrap(), 1);
         assert!(transaction_log.is_empty());
+    }
+
+    #[rstest]
+    fn test_resize_empty_log(path: PathBuf) {
+        TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 3 + HEADER_SIZE
+        );
+
+        TransactionLog::try_load_or_create(path.clone(), 5).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 5 + HEADER_SIZE
+        );
+    }
+
+    #[rstest]
+    fn test_resize_non_empty_log(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        transaction_log
+            .push_back(Transaction::WriteRecord(1))
+            .unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 3 + HEADER_SIZE
+        );
+
+        TransactionLog::try_load_or_create(path.clone(), 5).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len() as usize,
+            ENTRY_SIZE * 3 + HEADER_SIZE,
+            "The log is not empty, so the capacity should not be changed."
+        );
     }
 
     #[fixture]
