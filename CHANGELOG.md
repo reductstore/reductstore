@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix deadlock in write operation for small records, [PR-724](https://github.com/reductstore/reductstore/pull/724)
+- RS-609: Restart replication thread when task settings are updated, [PR-737](https://github.com/reductstore/reductstore/pull/737)
 
 ## [1.13.5] - 2025-02-05
 

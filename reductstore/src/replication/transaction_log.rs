@@ -82,14 +82,17 @@ impl TransactionLog {
                 read_pos: HEADER_SIZE,
             }
         } else {
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
-            let mut file = file.write()?;
+            let (buf, capacity_in_bytes) = {
+                let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+                let mut file = file.write()?;
 
-            let mut buf = [0u8; 16];
-            file.read_exact(&mut buf)?;
+                let mut buf = [0u8; 16];
+                file.read_exact(&mut buf)?;
+                let capacity_in_bytes = file.metadata()?.len() as usize;
+                (buf, capacity_in_bytes)
+            };
             let write_pos = u64::from_be_bytes(buf[0..8].try_into().unwrap()) as usize;
             let read_pos = u64::from_be_bytes(buf[8..16].try_into().unwrap()) as usize;
-            let capacity_in_bytes = file.metadata()?.len() as usize;
             let capacity_in_bytes = if init_capacity_in_bytes != capacity_in_bytes {
                 // If the capacity is changed, we need to check if the log is empty
                 // then we can change the capacity.
@@ -98,6 +101,11 @@ impl TransactionLog {
                         "Transaction log {:?}' size changed from {} to {} bytes",
                         path, capacity_in_bytes, init_capacity_in_bytes
                     );
+                    let file = FILE_CACHE
+                        .write_or_create(&path, SeekFrom::Start(0))?
+                        .upgrade()?;
+                    let file = file.write()?;
+
                     file.set_len(init_capacity_in_bytes as u64)?;
                     init_capacity_in_bytes
                 } else {
