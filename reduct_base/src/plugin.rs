@@ -14,5 +14,5 @@ pub struct PluginInfo {
 }
 
 pub trait Plugin {
-    fn info(&self) -> PluginInfo;
+    fn info(&self) -> &PluginInfo;
 }
