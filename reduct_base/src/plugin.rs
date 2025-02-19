@@ -5,7 +5,7 @@
 
 use derive_builder::Builder;
 
-#[derive(Debug, Builder)]
+#[derive(Debug, Builder, Clone)]
 #[builder(setter(into))]
 pub struct PluginInfo {
     name: String,
