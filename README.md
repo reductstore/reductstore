@@ -8,7 +8,7 @@
 [![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
 [![codecov](https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ)](https://codecov.io/gh/reductstore/reductstore)
 [![Community](https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store
-)](https://community.reduct.store)
+)](https://community.reduct.store/signup)
 
 
 ReductStore is a time series object store designed specifically for storing and managing large volumes of unstructured data. It provides high performance for both writing and real-time querying, with the added benefit of batching data. This makes it an ideal solution for edge, industrial and IoT AI applications where fast access to data is critical. For more information, please visit [https://www.reduct.store/](https://www.reduct.store/).
