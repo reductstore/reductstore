@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2025-02-25
+
 ### Added
 
 - RS-550: Support for when condition on replication task, [PR-687](https://github.com/reductstore/reductstore/pull/687)
@@ -914,7 +916,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.13.5...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.0...HEAD
+
+[1.14.0]: https://github.com/reductstore/reductstore/compare/v1.13.5...v1.14.0
 
 [1.13.5]: https://github.com/reductstore/reductstore/compare/v1.13.4...v1.13.5
 
