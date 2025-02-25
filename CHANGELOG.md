@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-598: Optimize write operation for small records, [PR-723](https://github.com/reductstore/reductstore/pull/723)
 - RS-608: Bump rand to 0.9 and fix compatibility issues, [PR-736](https://github.com/reductstore/reductstore/pull/736)
+- Update Web Console up to v1.9.0, [PR-743](https://github.com/reductstore/reductstore/pull/743)
 
 ### Fixed
 
