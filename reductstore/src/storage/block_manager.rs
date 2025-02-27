@@ -109,10 +109,11 @@ impl BlockManager {
             let path = self.path_to_desc(block_id);
             let file = match FILE_CACHE.read(&path, SeekFrom::Start(0)) {
                 Ok(file) => file.upgrade()?,
-                Err(e) => {
+                Err(err) => {
                     // here we can't read the block descriptor, it might be corrupted or not exist
                     // we should remove it from the index
-                    error!("Block descriptor {:?} can't be read: {}", path, e);
+                    let err_msg = format!("Block descriptor {:?} can't be read: {}", path, err);
+                    error!("{}", &err_msg);
                     info!(
                         "Remove block {} from the index. The block {} must be removed manually",
                         block_id,
@@ -120,10 +121,7 @@ impl BlockManager {
                     );
                     self.block_index.remove_block(block_id);
                     self.block_index.save()?;
-                    return Err(ReductError::internal_server_error(&format!(
-                        "Block descriptor {:?} can't be read: {}",
-                        path, e.message
-                    )));
+                    return Err(internal_server_error!(&err_msg));
                 }
             };
             let mut buf = vec![];
@@ -720,6 +718,7 @@ mod tests {
     mod index_operations {
         use super::*;
         use std::thread::sleep;
+
         #[rstest]
         #[tokio::test]
         async fn test_update_index_when_start_new_one(
@@ -878,6 +877,24 @@ mod tests {
 
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 1, "index updated");
+        }
+
+        #[rstest]
+        fn test_recovering_index_if_no_meta_file(mut block_manager: BlockManager, block_id: u64) {
+            assert!(block_manager.index().get_block(block_id).is_some());
+
+            FILE_CACHE
+                .remove(&block_manager.path_to_desc(block_id))
+                .unwrap();
+            block_manager.block_cache.remove(&block_id); // remove block from cache to load it from disk
+            assert_eq!(
+                block_manager.load_block(block_id).err().unwrap().status(),
+                ErrorCode::InternalServerError
+            );
+            assert!(
+                block_manager.index().get_block(block_id).is_none(),
+                "we removed the block descriptor file"
+            );
         }
     }
 
