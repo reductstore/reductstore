@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Remove non-existing block from block index, [PR-744](https://github.com/reductstore/reductstore/pull/744)
+
 ## [1.14.0] - 2025-02-25
 
 ### Added
