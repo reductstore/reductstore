@@ -1030,7 +1030,7 @@ mod tests {
     }
 
     #[fixture]
-    fn block(block_manager: BlockManager, block_id: u64) -> BlockRef {
+    fn block(mut block_manager: BlockManager, block_id: u64) -> BlockRef {
         block_manager.load_block(block_id).unwrap()
     }
 

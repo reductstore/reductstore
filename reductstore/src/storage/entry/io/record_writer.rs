@@ -298,7 +298,7 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
 
             let block_ref = block_manager
-                .read()
+                .write()
                 .unwrap()
                 .load_block(SMALL_RECORD_TIME)
                 .unwrap();
@@ -347,7 +347,7 @@ mod tests {
                 "task is finished"
             );
 
-            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
             assert_eq!(
                 block_ref
                     .read()
@@ -380,7 +380,7 @@ mod tests {
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
             assert_eq!(
                 block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
@@ -396,7 +396,7 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let block_ref = block_manager.read().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
             assert_eq!(
                 block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
