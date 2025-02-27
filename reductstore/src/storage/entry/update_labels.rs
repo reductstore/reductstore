@@ -43,7 +43,7 @@ impl Entry {
             let mut records_per_block = BTreeMap::new();
 
             {
-                let bm = block_manager.read()?;
+                let mut bm = block_manager.write()?;
                 for UpdateLabels {
                     time,
                     update,

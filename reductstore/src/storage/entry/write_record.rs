@@ -188,12 +188,12 @@ mod tests {
 
         write_stub_record(&mut entry, 1);
         write_stub_record(&mut entry, 2000010);
-        let bm = entry.block_manager.read().unwrap();
+        let mut bm = entry.block_manager.write().unwrap();
 
         assert_eq!(
             bm.load_block(1)
                 .unwrap()
-                .read()
+                .write()
                 .unwrap()
                 .get_record(1)
                 .unwrap()
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(
             bm.load_block(2000010)
                 .unwrap()
-                .read()
+                .write()
                 .unwrap()
                 .get_record(2000010)
                 .unwrap()
@@ -241,11 +241,11 @@ mod tests {
         write_stub_record(&mut entry, 2);
         write_stub_record(&mut entry, 2000010);
 
-        let bm = entry.block_manager.read().unwrap();
+        let mut bm = entry.block_manager.write().unwrap();
         let records = bm
             .load_block(1)
             .unwrap()
-            .read()
+            .write()
             .unwrap()
             .record_index()
             .clone();
@@ -264,7 +264,7 @@ mod tests {
         let records = bm
             .load_block(2000010)
             .unwrap()
-            .read()
+            .write()
             .unwrap()
             .record_index()
             .clone();
@@ -287,7 +287,7 @@ mod tests {
         write_stub_record(&mut entry, 3000000);
         write_stub_record(&mut entry, 2000000);
 
-        let bm = entry.block_manager.read().unwrap();
+        let mut bm = entry.block_manager.write().unwrap();
         let records = bm
             .load_block(1000000)
             .unwrap()
@@ -315,7 +315,7 @@ mod tests {
         write_stub_record(&mut entry, 3000000);
         write_stub_record(&mut entry, 1000000);
 
-        let bm = entry.block_manager.read().unwrap();
+        let mut bm = entry.block_manager.write().unwrap();
         let records = bm
             .load_block(1000000)
             .unwrap()

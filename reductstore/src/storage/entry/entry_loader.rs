@@ -419,7 +419,7 @@ mod tests {
         assert_eq!(info.latest_record, 2000010);
 
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
-        let block_manager = BlockManager::new(path.clone(), block_index); // reload the block manager
+        let mut block_manager = BlockManager::new(path.clone(), block_index); // reload the block manager
         let block_v1_9 = block_manager.load_block(1).unwrap().read().unwrap().clone();
         assert_eq!(block_v1_9.record_count(), 2);
         assert_eq!(block_v1_9.size(), 20);
@@ -586,7 +586,7 @@ mod tests {
 
             let entry = EntryLoader::restore_entry(path, entry.settings()).unwrap();
 
-            let block = entry.block_manager.read().unwrap().load_block(1).unwrap();
+            let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
             let block = block.read().unwrap();
             assert_eq!(block.record_count(), 1);
             assert!(block.get_record(0).is_none());
@@ -602,7 +602,7 @@ mod tests {
             wal.append(1, WalEntry::RemoveBlock).unwrap();
             let entry = EntryLoader::restore_entry(path, entry.settings()).unwrap();
 
-            let block = entry.block_manager.read().unwrap().load_block(1).clone();
+            let block = entry.block_manager.write().unwrap().load_block(1).clone();
             assert_eq!(block.err().unwrap().status, InternalServerError,);
         }
 

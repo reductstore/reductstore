@@ -6,7 +6,7 @@ pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod wal;
 
 mod block_cache;
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 
@@ -84,7 +84,7 @@ impl BlockManager {
         Ok(())
     }
 
-    pub fn find_block(&self, start: u64) -> Result<BlockRef, ReductError> {
+    pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -102,12 +102,28 @@ impl BlockManager {
         self.load_block(id)
     }
 
-    pub fn load_block(&self, block_id: u64) -> Result<BlockRef, ReductError> {
+    pub fn load_block(&mut self, block_id: u64) -> Result<BlockRef, ReductError> {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
             let path = self.path_to_desc(block_id);
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+            let file = match FILE_CACHE.read(&path, SeekFrom::Start(0)) {
+                Ok(file) => file.upgrade()?,
+                Err(err) => {
+                    // here we can't read the block descriptor, it might be corrupted or not exist
+                    // we should remove it from the index
+                    let err_msg = format!("Block descriptor {:?} can't be read: {}", path, err);
+                    error!("{}", &err_msg);
+                    info!(
+                        "Remove block {} from the index. The block {} must be removed manually",
+                        block_id,
+                        self.path_to_data(block_id).display()
+                    );
+                    self.block_index.remove_block(block_id);
+                    self.block_index.save()?;
+                    return Err(internal_server_error!(&err_msg));
+                }
+            };
             let mut buf = vec![];
 
             let mut lock = file.write()?;
@@ -702,6 +718,7 @@ mod tests {
     mod index_operations {
         use super::*;
         use std::thread::sleep;
+
         #[rstest]
         #[tokio::test]
         async fn test_update_index_when_start_new_one(
@@ -861,6 +878,24 @@ mod tests {
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 1, "index updated");
         }
+
+        #[rstest]
+        fn test_recovering_index_if_no_meta_file(mut block_manager: BlockManager, block_id: u64) {
+            assert!(block_manager.index().get_block(block_id).is_some());
+
+            FILE_CACHE
+                .remove(&block_manager.path_to_desc(block_id))
+                .unwrap();
+            block_manager.block_cache.remove(&block_id); // remove block from cache to load it from disk
+            assert_eq!(
+                block_manager.load_block(block_id).err().unwrap().status(),
+                ErrorCode::InternalServerError
+            );
+            assert!(
+                block_manager.index().get_block(block_id).is_none(),
+                "we removed the block descriptor file"
+            );
+        }
     }
 
     mod record_removing {
@@ -1012,7 +1047,7 @@ mod tests {
     }
 
     #[fixture]
-    fn block(block_manager: BlockManager, block_id: u64) -> BlockRef {
+    fn block(mut block_manager: BlockManager, block_id: u64) -> BlockRef {
         block_manager.load_block(block_id).unwrap()
     }
 
