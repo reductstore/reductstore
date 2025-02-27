@@ -25,7 +25,7 @@ impl Entry {
             debug!("Reading record for ts={}", time);
 
             let (block_ref, record) = {
-                let bm = block_manager.read()?;
+                let mut bm = block_manager.write()?;
                 let block_ref = bm.find_block(time)?;
                 let block = block_ref.read()?;
                 let record = block
