@@ -260,7 +260,7 @@ jobs:
       - build
     strategy:
       matrix:
-        version: [ 'latest', 'v1.14.0', 'v1.12.5', 'v1.11.4', 'v1.10.1', 'v1.9.5', 'v1.8.2', 'v1.7.3' ]
+        version: [ 'latest', 'v1.14.0', 'v1.13.5', 'v1.12.4', 'v1.11.2', 'v1.10.1', 'v1.9.5', 'v1.8.2', 'v1.7.3' ]
     env:
       RS_API_TOKEN: XXXX
     steps:
