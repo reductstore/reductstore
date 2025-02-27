@@ -137,7 +137,7 @@ impl Entry {
         let mut records_per_block = BTreeMap::new();
 
         {
-            let bm = block_manager.read()?;
+            let mut bm = block_manager.write()?;
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record

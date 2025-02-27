@@ -6,7 +6,7 @@ pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod wal;
 
 mod block_cache;
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 
@@ -84,7 +84,7 @@ impl BlockManager {
         Ok(())
     }
 
-    pub fn find_block(&self, start: u64) -> Result<BlockRef, ReductError> {
+    pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -102,12 +102,30 @@ impl BlockManager {
         self.load_block(id)
     }
 
-    pub fn load_block(&self, block_id: u64) -> Result<BlockRef, ReductError> {
+    pub fn load_block(&mut self, block_id: u64) -> Result<BlockRef, ReductError> {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
             let path = self.path_to_desc(block_id);
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+            let file = match FILE_CACHE.read(&path, SeekFrom::Start(0)) {
+                Ok(file) => file.upgrade()?,
+                Err(e) => {
+                    // here we can't read the block descriptor, it might be corrupted or not exist
+                    // we should remove it from the index
+                    error!("Block descriptor {:?} can't be read: {}", path, e);
+                    info!(
+                        "Remove block {} from the index. The block {} must be removed manually",
+                        block_id,
+                        self.path_to_data(block_id).display()
+                    );
+                    self.block_index.remove_block(block_id);
+                    self.block_index.save()?;
+                    return Err(ReductError::internal_server_error(&format!(
+                        "Block descriptor {:?} can't be read: {}",
+                        path, e.message
+                    )));
+                }
+            };
             let mut buf = vec![];
 
             let mut lock = file.write()?;
