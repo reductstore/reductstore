@@ -132,6 +132,7 @@ impl Entry {
         }
 
         let (rx, task_handle) = spawn_query_task(
+            id,
             self.task_group(),
             query.unwrap(),
             options.clone(),
