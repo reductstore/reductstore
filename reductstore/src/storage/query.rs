@@ -12,18 +12,21 @@ use crate::core::thread_pool::{shared, shared_isolated, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
-use log::{trace, warn};
+use log::{debug, info, trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
+use std::cmp::{max, min};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
 
 const QUERY_BUFFER_SIZE: usize = 64;
+const MIN_FULL_CHANNEL_SLEEP: Duration = Duration::from_micros(10);
+const MAX_FULL_CHANNEL_SLEEP: Duration = Duration::from_millis(10);
 
 /// Build a query.
 pub(in crate::storage) fn build_query(
@@ -45,6 +48,7 @@ pub(in crate::storage) fn build_query(
 }
 
 pub(super) fn spawn_query_task(
+    id: u64,
     task_group: String,
     query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
@@ -55,25 +59,36 @@ pub(super) fn spawn_query_task(
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
     let query = Arc::new(Mutex::new(query));
     let handle = shared_isolated("spawn_query_task", "spawn query task", move || {
-        trace!("Query task for '{}' running", task_group);
+        trace!("Query task for '{}' id={} running", task_group, id);
+        let watcher = Arc::new(Mutex::new(QueryWatcher::new()));
 
         loop {
             let group = task_group.clone();
             let query = query.clone();
             let block_manager = block_manager.clone();
             let tx = tx.clone();
+            let watcher = watcher.clone();
 
             // the task return None if the loop must be stopped
             // we do it for each iteration so we don't need to take the whole worker for a long query
             let task = shared(&group.clone(), "query iteration", move || {
+                let mut watcher = watcher.lock().unwrap();
                 if tx.is_closed() {
-                    trace!("Query '{}' task channel closed", group);
+                    debug!("Query '{}' id={} task channel closed", group, id);
+                    return None;
+                }
+
+                if watcher.expired(options.ttl) {
+                    debug!("Query '{}' id={} task expired", group, id);
                     return None;
                 }
 
                 if tx.capacity() == 0 {
-                    trace!("Query '{}' task channel full", group);
-                    return Some(Duration::from_micros(10));
+                    trace!("Query '{}' id={} task channel full", group, id);
+                    // we increase the sleep time for the next iteration
+                    // to avoid flooding the channel but still be responsive
+                    let timeout = watcher.full_channel();
+                    return Some(timeout);
                 }
 
                 let next_result = query.lock().unwrap().next(block_manager.clone());
@@ -82,9 +97,12 @@ pub(super) fn spawn_query_task(
                 let send_result = tx.blocking_send(next_result);
 
                 if let Err(err) = send_result {
-                    warn!("Error sending query '{}' result: {}", group, err);
+                    warn!("Error sending query '{}' id={} result: {}", group, id, err);
                     return None;
                 }
+
+                // notify the watcher that we sent a result
+                watcher.send_success();
 
                 if let Some(err) = query_err {
                     if err.status == NoContent && options.continuous {
@@ -93,7 +111,7 @@ pub(super) fn spawn_query_task(
                         return Some(options.ttl / 4);
                     }
 
-                    trace!("Query task done for '{}'", group);
+                    trace!("Query task done for '{}' id={}", group, id);
                     return None;
                 }
                 Some(Duration::from_millis(0))
@@ -107,6 +125,38 @@ pub(super) fn spawn_query_task(
         }
     });
     (rx, handle)
+}
+
+struct QueryWatcher {
+    full_channel_sleep: Duration,
+    last_send_time: Instant,
+}
+
+impl QueryWatcher {
+    fn new() -> Self {
+        Self {
+            full_channel_sleep: Duration::default(),
+            last_send_time: Instant::now(),
+        }
+    }
+
+    fn expired(&self, ttl: Duration) -> bool {
+        self.last_send_time.elapsed() > ttl
+    }
+
+    fn full_channel(&mut self) -> Duration {
+        self.full_channel_sleep += MIN_FULL_CHANNEL_SLEEP;
+        self.full_channel_sleep = min(self.full_channel_sleep, MAX_FULL_CHANNEL_SLEEP);
+        self.full_channel_sleep
+    }
+
+    fn send_success(&mut self) {
+        if self.full_channel_sleep > MIN_FULL_CHANNEL_SLEEP {
+            self.full_channel_sleep -= MIN_FULL_CHANNEL_SLEEP;
+        }
+        self.full_channel_sleep = max(self.full_channel_sleep, MIN_FULL_CHANNEL_SLEEP);
+        self.last_send_time = Instant::now();
+    }
 }
 
 #[cfg(test)]
