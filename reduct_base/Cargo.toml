@@ -25,6 +25,7 @@ chrono = { version = "0.4.39", features = ["serde"] }
 url = "2.5.4"
 http = "1.2.0"
 derive_builder = "0.20.2"
+bytes = "1.10.0"
 
 [dev-dependencies]
 rstest = "0.24.0"

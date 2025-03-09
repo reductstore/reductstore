@@ -6,7 +6,9 @@ use std::net::{IpAddr, SocketAddr};
 use axum_server::tls_rustls::RustlsConfig;
 
 use axum_server::Handle;
+use dlopen2::wrapper::{Container, WrapperApi};
 use log::info;
+use reduct_base::extension::IoExtension;
 use reductstore::api::create_axum_app;
 use reductstore::cfg::Cfg;
 use reductstore::core::env::StdEnvGetter;
@@ -15,6 +17,11 @@ use reductstore::storage::storage::Storage;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+
+#[derive(WrapperApi)]
+struct PluginApi {
+    get_plugin: extern "C" fn() -> *mut dyn IoExtension,
+}
 
 async fn launch_server() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -50,6 +57,16 @@ async fn launch_server() {
             git_ref
         );
     }
+
+    let plugin_api_wrapper = unsafe {
+        Container::<PluginApi>::load(
+            "/home/atimin/Projects/reductstore/test_plugin/target/release/libtest_plugin.so",
+        )
+        .expect("Failed to load plugin")
+    };
+    let plugin = unsafe { Box::from_raw(plugin_api_wrapper.get_plugin()) };
+
+    info!("Plugin: {:?}", plugin.info());
 
     let scheme = if cfg.cert_path.is_empty() {
         "http"
