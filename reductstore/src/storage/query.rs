@@ -78,7 +78,7 @@ pub(super) fn spawn_query_task(
                     return None;
                 }
 
-                if watcher.expired(options.ttl) {
+                if watcher.expired(options.ttl) && !options.continuous {
                     debug!("Query '{}' id={} task expired", group, id);
                     return None;
                 }
@@ -201,6 +201,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let (rx, handle) = spawn_query_task(
+            0,
             "bucket/entry".to_string(),
             query,
             options,
@@ -218,6 +219,7 @@ mod tests {
         let query = build_query(0, 5, options.clone()).unwrap();
 
         let (mut rx, handle) = spawn_query_task(
+            0,
             "bucket/entry".to_string(),
             query,
             options,
@@ -239,6 +241,7 @@ mod tests {
         };
         let query = build_query(0, 5, options.clone()).unwrap();
         let (mut rx, handle) = spawn_query_task(
+            0,
             "bucket/entry".to_string(),
             query,
             options,
@@ -282,6 +285,7 @@ mod tests {
         let query = build_query(0, 10, options.clone()).unwrap();
 
         let (rx, handle) = spawn_query_task(
+            0,
             "bucket/entry".to_string(),
             query,
             options,
