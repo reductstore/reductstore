@@ -30,7 +30,7 @@ reduct-base = { path = "../reduct_base", version = "1.11.0" }
 reduct-macros = { path = "../reduct_macros", version = "1.11.0" }
 
 log = "0.4.26"
-chrono = { version = "0.4.39", features = ["serde"] }
+chrono = { version = "0.4.40", features = ["serde"] }
 thread-id = "5.0.0"
 zip = "2.2.3"
 tempfile = "3.18.0"
@@ -68,7 +68,7 @@ crossbeam-channel = "0.5.14"
 [build-dependencies]
 prost-build = "0.13.1"
 reqwest = { version = "0.12.11", default-features = false, features = ["rustls-tls", "blocking"] }
-chrono = "0.4.39"
+chrono = "0.4.40"
 
 [dev-dependencies]
 mockall = "0.13.1"
