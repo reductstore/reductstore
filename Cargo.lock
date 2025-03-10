@@ -1995,7 +1995,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.14.2"
+version = "1.14.3"
 dependencies = [
  "chrono",
  "http",
@@ -2008,7 +2008,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.14.2"
+version = "1.14.3"
 dependencies = [
  "quote",
  "syn 2.0.98",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.14.2"
+version = "1.14.3"
 dependencies = [
  "async-stream",
  "async-trait",

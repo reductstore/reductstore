@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Minimum Rust version to 1.85
 
+
+## [1.14.3] - 2025-03-10
+
+### Fixed
+
+- Fix hanging read query and its channel timeout, [PR-750](https://github.com/reductstore/reductstore/pull/750)
+
 ## [1.14.2] - 2025-02-27
 
 ### Fixed
@@ -932,7 +939,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.3...HEAD
+
+[1.14.3]: https://github.com/reductstore/reductstore/compare/v1.14.2...v1.14.3
 
 [1.14.2]: https://github.com/reductstore/reductstore/compare/v1.14.1...v1.14.2
 
