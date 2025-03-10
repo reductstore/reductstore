@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 pub mod batch;
 pub mod error;
-pub mod extension;
+pub mod ext;
 pub mod msg;
 
 pub type Labels = HashMap<String, String>;
