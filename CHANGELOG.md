@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix hanging read query and its channel timeout, [PR-750](https://github.com/reductstore/reductstore/pull/750)
+
 ## [1.14.2] - 2025-02-27
 
 ### Fixed
