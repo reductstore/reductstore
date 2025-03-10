@@ -47,6 +47,15 @@ pub(in crate::storage) fn build_query(
     })
 }
 
+/// Spawn a query task.
+///
+/// # Arguments
+///
+/// * `id` - The id of the query, for logging purpose.
+/// * `task_group` - The task group of the query.
+/// * `query` - The query.
+/// * `options` - The query options.
+/// * `block_manager` - The block manager.
 pub(super) fn spawn_query_task(
     id: u64,
     task_group: String,
@@ -127,6 +136,7 @@ pub(super) fn spawn_query_task(
     (rx, handle)
 }
 
+/// A wrapper for timeout and expiry time logic
 struct QueryWatcher {
     full_channel_sleep: Duration,
     last_send_time: Instant,
@@ -135,21 +145,25 @@ struct QueryWatcher {
 impl QueryWatcher {
     fn new() -> Self {
         Self {
-            full_channel_sleep: Duration::default(),
+            full_channel_sleep: MIN_FULL_CHANNEL_SLEEP,
             last_send_time: Instant::now(),
         }
     }
 
+    /// Check if the query is expired.
     fn expired(&self, ttl: Duration) -> bool {
         self.last_send_time.elapsed() > ttl
     }
 
+    /// Get the sleep time for the next iteration.
     fn full_channel(&mut self) -> Duration {
+        let sleep = self.full_channel_sleep;
         self.full_channel_sleep += MIN_FULL_CHANNEL_SLEEP;
         self.full_channel_sleep = min(self.full_channel_sleep, MAX_FULL_CHANNEL_SLEEP);
-        self.full_channel_sleep
+        sleep
     }
 
+    /// Notify that a result has been sent.
     fn send_success(&mut self) {
         if self.full_channel_sleep > MIN_FULL_CHANNEL_SLEEP {
             self.full_channel_sleep -= MIN_FULL_CHANNEL_SLEEP;
@@ -166,9 +180,10 @@ mod tests {
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
     use rstest::*;
+    use test_log::test as log_test;
     use tokio::time::timeout;
 
-    #[rstest]
+    #[log_test(rstest)]
     fn test_bad_start_stop() {
         let options = QueryOptions::default();
         assert_eq!(
@@ -189,7 +204,7 @@ mod tests {
         assert!(build_query(10, 5, options.clone()).is_ok());
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_query_task_expired(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
@@ -212,7 +227,7 @@ mod tests {
         assert!(handle.is_finished());
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_query_task_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
@@ -231,7 +246,7 @@ mod tests {
         assert_eq!(timeout(Duration::from_millis(1000), handle).await, Ok(()));
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
@@ -278,7 +293,7 @@ mod tests {
         );
     }
 
-    #[rstest]
+    #[log_test(rstest)]
     #[tokio::test]
     async fn test_query_task_err(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
@@ -332,5 +347,55 @@ mod tests {
 
         block_manager.finish_block(block_ref).unwrap();
         Arc::new(RwLock::new(block_manager))
+    }
+
+    mod task_watcher {
+        use super::*;
+
+        #[rstest]
+        fn test_sleep_timeout() {
+            let mut watcher = QueryWatcher::new();
+            let mut sleep = watcher.full_channel();
+            assert_eq!(sleep, MIN_FULL_CHANNEL_SLEEP);
+
+            sleep = watcher.full_channel();
+            assert_eq!(sleep, MIN_FULL_CHANNEL_SLEEP * 2);
+
+            watcher.send_success();
+            watcher.send_success();
+            sleep = watcher.full_channel();
+            assert_eq!(sleep, MIN_FULL_CHANNEL_SLEEP);
+        }
+
+        #[rstest]
+        fn test_sleep_timeout_overflow() {
+            let mut watcher = QueryWatcher {
+                full_channel_sleep: MAX_FULL_CHANNEL_SLEEP,
+                last_send_time: Instant::now(),
+            };
+            let mut sleep = watcher.full_channel();
+            assert_eq!(sleep, MAX_FULL_CHANNEL_SLEEP);
+
+            watcher.send_success();
+            sleep = watcher.full_channel();
+            assert_eq!(sleep, MAX_FULL_CHANNEL_SLEEP - MIN_FULL_CHANNEL_SLEEP);
+        }
+
+        #[rstest]
+        fn test_sleep_timeout_underflow() {
+            let mut watcher = QueryWatcher::new();
+
+            watcher.send_success();
+            let sleep = watcher.full_channel();
+            assert_eq!(sleep, MIN_FULL_CHANNEL_SLEEP);
+        }
+
+        #[rstest]
+        fn test_expired() {
+            let watcher = QueryWatcher::new();
+            assert!(!watcher.expired(Duration::from_millis(100)));
+            sleep(Duration::from_millis(100));
+            assert!(watcher.expired(Duration::from_millis(100)));
+        }
     }
 }
