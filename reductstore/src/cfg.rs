@@ -11,6 +11,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::cfg::io::IoConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
+use crate::ext::ext_repository::ExtRepository;
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -18,6 +19,7 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";
@@ -82,6 +84,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             auth: TokenAuthorization::new(&self.api_token),
             console,
             replication_repo: tokio::sync::RwLock::new(replication_engine),
+            ext_repo: ExtRepository::try_load(&PathBuf::from(&self.data_path).join("ext"))?,
+
             base_path: self.api_base_path.clone(),
             io_settings: self.io_conf.clone(),
         })

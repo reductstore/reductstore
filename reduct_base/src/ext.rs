@@ -3,10 +3,12 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::error::ReductError;
 use crate::msg::entry_api::QueryEntry;
 use crate::Labels;
 use bytes::Bytes;
 
+#[derive(Debug)]
 pub struct IoExtensionInfo {
     name: String,
     version: String,
@@ -57,16 +59,35 @@ impl IoExtensionInfo {
     }
 }
 
+enum ProcessingType {
+    Chunkwise,
+    Full,
+}
+
 pub trait IoExtension {
     fn info(&self) -> IoExtensionInfo;
 
-    fn query(&self, query_id: u64, query: QueryEntry) -> Result<(), String>;
-
-    fn process(
+    fn register_query(
         &self,
         query_id: u64,
-        record_content: Bytes,
+        bucket_name: &str,
+        entry_name: &str,
+        query: &QueryEntry,
+    ) -> Result<(), ReductError>;
+
+    fn prepare_processing(
+        &self,
+        query_id: u64,
+        timestamp: u64,
+        size: u64,
+        content_type: &str,
         labels: Labels,
-        content_type: Option<String>,
-    ) -> Result<(Bytes, Labels), String>;
+    ) -> Result<ProcessingType, ReductError>;
+
+    fn process_chunk(
+        &self,
+        query_id: u64,
+        timestamp: u64,
+        chunk: Option<Bytes>,
+    ) -> Result<Option<Bytes>, ReductError>;
 }

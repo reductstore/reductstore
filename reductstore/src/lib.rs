@@ -5,7 +5,7 @@ pub mod asset;
 pub mod auth;
 pub mod cfg;
 pub mod core;
-mod ext;
+pub mod ext;
 mod license;
 pub mod replication;
 pub mod storage;

@@ -20,6 +20,7 @@ use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
 use reduct_base::bad_request;
+use serde::__private::ser::constrain;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -54,7 +55,8 @@ pub(crate) async fn read_record(
 
     let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
 
-    fetch_and_response_single_record(entry, ts, query_id, method.name() == "HEAD").await
+    fetch_and_response_single_record(entry, ts, query_id, method.name() == "HEAD", &components)
+        .await
 }
 
 async fn fetch_and_response_single_record(
@@ -62,6 +64,7 @@ async fn fetch_and_response_single_record(
     ts: Option<u64>,
     query_id: Option<u64>,
     empty_body: bool,
+    components: &Components,
 ) -> Result<impl IntoResponse, HttpError> {
     let make_headers = |record_reader: &RecordReader| {
         let mut headers = HeaderMap::new();
@@ -106,6 +109,14 @@ async fn fetch_and_response_single_record(
     };
 
     let headers = make_headers(&reader);
+
+    if let Some(query_id) = query_id {
+        for ext in components.ext_repo.extensions() {
+            // ext.write().unwrap().prepare_processing(query_id, reader.timestamp(), reader.content_length(), reader.content_type(), reader.labels()
+
+            // ).map_err(|e| HttpError::from(e))?;
+        }
+    }
 
     Ok((
         headers,

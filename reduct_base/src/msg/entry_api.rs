@@ -88,4 +88,17 @@ pub struct QueryEntry {
     /// Strict conditional query
     /// If true, the query returns an error if any condition cannot be evaluated
     pub strict: Option<bool>,
+    /// Extension
+    /// use nested objects to pass additional information to extensions
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///    "ext": {
+    ///         "img_ext": {
+    ///            "scale_width": 100,
+    ///           "scale_height": 100
+    ///       }
+    ///  }
+    pub ext: Option<Value>,
 }

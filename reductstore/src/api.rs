@@ -16,6 +16,7 @@ use crate::auth::token_repository::ManageTokens;
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::env::StdEnvGetter;
+use crate::ext::ext_repository::ExtRepository;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;
@@ -44,6 +45,7 @@ pub struct Components {
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
+    pub ext_repo: ExtRepository,
     pub base_path: String,
     pub io_settings: IoConfig,
 }

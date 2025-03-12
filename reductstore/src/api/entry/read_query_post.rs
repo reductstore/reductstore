@@ -9,6 +9,7 @@ use crate::auth::policy::ReadAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType};
+use serde_json::Map;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -39,7 +40,15 @@ pub(crate) async fn read_query_json(
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let id = entry.query(request).await?;
+    let id = entry.query(request.clone()).await?;
+
+    // notify extensions
+    // if let Some(ext) = &request.ext {
+    //     for (key, _) in ext.as_object().unwrap_or(&Map::new()) {
+    //         let ext = components.ext_repo.get_extension(&key)?;
+    //         ext.write().unwrap().query(id, &bucket_name, &entry_name, &request)?;
+    //     }
+    // }
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }
