@@ -110,14 +110,6 @@ async fn fetch_and_response_single_record(
 
     let headers = make_headers(&reader);
 
-    if let Some(query_id) = query_id {
-        for ext in components.ext_repo.extensions() {
-            // ext.write().unwrap().prepare_processing(query_id, reader.timestamp(), reader.content_length(), reader.content_type(), reader.labels()
-
-            // ).map_err(|e| HttpError::from(e))?;
-        }
-    }
-
     Ok((
         headers,
         Body::from_stream(ReaderWrapper { reader, empty_body }),

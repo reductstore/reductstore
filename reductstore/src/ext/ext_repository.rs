@@ -1,15 +1,21 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::weak::Weak;
+use crate::storage::entry::RecordReader;
+use crate::storage::query::QueryRx;
+use crate::storage::storage::CHANNEL_BUFFER_SIZE;
 use dlopen2::wrapper::{Container, WrapperApi};
-use log::info;
+use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{IoExtension, IoExtensionInfo};
+use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, not_found};
 use std::collections::hash_map::Values;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use tokio::sync::RwLock as AsyncRwLock;
 
 type IoExtRef = Arc<RwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
@@ -23,9 +29,18 @@ pub struct ExtRepository {
     extension_map: IoExtMap,
 }
 
+struct MockExt {
+    info: IoExtensionInfo,
+}
+
 impl ExtRepository {
     pub(crate) fn try_load(path: &PathBuf) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
+        if !path.exists() {
+            error!("No extension found in path {}", path.display());
+            return Ok(ExtRepository { extension_map });
+        }
+
         for entry in path.read_dir()? {
             let path = entry?.path();
             if path.is_file()
@@ -48,14 +63,21 @@ impl ExtRepository {
         Ok(ExtRepository { extension_map })
     }
 
-    pub fn get_extension(&self, name: &str) -> Result<IoExtRef, ReductError> {
-        self.extension_map
-            .get(name)
-            .cloned()
-            .ok_or(not_found!("Extension '{}' not found", name))
+    pub fn register_query(
+        &self,
+        query_id: u64,
+        bucket_name: &str,
+        entry_name: &str,
+        query_options: QueryEntry,
+    ) -> Result<(), ReductError> {
+        todo!()
     }
 
-    pub fn extensions(&self) -> Values<'_, String, IoExtRef> {
-        self.extension_map.values()
+    pub async fn next_processed_record(
+        &self,
+        query_id: u64,
+        query_rx: Arc<AsyncRwLock<QueryRx>>,
+    ) -> Option<Result<RecordReader, ReductError>> {
+        query_rx.write().await.recv().await
     }
 }

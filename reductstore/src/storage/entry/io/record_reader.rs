@@ -10,7 +10,7 @@ use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use bytes::Bytes;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
+use reduct_base::{internal_server_error, Labels};
 use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};

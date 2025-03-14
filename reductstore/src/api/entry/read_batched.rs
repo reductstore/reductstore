@@ -15,6 +15,7 @@ use bytes::Bytes;
 use futures_util::Stream;
 
 use crate::cfg::io::IoConfig;
+use crate::ext::ext_repository::ExtRepository;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
 use log::{debug, warn};
@@ -66,6 +67,7 @@ pub(crate) async fn read_batched_records(
         query_id,
         method.name == "HEAD",
         &components.io_settings,
+        &components.ext_repo,
     )
     .await
 }
@@ -76,6 +78,7 @@ async fn fetch_and_response_batched_records(
     query_id: u64,
     empty_body: bool,
     io_settings: &IoConfig,
+    ext_repository: &ExtRepository,
 ) -> Result<impl IntoResponse, HttpError> {
     let make_header = |reader: &RecordReader| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
@@ -121,9 +124,11 @@ async fn fetch_and_response_batched_records(
     let start_time = std::time::Instant::now();
     loop {
         let reader = match next_record_reader(
+            query_id,
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
             io_settings.batch_records_timeout,
+            &ext_repository,
         )
         .await
         {
@@ -194,12 +199,19 @@ async fn fetch_and_response_batched_records(
 // This function is used to get the next record from the query receiver
 // created for better testing
 async fn next_record_reader(
+    query_id: u64,
     rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
     recv_timeout: Duration,
+    ext_repository: &ExtRepository,
 ) -> Option<Result<RecordReader, ReductError>> {
     // we need to wait for the first record
-    let result = if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
+    let result = if let Ok(result) = timeout(
+        recv_timeout,
+        ext_repository.next_processed_record(query_id, rx),
+    )
+    .await
+    {
         result
     } else {
         debug!("Timeout while waiting for record from query {}", query_path);

@@ -42,13 +42,9 @@ pub(crate) async fn read_query_json(
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
     let id = entry.query(request.clone()).await?;
 
-    // notify extensions
-    // if let Some(ext) = &request.ext {
-    //     for (key, _) in ext.as_object().unwrap_or(&Map::new()) {
-    //         let ext = components.ext_repo.get_extension(&key)?;
-    //         ext.write().unwrap().query(id, &bucket_name, &entry_name, &request)?;
-    //     }
-    // }
+    components
+        .ext_repo
+        .register_query(id, bucket_name, entry_name, request)?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }

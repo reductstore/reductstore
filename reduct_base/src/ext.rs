@@ -7,6 +7,7 @@ use crate::error::ReductError;
 use crate::msg::entry_api::QueryEntry;
 use crate::Labels;
 use bytes::Bytes;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct IoExtensionInfo {
@@ -74,20 +75,4 @@ pub trait IoExtension {
         entry_name: &str,
         query: &QueryEntry,
     ) -> Result<(), ReductError>;
-
-    fn prepare_processing(
-        &self,
-        query_id: u64,
-        timestamp: u64,
-        size: u64,
-        content_type: &str,
-        labels: Labels,
-    ) -> Result<ProcessingType, ReductError>;
-
-    fn process_chunk(
-        &self,
-        query_id: u64,
-        timestamp: u64,
-        chunk: Option<Bytes>,
-    ) -> Result<Option<Bytes>, ReductError>;
 }
