@@ -67,7 +67,7 @@ crossbeam-channel = "0.5.14"
 
 [build-dependencies]
 prost-build = "0.13.1"
-reqwest = { version = "0.12.11", default-features = false, features = ["rustls-tls", "blocking"] }
+reqwest = { version = "0.12.14", default-features = false, features = ["rustls-tls", "blocking"] }
 chrono = "0.4.40"
 
 [dev-dependencies]
