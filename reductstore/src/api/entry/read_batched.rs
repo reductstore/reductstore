@@ -12,16 +12,19 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
-use futures_util::Stream;
+use futures_util::{FutureExt, Stream};
 
 use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::ExtRepository;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
+use futures_util::Future;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
+use reduct_base::io::ReadRecord;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
+use std::pin::pin;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -90,8 +93,7 @@ async fn fetch_and_response_batched_records(
         let mut labels: Vec<String> = reader
             .labels()
             .iter()
-            .map(|label| {
-                let (k, v) = (&label.name, &label.value);
+            .map(|(k, v)| {
                 if v.contains(",") {
                     format!("{}=\"{}\"", k, v)
                 } else {
@@ -238,7 +240,7 @@ impl Stream for ReadersWrapper {
 
     fn poll_next(
         mut self: Pin<&mut ReadersWrapper>,
-        _cx: &mut Context<'_>,
+        ctx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.empty_body {
             return Poll::Ready(None);
@@ -250,7 +252,8 @@ impl Stream for ReadersWrapper {
 
         let mut index = 0;
         while index < self.readers.len() {
-            if let Poll::Ready(data) = self.readers[index].rx().poll_recv(_cx) {
+            let pinned_future = pin!(self.readers[index].read());
+            if let Poll::Ready(data) = pinned_future.poll(ctx) {
                 match data {
                     Some(Ok(chunk)) => {
                         return Poll::Ready(Some(Ok(chunk)));

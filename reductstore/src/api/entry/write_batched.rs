@@ -14,12 +14,13 @@ use futures_util::StreamExt;
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::{RecordDrainer, WriteRecordContent};
+use crate::storage::entry::RecordDrainer;
 use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
+use reduct_base::io::WriteRecord;
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -30,7 +31,7 @@ use tokio::time::timeout;
 struct WriteContext {
     time: u64,
     header: RecordHeader,
-    writer: Box<dyn WriteRecordContent + Sync + Send>,
+    writer: Box<dyn WriteRecord + Sync + Send>,
 }
 
 type ErrorMap = BTreeMap<u64, ReductError>;
@@ -201,7 +202,7 @@ fn spawn_getting_writers(
 }
 
 async fn write_chunk(
-    writer: &mut Box<dyn WriteRecordContent + Sync + Send>,
+    writer: &mut Box<dyn WriteRecord + Sync + Send>,
     chunk: Bytes,
     written: &mut usize,
     content_size: usize,
@@ -254,7 +255,7 @@ async fn start_writing(
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
-) -> Box<dyn WriteRecordContent + Sync + Send> {
+) -> Box<dyn WriteRecord + Sync + Send> {
     let get_writer = async {
         bucket
             .begin_write(
@@ -284,8 +285,9 @@ mod tests {
     use crate::api::tests::{components, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
     use axum_extra::headers::HeaderValue;
-
+    use futures_util::SinkExt;
     use reduct_base::error::ErrorCode;
+    use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
     #[rstest]

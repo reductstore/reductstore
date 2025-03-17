@@ -12,13 +12,14 @@ pub use crate::storage::block_manager::RecordTx;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
-use crate::storage::entry::{Entry, EntrySettings, RecordReader, WriteRecordContent};
+use crate::storage::entry::{Entry, EntrySettings, RecordReader};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use crate::storage::storage::check_name_convention;
 use log::debug;
 use prost::bytes::Bytes;
 use prost::Message;
 use reduct_base::error::ReductError;
+use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
@@ -222,7 +223,7 @@ impl Bucket {
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> TaskHandle<Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError>> {
+    ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
         let get_entry = || {
             self.keep_quota_for(content_size)?;
             self.get_or_create_entry(name)?.upgrade()

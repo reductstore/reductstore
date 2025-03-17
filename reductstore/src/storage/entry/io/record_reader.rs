@@ -7,9 +7,11 @@ use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+use async_trait::async_trait;
 use bytes::Bytes;
 use log::debug;
 use reduct_base::error::ReductError;
+use reduct_base::io::{ReadChunk, ReadRecord, WriteChunk};
 use reduct_base::{internal_server_error, Labels};
 use std::cmp::min;
 use std::io::Read;
@@ -21,8 +23,11 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
-    record: Record,
+    timestamp: u64,
+    content_type: String,
+    length: u64,
     last: bool,
+    labels: Labels,
 }
 
 struct ReadContext {
@@ -104,11 +109,7 @@ impl RecordReader {
             });
         };
 
-        Ok(RecordReader {
-            rx: Some(rx),
-            record,
-            last,
-        })
+        Ok(Self::form_record_with_rx(rx, record, last))
     }
 
     /// Create a new record reader for a record with no content.
@@ -126,59 +127,26 @@ impl RecordReader {
     pub fn form_record(record: Record, last: bool) -> Self {
         RecordReader {
             rx: None,
-            record,
+            timestamp: ts_to_us(record.timestamp.as_ref().unwrap()),
+            length: record.end - record.begin,
+            content_type: record.content_type.clone(),
+            labels: record
+                .labels
+                .into_iter()
+                .map(|l| (l.name, l.value))
+                .collect(),
             last,
         }
     }
 
-    #[cfg(test)]
     pub fn form_record_with_rx(rx: RecordRx, record: Record, last: bool) -> Self {
-        RecordReader {
-            rx: Some(rx),
-            record,
-            last,
-        }
-    }
-
-    pub fn timestamp(&self) -> u64 {
-        ts_to_us(self.record.timestamp.as_ref().unwrap())
-    }
-
-    pub fn content_type(&self) -> &str {
-        self.record.content_type.as_str()
-    }
-
-    pub fn labels(&self) -> &Vec<Label> {
-        &self.record.labels
-    }
-
-    pub fn content_length(&self) -> u64 {
-        self.record.end - self.record.begin
-    }
-
-    /// Get the receiver to read the record content
-    ///
-    /// # Returns
-    ///
-    /// * `&mut Receiver<Result<Bytes, ReductError>>` - The receiver to read the record content
-    ///
-    /// # Panics
-    ///
-    /// Panics if the receiver isn't set (we read only metadata)
-    pub fn rx(&mut self) -> &mut Receiver<Result<Bytes, ReductError>> {
-        self.rx.as_mut().unwrap()
-    }
-
-    pub fn last(&self) -> bool {
-        self.last
+        let mut me = Self::form_record(record, last);
+        me.rx = Some(rx);
+        me
     }
 
     pub fn set_last(&mut self, last: bool) {
         self.last = last;
-    }
-
-    pub fn record(&self) -> &Record {
-        &self.record
     }
 
     fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
@@ -209,6 +177,55 @@ impl RecordReader {
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
             )
         }
+    }
+}
+
+#[async_trait]
+impl ReadRecord for RecordReader {
+    async fn read(&mut self) -> ReadChunk {
+        if let Some(rx) = &mut self.rx {
+            rx.recv().await
+        } else {
+            None
+        }
+    }
+
+    async fn read_timeout(&mut self, timeout: std::time::Duration) -> ReadChunk {
+        match tokio::time::timeout(timeout, self.read()).await {
+            Ok(chunk) => chunk,
+            Err(er) => Some(Err(internal_server_error!(
+                "Timeout reading record: {}",
+                er
+            ))),
+        }
+    }
+
+    fn blocking_read(&mut self) -> ReadChunk {
+        if let Some(rx) = &mut self.rx {
+            rx.blocking_recv()
+        } else {
+            None
+        }
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn content_length(&self) -> u64 {
+        self.length
+    }
+
+    fn content_type(&self) -> &str {
+        &self.content_type
+    }
+
+    fn last(&self) -> bool {
+        self.last
+    }
+
+    fn labels(&self) -> &Labels {
+        &self.labels
     }
 }
 

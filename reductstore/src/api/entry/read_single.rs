@@ -19,10 +19,12 @@ use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
+use futures_util::Future;
 use reduct_base::bad_request;
+use reduct_base::io::ReadRecord;
 use serde::__private::ser::constrain;
 use std::collections::HashMap;
-use std::pin::Pin;
+use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::RwLock as AsyncRwLock;
@@ -69,8 +71,7 @@ async fn fetch_and_response_single_record(
     let make_headers = |record_reader: &RecordReader| {
         let mut headers = HeaderMap::new();
 
-        for label in record_reader.labels() {
-            let (k, v) = (&label.name, &label.value);
+        for (k, v) in record_reader.labels() {
             headers.insert(
                 format!("x-reduct-label-{}", k)
                     .parse::<HeaderName>()
@@ -148,7 +149,8 @@ impl Stream for ReaderWrapper {
             return Poll::Ready(None);
         }
 
-        if let Poll::Ready(data) = self.reader.rx().poll_recv(cx) {
+        let pinned_future = pin!(self.reader.read());
+        if let Poll::Ready(data) = pinned_future.poll(cx) {
             match data {
                 Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
                 Some(Err(e)) => Poll::Ready(Some(Err(HttpError::from(e)))),

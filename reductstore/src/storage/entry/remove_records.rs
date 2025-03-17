@@ -6,6 +6,7 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
 use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::not_found;
 use std::collections::BTreeMap;

@@ -25,7 +25,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock as AsyncRwLock;
 
-pub(crate) use io::record_writer::{RecordDrainer, RecordWriter, WriteRecordContent};
+pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 
 use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
@@ -380,6 +380,7 @@ mod tests {
         use super::*;
 
         use reduct_base::error::ErrorCode;
+        use reduct_base::io::ReadRecord;
         use reduct_base::{no_content, not_found};
         use std::thread::sleep;
 

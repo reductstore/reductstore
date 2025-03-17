@@ -11,6 +11,7 @@ use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::ts_to_us;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
+use reduct_base::io::ReadRecord;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
@@ -123,11 +124,11 @@ impl BucketWrapper {
             }
 
             if !record.labels().is_empty() {
-                for label in record.labels() {
-                    if label.value.contains(',') {
-                        header_values.push(format!("{}=\"{}\"", label.name, label.value));
+                for (name, value) in record.labels() {
+                    if value.contains(',') {
+                        header_values.push(format!("{}=\"{}\"", name, value));
                     } else {
-                        header_values.push(format!("{}={}", label.name, label.value));
+                        header_values.push(format!("{}={}", name, value));
                     }
                 }
             }
@@ -149,8 +150,7 @@ impl BucketWrapper {
 
         let stream = stream! {
              while let Some(mut record) = records.pop() {
-                let rx = record.rx();
-                 while let Some(chunk) = rx.recv().await {
+                 while let Some(chunk) = record.read().await {
                      yield chunk;
                  }
              }
@@ -199,11 +199,7 @@ impl BucketWrapper {
     }
 
     fn sort_by_timestamp(records_to_update: &mut Vec<RecordReader>) {
-        records_to_update.sort_by(|a, b| {
-            let a = a.record();
-            let b = b.record();
-            ts_to_us(&b.timestamp.as_ref().unwrap()).cmp(&ts_to_us(&a.timestamp.as_ref().unwrap()))
-        });
+        records_to_update.sort_by(|a, b| b.timestamp().cmp(&a.timestamp()));
     }
 }
 

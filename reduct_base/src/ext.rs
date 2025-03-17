@@ -60,11 +60,6 @@ impl IoExtensionInfo {
     }
 }
 
-enum ProcessingType {
-    Chunkwise,
-    Full,
-}
-
 pub trait IoExtension {
     fn info(&self) -> IoExtensionInfo;
 
