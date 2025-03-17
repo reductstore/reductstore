@@ -72,7 +72,7 @@ chrono = "0.4.40"
 
 [dev-dependencies]
 mockall = "0.13.1"
-rstest = "0.24.0"
+rstest = "0.25.0"
 serial_test = "3.2.0"
 test-log = "0.2.17"
 
