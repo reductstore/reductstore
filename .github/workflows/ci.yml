@@ -103,6 +103,8 @@ jobs:
         run: cargo install cargo-export
 
       - name: Build binary
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
         run: cargo build --release -p reductstore --target ${{ matrix.target }}
 
       - name: Upload binary
