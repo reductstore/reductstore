@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Minimum Rust version to 1.85
-
+- RS-633: Link runtime libraries statically, [PR-761](https://github.com/reductstore/reductstore/pull/761)
 
 ## [1.14.3] - 2025-03-10
 
