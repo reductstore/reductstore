@@ -4,10 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::error::ReductError;
+use crate::io::ReadRecord;
 use crate::msg::entry_api::QueryEntry;
-use crate::Labels;
-use bytes::Bytes;
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct IoExtensionInfo {
@@ -60,6 +58,8 @@ impl IoExtensionInfo {
     }
 }
 
+pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
+
 pub trait IoExtension {
     fn info(&self) -> IoExtensionInfo;
 
@@ -70,4 +70,10 @@ pub trait IoExtension {
         entry_name: &str,
         query: &QueryEntry,
     ) -> Result<(), ReductError>;
+
+    fn next_processed_record(
+        &self,
+        query_id: u64,
+        record: BoxedReadRecord,
+    ) -> Option<Result<BoxedReadRecord, ReductError>>;
 }

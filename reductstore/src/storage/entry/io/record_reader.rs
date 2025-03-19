@@ -28,6 +28,7 @@ pub(crate) struct RecordReader {
     length: u64,
     last: bool,
     labels: Labels,
+    computed_labels: Labels,
 }
 
 struct ReadContext {
@@ -135,6 +136,7 @@ impl RecordReader {
                 .into_iter()
                 .map(|l| (l.name, l.value))
                 .collect(),
+            computed_labels: Labels::new(),
             last,
         }
     }
@@ -226,6 +228,14 @@ impl ReadRecord for RecordReader {
 
     fn labels(&self) -> &Labels {
         &self.labels
+    }
+
+    fn computed_labels(&self) -> &Labels {
+        &self.computed_labels
+    }
+
+    fn computed_labels_mut(&mut self) -> &mut Labels {
+        &mut self.computed_labels
     }
 }
 

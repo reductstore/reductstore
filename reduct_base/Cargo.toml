@@ -20,7 +20,7 @@ crate-type = ["lib"]
 
 [features]
 default = []
-io = ["dep:async-trait"]
+io = ["dep:async-trait", "dep:tokio"]
 ext = ["io"]
 all = ["io", "ext"]
 
@@ -34,6 +34,8 @@ url = "2.5.4"
 http = "1.2.0"
 bytes = "1.10.0"
 async-trait = { version =  "0.1.87" , optional = true }
+tokio = { version = "1.44.1", optional = true, features = ["default", "rt"] }
+
 
 [dev-dependencies]
 rstest = "0.24.0"

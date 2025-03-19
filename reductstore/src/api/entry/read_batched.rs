@@ -21,6 +21,7 @@ use crate::storage::query::QueryRx;
 use futures_util::Future;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
+use reduct_base::ext::BoxedReadRecord;
 use reduct_base::io::ReadRecord;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
@@ -83,24 +84,25 @@ async fn fetch_and_response_batched_records(
     io_settings: &IoConfig,
     ext_repository: &ExtRepository,
 ) -> Result<impl IntoResponse, HttpError> {
-    let make_header = |reader: &RecordReader| {
+    let make_header = |reader: &BoxedReadRecord| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
         let mut meta_data = vec![
             reader.content_length().to_string(),
             reader.content_type().to_string(),
         ];
 
-        let mut labels: Vec<String> = reader
-            .labels()
-            .iter()
-            .map(|(k, v)| {
-                if v.contains(",") {
-                    format!("{}=\"{}\"", k, v)
-                } else {
-                    format!("{}={}", k, v)
-                }
-            })
-            .collect();
+        let format_labels = |(k, v): (&String, &String)| {
+            if v.contains(",") {
+                format!("{}=\"{}\"", k, v)
+            } else {
+                format!("{}={}", k, v)
+            }
+        };
+
+        let mut labels: Vec<String> = reader.labels().iter().map(format_labels).collect();
+
+        labels.extend(reader.computed_labels().iter().map(format_labels));
+
         labels.sort();
 
         meta_data.append(&mut labels);
@@ -206,7 +208,7 @@ async fn next_record_reader(
     query_path: &str,
     recv_timeout: Duration,
     ext_repository: &ExtRepository,
-) -> Option<Result<RecordReader, ReductError>> {
+) -> Option<Result<BoxedReadRecord, ReductError>> {
     // we need to wait for the first record
     let result = if let Ok(result) = timeout(
         recv_timeout,
@@ -231,7 +233,7 @@ async fn next_record_reader(
 }
 
 struct ReadersWrapper {
-    readers: Vec<RecordReader>,
+    readers: Vec<Box<dyn ReadRecord + Send + Sync>>,
     empty_body: bool,
 }
 
