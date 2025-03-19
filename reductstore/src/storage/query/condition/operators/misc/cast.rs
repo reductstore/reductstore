@@ -8,19 +8,22 @@ use reduct_base::unprocessable_entity;
 
 /// A node representing a cast operation.
 pub(crate) struct Cast {
-    op_1: BoxedNode,
-    op_2: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Cast {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let op = self.op_1.apply(context)?;
-        let type_name = self.op_2.apply(context)?.as_string()?;
+        let op = self.operands[0].apply(context)?;
+        let type_name = self.operands[1].apply(context)?.as_string()?;
         op.cast(type_name.as_str())
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("Cast({:?}, {:?})", self.op_1, self.op_2)
+        format!("Cast({:?}, {:?})", self.operands[0], self.operands[1])
     }
 }
 
@@ -29,15 +32,13 @@ impl Boxed for Cast {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$cast requires exactly two operands"));
         }
-        let op_2 = operands.pop().unwrap();
-        let op_1 = operands.pop().unwrap();
-        Ok(Box::new(Cast::new(op_1, op_2)))
+        Ok(Box::new(Cast::new(operands)))
     }
 }
 
 impl Cast {
-    pub fn new(op_1: BoxedNode, op_2: BoxedNode) -> Self {
-        Self { op_1, op_2 }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 

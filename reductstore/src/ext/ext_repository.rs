@@ -217,7 +217,7 @@ impl ExtRepository {
                         match filter
                             .as_mut()
                             .unwrap()
-                            .filter_reader(record.as_ref().unwrap())
+                            .filter_with_computed(&record.as_ref().unwrap())
                         {
                             Ok(true) => status,
                             Ok(false) => ProcessStatus::NotReady,

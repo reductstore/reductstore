@@ -5,17 +5,17 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
+use std::ops::Deref;
 
 /// A node representing an `in` operation.
 pub(crate) struct In {
-    op: BoxedNode,
-    list: Vec<BoxedNode>,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for In {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let op_value = self.op.apply(context)?;
-        for item in self.list.iter() {
+        let op_value = self.operands[0].apply(context)?;
+        for item in self.operands[1..].iter() {
             if item.apply(context)? == op_value {
                 return Ok(Value::Bool(true));
             }
@@ -24,8 +24,20 @@ impl Node for In {
         Ok(Value::Bool(false))
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("In({:?}, {:?})", self.op, self.list)
+        format!(
+            "In({:?}, {:?})",
+            self.operands[0],
+            self.operands[1..]
+                .iter()
+                .map(|op| format!("{:?}", op))
+                .reduce(|a, b| format!("{:?}, {:?}", a, b))
+                .unwrap()
+        )
     }
 }
 
@@ -42,8 +54,7 @@ impl Boxed for In {
 
 impl In {
     pub fn new(mut operands: Vec<BoxedNode>) -> Self {
-        let op = operands.remove(0);
-        Self { op, list: operands }
+        Self { operands }
     }
 }
 

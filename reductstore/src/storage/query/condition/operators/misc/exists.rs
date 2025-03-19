@@ -8,17 +8,21 @@ use reduct_base::unprocessable_entity;
 
 /// A node representing an exists operation that checks if a label exists in the context.
 pub(crate) struct Exists {
-    op: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Exists {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value = self.op.apply(context)?.as_string()?;
+        let value = self.operands[0].apply(context)?.as_string()?;
         Ok(Value::Bool(context.labels.contains_key(value.as_str())))
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("Exists({:?})", self.op)
+        format!("Exists({:?})", self.operands[0])
     }
 }
 
@@ -30,14 +34,13 @@ impl Boxed for Exists {
             ));
         }
 
-        let op = operands.pop().unwrap();
-        Ok(Box::new(Exists::new(op)))
+        Ok(Box::new(Exists::new(operands)))
     }
 }
 
 impl Exists {
-    pub fn new(op: BoxedNode) -> Self {
-        Self { op }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 

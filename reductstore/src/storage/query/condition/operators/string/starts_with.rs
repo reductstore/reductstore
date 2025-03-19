@@ -8,25 +8,28 @@ use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
 pub(crate) struct StartsWith {
-    op_1: BoxedNode,
-    op_2: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for StartsWith {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value_1 = self.op_1.apply(context)?;
-        let value_2 = self.op_2.apply(context)?;
+        let value_1 = self.operands[0].apply(context)?;
+        let value_2 = self.operands[1].apply(context)?;
         Ok(Value::Bool(value_1.starts_with(value_2)?))
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("StartsWith({:?}, {:?})", self.op_1, self.op_2)
+        format!("StartsWith({:?}, {:?})", self.operands[0], self.operands[1])
     }
 }
 
 impl StartsWith {
-    pub fn new(op_1: BoxedNode, op_2: BoxedNode) -> Self {
-        Self { op_1, op_2 }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 
@@ -37,9 +40,7 @@ impl Boxed for StartsWith {
                 "$starts_with requires exactly two operands"
             ));
         }
-        let op_2 = operands.pop().unwrap();
-        let op_1 = operands.pop().unwrap();
-        Ok(Box::new(StartsWith::new(op_1, op_2)))
+        Ok(Box::new(StartsWith::new(operands)))
     }
 }
 

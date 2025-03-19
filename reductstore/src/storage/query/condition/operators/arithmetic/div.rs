@@ -4,24 +4,28 @@
 use crate::storage::query::condition::value::Div as DivTrait;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
+use rand::distr::Open01;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
 /// A node representing an arithmetic division operation.
 pub(crate) struct Div {
-    op_1: BoxedNode,
-    op_2: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Div {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value_1 = self.op_1.apply(context)?;
-        let value_2 = self.op_2.apply(context)?;
+        let value_1 = self.operands[0].apply(context)?;
+        let value_2 = self.operands[1].apply(context)?;
         value_1.divide(value_2)
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("Div({:?}, {:?})", self.op_1, self.op_2)
+        format!("Div({:?}, {:?})", self.operands[0], self.operands[1])
     }
 }
 
@@ -30,15 +34,14 @@ impl Boxed for Div {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$div requires exactly two operands"));
         }
-        let op_2 = operands.pop().unwrap();
-        let op_1 = operands.pop().unwrap();
-        Ok(Box::new(Div::new(op_1, op_2)))
+
+        Ok(Box::new(Div::new(operands)))
     }
 }
 
 impl Div {
-    pub fn new(op_1: BoxedNode, op_2: BoxedNode) -> Self {
-        Self { op_1, op_2 }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 

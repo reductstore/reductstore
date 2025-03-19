@@ -8,25 +8,28 @@ use reduct_base::unprocessable_entity;
 
 /// Gte node representing a logical greater than or equal operation.
 pub(crate) struct Gte {
-    op_1: BoxedNode,
-    op_2: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Gte {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value_1 = self.op_1.apply(context)?;
-        let value_2 = self.op_2.apply(context)?;
+        let value_1 = self.operands[0].apply(context)?;
+        let value_2 = self.operands[1].apply(context)?;
         Ok(Value::Bool(value_1 >= value_2))
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("Gte({:?}, {:?})", self.op_1, self.op_2)
+        format!("Gte({:?}, {:?})", self.operands[0], self.operands[1])
     }
 }
 
 impl Gte {
-    pub fn new(op_1: BoxedNode, op_2: BoxedNode) -> Self {
-        Self { op_1, op_2 }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 
@@ -35,9 +38,7 @@ impl Boxed for Gte {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$gte requires exactly two operands"));
         }
-        let op_2 = operands.pop().unwrap();
-        let op_1 = operands.pop().unwrap();
-        Ok(Box::new(Gte::new(op_1, op_2)))
+        Ok(Box::new(Gte::new(operands)))
     }
 }
 

@@ -11,7 +11,7 @@ use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::{Boxed, BoxedNode};
+use crate::storage::query::condition::{Boxed, BoxedNode, Context, EvaluationStage, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Value as JsonValue};
@@ -19,10 +19,46 @@ use serde_json::{Map, Value as JsonValue};
 /// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
 
+/// A node in a condition tree.
+///
+/// It evaluates the node in the given context on different stages.
+struct StagedAllOff {
+    operands: Vec<BoxedNode>,
+}
+
+impl Node for StagedAllOff {
+    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+        for operand in self.operands.iter() {
+            if operand.stage() == &context.stage {
+                let value = operand.apply(context)?;
+                if !value.as_bool()? {
+                    return Ok(Value::Bool(false));
+                }
+            }
+        }
+
+        Ok(Value::Bool(true))
+    }
+
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
+    fn print(&self) -> String {
+        format!("AllOf({:?})", self.operands)
+    }
+}
+
+impl Boxed for StagedAllOff {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+        Ok(Box::new(Self { operands }))
+    }
+}
+
 impl Parser {
     pub fn parse(&self, json: &JsonValue) -> Result<BoxedNode, ReductError> {
         let expressions = self.parse_intern(json)?;
-        Ok(AllOf::boxed(expressions)?)
+        Ok(StagedAllOff::boxed(expressions)?)
     }
 
     fn parse_intern(&self, json: &JsonValue) -> Result<Vec<BoxedNode>, ReductError> {
@@ -59,7 +95,15 @@ impl Parser {
             }
             JsonValue::String(value) => {
                 if value.starts_with("&") {
-                    Ok(vec![Reference::boxed(value[1..].to_string())])
+                    Ok(vec![Reference::boxed(
+                        value[1..].to_string(),
+                        EvaluationStage::Retrieve,
+                    )])
+                } else if value.starts_with("@") {
+                    Ok(vec![Reference::boxed(
+                        value[1..].to_string(),
+                        EvaluationStage::Compute,
+                    )])
                 } else {
                     Ok(vec![Constant::boxed(Value::String(value.clone()))])
                 }
