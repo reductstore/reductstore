@@ -21,7 +21,7 @@ use crate::storage::query::QueryRx;
 use futures_util::Future;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
-use reduct_base::ext::BoxedReadRecord;
+use reduct_base::ext::{BoxedReadRecord, ProcessStatus};
 use reduct_base::io::ReadRecord;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
@@ -136,8 +136,9 @@ async fn fetch_and_response_batched_records(
         )
         .await
         {
-            Some(value) => value,
-            None => break,
+            ProcessStatus::Ready(value) => value,
+            ProcessStatus::NotReady => continue,
+            ProcessStatus::Stop => break,
         };
 
         match reader {
@@ -208,9 +209,9 @@ async fn next_record_reader(
     query_path: &str,
     recv_timeout: Duration,
     ext_repository: &ExtRepository,
-) -> Option<Result<BoxedReadRecord, ReductError>> {
+) -> ProcessStatus {
     // we need to wait for the first record
-    let result = if let Ok(result) = timeout(
+    if let Ok(result) = timeout(
         recv_timeout,
         ext_repository.next_processed_record(query_id, rx),
     )
@@ -219,21 +220,12 @@ async fn next_record_reader(
         result
     } else {
         debug!("Timeout while waiting for record from query {}", query_path);
-        return None;
-    };
-
-    let reader = match result {
-        Some(reader) => reader,
-        None => {
-            warn!("Query {} is closed", query_path);
-            return None;
-        }
-    };
-    Some(reader)
+        ProcessStatus::Stop
+    }
 }
 
 struct ReadersWrapper {
-    readers: Vec<Box<dyn ReadRecord + Send + Sync>>,
+    readers: Vec<BoxedReadRecord>,
     empty_body: bool,
 }
 

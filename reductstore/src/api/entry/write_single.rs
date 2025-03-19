@@ -117,10 +117,7 @@ pub(crate) async fn write_record(
                 .notify(TransactionNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),
-                    labels: labels
-                        .into_iter()
-                        .map(|(k, v)| Label { name: k, value: v })
-                        .collect(),
+                    labels,
                     event: WriteRecord(ts),
                 })?;
             Ok(())

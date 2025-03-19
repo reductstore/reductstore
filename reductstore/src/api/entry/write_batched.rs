@@ -108,15 +108,7 @@ pub(crate) async fn write_batched_records(
                             TransactionNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),
-                                labels: ctx
-                                    .header
-                                    .labels
-                                    .iter()
-                                    .map(|(k, v)| Label {
-                                        name: k.clone(),
-                                        value: v.clone(),
-                                    })
-                                    .collect::<Vec<Label>>(), // TODO: find a way to avoid cloning
+                                labels: ctx.header.labels.clone(),
                                 event: Transaction::WriteRecord(ctx.time),
                             },
                         )?;

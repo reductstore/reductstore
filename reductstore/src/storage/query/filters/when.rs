@@ -2,8 +2,9 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::{BoxedNode, Context};
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::{RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
+use reduct_base::ext::BoxedReadRecord;
 
 /// A node representing a when filter with a condition.
 pub struct WhenFilter {
@@ -14,18 +15,26 @@ impl WhenFilter {
     pub fn new(condition: BoxedNode) -> Self {
         WhenFilter { condition }
     }
+
+    pub fn filter_reader(&mut self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
+        let context = Context::new(
+            reader
+                .labels()
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect(),
+        );
+        Ok(self.condition.apply(&context)?.as_bool()?)
+    }
 }
 
-impl<P> RecordFilter<P> for WhenFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
+impl RecordFilter for WhenFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
         let context = Context::new(
             record
                 .labels()
                 .iter()
-                .map(|l| (l.name.as_str(), l.value.as_str()))
+                .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
         );
         Ok(self.condition.apply(&context)?.as_bool()?)

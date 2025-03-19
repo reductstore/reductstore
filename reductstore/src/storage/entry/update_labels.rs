@@ -16,7 +16,7 @@ pub(crate) struct UpdateLabels {
     pub remove: HashSet<String>,
 }
 
-type UpdateResult = BTreeMap<u64, Result<Vec<Label>, ReductError>>;
+type UpdateResult = BTreeMap<u64, Result<Labels, ReductError>>;
 
 impl Entry {
     /// Update labels for multiple records.
@@ -62,7 +62,14 @@ impl Entry {
                                     .entry(block.block_id())
                                     .or_insert_with(Vec::new)
                                     .push(record.clone());
-                                result.insert(time, Ok(record.labels.clone()));
+                                result.insert(
+                                    time,
+                                    Ok(record
+                                        .labels
+                                        .iter()
+                                        .map(|label| (label.name.clone(), label.value.clone()))
+                                        .collect()),
+                                );
                             } else {
                                 result.insert(
                                     time,

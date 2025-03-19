@@ -8,9 +8,22 @@ use tokio::runtime::Handle;
 pub type WriteChunk = Result<Option<Bytes>, ReductError>;
 pub type ReadChunk = Option<Result<Bytes, ReductError>>;
 
+pub trait RecordMeta {
+    /// Returns the timestamp of the record as Unix time in microseconds.
+    fn timestamp(&self) -> u64;
+
+    /// Returns the labels associated with the record.
+    fn labels(&self) -> &Labels;
+
+    /// For filtering unfinished records.
+    fn state(&self) -> i32 {
+        0
+    }
+}
+
 /// Represents a record in the storage engine that can be read as a stream of bytes.
 #[async_trait]
-pub trait ReadRecord {
+pub trait ReadRecord: RecordMeta {
     /// Reads a chunk of the record content.
     ///
     /// # Returns
@@ -42,20 +55,8 @@ pub trait ReadRecord {
         Handle::current().block_on(self.read())
     }
 
-    /// Returns the timestamp of the record as Unix time in microseconds.
-    fn timestamp(&self) -> u64;
-
-    /// Returns the length of the record content in bytes.
-    fn content_length(&self) -> u64;
-
-    /// Returns the content type of the record as a MIME type.
-    fn content_type(&self) -> &str;
-
     /// Returns true if this is the last record in the stream.
     fn last(&self) -> bool;
-
-    /// Returns the labels associated with the record.
-    fn labels(&self) -> &Labels;
 
     /// Returns computed labels associated with the record.
     ///
@@ -66,6 +67,12 @@ pub trait ReadRecord {
     ///
     /// Computed labels are labels that are added by query processing and are not part of the original record.
     fn computed_labels_mut(&mut self) -> &mut Labels;
+
+    /// Returns the length of the record content in bytes.
+    fn content_length(&self) -> u64;
+
+    /// Returns the content type of the record as a MIME type.
+    fn content_type(&self) -> &str;
 }
 
 #[async_trait]

@@ -11,7 +11,7 @@ use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::ts_to_us;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
-use reduct_base::io::ReadRecord;
+use reduct_base::io::{ReadRecord, RecordMeta};
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};

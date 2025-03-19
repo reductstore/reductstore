@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::io::{ReadChunk, ReadRecord, WriteChunk};
+use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta, WriteChunk};
 use reduct_base::{internal_server_error, Labels};
 use std::cmp::min;
 use std::io::Read;
@@ -29,6 +29,7 @@ pub(crate) struct RecordReader {
     last: bool,
     labels: Labels,
     computed_labels: Labels,
+    state: i32,
 }
 
 struct ReadContext {
@@ -137,6 +138,7 @@ impl RecordReader {
                 .map(|l| (l.name, l.value))
                 .collect(),
             computed_labels: Labels::new(),
+            state: record.state,
             last,
         }
     }
@@ -182,6 +184,20 @@ impl RecordReader {
     }
 }
 
+impl RecordMeta for RecordReader {
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn labels(&self) -> &Labels {
+        &self.labels
+    }
+
+    fn state(&self) -> i32 {
+        self.state
+    }
+}
+
 #[async_trait]
 impl ReadRecord for RecordReader {
     async fn read(&mut self) -> ReadChunk {
@@ -210,24 +226,8 @@ impl ReadRecord for RecordReader {
         }
     }
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-
-    fn content_length(&self) -> u64 {
-        self.length
-    }
-
-    fn content_type(&self) -> &str {
-        &self.content_type
-    }
-
     fn last(&self) -> bool {
         self.last
-    }
-
-    fn labels(&self) -> &Labels {
-        &self.labels
     }
 
     fn computed_labels(&self) -> &Labels {
@@ -236,6 +236,14 @@ impl ReadRecord for RecordReader {
 
     fn computed_labels_mut(&mut self) -> &mut Labels {
         &mut self.computed_labels
+    }
+
+    fn content_length(&self) -> u64 {
+        self.length
+    }
+
+    fn content_type(&self) -> &str {
+        &self.content_type
     }
 }
 

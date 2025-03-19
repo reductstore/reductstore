@@ -2,34 +2,31 @@
 // Licensed under the Business Source License 1.1
 
 use log::warn;
+use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::Labels;
 
 use crate::replication::TransactionNotification;
 use crate::storage::proto::record::Label;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter,
-    RecordFilter, WhenFilter,
+    EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter, WhenFilter,
 };
 
 /// Filter for transaction notifications.
 pub(super) struct TransactionFilter {
     bucket: String,
     entries: Vec<String>,
-    query_filters: Vec<Box<dyn RecordFilter<TransactionNotification> + Send + Sync>>,
+    query_filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
 }
 
-impl FilterPoint for TransactionNotification {
-    fn timestamp(&self) -> i64 {
-        self.event.timestamp().clone() as i64
+impl RecordMeta for TransactionNotification {
+    fn timestamp(&self) -> u64 {
+        self.event.timestamp().clone()
     }
 
-    fn labels(&self) -> &Vec<Label> {
+    fn labels(&self) -> &Labels {
         &self.labels
-    }
-
-    fn state(&self) -> &i32 {
-        &0
     }
 }
 
@@ -43,8 +40,7 @@ impl TransactionFilter {
     /// * `include` - Labels to include. All must match. If empty, all labels are matched.
     /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
     pub(super) fn new(name: &str, settings: ReplicationSettings) -> Self {
-        let mut query_filters: Vec<Box<dyn RecordFilter<TransactionNotification> + Send + Sync>> =
-            vec![];
+        let mut query_filters: Vec<Box<dyn RecordFilter + Send + Sync>> = vec![];
         if !settings.include.is_empty() {
             query_filters.push(Box::new(IncludeLabelFilter::new(settings.include)));
         }

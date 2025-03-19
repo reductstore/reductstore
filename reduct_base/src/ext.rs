@@ -60,6 +60,15 @@ impl IoExtensionInfo {
 
 pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 
+/// The status of the processing of a record.
+///
+/// The three possible states allow to aggregate records on the extension side.
+pub enum ProcessStatus {
+    Ready(Result<BoxedReadRecord, ReductError>),
+    NotReady,
+    Stop,
+}
+
 pub trait IoExtension {
     fn info(&self) -> IoExtensionInfo;
 
@@ -71,9 +80,5 @@ pub trait IoExtension {
         query: &QueryEntry,
     ) -> Result<(), ReductError>;
 
-    fn next_processed_record(
-        &self,
-        query_id: u64,
-        record: BoxedReadRecord,
-    ) -> Option<Result<BoxedReadRecord, ReductError>>;
+    fn next_processed_record(&self, query_id: u64, record: BoxedReadRecord) -> ProcessStatus;
 }

@@ -4,7 +4,7 @@
 use crate::storage::proto::record::State;
 use reduct_base::error::ReductError;
 
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::{IncludeLabelFilter, RecordFilter, RecordMeta};
 
 /// Filter that passes records with a specific state
 pub struct RecordStateFilter {
@@ -26,12 +26,9 @@ impl RecordStateFilter {
     }
 }
 
-impl<P> RecordFilter<P> for RecordStateFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
-        let result = *record.state() == self.state as i32;
+impl RecordFilter for RecordStateFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+        let result = record.state() == self.state as i32;
         Ok(result)
     }
 }

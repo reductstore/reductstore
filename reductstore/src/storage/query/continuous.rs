@@ -7,7 +7,7 @@ use crate::storage::query::historical::HistoricalQuery;
 use reduct_base::error::{ErrorCode, ReductError};
 
 use crate::storage::entry::RecordReader;
-use reduct_base::io::ReadRecord;
+use reduct_base::io::{ReadRecord, RecordMeta};
 use std::sync::{Arc, RwLock};
 
 pub struct ContinuousQuery {

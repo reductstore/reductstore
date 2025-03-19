@@ -3,14 +3,17 @@
 
 use crate::core::weak::Weak;
 use crate::storage::entry::RecordReader;
+use crate::storage::proto::record::Label;
+use crate::storage::query::condition::Parser;
+use crate::storage::query::filters::{RecordFilter, WhenFilter};
 use crate::storage::query::QueryRx;
 use crate::storage::storage::CHANNEL_BUFFER_SIZE;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, IoExtension, IoExtensionInfo};
-use reduct_base::io::{ReadChunk, ReadRecord};
+use reduct_base::ext::{BoxedReadRecord, IoExtension, IoExtensionInfo, ProcessStatus};
+use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, not_found, Labels};
 use std::collections::hash_map::Values;
@@ -28,9 +31,18 @@ struct PluginApi {
     get_plugin: extern "C" fn() -> *mut (dyn IoExtension + Send + Sync),
 }
 
+struct QueryContext {
+    query_id: u64,
+    bucket_name: String,
+    entry_name: String,
+    query: QueryEntry,
+    condition_filter: Option<WhenFilter>,
+}
+
 pub struct ExtRepository {
     extension_map: IoExtMap,
     mock: MockExt,
+    query_map: RwLock<HashMap<u64, QueryContext>>,
 }
 
 struct MockExt {}
@@ -50,51 +62,40 @@ impl IoExtension for MockExt {
         todo!()
     }
 
-    fn next_processed_record(
-        &self,
-        query_id: u64,
-        record: BoxedReadRecord,
-    ) -> Option<Result<BoxedReadRecord, ReductError>> {
+    fn next_processed_record(&self, query_id: u64, reader: BoxedReadRecord) -> ProcessStatus {
         struct Wrapper {
-            record: BoxedReadRecord,
+            reader: BoxedReadRecord,
             labels: Labels,
             computed_labels: Labels,
         }
 
-        #[async_trait]
-        impl ReadRecord for Wrapper {
-            async fn read(&mut self) -> ReadChunk {
-                self.record.read().await
-            }
-
-            async fn read_timeout(&mut self, timeout: Duration) -> ReadChunk {
-                self.record.read_timeout(timeout).await
-            }
-
-            fn blocking_read(&mut self) -> ReadChunk {
-                self.record.blocking_read()
-            }
-
+        impl RecordMeta for Wrapper {
             fn timestamp(&self) -> u64 {
-                self.record.timestamp()
-            }
-
-            fn content_length(&self) -> u64 {
-                self.record.content_length()
-            }
-
-            fn content_type(&self) -> &str {
-                self.record.content_type()
-            }
-
-            fn last(&self) -> bool {
-                self.record.last()
+                self.reader.timestamp()
             }
 
             fn labels(&self) -> &Labels {
                 &self.labels
             }
+        }
 
+        #[async_trait]
+        impl ReadRecord for Wrapper {
+            async fn read(&mut self) -> ReadChunk {
+                self.reader.read().await
+            }
+
+            async fn read_timeout(&mut self, timeout: Duration) -> ReadChunk {
+                self.reader.read_timeout(timeout).await
+            }
+
+            fn blocking_read(&mut self) -> ReadChunk {
+                self.reader.blocking_read()
+            }
+
+            fn last(&self) -> bool {
+                self.reader.last()
+            }
             fn computed_labels(&self) -> &Labels {
                 &self.computed_labels
             }
@@ -102,11 +103,19 @@ impl IoExtension for MockExt {
             fn computed_labels_mut(&mut self) -> &mut Labels {
                 &mut self.computed_labels
             }
+
+            fn content_length(&self) -> u64 {
+                self.reader.content_length()
+            }
+
+            fn content_type(&self) -> &str {
+                self.reader.content_type()
+            }
         }
 
-        let mut labels = record.labels().clone();
+        let mut labels = reader.labels().clone();
         let wrapper = Wrapper {
-            record,
+            reader,
             labels,
             computed_labels: Labels::from_iter(vec![(
                 "from_plugin".to_string(),
@@ -114,19 +123,21 @@ impl IoExtension for MockExt {
             )]),
         };
 
-        Some(Ok(Box::new(wrapper)))
+        ProcessStatus::Ready(Ok(Box::new(wrapper)))
     }
 }
 
 impl ExtRepository {
     pub(crate) fn try_load(path: &PathBuf) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
+        let query_map = RwLock::new(HashMap::new());
         let mock = MockExt {};
         if !path.exists() {
             error!("No extension found in path {}", path.display());
             return Ok(ExtRepository {
                 extension_map,
                 mock,
+                query_map,
             });
         }
 
@@ -152,6 +163,7 @@ impl ExtRepository {
         Ok(ExtRepository {
             extension_map,
             mock,
+            query_map,
         })
     }
 
@@ -162,21 +174,63 @@ impl ExtRepository {
         entry_name: &str,
         query_options: QueryEntry,
     ) -> Result<(), ReductError> {
-        todo!()
+        let condition_filter = if let Some(condition) = &query_options.when {
+            Some(WhenFilter::new(Parser::new().parse(condition)?))
+        } else {
+            None
+        };
+
+        self.query_map.write()?.insert(query_id, {
+            QueryContext {
+                query_id,
+                bucket_name: bucket_name.to_string(),
+                entry_name: entry_name.to_string(),
+                query: query_options,
+                condition_filter,
+            }
+        });
+        Ok(())
+    }
+
+    /// TODO: Call in the code that removes queries
+    pub fn remove_query(&self, query_id: u64) -> Result<(), ReductError> {
+        self.query_map.write()?.remove(&query_id);
+        Ok(())
     }
 
     pub async fn next_processed_record(
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
-    ) -> Option<Result<BoxedReadRecord, ReductError>> {
+    ) -> ProcessStatus {
         if let Some(record) = query_rx.write().await.recv().await {
             match record {
-                Ok(record) => self.mock.next_processed_record(query_id, Box::new(record)),
-                Err(e) => Some(Err(e)),
+                Ok(record) => {
+                    let status = self.mock.next_processed_record(query_id, Box::new(record));
+                    let mut lock = self.query_map.write().unwrap();
+                    let filter = &mut lock.get_mut(&query_id).unwrap().condition_filter;
+                    if filter.is_none() {
+                        return status;
+                    }
+
+                    if let ProcessStatus::Ready(record) = &status {
+                        match filter
+                            .as_mut()
+                            .unwrap()
+                            .filter_reader(record.as_ref().unwrap())
+                        {
+                            Ok(true) => status,
+                            Ok(false) => ProcessStatus::NotReady,
+                            Err(e) => ProcessStatus::Ready(Err(e)),
+                        }
+                    } else {
+                        status
+                    }
+                }
+                Err(e) => ProcessStatus::Ready(Err(e)),
             }
         } else {
-            None
+            ProcessStatus::Stop
         }
     }
 }
