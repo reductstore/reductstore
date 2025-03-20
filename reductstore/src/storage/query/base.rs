@@ -38,7 +38,7 @@ pub(in crate::storage) trait Query {
 
 /// QueryOptions is used to specify the options for a query.
 #[derive(Clone, Debug)]
-pub struct QueryOptions {
+pub(crate) struct QueryOptions {
     /// The time to live of the query.
     pub ttl: Duration,
     /// Only include the records that match the key-value pairs.

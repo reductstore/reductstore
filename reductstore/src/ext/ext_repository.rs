@@ -4,13 +4,14 @@
 use crate::core::weak::Weak;
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record::Label;
+use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{RecordFilter, WhenFilter};
 use crate::storage::query::QueryRx;
 use crate::storage::storage::CHANNEL_BUFFER_SIZE;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
-use log::{error, info};
+use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, IoExtension, IoExtensionInfo, ProcessStatus};
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
@@ -20,7 +21,7 @@ use std::collections::hash_map::Values;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock as AsyncRwLock;
 
 type IoExtRef = Arc<RwLock<Box<dyn IoExtension + Send + Sync>>>;
@@ -35,8 +36,9 @@ struct QueryContext {
     query_id: u64,
     bucket_name: String,
     entry_name: String,
-    query: QueryEntry,
+    query: QueryOptions,
     condition_filter: Option<WhenFilter>,
+    last_access: std::time::Instant,
 }
 
 pub struct ExtRepository {
@@ -172,29 +174,36 @@ impl ExtRepository {
         query_id: u64,
         bucket_name: &str,
         entry_name: &str,
-        query_options: QueryEntry,
+        query_request: QueryEntry,
     ) -> Result<(), ReductError> {
+        let query_options: QueryOptions = query_request.into();
+
+        let mut query_map = self.query_map.write()?;
+        // remove expired queries
+        query_map.retain(|_, query| {
+            if query.last_access.elapsed() > query.query.ttl {
+                false
+            } else {
+                true
+            }
+        });
+
         let condition_filter = if let Some(condition) = &query_options.when {
             Some(WhenFilter::new(Parser::new().parse(condition)?))
         } else {
             None
         };
 
-        self.query_map.write()?.insert(query_id, {
+        query_map.insert(query_id, {
             QueryContext {
                 query_id,
                 bucket_name: bucket_name.to_string(),
                 entry_name: entry_name.to_string(),
                 query: query_options,
                 condition_filter,
+                last_access: Instant::now(),
             }
         });
-        Ok(())
-    }
-
-    /// TODO: Call in the code that removes queries
-    pub fn remove_query(&self, query_id: u64) -> Result<(), ReductError> {
-        self.query_map.write()?.remove(&query_id);
         Ok(())
     }
 
@@ -203,25 +212,45 @@ impl ExtRepository {
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
     ) -> ProcessStatus {
+        // check if registered
         if let Some(record) = query_rx.write().await.recv().await {
             match record {
                 Ok(record) => {
-                    let status = self.mock.next_processed_record(query_id, Box::new(record));
+                    let record = Box::new(record);
+                    // check if query is registered and
                     let mut lock = self.query_map.write().unwrap();
-                    let filter = &mut lock.get_mut(&query_id).unwrap().condition_filter;
-                    if filter.is_none() {
+
+                    let mut query = lock.get_mut(&query_id);
+                    if query.is_none() {
+                        debug!("Query {} not found", query_id);
+                        return ProcessStatus::Ready(Ok(record));
+                    }
+
+                    let query = query.unwrap();
+                    query.last_access = Instant::now();
+
+                    let status = self.mock.next_processed_record(query_id, record);
+
+                    if query.condition_filter.is_none() {
                         return status;
                     }
 
                     if let ProcessStatus::Ready(record) = &status {
-                        match filter
+                        match query
+                            .condition_filter
                             .as_mut()
                             .unwrap()
                             .filter_with_computed(&record.as_ref().unwrap())
                         {
                             Ok(true) => status,
                             Ok(false) => ProcessStatus::NotReady,
-                            Err(e) => ProcessStatus::Ready(Err(e)),
+                            Err(e) => {
+                                if (query.query.strict) {
+                                    ProcessStatus::Ready(Err(e))
+                                } else {
+                                    status
+                                }
+                            }
                         }
                     } else {
                         status
