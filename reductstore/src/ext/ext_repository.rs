@@ -16,6 +16,7 @@ use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, IoExtension, IoExtensionInfo, ProcessStatus};
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::msg::entry_api::QueryEntry;
+use reduct_base::msg::entry_api::QueryType::Query;
 use reduct_base::{internal_server_error, not_found, unprocessable_entity, Labels};
 use std::collections::hash_map::Values;
 use std::collections::HashMap;
@@ -28,8 +29,8 @@ type IoExtRef = Arc<RwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
 
 #[derive(WrapperApi)]
-struct PluginApi {
-    get_plugin: extern "C" fn() -> *mut (dyn IoExtension + Send + Sync),
+struct ExtensionApi {
+    get_ext: extern "C" fn() -> *mut (dyn IoExtension + Send + Sync),
 }
 
 struct QueryContext {
@@ -45,6 +46,7 @@ struct QueryContext {
 pub struct ExtRepository {
     extension_map: IoExtMap,
     query_map: RwLock<HashMap<u64, QueryContext>>,
+    ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
 }
 
 impl ExtRepository {
@@ -58,9 +60,11 @@ impl ExtRepository {
             return Ok(ExtRepository {
                 extension_map,
                 query_map,
+                ext_wrappers: Vec::new(),
             });
         }
 
+        let mut ext_wrappers = Vec::new();
         for entry in path.read_dir()? {
             let path = entry?.path();
             if path.is_file()
@@ -68,21 +72,25 @@ impl ExtRepository {
                     .extension()
                     .map_or(false, |ext| ext == "so" || ext == "dll")
             {
-                let plugin_api_wrapper = unsafe {
-                    Container::<PluginApi>::load(path)
-                        .map_err(|e| internal_server_error!("Failed to load plugin: {}", e))?
+                let ext_wrapper = unsafe {
+                    Container::<ExtensionApi>::load(path)
+                        .map_err(|e| internal_server_error!("Failed to load extension: {}", e))?
                 };
-                let plugin = unsafe { Box::from_raw(plugin_api_wrapper.get_plugin()) };
-                info!("Load extension: {:?}", plugin.info());
 
-                let name = plugin.info().name().to_string();
-                extension_map.insert(name, Arc::new(RwLock::new(plugin)));
+                let ext = unsafe { Arc::new(RwLock::new(Box::from_raw(ext_wrapper.get_ext()))) };
+
+                info!("Load extension: {:?}", ext.read()?.info());
+
+                let name = ext.read()?.info().name().to_string();
+                extension_map.insert(name, ext);
+                ext_wrappers.push(ext_wrapper);
             }
         }
 
         Ok(ExtRepository {
             extension_map,
             query_map,
+            ext_wrappers,
         })
     }
 
