@@ -70,7 +70,7 @@ pub enum ProcessStatus {
 }
 
 pub trait IoExtension {
-    fn info(&self) -> IoExtensionInfo;
+    fn info(&self) -> &IoExtensionInfo;
 
     fn register_query(
         &self,

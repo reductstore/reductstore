@@ -47,103 +47,9 @@ pub struct ExtRepository {
     query_map: RwLock<HashMap<u64, QueryContext>>,
 }
 
-struct MockExt {
-    name: String,
-}
-
-impl IoExtension for MockExt {
-    fn info(&self) -> IoExtensionInfo {
-        todo!()
-    }
-
-    fn register_query(
-        &self,
-        query_id: u64,
-        bucket_name: &str,
-        entry_name: &str,
-        query: &QueryEntry,
-    ) -> Result<(), ReductError> {
-        info!("Register query {} for Mock plugin", query_id);
-        Ok(())
-    }
-
-    fn next_processed_record(&self, query_id: u64, reader: BoxedReadRecord) -> ProcessStatus {
-        struct Wrapper {
-            reader: BoxedReadRecord,
-            labels: Labels,
-            computed_labels: Labels,
-        }
-
-        impl RecordMeta for Wrapper {
-            fn timestamp(&self) -> u64 {
-                self.reader.timestamp()
-            }
-
-            fn labels(&self) -> &Labels {
-                &self.labels
-            }
-        }
-
-        #[async_trait]
-        impl ReadRecord for Wrapper {
-            async fn read(&mut self) -> ReadChunk {
-                self.reader.read().await
-            }
-
-            async fn read_timeout(&mut self, timeout: Duration) -> ReadChunk {
-                self.reader.read_timeout(timeout).await
-            }
-
-            fn blocking_read(&mut self) -> ReadChunk {
-                self.reader.blocking_read()
-            }
-
-            fn last(&self) -> bool {
-                self.reader.last()
-            }
-            fn computed_labels(&self) -> &Labels {
-                &self.computed_labels
-            }
-
-            fn computed_labels_mut(&mut self) -> &mut Labels {
-                &mut self.computed_labels
-            }
-
-            fn content_length(&self) -> u64 {
-                self.reader.content_length()
-            }
-
-            fn content_type(&self) -> &str {
-                self.reader.content_type()
-            }
-        }
-
-        let mut labels = reader.labels().clone();
-        let wrapper = Wrapper {
-            reader,
-            labels,
-            computed_labels: Labels::from_iter(vec![(self.name.clone(), "true".to_string())]),
-        };
-
-        ProcessStatus::Ready(Ok(Box::new(wrapper)))
-    }
-}
-
 impl ExtRepository {
     pub(crate) fn try_load(path: &PathBuf) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
-        extension_map.insert(
-            "mock1".to_string(),
-            Arc::new(RwLock::new(Box::new(MockExt {
-                name: "mock1".to_string(),
-            }))),
-        );
-        extension_map.insert(
-            "mock2".to_string(),
-            Arc::new(RwLock::new(Box::new(MockExt {
-                name: "mock2".to_string(),
-            }))),
-        );
 
         let query_map = RwLock::new(HashMap::new());
 
@@ -315,7 +221,7 @@ impl ExtRepository {
             computed_labels.extend(record.computed_labels().clone().into_iter());
             status = ext.read().unwrap().next_processed_record(query_id, record);
             if let ProcessStatus::Ready(result) = status {
-                if let Ok(mut processed_record) = result {
+                if let Ok(processed_record) = result {
                     record = processed_record;
                 } else {
                     return ProcessStatus::Ready(result);
