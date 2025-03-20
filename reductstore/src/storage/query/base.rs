@@ -59,6 +59,8 @@ pub(crate) struct QueryOptions {
     pub when: Option<Value>,
     /// Strict condition
     pub strict: bool,
+    /// Extension part
+    pub ext: Option<Value>,
 }
 
 impl From<QueryEntry> for QueryOptions {
@@ -74,6 +76,7 @@ impl From<QueryEntry> for QueryOptions {
             only_metadata: query.only_metadata.unwrap_or(false),
             when: query.when,
             strict: query.strict.unwrap_or(false),
+            ext: query.ext,
         }
     }
 }
@@ -91,6 +94,7 @@ impl Default for QueryOptions {
             only_metadata: false,
             when: None,
             strict: false,
+            ext: None,
         }
     }
 }
