@@ -1,6 +1,6 @@
 # ReductStore
 
-## The Fastest Time Series Object Storage for AI Infrastructure
+## High Performance Storage and Streaming Solution for Data Acquisition Systems
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
@@ -10,8 +10,9 @@
 [![Community](https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store
 )](https://community.reduct.store/signup)
 
+ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT). It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference). This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
 
-ReductStore is a time series object store designed specifically for storing and managing large volumes of unstructured data. It provides high performance for both writing and real-time querying, with the added benefit of batching data. This makes it an ideal solution for edge, industrial and IoT AI applications where fast access to data is critical. For more information, please visit [https://www.reduct.store/](https://www.reduct.store/).
+For more information, please visit https://www.reduct.store/.
 
 ## Why Does It Exist?
 
