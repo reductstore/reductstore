@@ -141,6 +141,7 @@ mod tests {
     use crate::api::tests::{components, empty_body, path_to_entry_1};
     use crate::storage::proto::record::Label;
     use axum_extra::headers::{Authorization, HeaderMapExt};
+    use reduct_base::io::RecordMeta;
     use rstest::*;
 
     #[rstest]
@@ -174,13 +175,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            record.labels()[0],
-            Label {
-                name: "x".to_string(),
-                value: "y".to_string(),
-            }
-        );
+        assert_eq!(&record.labels()["x"], "z");
 
         let info = components
             .replication_repo

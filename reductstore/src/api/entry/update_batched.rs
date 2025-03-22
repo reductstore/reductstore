@@ -103,14 +103,14 @@ pub(crate) async fn update_batched_records(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
     use axum::response::IntoResponse;
     use axum_extra::headers::HeaderValue;
     use bytes::Bytes;
+    use reduct_base::io::RecordMeta;
     use rstest::rstest;
-
-    use super::*;
 
     #[rstest]
     #[tokio::test]
@@ -205,20 +205,8 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(reader.labels().len(), 2);
-            assert_eq!(
-                reader.labels()[0],
-                Label {
-                    name: "x".to_string(),
-                    value: "z".to_string(),
-                }
-            );
-            assert_eq!(
-                reader.labels()[1],
-                Label {
-                    name: "1".to_string(),
-                    value: "2".to_string(),
-                }
-            );
+            assert_eq!(&reader.labels()["x"], "z");
+            assert_eq!(&reader.labels()["1"], "2");
         }
 
         assert_eq!(err_map.len(), 0);

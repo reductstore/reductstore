@@ -378,6 +378,7 @@ impl Bucket {
 mod tests {
     use super::*;
     use reduct_base::conflict;
+    use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
@@ -509,10 +510,7 @@ mod tests {
             );
 
             let mut reader = bucket.begin_read("test-2", 1).await.unwrap();
-            assert_eq!(
-                reader.rx().recv().await.unwrap().unwrap(),
-                Bytes::from("test")
-            );
+            assert_eq!(reader.read().await.unwrap().unwrap(), Bytes::from("test"));
         }
     }
 
@@ -567,7 +565,7 @@ mod tests {
         time: u64,
     ) -> Result<Vec<u8>, ReductError> {
         let mut reader = bucket.begin_read(entry_name, time).await?;
-        let data = reader.rx().recv().await.unwrap().unwrap();
+        let data = reader.read().await.unwrap().unwrap();
         Ok(data.to_vec())
     }
 

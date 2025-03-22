@@ -323,22 +323,16 @@ mod tests {
         fn test_filter_point(notification: TransactionNotification) {
             assert_eq!(notification.timestamp(), 0);
             assert_eq!(notification.labels(), &notification.labels);
-            assert_eq!(notification.state(), &0);
+            assert_eq!(notification.state(), 0);
         }
     }
 
     #[fixture]
     fn notification() -> TransactionNotification {
-        let labels = vec![
-            Label {
-                name: "x".to_string(),
-                value: "y".to_string(),
-            },
-            Label {
-                name: "z".to_string(),
-                value: "w".to_string(),
-            },
-        ];
+        let labels = Labels::from_iter(vec![
+            ("x".to_string(), "y".to_string()),
+            ("z".to_string(), "w".to_string()),
+        ]);
         TransactionNotification {
             bucket: "bucket".to_string(),
             entry: "entry".to_string(),

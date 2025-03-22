@@ -279,6 +279,7 @@ mod tests {
     use crate::api::tests::{components, headers, path_to_entry_1};
 
     use rstest::*;
+    use tempfile::tempdir;
     use tokio::time::sleep;
 
     #[rstest]
@@ -438,38 +439,59 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_next_record_reader_timeout() {
+        async fn test_next_record_reader_timeout(ext_repository: ExtRepository) {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             assert!(
-                timeout(
-                    Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", Duration::from_millis(10))
-                )
-                .await
-                .unwrap()
-                .is_none(),
-                "should return None if no record is received after timeout"
+                matches!(
+                    timeout(
+                        Duration::from_secs(1),
+                        next_record_reader(
+                            1,
+                            rx.clone(),
+                            "",
+                            Duration::from_millis(10),
+                            &ext_repository
+                        )
+                    )
+                    .await
+                    .unwrap(),
+                    ProcessStatus::Stop,
+                ),
+                "should return None if the query is closed"
             );
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_next_record_reader_closed_tx() {
+        async fn test_next_record_reader_closed_tx(ext_repository: ExtRepository) {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert!(
-                timeout(
-                    Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", Duration::from_millis(0))
-                )
-                .await
-                .unwrap()
-                .is_none(),
+                matches!(
+                    timeout(
+                        Duration::from_secs(1),
+                        next_record_reader(
+                            1,
+                            rx.clone(),
+                            "",
+                            Duration::from_millis(0),
+                            &ext_repository
+                        )
+                    )
+                    .await
+                    .unwrap(),
+                    ProcessStatus::Stop
+                ),
                 "should return None if the query is closed"
             );
         }
+    }
+
+    #[fixture]
+    fn ext_repository() -> ExtRepository {
+        ExtRepository::try_load(&tempdir().unwrap().into_path()).unwrap()
     }
 
     mod stream_wrapper {

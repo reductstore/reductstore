@@ -158,13 +158,13 @@ fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
     use rstest::fixture;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::ReplicationSettings;
@@ -242,6 +242,7 @@ mod tests {
             base_path: "/".to_string(),
             replication_repo: RwLock::new(replication_repo),
             io_settings: IoConfig::default(),
+            ext_repo: ExtRepository::try_load(&PathBuf::from("")).unwrap(),
         };
 
         Arc::new(components)

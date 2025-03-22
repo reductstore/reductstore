@@ -360,7 +360,7 @@ mod tests {
                 "We don't spawn a task for small records"
             );
             assert_eq!(
-                reader.rx().blocking_recv().unwrap().unwrap(),
+                reader.blocking_read().unwrap().unwrap(),
                 Bytes::from("0123456789")
             );
         }
@@ -382,7 +382,7 @@ mod tests {
                 "We spawn a task for big records"
             );
             assert_eq!(
-                reader.rx().blocking_recv().unwrap().unwrap().len(),
+                reader.blocking_read().unwrap().unwrap().len(),
                 MAX_IO_BUFFER_SIZE
             );
 
