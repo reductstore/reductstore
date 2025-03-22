@@ -4,7 +4,7 @@
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::{RecordFilter, RecordMeta};
 
 /// Filter that excludes records with specific labels
 pub struct IncludeLabelFilter {
@@ -26,17 +26,12 @@ impl IncludeLabelFilter {
     }
 }
 
-impl<P> RecordFilter<P> for IncludeLabelFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
-        let result = self.labels.iter().all(|(key, value)| {
-            record
-                .labels()
-                .iter()
-                .any(|label| label.name == *key && label.value == *value)
-        });
+impl RecordFilter for IncludeLabelFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+        let result = self
+            .labels
+            .iter()
+            .all(|(key, value)| record.labels().iter().any(|(k, v)| k == key && v == value));
 
         Ok(result)
     }

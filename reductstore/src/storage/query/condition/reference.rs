@@ -2,13 +2,15 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::{Context, Node};
+use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage, Node};
 use reduct_base::error::ReductError;
 use reduct_base::not_found;
 
 /// A node representing a reference to a label in the context.
 pub(super) struct Reference {
     name: String,
+    stage: EvaluationStage,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Reference {
@@ -22,18 +24,30 @@ impl Node for Reference {
         Ok(value)
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
+    fn stage(&self) -> &EvaluationStage {
+        &self.stage
+    }
+
     fn print(&self) -> String {
         format!("Ref({})", self.name)
     }
 }
 
 impl Reference {
-    pub fn new(name: String) -> Self {
-        Reference { name }
+    pub fn new(name: String, stage: EvaluationStage) -> Self {
+        Reference {
+            name,
+            stage,
+            operands: vec![],
+        }
     }
 
-    pub fn boxed(name: String) -> Box<Self> {
-        Box::new(Reference::new(name))
+    pub fn boxed(name: String, stage: EvaluationStage) -> BoxedNode {
+        Box::new(Reference::new(name, stage))
     }
 }
 

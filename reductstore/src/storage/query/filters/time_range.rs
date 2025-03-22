@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::{RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
 
 /// Filter that passes records with a timestamp within a specific range
@@ -26,11 +26,8 @@ impl TimeRangeFilter {
     }
 }
 
-impl<P> RecordFilter<P> for TimeRangeFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
+impl RecordFilter for TimeRangeFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
         let ts = record.timestamp() as u64;
         let ret = ts >= self.start && ts < self.stop;
         if ret {

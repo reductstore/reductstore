@@ -11,6 +11,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::cfg::io::IoConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
+use crate::ext::ext_repository::ExtRepository;
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -18,6 +19,7 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";
@@ -35,6 +37,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub cert_path: String,
     pub cert_key_path: String,
     pub license_path: Option<String>,
+    pub ext_path: String,
     pub cors_allow_origin: Vec<String>,
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
@@ -58,6 +61,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             cert_path: env.get_masked("RS_CERT_PATH", "".to_string()),
             cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
             license_path: env.get_optional("RS_LICENSE_PATH"),
+            ext_path: env.get("RS_EXT_PATH", "/ext".to_string()),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
@@ -82,6 +86,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             auth: TokenAuthorization::new(&self.api_token),
             console,
             replication_repo: tokio::sync::RwLock::new(replication_engine),
+            ext_repo: ExtRepository::try_load(&PathBuf::from(&self.ext_path))?,
+
             base_path: self.api_base_path.clone(),
             io_settings: self.io_conf.clone(),
         })

@@ -4,8 +4,6 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
-use reduct_base::error::ReductError;
-
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record::Label;
@@ -13,23 +11,12 @@ use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterPoint, IncludeLabelFilter,
-    RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
+    EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter,
+    RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
-
-impl FilterPoint for Record {
-    fn timestamp(&self) -> i64 {
-        ts_to_us(self.timestamp.as_ref().unwrap()) as i64
-    }
-
-    fn labels(&self) -> &Vec<Label> {
-        &self.labels
-    }
-
-    fn state(&self) -> &i32 {
-        &self.state
-    }
-}
+use reduct_base::error::ReductError;
+use reduct_base::io::RecordMeta;
+use reduct_base::Labels;
 
 pub struct HistoricalQuery {
     /// The start time of the query.
@@ -41,7 +28,7 @@ pub struct HistoricalQuery {
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
     current_block: Option<BlockRef>,
     /// Filters
-    filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>>,
+    filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
     /// Request only metadata without the content.
     only_metadata: bool,
     /// Strict mode
@@ -54,7 +41,7 @@ impl HistoricalQuery {
         stop_time: u64,
         options: QueryOptions,
     ) -> Result<Self, ReductError> {
-        let mut filters: Vec<Box<dyn RecordFilter<Record> + Send + Sync>> = vec![
+        let mut filters: Vec<Box<dyn RecordFilter + Send + Sync>> = vec![
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
             Box::new(RecordStateFilter::new(RecordState::Finished)),
         ];
@@ -156,14 +143,51 @@ impl Query for HistoricalQuery {
     }
 }
 
+// Wrapper for RecordMeta to implement RecordMeta for Record
+// This is needed because we need different layout for labels in RecordMeta and Record
+struct RecordMetaWrapper {
+    time: u64,
+    labels: Labels,
+    state: i32,
+}
+
+impl RecordMeta for RecordMetaWrapper {
+    fn timestamp(&self) -> u64 {
+        self.time
+    }
+
+    fn labels(&self) -> &Labels {
+        &self.labels
+    }
+
+    fn state(&self) -> i32 {
+        self.state
+    }
+}
+
+impl From<Record> for RecordMetaWrapper {
+    fn from(record: Record) -> Self {
+        RecordMetaWrapper {
+            time: ts_to_us(record.timestamp.as_ref().unwrap()),
+            labels: record
+                .labels
+                .iter()
+                .map(|label| (label.name.clone(), label.value.clone()))
+                .collect(),
+            state: record.state,
+        }
+    }
+}
+
 impl HistoricalQuery {
     fn filter_records_from_current_block(&mut self) -> Result<Vec<Record>, ReductError> {
         let block = self.current_block.as_ref().unwrap().read()?;
         let mut filtered_records = Vec::new();
         for record in block.record_index().values() {
+            let wrapper = RecordMetaWrapper::from(record.clone());
             let mut include_record = true;
             for filter in self.filters.iter_mut() {
-                match filter.filter(record) {
+                match filter.filter(&wrapper) {
                     Ok(false) => {
                         include_record = false;
                         break;

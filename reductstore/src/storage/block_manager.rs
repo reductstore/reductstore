@@ -594,7 +594,7 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
-    use crate::storage::entry::{RecordWriter, WriteRecordContent};
+    use crate::storage::entry::RecordWriter;
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rand::distr::Alphanumeric;
     use rand::{rng, Rng};
@@ -603,6 +603,7 @@ mod tests {
 
     mod block_operations {
         use super::*;
+        use reduct_base::io::WriteRecord;
 
         #[rstest]
         fn test_starting_block(mut block_manager: BlockManager) {
@@ -717,6 +718,7 @@ mod tests {
 
     mod index_operations {
         use super::*;
+        use reduct_base::io::WriteRecord;
         use std::thread::sleep;
 
         #[rstest]

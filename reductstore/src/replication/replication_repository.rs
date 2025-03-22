@@ -613,7 +613,7 @@ mod tests {
                 repl.notify(TransactionNotification {
                     bucket: "bucket-1".to_string(),
                     entry: "entry-1".to_string(),
-                    labels: Vec::new(),
+                    labels: Labels::default(),
                     event: WriteRecord(0),
                 })
                 .unwrap();

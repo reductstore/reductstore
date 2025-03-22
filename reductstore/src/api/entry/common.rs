@@ -72,6 +72,7 @@ pub(super) fn parse_query_params(
         only_metadata: Some(only_metadata),
         when: None,
         strict: None,
+        ext: None,
     })
 }
 

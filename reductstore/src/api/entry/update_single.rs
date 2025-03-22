@@ -100,11 +100,11 @@ pub(crate) async fn update_record(
 
 #[cfg(test)]
 mod tests {
-    use axum_extra::headers::{Authorization, HeaderMapExt};
-    use rstest::*;
-
     use crate::api::tests::{components, empty_body, path_to_entry_1};
     use crate::storage::proto::record::Label;
+    use axum_extra::headers::{Authorization, HeaderMapExt};
+    use reduct_base::io::RecordMeta;
+    use rstest::*;
 
     use super::*;
 
@@ -144,20 +144,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(record.labels().len(), 2);
-        assert_eq!(
-            record.labels()[0],
-            Label {
-                name: "x".to_string(),
-                value: "z".to_string(),
-            }
-        );
-        assert_eq!(
-            record.labels()[1],
-            Label {
-                name: "1".to_string(),
-                value: "2".to_string(),
-            }
-        );
+        assert_eq!(&record.labels()["x"], "z",);
+        assert_eq!(&record.labels()["1"], "2",);
 
         let info = components
             .replication_repo

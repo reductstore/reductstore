@@ -1,10 +1,12 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use log::Metadata;
 use reduct_base::error::ReductError;
+use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::RecordFilter;
 
 /// Filter that excludes records with specific labels
 pub struct ExcludeLabelFilter {
@@ -26,17 +28,12 @@ impl ExcludeLabelFilter {
     }
 }
 
-impl<P> RecordFilter<P> for ExcludeLabelFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
-        let result = !self.labels.iter().all(|(key, value)| {
-            record
-                .labels()
-                .iter()
-                .any(|label| label.name == *key && label.value == *value)
-        });
+impl RecordFilter for ExcludeLabelFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+        let result = !self
+            .labels
+            .iter()
+            .all(|(key, value)| record.labels().iter().any(|(k, v)| k == key && v == value));
 
         Ok(result)
     }

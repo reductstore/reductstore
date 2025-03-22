@@ -1,9 +1,12 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::condition::{BoxedNode, Context};
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
+use crate::storage::query::filters::{RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
+use reduct_base::ext::BoxedReadRecord;
+use reduct_base::unprocessable_entity;
+use std::collections::HashMap;
 
 /// A node representing a when filter with a condition.
 pub struct WhenFilter {
@@ -14,19 +17,37 @@ impl WhenFilter {
     pub fn new(condition: BoxedNode) -> Self {
         WhenFilter { condition }
     }
+
+    pub fn filter_with_computed(&mut self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
+        let mut labels = reader
+            .labels()
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect::<HashMap<_, _>>();
+
+        for (k, v) in reader.computed_labels() {
+            if labels.insert(k, v).is_some() {
+                return Err(unprocessable_entity!(
+                    "Computed label '@{}' already exists",
+                    k
+                ));
+            }
+        }
+
+        let context = Context::new(labels, EvaluationStage::Compute);
+        Ok(self.condition.apply(&context)?.as_bool()?)
+    }
 }
 
-impl<P> RecordFilter<P> for WhenFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
+impl RecordFilter for WhenFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
         let context = Context::new(
             record
                 .labels()
                 .iter()
-                .map(|l| (l.name.as_str(), l.value.as_str()))
+                .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
+            EvaluationStage::Retrieve,
         );
         Ok(self.condition.apply(&context)?.as_bool()?)
     }
