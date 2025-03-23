@@ -55,7 +55,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Ref::new(Constant::boxed(Value::String("foo".to_string())));
+        let op = Ref::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
 
         let mut context = Context::default();
         context.labels.insert("foo", "bar");
@@ -76,7 +76,7 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let and = Ref::new(Constant::boxed(Value::String("foo".to_string())));
+        let and = Ref::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
         assert_eq!(and.print(), "Ref(String(\"foo\"))");
     }
 }

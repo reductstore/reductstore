@@ -189,25 +189,25 @@ mod tests {
 
         let updated_labels = result.get(&1).unwrap().as_ref().unwrap();
         let expected_labels_1 = make_expected_labels(1);
-        assert!(updated_labels.keys().eq(expected_labels_1.keys()));
+        assert_eq!(updated_labels, &expected_labels_1);
 
         let updated_labels = result.get(&2).unwrap().as_ref().unwrap();
         let expected_labels_2 = make_expected_labels(2);
-        assert!(updated_labels.keys().eq(expected_labels_2.keys()));
+        assert_eq!(updated_labels, &expected_labels_2);
 
         let updated_labels = result.get(&3).unwrap().as_ref().unwrap();
         let expected_labels_3 = make_expected_labels(3);
-        assert!(updated_labels.keys().eq(expected_labels_3.keys()));
+        assert_eq!(updated_labels, &expected_labels_3);
 
         // check if the records were updated
-        let labels = entry.begin_read(1).wait().unwrap().labels();
-        assert!(labels.keys().eq(expected_labels_1.keys()));
+        let labels = entry.begin_read(1).wait().unwrap().labels().clone();
+        assert_eq!(labels, expected_labels_1);
 
-        let labels = entry.begin_read(2).wait().unwrap().labels();
-        assert!(labels.keys().eq(expected_labels_2.keys()));
+        let labels = entry.begin_read(2).wait().unwrap().labels().clone();
+        assert_eq!(labels, expected_labels_2);
 
-        let labels = entry.begin_read(3).wait().unwrap().labels();
-        assert!(labels.keys().eq(expected_labels_3.keys()));
+        let labels = entry.begin_read(3).wait().unwrap().labels().clone();
+        assert_eq!(labels, expected_labels_3);
     }
 
     #[rstest]
@@ -225,16 +225,29 @@ mod tests {
         assert_eq!(result.len(), 1);
 
         let updated_labels = result.get(&1).unwrap().as_ref().unwrap();
-        let expected_labels = Labels::from_iter(vec![
-            ("a-1".to_string(), "x-1".to_string()),
-            ("c-1".to_string(), "z-1".to_string()),
-        ]);
+        let expected_labels = vec![
+            Label {
+                name: "a-1".to_string(),
+                value: "x-1".to_string(),
+            },
+            Label {
+                name: "c-1".to_string(),
+                value: "z-1".to_string(),
+            },
+        ];
 
-        assert!(updated_labels.keys().eq(expected_labels.keys()));
+        assert_eq!(
+            updated_labels,
+            &expected_labels
+                .iter()
+                .map(|l| (l.name.clone(), l.value.clone()))
+                .collect::<Labels>()
+        );
 
         let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
-        let record = block.read().unwrap().get_record(1).unwrap().clone();
-        assert!(record.labels.iter().eq(expected_labels.iter()));
+        let mut record = block.read().unwrap().get_record(1).unwrap().clone();
+        record.labels.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(record.labels, expected_labels);
     }
     fn make_update(time: u64) -> UpdateLabels {
         UpdateLabels {

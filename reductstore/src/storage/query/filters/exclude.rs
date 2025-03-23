@@ -43,8 +43,10 @@ impl RecordFilter for ExcludeLabelFilter {
 mod tests {
     use super::*;
     use crate::storage::proto::record::Label;
-    use crate::storage::proto::Record;
+    use crate::storage::proto::{ts_to_us, Record};
 
+    use crate::storage::query::filters::tests::RecordWrapper;
+    use crate::storage::query::filters::WhenFilter;
     use rstest::*;
 
     #[rstest]
@@ -61,7 +63,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
+        let wrapper = RecordWrapper::from(record);
+        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
     }
 
     #[rstest]
@@ -78,7 +81,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record).unwrap(), "Record should pass");
+        let wrapper = RecordWrapper::from(record);
+        assert!(filter.filter(&wrapper).unwrap(), "Record should pass");
     }
 
     #[rstest]
@@ -105,8 +109,9 @@ mod tests {
             ..Default::default()
         };
 
+        let wrapper = RecordWrapper::from(record);
         assert!(
-            !filter.filter(&record).unwrap(),
+            !filter.filter(&wrapper).unwrap(),
             "Record should not pass because it has key1=value1 and key2=value2"
         );
 
@@ -118,8 +123,9 @@ mod tests {
             ..Default::default()
         };
 
+        let wrapper = RecordWrapper::from(record);
         assert!(
-            filter.filter(&record).unwrap(),
+            filter.filter(&wrapper).unwrap(),
             "Record should pass because it has only key1=value1"
         );
     }

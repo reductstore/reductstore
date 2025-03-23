@@ -59,6 +59,7 @@ mod tests {
     use crate::storage::proto::record::Label;
     use crate::storage::proto::Record;
     use crate::storage::query::condition::Parser;
+    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::rstest;
 
     #[rstest]
@@ -75,7 +76,9 @@ mod tests {
             }],
             ..Default::default()
         };
-        let result = filter.filter(&record).unwrap();
+
+        let wrapper = RecordWrapper::from(record.clone());
+        let result = filter.filter(&wrapper).unwrap();
         assert_eq!(result, true);
     }
 }

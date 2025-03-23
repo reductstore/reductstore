@@ -51,19 +51,19 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let sub = Cast::new(
+        let sub = Cast::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("float".to_string())),
-        );
+        ]);
         assert_eq!(sub.apply(&Context::default()).unwrap(), Value::Float(1.0));
     }
 
     #[rstest]
     fn apply_bad() {
-        let sub = Cast::new(
+        let sub = Cast::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("foo".to_string())),
-        );
+        ]);
         assert_eq!(
             sub.apply(&Context::default()),
             Err(unprocessable_entity!("Unknown type 'foo'"))
@@ -81,10 +81,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let op = Cast::new(
+        let op = Cast::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::String("bool".to_string())),
-        );
+        ]);
         assert_eq!(op.print(), "Cast(Bool(true), String(\"bool\"))");
     }
 }

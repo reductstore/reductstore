@@ -175,7 +175,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(&record.labels()["x"], "z");
+        assert_eq!(&record.labels()["x"], "y");
 
         let info = components
             .replication_repo

@@ -220,13 +220,14 @@ mod tests {
 
     use rstest::rstest;
 
+    use super::*;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{record, us_to_ts};
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
+    use reduct_base::ext::BoxedReadRecord;
+    use reduct_base::io::ReadRecord;
     use reduct_base::{no_content, not_found};
-
-    use super::*;
 
     #[rstest]
     fn test_query_ok_1_rec(block_manager: Arc<RwLock<BlockManager>>) {
@@ -234,7 +235,7 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[0].0.timestamp(), 0);
         assert_eq!(records[0].1, "0123456789");
     }
 
@@ -244,9 +245,9 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[0].0.timestamp(), 0);
         assert_eq!(records[0].1, "0123456789");
-        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&5)));
+        assert_eq!(records[1].0.timestamp(), 5);
         assert_eq!(records[1].1, "0123456789");
     }
 
@@ -256,11 +257,11 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 3);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[0].0.timestamp(), 0);
         assert_eq!(records[0].1, "0123456789");
-        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&5)));
+        assert_eq!(records[1].0.timestamp(), 5);
         assert_eq!(records[1].1, "0123456789");
-        assert_eq!(records[2].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(records[2].0.timestamp(), 1000);
         assert_eq!(records[2].1, "0123456789");
     }
 
@@ -281,19 +282,13 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(records[0].0.timestamp(), 1000);
         assert_eq!(
-            records[0].0.labels,
-            vec![
-                Label {
-                    name: "block".to_string(),
-                    value: "2".to_string(),
-                },
-                Label {
-                    name: "record".to_string(),
-                    value: "1".to_string(),
-                },
-            ]
+            records[0].0.labels(),
+            &HashMap::from([
+                ("block".to_string(), "2".to_string()),
+                ("record".to_string(), "1".to_string()),
+            ])
         );
         assert_eq!(records[0].1, "0123456789");
     }
@@ -316,23 +311,14 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&5)));
+        assert_eq!(records[0].0.timestamp(), 5);
         assert_eq!(
-            records[0].0.labels,
-            vec![
-                Label {
-                    name: "block".to_string(),
-                    value: "1".to_string(),
-                },
-                Label {
-                    name: "record".to_string(),
-                    value: "2".to_string(),
-                },
-                Label {
-                    name: "flag".to_string(),
-                    value: "false".to_string(),
-                },
-            ]
+            records[0].0.labels(),
+            &HashMap::from([
+                ("block".to_string(), "1".to_string()),
+                ("record".to_string(), "2".to_string()),
+                ("flag".to_string(), "false".to_string()),
+            ])
         );
         assert_eq!(records[0].1, "0123456789");
     }
@@ -375,8 +361,8 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
-        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(records[0].0.timestamp(), 0);
+        assert_eq!(records[1].0.timestamp(), 1000);
     }
 
     #[rstest]
@@ -393,8 +379,8 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
-        assert_eq!(records[1].0.timestamp, Some(us_to_ts(&1000)));
+        assert_eq!(records[0].0.timestamp(), 0);
+        assert_eq!(records[1].0.timestamp(), 1000);
     }
 
     #[rstest]
@@ -411,7 +397,7 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.timestamp, Some(us_to_ts(&0)));
+        assert_eq!(records[0].0.timestamp(), 0);
     }
 
     #[rstest]
@@ -454,17 +440,17 @@ mod tests {
     fn read_to_vector(
         query: &mut HistoricalQuery,
         block_manager: Arc<RwLock<BlockManager>>,
-    ) -> Vec<(Record, String)> {
-        let mut records = Vec::new();
+    ) -> Vec<(BoxedReadRecord, String)> {
+        let mut records: Vec<(BoxedReadRecord, String)> = Vec::new();
         loop {
             match query.next(block_manager.clone()) {
                 Ok(mut reader) => {
                     let mut content = String::new();
-                    while let Some(chunk) = reader.rx().blocking_recv() {
+                    while let Some(chunk) = reader.blocking_read() {
                         content
                             .push_str(String::from_utf8(chunk.unwrap().to_vec()).unwrap().as_str())
                     }
-                    records.push((reader.record().clone(), content));
+                    records.push((Box::new(reader), content));
                 }
                 Err(err) => {
                     assert_eq!(err.status, ErrorCode::NoContent);

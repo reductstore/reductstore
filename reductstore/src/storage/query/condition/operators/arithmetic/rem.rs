@@ -53,19 +53,19 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Rem::new(
+        let op = Rem::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Int(2)),
-        );
+        ]);
         assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(1));
     }
 
     #[rstest]
     fn apply_bad() {
-        let op = Rem::new(
+        let op = Rem::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("foo".to_string())),
-        );
+        ]);
         assert_eq!(
             op.apply(&Context::default()),
             Err(unprocessable_entity!("Cannot divide integer by string"))
@@ -83,10 +83,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let op = Rem::new(
+        let op = Rem::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(true)),
-        );
+        ]);
         assert_eq!(op.print(), "Rem(Bool(true), Bool(true))");
     }
 }

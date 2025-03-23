@@ -43,6 +43,7 @@ impl RecordFilter for TimeRangeFilter {
 mod tests {
     use super::*;
     use crate::storage::proto::{us_to_ts, Record};
+    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::*;
 
     #[rstest]
@@ -53,9 +54,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record).unwrap(), "First time should pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap(), "First time should pass");
         assert!(
-            !filter.filter(&record).unwrap(),
+            !filter.filter(&wrapper).unwrap(),
             "Second time should not pass, as we have already returned the record"
         );
     }
@@ -68,7 +70,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
     }
 
     #[rstest]
@@ -79,7 +82,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record).unwrap(), "Record should pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap(), "Record should pass");
     }
 
     #[rstest]
@@ -90,6 +94,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
     }
 }

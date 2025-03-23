@@ -53,19 +53,19 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let sub = Sub::new(
+        let sub = Sub::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Int(2)),
-        );
+        ]);
         assert_eq!(sub.apply(&Context::default()).unwrap(), Value::Int(-1));
     }
 
     #[rstest]
     fn apply_bad() {
-        let sub = Sub::new(
+        let sub = Sub::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("foo".to_string())),
-        );
+        ]);
         assert_eq!(
             sub.apply(&Context::default()),
             Err(unprocessable_entity!("Cannot subtract string from integer"))
@@ -83,10 +83,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let op = Sub::new(
+        let op = Sub::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(true)),
-        );
+        ]);
         assert_eq!(op.print(), "Sub(Bool(true), Bool(true))");
     }
 }

@@ -32,6 +32,7 @@ impl RecordFilter for EachNFilter {
 mod tests {
     use super::*;
     use crate::storage::proto::Record;
+    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::*;
 
     #[rstest]
@@ -39,14 +40,15 @@ mod tests {
         let mut filter = EachNFilter::new(2);
         let record = Record::default();
 
-        assert!(filter.filter(&record).unwrap(), "First time should pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap(), "First time should pass");
         assert!(
-            !filter.filter(&record).unwrap(),
+            !filter.filter(&wrapper).unwrap(),
             "Second time should not pass"
         );
-        assert!(filter.filter(&record).unwrap(), "Third time should pass");
+        assert!(filter.filter(&wrapper).unwrap(), "Third time should pass");
         assert!(
-            !filter.filter(&record).unwrap(),
+            !filter.filter(&wrapper).unwrap(),
             "Fourth time should not pass"
         );
     }

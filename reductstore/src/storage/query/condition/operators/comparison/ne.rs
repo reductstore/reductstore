@@ -53,7 +53,7 @@ mod tests {
     #[case(Value::Int(1), Value::Int(2), Value::Bool(true))]
     #[case(Value::Int(2), Value::Int(1), Value::Bool(true))]
     fn apply(#[case] op_1: Value, #[case] op_2: Value, #[case] expected: Value) {
-        let eq = Ne::new(Constant::boxed(op_1), Constant::boxed(op_2));
+        let eq = Ne::new(vec![Constant::boxed(op_1), Constant::boxed(op_2)]);
         assert_eq!(eq.apply(&Context::default()).unwrap(), expected);
     }
 
@@ -69,10 +69,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let eq = Ne::new(
+        let eq = Ne::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
-        );
+        ]);
         assert_eq!(eq.print(), "Ne(Bool(true), Bool(false))");
     }
 }

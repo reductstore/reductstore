@@ -124,13 +124,17 @@ impl BucketWrapper {
             }
 
             if !record.labels().is_empty() {
+                let mut label_headers = vec![];
                 for (name, value) in record.labels() {
                     if value.contains(',') {
-                        header_values.push(format!("{}=\"{}\"", name, value));
+                        label_headers.push(format!("{}=\"{}\"", name, value));
                     } else {
-                        header_values.push(format!("{}={}", name, value));
+                        label_headers.push(format!("{}={}", name, value));
                     }
                 }
+
+                label_headers.sort();
+                header_values.push(label_headers.join(","));
             }
 
             headers.insert(

@@ -38,6 +38,7 @@ impl RecordFilter for EachSecondFilter {
 mod tests {
     use super::*;
     use crate::storage::proto::Record;
+    use crate::storage::query::filters::tests::RecordWrapper;
     use prost_wkt_types::Timestamp;
     use rstest::*;
 
@@ -50,22 +51,25 @@ mod tests {
             nanos: 0,
         });
 
-        assert!(filter.filter(&record).unwrap());
-        assert!(!filter.filter(&record).unwrap());
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap());
+        assert!(!filter.filter(&wrapper).unwrap());
 
         record.timestamp = Some(Timestamp {
             seconds: 2,
             nanos: 0,
         });
 
-        assert!(!filter.filter(&record).unwrap());
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(!filter.filter(&wrapper).unwrap());
 
         record.timestamp = Some(Timestamp {
             seconds: 3,
             nanos: 0,
         });
 
-        assert!(filter.filter(&record).unwrap());
-        assert!(!filter.filter(&record).unwrap());
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap());
+        assert!(!filter.filter(&wrapper).unwrap());
     }
 }

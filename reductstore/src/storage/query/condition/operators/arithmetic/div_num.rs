@@ -55,19 +55,19 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let sub = DivNum::new(
+        let sub = DivNum::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Int(2)),
-        );
+        ]);
         assert_eq!(sub.apply(&Context::default()).unwrap(), Value::Int(0));
     }
 
     #[rstest]
     fn apply_bad() {
-        let sub = DivNum::new(
+        let sub = DivNum::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("foo".to_string())),
-        );
+        ]);
         assert_eq!(
             sub.apply(&Context::default()),
             Err(unprocessable_entity!("Cannot divide by string"))
@@ -87,10 +87,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let op = DivNum::new(
+        let op = DivNum::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(true)),
-        );
+        ]);
         assert_eq!(op.print(), "DivNum(Bool(true), Bool(true))");
     }
 }

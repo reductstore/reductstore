@@ -28,7 +28,7 @@ impl Node for Nin {
 
     fn print(&self) -> String {
         format!(
-            "Nin({:?}, {:?})",
+            "Nin({:?}, [{:}])",
             self.operands[0],
             self.operands[1..]
                 .iter()

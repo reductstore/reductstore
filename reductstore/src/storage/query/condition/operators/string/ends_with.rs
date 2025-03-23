@@ -56,7 +56,7 @@ mod tests {
     #[case(Value::String("test".to_string()), Value::String("es".to_string()), Value::Bool(false))]
     #[case(Value::String("test".to_string()), Value::String("st".to_string()), Value::Bool(true))]
     fn apply(#[case] op_1: Value, #[case] op_2: Value, #[case] expected: Value) {
-        let contains = EndsWith::new(Constant::boxed(op_1), Constant::boxed(op_2));
+        let contains = EndsWith::new(vec![Constant::boxed(op_1), Constant::boxed(op_2)]);
         assert_eq!(contains.apply(&Context::default()).unwrap(), expected);
     }
 
@@ -71,10 +71,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let op = EndsWith::new(
+        let op = EndsWith::new(vec![
             Constant::boxed(Value::String("test".to_string())),
             Constant::boxed(Value::String("es".to_string())),
-        );
+        ]);
         assert_eq!(op.print(), "EndsWith(String(\"test\"), String(\"es\"))");
     }
 }

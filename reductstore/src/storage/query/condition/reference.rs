@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn apply() {
-        let reference = Reference::new("label".to_string());
+        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
         let mut context = Context::default();
         context.labels.insert("label", "true");
         let result = reference.apply(&context).unwrap();
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn apply_not_found() {
-        let reference = Reference::new("label".to_string());
+        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
         let context = Context::default();
         let result = reference.apply(&context);
         assert!(result
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn print() {
-        let reference = Reference::new("label".to_string());
+        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
         let result = reference.print();
         assert_eq!(result, "Ref(label)");
     }

@@ -223,7 +223,10 @@ mod tests {
     fn test_parser_object_syntax(parser: Parser) {
         let json = serde_json::from_str(r#"{"&label": {"$gt": 10}}"#).unwrap();
         let node = parser.parse(&json).unwrap();
-        let context = Context::new(HashMap::from_iter(vec![("label", "20")]));
+        let context = Context::new(
+            HashMap::from_iter(vec![("label", "20")]),
+            EvaluationStage::Retrieve,
+        );
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -253,7 +256,10 @@ mod tests {
         let json =
             serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
         let node = parser.parse(&json).unwrap();
-        let context = Context::new(HashMap::from_iter(vec![("label", "true")]));
+        let context = Context::new(
+            HashMap::from_iter(vec![("label", "true")]),
+            EvaluationStage::Retrieve,
+        );
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 

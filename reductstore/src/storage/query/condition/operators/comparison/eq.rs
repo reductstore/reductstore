@@ -54,7 +54,7 @@ mod tests {
     #[case(Value::Int(1), Value::Int(2), Value::Bool(false))]
     #[case(Value::Int(2), Value::Int(1), Value::Bool(false))]
     fn apply(#[case] op_1: Value, #[case] op_2: Value, #[case] expected: Value) {
-        let eq = Eq::new(Constant::boxed(op_1), Constant::boxed(op_2));
+        let eq = Eq::new(vec![Constant::boxed(op_1), Constant::boxed(op_2)]);
         assert_eq!(eq.apply(&Context::default()).unwrap(), expected);
     }
 
@@ -70,10 +70,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let eq = Eq::new(
+        let eq = Eq::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
-        );
+        ]);
         assert_eq!(eq.print(), "Eq(Bool(true), Bool(false))");
     }
 }

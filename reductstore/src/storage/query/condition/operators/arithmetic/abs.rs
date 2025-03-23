@@ -52,13 +52,13 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Abs::new(Constant::boxed(Value::Int(-1)));
+        let op = Abs::new(vec![Constant::boxed(Value::Int(-1))]);
         assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(1));
     }
 
     #[rstest]
     fn apply_bad() {
-        let op = Abs::new(Constant::boxed(Value::String("foo".to_string())));
+        let op = Abs::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
         assert_eq!(
             op.apply(&Context::default()).unwrap_err(),
             unprocessable_entity!("Cannot calculate absolute value of a string")
@@ -76,7 +76,7 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let and = Abs::new(Constant::boxed(Value::Bool(true)));
+        let and = Abs::new(vec![Constant::boxed(Value::Bool(true))]);
         assert_eq!(and.print(), "Abs(Bool(true))");
     }
 }

@@ -54,7 +54,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Exists::new(Constant::boxed(Value::String("foo".to_string())));
+        let op = Exists::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
         assert_eq!(op.apply(&Context::default()).unwrap(), Value::Bool(false));
 
         let mut context = Context::default();
@@ -73,7 +73,7 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let and = Exists::new(Constant::boxed(Value::Bool(true)));
+        let and = Exists::new(vec![Constant::boxed(Value::Bool(true))]);
         assert_eq!(and.print(), "Exists(Bool(true))");
     }
 }

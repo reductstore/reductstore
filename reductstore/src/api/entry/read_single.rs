@@ -381,6 +381,7 @@ mod tests {
     mod steam_wrapper {
         use super::*;
         use crate::storage::proto::Record;
+        use prost_wkt_types::Timestamp;
 
         #[rstest]
         fn test_size_hint() {
@@ -390,7 +391,7 @@ mod tests {
                 reader: RecordReader::form_record_with_rx(
                     rx,
                     Record {
-                        timestamp: None,
+                        timestamp: Some(Timestamp::default()),
                         begin: 0,
                         end: 0,
                         state: 0,

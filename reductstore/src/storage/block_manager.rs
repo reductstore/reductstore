@@ -598,6 +598,7 @@ mod tests {
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rand::distr::Alphanumeric;
     use rand::{rng, Rng};
+    use reduct_base::io::WriteRecord;
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -903,6 +904,7 @@ mod tests {
     mod record_removing {
         use super::*;
         use crate::storage::entry::RecordReader;
+        use reduct_base::io::ReadRecord;
 
         #[rstest]
         #[case(0)]
@@ -946,7 +948,7 @@ mod tests {
             .unwrap();
 
             let mut received = BytesMut::new();
-            while let Some(Ok(chunk)) = reader.rx().blocking_recv() {
+            while let Some(Ok(chunk)) = reader.blocking_read() {
                 received.extend_from_slice(&chunk);
             }
             assert_eq!(received.len(), record_size);

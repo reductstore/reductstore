@@ -30,7 +30,7 @@ impl Node for In {
 
     fn print(&self) -> String {
         format!(
-            "In({:?}, {:?})",
+            "In({:?}, [{:}])",
             self.operands[0],
             self.operands[1..]
                 .iter()
