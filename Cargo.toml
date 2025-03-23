@@ -3,8 +3,8 @@
 members = [
     "reductstore",
     "reduct_base",
-    "reduct_macros"
-]
+    "reduct_macros",
+    "ext_stub"]
 
 resolver = "2"
 

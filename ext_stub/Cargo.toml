@@ -1,0 +1,17 @@
+[package]
+name = "ext_stub"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+
+[lib]
+crate-type = ["dylib", "rlib"]
+
+[dependencies]
+reduct-base = { path = "../reduct_base", version = "1.15.0", features = ["ext"] }
+async-trait = "0.1.88"
+
+[build]
+rustflags = ["-C", "prefer-dynamic", "-C", "rpath"]

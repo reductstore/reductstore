@@ -7,7 +7,7 @@ use crate::error::ReductError;
 use crate::io::ReadRecord;
 use crate::msg::entry_api::QueryEntry;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct IoExtensionInfo {
     name: String,
     version: String,
@@ -26,13 +26,13 @@ impl IoExtensionInfoBuilder {
         }
     }
 
-    pub fn name(mut self, name: String) -> Self {
-        self.name = name;
+    pub fn name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
         self
     }
 
-    pub fn version(mut self, version: String) -> Self {
-        self.version = version;
+    pub fn version(mut self, version: &str) -> Self {
+        self.version = version.to_string();
         self
     }
 

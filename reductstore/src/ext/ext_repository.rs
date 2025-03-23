@@ -65,8 +65,13 @@ impl ExtRepository {
                     .map_or(false, |ext| ext == "so" || ext == "dll")
             {
                 let ext_wrapper = unsafe {
-                    Container::<ExtensionApi>::load(path)
-                        .map_err(|e| internal_server_error!("Failed to load extension: {}", e))?
+                    match Container::<ExtensionApi>::load(path.clone()) {
+                        Ok(wrapper) => wrapper,
+                        Err(e) => {
+                            error!("Failed to load extension '{:?}': {:?}", path, e);
+                            continue;
+                        }
+                    }
                 };
 
                 let ext = unsafe { Arc::new(RwLock::new(Box::from_raw(ext_wrapper.get_ext()))) };
@@ -232,5 +237,47 @@ impl ExtRepository {
             .computed_labels_mut()
             .extend(computed_labels.clone().into_iter());
         ProcessStatus::Ready(Ok(record))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reduct_base::ext::IoExtensionInfo;
+    use rstest::{fixture, rstest};
+    use std::env;
+    use test_log::test as log_test;
+
+    #[log_test(rstest)]
+    fn test_load_extension(ext_path: PathBuf) {
+        let ext_repo = ExtRepository::try_load(&ext_path).unwrap();
+        assert_eq!(ext_repo.extension_map.len(), 1);
+        let ext = ext_repo
+            .extension_map
+            .get("ext_stub")
+            .unwrap()
+            .read()
+            .unwrap();
+        let info = ext.info().clone();
+        assert_eq!(
+            info,
+            IoExtensionInfo::builder()
+                .name("ext_stub")
+                .version("0.1")
+                .build()
+        );
+    }
+
+    #[fixture]
+    fn ext_path() -> PathBuf {
+        // This is the path to the build directory of the extension from ext_stub crate
+        PathBuf::from(env::var("OUT_DIR").unwrap())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
     }
 }
