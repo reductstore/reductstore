@@ -34,7 +34,7 @@ impl Lt {
 }
 
 impl Boxed for Lt {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$lt requires exactly two operands"));
         }

@@ -19,7 +19,7 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";

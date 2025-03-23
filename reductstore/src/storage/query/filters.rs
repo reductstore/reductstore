@@ -9,8 +9,6 @@ pub(crate) mod record_state;
 pub(crate) mod time_range;
 pub(crate) mod when;
 
-use crate::storage::proto::record::Label;
-
 /// Trait for record filters in queries.
 pub trait RecordFilter {
     /// Filter the record by condition.

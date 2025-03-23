@@ -101,7 +101,7 @@ pub(crate) async fn update_record(
 #[cfg(test)]
 mod tests {
     use crate::api::tests::{components, empty_body, path_to_entry_1};
-    use crate::storage::proto::record::Label;
+
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::io::RecordMeta;
     use rstest::*;

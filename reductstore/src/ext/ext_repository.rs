@@ -1,28 +1,20 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::weak::Weak;
-use crate::storage::entry::RecordReader;
-use crate::storage::proto::record::Label;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
-use crate::storage::query::filters::{RecordFilter, WhenFilter};
+use crate::storage::query::filters::WhenFilter;
 use crate::storage::query::QueryRx;
-use crate::storage::storage::CHANNEL_BUFFER_SIZE;
-use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
-use log::{debug, error, info};
+use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, IoExtension, IoExtensionInfo, ProcessStatus};
-use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
+use reduct_base::ext::{BoxedReadRecord, IoExtension, ProcessStatus};
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::msg::entry_api::QueryType::Query;
-use reduct_base::{internal_server_error, not_found, unprocessable_entity, Labels};
-use std::collections::hash_map::Values;
+use reduct_base::{internal_server_error, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::RwLock as AsyncRwLock;
 
 type IoExtRef = Arc<RwLock<Box<dyn IoExtension + Send + Sync>>>;
@@ -35,8 +27,6 @@ struct ExtensionApi {
 
 struct QueryContext {
     query_id: u64,
-    bucket_name: String,
-    entry_name: String,
     query: QueryOptions,
     condition_filter: Option<WhenFilter>,
     last_access: Instant,
@@ -46,6 +36,8 @@ struct QueryContext {
 pub struct ExtRepository {
     extension_map: IoExtMap,
     query_map: RwLock<HashMap<u64, QueryContext>>,
+
+    #[allow(dead_code)]
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
 }
 
@@ -146,8 +138,6 @@ impl ExtRepository {
         query_map.insert(query_id, {
             QueryContext {
                 query_id,
-                bucket_name: bucket_name.to_string(),
-                entry_name: entry_name.to_string(),
                 query: query_options,
                 condition_filter,
                 last_access: Instant::now(),
@@ -158,7 +148,7 @@ impl ExtRepository {
         Ok(())
     }
 
-    pub async fn next_processed_record(
+    pub(crate) async fn next_processed_record(
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
@@ -171,7 +161,7 @@ impl ExtRepository {
                     // check if query is registered and
                     let mut lock = self.query_map.write().unwrap();
 
-                    let mut query = lock.get_mut(&query_id);
+                    let query = lock.get_mut(&query_id);
                     if query.is_none() {
                         return ProcessStatus::Ready(Ok(record));
                     }
@@ -200,7 +190,7 @@ impl ExtRepository {
                             Ok(true) => status,
                             Ok(false) => ProcessStatus::NotReady,
                             Err(e) => {
-                                if (query.query.strict) {
+                                if query.query.strict {
                                     ProcessStatus::Ready(Err(e))
                                 } else {
                                     status
@@ -223,11 +213,10 @@ impl ExtRepository {
         mut record: BoxedReadRecord,
         query: &QueryContext,
     ) -> ProcessStatus {
-        let mut status = ProcessStatus::Stop;
         let mut computed_labels = Labels::new();
         for ext in &query.ext_pipeline {
             computed_labels.extend(record.computed_labels().clone().into_iter());
-            status = ext.read().unwrap().next_processed_record(query_id, record);
+            let status = ext.read().unwrap().next_processed_record(query_id, record);
             if let ProcessStatus::Ready(result) = status {
                 if let Ok(processed_record) = result {
                     record = processed_record;

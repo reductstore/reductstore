@@ -29,7 +29,7 @@ impl Node for Rem {
 }
 
 impl Boxed for Rem {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$rem requires exactly two operands"));
         }

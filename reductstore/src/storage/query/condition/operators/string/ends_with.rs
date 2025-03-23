@@ -34,7 +34,7 @@ impl EndsWith {
 }
 
 impl Boxed for EndsWith {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!(
                 "$ends_with requires exactly two operands"

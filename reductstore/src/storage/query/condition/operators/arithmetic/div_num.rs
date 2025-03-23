@@ -29,7 +29,7 @@ impl Node for DivNum {
 }
 
 impl Boxed for DivNum {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!(
                 "$div_num requires exactly two operands"

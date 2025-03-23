@@ -23,7 +23,6 @@ use futures_util::Future;
 use hyper::http::HeaderValue;
 use reduct_base::bad_request;
 use reduct_base::io::{ReadRecord, RecordMeta};
-use serde::__private::ser::constrain;
 use std::collections::HashMap;
 use std::i64;
 use std::pin::{pin, Pin};
@@ -59,8 +58,7 @@ pub(crate) async fn read_record(
 
     let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
 
-    fetch_and_response_single_record(entry, ts, query_id, method.name() == "HEAD", &components)
-        .await
+    fetch_and_response_single_record(entry, ts, query_id, method.name() == "HEAD").await
 }
 
 async fn fetch_and_response_single_record(
@@ -68,7 +66,6 @@ async fn fetch_and_response_single_record(
     ts: Option<u64>,
     query_id: Option<u64>,
     empty_body: bool,
-    components: &Components,
 ) -> Result<impl IntoResponse, HttpError> {
     let make_headers = |record_reader: &RecordReader| {
         let mut headers = HeaderMap::new();

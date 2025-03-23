@@ -51,7 +51,7 @@ impl Boxed for Nin {
 }
 
 impl Nin {
-    pub fn new(mut operands: Vec<BoxedNode>) -> Self {
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
         Self { operands }
     }
 }

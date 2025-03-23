@@ -28,7 +28,7 @@ impl Node for Abs {
 }
 
 impl Boxed for Abs {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 1 {
             return Err(unprocessable_entity!("Abs requires exactly one operand"));
         }

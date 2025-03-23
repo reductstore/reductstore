@@ -6,7 +6,6 @@ use std::sync::{Arc, RwLock};
 
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
-use crate::storage::proto::record::Label;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
@@ -221,8 +220,8 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::storage::proto::record::Label;
-    use crate::storage::proto::{record, us_to_ts};
+
+    use crate::storage::proto::record;
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
     use reduct_base::ext::BoxedReadRecord;

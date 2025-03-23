@@ -15,7 +15,6 @@ use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::RecordDrainer;
-use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
@@ -275,9 +274,8 @@ mod tests {
     use super::*;
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use crate::storage::proto::record::Label;
+
     use axum_extra::headers::HeaderValue;
-    use futures_util::SinkExt;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::{ReadRecord, RecordMeta};
     use rstest::{fixture, rstest};

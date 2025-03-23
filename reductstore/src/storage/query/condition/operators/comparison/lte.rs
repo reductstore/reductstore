@@ -34,7 +34,7 @@ impl Lte {
 }
 
 impl Boxed for Lte {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$lte requires exactly two operands"));
         }

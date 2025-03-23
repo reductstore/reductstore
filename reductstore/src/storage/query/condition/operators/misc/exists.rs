@@ -27,7 +27,7 @@ impl Node for Exists {
 }
 
 impl Boxed for Exists {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 1 {
             return Err(unprocessable_entity!(
                 "$exists requires exactly one operand"

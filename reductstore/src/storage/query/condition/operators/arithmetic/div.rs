@@ -4,7 +4,6 @@
 use crate::storage::query::condition::value::Div as DivTrait;
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
-use rand::distr::Open01;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
@@ -30,7 +29,7 @@ impl Node for Div {
 }
 
 impl Boxed for Div {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$div requires exactly two operands"));
         }

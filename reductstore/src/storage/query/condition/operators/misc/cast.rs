@@ -28,7 +28,7 @@ impl Node for Cast {
 }
 
 impl Boxed for Cast {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$cast requires exactly two operands"));
         }

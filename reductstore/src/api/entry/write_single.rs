@@ -11,7 +11,6 @@ use axum_extra::headers::{Expect, Header, HeaderMap};
 use crate::api::entry::common::{parse_content_length_from_header, parse_timestamp_from_query};
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
-use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
@@ -139,7 +138,7 @@ mod tests {
     use super::*;
 
     use crate::api::tests::{components, empty_body, path_to_entry_1};
-    use crate::storage::proto::record::Label;
+
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::io::RecordMeta;
     use rstest::*;

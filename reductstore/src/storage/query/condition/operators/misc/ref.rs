@@ -30,7 +30,7 @@ impl Node for Ref {
 }
 
 impl Boxed for Ref {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 1 {
             return Err(unprocessable_entity!("$ref requires exactly one operand"));
         }

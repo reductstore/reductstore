@@ -7,7 +7,6 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::Labels;
 
 use crate::replication::TransactionNotification;
-use crate::storage::proto::record::Label;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter, WhenFilter,

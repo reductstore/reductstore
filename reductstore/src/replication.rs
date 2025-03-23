@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use crate::cfg::replication::ReplicationConfig;
 use crate::replication::replication_task::ReplicationTask;
-use crate::storage::proto::record::Label;
 use crate::storage::storage::Storage;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{

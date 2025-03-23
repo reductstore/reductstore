@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use log::Metadata;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
@@ -43,10 +42,10 @@ impl RecordFilter for ExcludeLabelFilter {
 mod tests {
     use super::*;
     use crate::storage::proto::record::Label;
-    use crate::storage::proto::{ts_to_us, Record};
+    use crate::storage::proto::Record;
 
     use crate::storage::query::filters::tests::RecordWrapper;
-    use crate::storage::query::filters::WhenFilter;
+
     use rstest::*;
 
     #[rstest]

@@ -5,7 +5,6 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
-use std::ops::Deref;
 
 /// A node representing an `in` operation.
 pub(crate) struct In {
@@ -53,7 +52,7 @@ impl Boxed for In {
 }
 
 impl In {
-    pub fn new(mut operands: Vec<BoxedNode>) -> Self {
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
         Self { operands }
     }
 }

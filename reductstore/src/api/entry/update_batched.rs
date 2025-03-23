@@ -105,7 +105,7 @@ pub(crate) async fn update_batched_records(
 mod tests {
     use super::*;
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
-    use crate::storage::proto::record::Label;
+
     use axum::response::IntoResponse;
     use axum_extra::headers::HeaderValue;
     use bytes::Bytes;

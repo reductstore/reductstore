@@ -34,7 +34,7 @@ impl StartsWith {
 }
 
 impl Boxed for StartsWith {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!(
                 "$starts_with requires exactly two operands"

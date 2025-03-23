@@ -4,21 +4,20 @@
 use crate::core::file_cache::FileWeak;
 use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
-use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta, WriteChunk};
+use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, Labels};
 use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Sender};
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {

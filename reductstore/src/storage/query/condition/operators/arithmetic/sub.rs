@@ -29,7 +29,7 @@ impl Node for Sub {
 }
 
 impl Boxed for Sub {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$sub requires exactly two operands"));
         }
