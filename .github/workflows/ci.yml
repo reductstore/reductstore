@@ -761,3 +761,29 @@ jobs:
   #         asset_path: /tmp/reductstore.win-amd64.zip
   #         asset_name: reductstore.win-amd64.zip
   #         asset_content_type: application/zip
+  benchmark:
+    name: Run benchamarks
+    runs-on: ubuntu-latest
+    needs:
+      - build # for docker image
+    steps:
+      - uses: actions/checkout@
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load Docker image
+        run: docker load --input /tmp/image.tar
+
+      - name: Clone external repository
+        run: git clone https://github.com/reductstore/sdk-benchmarks.git
+
+      - name: Set environment variable for Docker Compose
+        run: echo "REDUCT_IMAGE=${{github.repository}}:latest" >> sdk-benchmarks/.env
+
+      - name: Run docker-compose
+        working-directory: ./sdk-benchmarks
+        run: |
+          docker-compose up
