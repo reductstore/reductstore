@@ -767,7 +767,8 @@ jobs:
     needs:
       - build # for docker image
     strategy:
-      matrix: branch:["latest", "main"]
+      matrix:
+        branch: ["latest", "main"]
 
     steps:
       - uses: actions/checkout@v4
