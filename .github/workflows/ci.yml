@@ -762,7 +762,7 @@ jobs:
   #         asset_name: reductstore.win-amd64.zip
   #         asset_content_type: application/zip
   benchmark:
-    name: Run benchamarks
+    name: Run benchmarks
     runs-on: ubuntu-latest
     needs:
       - build # for docker image
@@ -780,10 +780,18 @@ jobs:
       - name: Clone external repository
         run: git clone https://github.com/reductstore/sdk-benchmarks.git
 
+      - name: Replace files
+        run: |
+          cp .github/files/docker-compose.yml sdk-benchmarks/
+          cp .github/files/main.py sdk-benchmarks/python/
+
       - name: Set environment variable for Docker Compose
         run: echo "REDUCT_IMAGE=${{github.repository}}:latest" >> sdk-benchmarks/.env
 
-      - name: Run docker-compose
+      - name: Run docker compose
         working-directory: ./sdk-benchmarks
         run: |
           docker-compose up
+
+      - name: Copy result
+        run: cp sdk-benchmarks/results/python.csv current.csv
