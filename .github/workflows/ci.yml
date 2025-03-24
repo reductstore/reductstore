@@ -812,4 +812,4 @@ jobs:
       - name: Check result
         run: |
           python3 .github/files/check_results.py .github/files/threshold current.csv stable.csv
-          python3 .github/files/check_results.py .github/files/threshold current.csv main.py
+          python3 .github/files/check_results.py .github/files/threshold current.csv main.csv
