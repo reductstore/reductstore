@@ -766,6 +766,9 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build # for docker image
+    strategy:
+      matrix: branch:["latest", "main"]
+
     steps:
       - uses: actions/checkout@v4
       - name: Download image artifact
@@ -793,23 +796,14 @@ jobs:
       - name: Copy result
         run: cp sdk-benchmarks/results/python.csv current.csv
 
-      - name: Run docker compose with stable
+      - name: Run docker compose with ${{matrix.branch}}
         working-directory: ./sdk-benchmarks
         run: |
-          REDUCT_IMAGE=reduct/store:latest docker compose up --exit-code-from bench-py
+          REDUCT_IMAGE=reduct/store:${{matrix.branch}} docker compose up --exit-code-from bench-py
 
       - name: Copy result
-        run: cp sdk-benchmarks/results/python.csv stable.csv
-
-      - name: Run docker compose with main
-        working-directory: ./sdk-benchmarks
-        run: |
-          REDUCT_IMAGE=reduct/store:main docker compose up --exit-code-from bench-py
-
-      - name: Copy result
-        run: cp sdk-benchmarks/results/python.csv main.csv
+        run: cp sdk-benchmarks/results/python.csv ${{matrix.branch}}.csv
 
       - name: Check result
         run: |
-          python3 .github/files/check_results.py .github/files/threshold current.csv stable.csv
-          python3 .github/files/check_results.py .github/files/threshold current.csv main.csv
+          python3 .github/files/check_results.py .github/files/threshold current.csv ${{matric.branch}}.csv
