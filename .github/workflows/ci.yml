@@ -785,13 +785,31 @@ jobs:
           cp .github/files/docker-compose.yml sdk-benchmarks/
           cp .github/files/main.py sdk-benchmarks/python/
 
-      - name: Set environment variable for Docker Compose
-        run: echo "REDUCT_IMAGE=${{github.repository}}:latest" >> sdk-benchmarks/.env
-
-      - name: Run docker compose
+      - name: Run docker compose with current image
         working-directory: ./sdk-benchmarks
         run: |
-          docker compose up --exit-code-from bench-py
+          REDUCT_IMAGE=${{github.repository}}:latest docker compose up --exit-code-from bench-py
 
       - name: Copy result
         run: cp sdk-benchmarks/results/python.csv current.csv
+
+      - name: Run docker compose with stable
+        working-directory: ./sdk-benchmarks
+        run: |
+          REDUCT_IMAGE=reduct/store:latest docker compose up --exit-code-from bench-py
+
+      - name: Copy result
+        run: cp sdk-benchmarks/results/python.csv stable.csv
+
+      - name: Run docker compose with main
+        working-directory: ./sdk-benchmarks
+        run: |
+          REDUCT_IMAGE=reduct/store:main docker compose up --exit-code-from bench-py
+
+      - name: Copy result
+        run: cp sdk-benchmarks/results/python.csv main.csv
+
+      - name: Check result
+        run: |
+          python3 .github/files/check_results.py .github/files/threshold current.csv stable.csv
+          python3 .github/files/check_results.py .github/files/threshold current.csv main.py
