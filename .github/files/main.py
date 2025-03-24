@@ -1,0 +1,132 @@
+import asyncio
+import time
+from datetime import datetime
+
+from reduct import Batch, Bucket, Client
+
+RECORD_NUM = 2000
+RECORD_SIZES = [2**x * 1024 for x in range(11)]  # 1 KiB ~ 4 MiB
+
+MAX_BATCH_SIZE = 8_000_000
+MAX_BATCH_RECORDS = 80
+
+
+class Result:
+    write_req_per_sec: float
+    write_bytes_per_sec: float
+    read_req_per_sec: float
+    read_bytes_per_sec: float
+    record_size: int
+    record_num: int
+
+    def __init__(self):
+        self.write_req_per_sec = 0
+        self.write_bytes_per_sec = 0
+        self.read_req_per_sec = 0
+        self.read_bytes_per_sec = 0
+        self.update_req_per_sec = 0
+        self.remove_req_per_sec = 0
+        self.record_size = 0
+        self.record_num = 0
+
+    def __str__(self):
+        return (
+            f"Record size: {self.record_size // 1024} KiB, Record num: {self.record_num}, "
+            f"Write req/s: {self.write_req_per_sec}, Write KiB/s: {self.write_bytes_per_sec // 1024}, "
+            f"Read req/s: {self.read_req_per_sec}, Read KiB/s: {self.read_bytes_per_sec // 1024}, "
+            f"Update req/s: {self.update_req_per_sec}, "
+            f"Remove req/s: {self.remove_req_per_sec}"
+        )
+
+    def to_csv(self):
+        return (
+            f"{self.record_size},{self.record_num},{self.write_req_per_sec},"
+            f"{self.write_bytes_per_sec},{self.read_req_per_sec},{self.read_bytes_per_sec},"
+            f"{self.update_req_per_sec},{self.remove_req_per_sec}"
+        )
+
+
+async def bench(record_size: int, record_num: int) -> Result:
+    """Run benchmark with given record size and record number."""
+
+    result = Result()
+    result.record_size = record_size
+    result.record_num = record_num
+
+    measure_time = time.time_ns() // 1000
+    async with Client("http://reductstore:8383", api_token="token") as client:
+        bucket: Bucket = await client.create_bucket(f"benchmark-{measure_time}")
+        record_data = b"0" * record_size
+        start_time = datetime.now()
+
+        # Write
+        batch = Batch()
+        for i in range(record_num):
+            batch.add(i, record_data, labels={"key": "value"})
+            if len(batch) >= MAX_BATCH_RECORDS or batch.size >= MAX_BATCH_SIZE:
+                await bucket.write_batch("python-bench", batch)
+                batch.clear()
+
+        if len(batch) > 0:
+            await bucket.write_batch("python-bench", batch)
+
+        # Save result
+        delta = (datetime.now() - start_time).total_seconds()
+        result.write_req_per_sec = int(record_num / delta)
+        result.write_bytes_per_sec = int(record_num * record_size / delta)
+
+        # Read
+        start_time = datetime.now()
+        count = 0
+        async for record in bucket.query("python-bench", start=0, stop=record_num):
+            async for chunk in record.read(n=16_000):
+                count += len(chunk)
+
+        if count != record_num * record_size:
+            raise Exception(
+                f"Read {count} bytes, expected {record_num * record_size} bytes."
+            )
+
+        # Save result
+        delta = (datetime.now() - start_time).total_seconds()
+        result.read_req_per_sec = int(record_num / delta)
+        result.read_bytes_per_sec = int(record_num * record_size / delta)
+
+        # Update metadata (labels)
+        start_time = datetime.now()
+        batch = Batch()
+        for i in range(record_num):
+            batch.add(i, labels={"key": "new-value"})
+            if len(batch) >= MAX_BATCH_RECORDS or batch.size >= MAX_BATCH_SIZE:
+                await bucket.update_batch("python-bench", batch)
+                batch.clear()
+
+        if len(batch) > 0:
+            errors = await bucket.update_batch("python-bench", batch)
+            assert not errors
+
+        # Save result
+        delta = (datetime.now() - start_time).total_seconds()
+        result.update_req_per_sec = int(record_num / delta)
+
+        # Remove
+        start_time = datetime.now()
+        removed_records = await bucket.remove_query(
+            "python-bench", start=0, stop=record_num
+        )
+        assert removed_records == record_num
+
+        # Save result
+        delta = (datetime.now() - start_time).total_seconds()
+        result.remove_req_per_sec = int(record_num / delta)
+
+    return result
+
+
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    with open("/results/python.csv", "w") as f:
+        for record_size in RECORD_SIZES:
+            result = loop.run_until_complete(bench(record_size, RECORD_NUM))
+            print(result)
+            f.write(result.to_csv() + "\n")
