@@ -791,7 +791,7 @@ jobs:
       - name: Run docker compose
         working-directory: ./sdk-benchmarks
         run: |
-          docker compose up
+          docker compose up --exit-code-from bench-py
 
       - name: Copy result
         run: cp sdk-benchmarks/results/python.csv current.csv
