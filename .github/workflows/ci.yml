@@ -806,4 +806,4 @@ jobs:
 
       - name: Check result
         run: |
-          python3 .github/files/check_results.py .github/files/threshold current.csv ${{matric.branch}}.csv
+          python3 .github/files/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv
