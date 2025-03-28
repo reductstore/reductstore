@@ -42,6 +42,7 @@ pub struct ReplicationTask {
     remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     stop_flag: Arc<AtomicBool>,
+    is_active: Arc<AtomicBool>,
 }
 
 impl Default for ReplicationSystemOptions {
@@ -105,6 +106,7 @@ impl ReplicationTask {
             Duration::from_secs(3600),
         )));
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let is_active = Arc::new(AtomicBool::new(true));
 
         let config = settings.clone();
         let replication_name = name.clone();
@@ -114,6 +116,7 @@ impl ReplicationTask {
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
         let thr_system_options = system_options.clone();
         let thr_stop_flag = Arc::clone(&stop_flag);
+        let thr_is_active = Arc::clone(&is_active);
 
         spawn(move || {
             let init_transaction_logs = || {
@@ -154,15 +157,21 @@ impl ReplicationTask {
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
                 match sender.run() {
-                    SyncState::SyncedOrRemoved => {}
+                    SyncState::SyncedOrRemoved => {
+                        thr_is_active.store(true, Ordering::Relaxed);
+                    }
                     SyncState::NotAvailable => {
+                        thr_is_active.store(false, Ordering::Relaxed);
                         sleep(thr_system_options.remote_bucket_unavailable_timeout);
                     }
                     SyncState::NoTransactions => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
+                        thr_is_active.store(true, Ordering::Relaxed);
                         sleep(thr_system_options.next_transaction_timeout);
                     }
                     SyncState::BrokenLog(entry_name) => {
+                        thr_is_active.store(false, Ordering::Relaxed);
+
                         info!("Transaction log is corrupted, dropping the whole log");
                         let path = ReplicationTask::build_path_to_transaction_log(
                             thr_storage.data_path(),
@@ -207,6 +216,7 @@ impl ReplicationTask {
             remote_bucket,
             hourly_diagnostics,
             stop_flag,
+            is_active,
         }
     }
 
@@ -284,9 +294,10 @@ impl ReplicationTask {
         for (_, log) in self.log_map.read().unwrap().iter() {
             pending_records += log.read().unwrap().len() as u64;
         }
+
         ReplicationInfo {
             name: self.name.clone(),
-            is_active: self.remote_bucket.read().unwrap().is_active(),
+            is_active: self.is_active.load(Ordering::Relaxed),
             is_provisioned: self.is_provisioned,
             pending_records,
         }

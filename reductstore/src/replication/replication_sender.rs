@@ -40,8 +40,8 @@ pub(super) enum SyncState {
     BrokenLog(String),
 }
 
-const MAX_PAYLOAD_SIZE: u64 = 16_000_000;
-const MAX_BATCH_SIZE: usize = 100;
+const MAX_PAYLOAD_SIZE: u64 = 4_000_000;
+const MAX_BATCH_SIZE: usize = 80;
 
 impl ReplicationSender {
     pub fn new(
