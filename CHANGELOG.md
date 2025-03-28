@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.4] - 2025-03-28
+
 ### Fixed
 
 - RS-656: Fix replication lock during API HTTP iteration and batching issues, [PR-771](https://github.com/reductstore/reductstore/pull/771)
@@ -25,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.14.1] - 2025-02-27
 
-### Fixed
+### Fixed`
 
 - Remove non-existing block from block index, [PR-744](https://github.com/reductstore/reductstore/pull/744)
 
@@ -938,7 +940,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.4...HEAD
+
+[1.14.4]: https://github.com/reductstore/reductstore/compare/v1.14.3...v1.14.4
 
 [1.14.3]: https://github.com/reductstore/reductstore/compare/v1.14.2...v1.14.3
 
