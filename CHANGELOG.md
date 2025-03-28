@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-656: Fix replication lock during API HTTP iteration and batching issues, [PR-771](https://github.com/reductstore/reductstore/pull/771)
+
 ## [1.14.3] - 2025-03-10
 
 ### Fixed
