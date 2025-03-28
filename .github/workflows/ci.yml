@@ -390,7 +390,11 @@ jobs:
     strategy:
       matrix:
         include:
-          # Many small blobs
+          # 10Kb blobs max records in a batch
+          - max_blob_size: 0.01
+            entries: 4
+            records: 1536
+          # 1MB blobs
           - max_blob_size: 1
             entries: 4
             records: 1536
