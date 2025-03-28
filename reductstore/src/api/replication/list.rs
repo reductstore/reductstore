@@ -48,7 +48,7 @@ mod tests {
 
         assert_eq!(list.replications.len(), 1);
         assert_eq!(list.replications[0].name, "api-test");
-        assert_eq!(list.replications[0].is_active, false);
+        assert_eq!(list.replications[0].is_active, true);
         assert_eq!(list.replications[0].is_provisioned, false);
     }
 }

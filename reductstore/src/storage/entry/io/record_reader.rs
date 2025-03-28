@@ -205,13 +205,8 @@ impl RecordReader {
 
         if let Err(e) = read_all() {
             error!(
-                "Failed to send record {}/{}/{}: {}, sent {}/{} bytes",
-                ctx.bucket_name,
-                ctx.entry_name,
-                ctx.record_timestamp,
-                e,
-                read_bytes,
-                ctx.content_size
+                "Failed to send record {}/{}/{}: {}",
+                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
             )
         }
     }
