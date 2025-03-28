@@ -804,13 +804,15 @@ jobs:
 
       - name: Run current ReductStore
         run: |
-          docker run
-            --env RS_DATA_PATH=/data
-            --env RS_API_TOKEN=token
-            --env RS_LOG_LEVEL=INFO
-          --name current -d ${{github.repository}}:latest
-          sleep 5
-          docker logs current
+          run: |
+            docker run -d \
+              --name current \
+              --env RS_DATA_PATH=/data \
+              --env RS_API_TOKEN=token \
+              --env RS_LOG_LEVEL=INFO \
+              ${{ github.repository }}:latest
+            sleep 5
+            docker logs current
 
       - name: Run docker compose with current image
         working-directory: ./sdk-benchmarks
