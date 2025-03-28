@@ -87,7 +87,7 @@ impl ReplicationSender {
                                 total_size += record_size;
                                 batch.push((record_to_sync, transaction));
 
-                                if total_size > 0 && total_size + record_size > MAX_PAYLOAD_SIZE {
+                                if total_size >= MAX_PAYLOAD_SIZE {
                                     break;
                                 }
                             }
