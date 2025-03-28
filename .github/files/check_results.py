@@ -3,6 +3,39 @@ import argparse
 import sys
 from pathlib import Path
 
+"""
+This module compares the results of a benchmark run against a reference (ground truth) file
+using a relative threshold specified in a separate text file.
+
+It expects three inputs:
+1. A CSV file containing benchmark results.
+2. A CSV file with reference (ground truth) results in the same format.
+3. A text file containing a single float value, representing the acceptable threshold
+   for relative deviation.
+
+The CSV files must have identical structure and contain the following columns:
+    - record_size
+    - record_num
+    - write_req_per_sec
+    - write_bytes_per_sec
+    - read_req_per_sec
+    - read_bytes_per_sec
+    - update_req_per_sec
+    - remove_req_per_sec
+
+Each line in the CSV files represents a test case, where:
+- The first column is treated as a key (e.g., record size),
+- The remaining columns are performance metrics.
+
+The script validates that:
+- The number of rows and columns in both CSV files match.
+- For each value, the relative difference between the result and the reference does not
+  exceed the given threshold.
+- If a reference value is 0, any non-zero result is considered an error.
+
+If any value exceeds the allowed deviation, the script exits with an error.
+"""
+
 
 def load_threshold(file: Path) -> float:
     """Load threshold value from txt file"""
@@ -11,7 +44,7 @@ def load_threshold(file: Path) -> float:
 
 
 def load_result(file: Path) -> dict[int, list[int]]:
-    """Load result from csv file"""
+    """Load result from csv file, key is record_size"""
     result = {}
     with open(file, "r") as f:
         for line in f:
@@ -23,17 +56,33 @@ def load_result(file: Path) -> dict[int, list[int]]:
 def compare_results(
     threshold: float, result: dict[int, list[int]], result_gt: dict[int, list[int]]
 ) -> bool:
-    """Compare results with relative threshold"""
+    fields = [
+        "record_num",
+        "write_req_per_sec",
+        "write_bytes_per_sec",
+        "read_req_per_sec",
+        "read_bytes_per_sec",
+        "update_req_per_sec",
+        "remove_req_per_sec",
+    ]
+
+    "Compare results with relative threshold"
     assert len(result) == len(result_gt)
-    assert all(len(result[key]) == len(result_gt[key]) for key in result)
+    assert all(len(result[key]) == len(result_gt[key]) == len(fields) for key in result)
 
     for key in result:
-        for v, v_gt in zip(result[key], result_gt[key]):
+        for field, v, v_gt in zip(fields, result[key], result_gt[key]):
             if v_gt == 0 and v != 0:
+                print(
+                    f"Error: Reference value is 0, but result is {v} for record_size: {key} and field: {field}"
+                )
                 return False
             else:
                 d = (v - v_gt) / v_gt
                 if d > threshold:
+                    print(
+                        f"Error: Relative difference {d:.2f} exceeds threshold {threshold} for record_size: {key} and field: {field}"
+                    )
                     return False
     return True
 
@@ -55,10 +104,8 @@ def main():
 
     r = compare_results(threshold, result, result_gt)
 
-    if r:
-        print("Results are correct")
-    else:
-        sys.exit("Results are incorrect")
+    if not r:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
