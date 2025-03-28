@@ -1,0 +1,46 @@
+services:
+  reductstore:
+    image: ${REDUCT_IMAGE:-reduct/store:latest}
+    ports:
+      - "8383:8383"
+    environment:
+      RS_DATA_PATH: /data
+      RS_API_TOKEN: token
+      RS_LOG_LEVEL: INFO
+
+  bench-py:
+    build:
+      context: ./python
+    depends_on:
+      - reductstore
+    environment:
+      PYTHONUNBUFFERED: 1
+    volumes:
+      - ./results:/results
+
+  # bench-rust:
+  #   build:
+  #     context: ./rust
+  #   depends_on:
+  #     - reductstore
+  #   volumes:
+  #     - ./results:/results
+  #
+  # bench-node:
+  #   build:
+  #     context: ./node
+  #   depends_on:
+  #     - reductstore
+  #   volumes:
+  #     - ./results:/results
+  #
+  # bench-cpp:
+  #   build:
+  #     context: ./cpp
+  #   depends_on:
+  #     - reductstore
+  #   volumes:
+  #     - ./results:/results
+
+volumes:
+  data:
