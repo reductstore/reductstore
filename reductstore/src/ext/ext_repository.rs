@@ -10,7 +10,7 @@ use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, IoExtension, ProcessStatus};
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::{internal_server_error, unprocessable_entity, Labels};
+use reduct_base::{unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -247,7 +247,7 @@ mod tests {
     use reqwest::blocking::get;
     use reqwest::StatusCode;
     use rstest::{fixture, rstest};
-    use std::fmt::format;
+
     use std::{env, fs};
     use test_log::test as log_test;
 
