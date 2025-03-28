@@ -32,8 +32,8 @@ reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
 log = "0.4.26"
 chrono = { version = "0.4.40", features = ["serde"] }
 thread-id = "5.0.0"
-zip = "2.2.3"
-tempfile = "3.19.0"
+zip = "2.5.0"
+tempfile = "3.19.1"
 hex = "0.4.3"
 prost = "0.13.1"
 prost-wkt = "0.6.0"
@@ -52,7 +52,7 @@ futures-util = "0.3.31"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 mime_guess = "2.0.5"
 bytesize = "2.0.1"
-async-trait = "0.1.86"
+async-trait = "0.1.88"
 url = { version = "2.5.4", features = ["serde"] }
 jsonwebtoken = "9.3.1"
 base64 = "0.22.1"
