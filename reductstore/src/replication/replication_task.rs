@@ -408,6 +408,42 @@ mod tests {
     }
 
     #[rstest]
+    fn test_replication_inactive(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(false);
+        let mut replication = build_replication(remote_bucket, settings);
+
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(100));
+        assert!(!transaction_log_is_empty(&replication));
+        assert_eq!(
+            replication.info(),
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: false,
+                is_provisioned: false,
+                pending_records: 1,
+            }
+        );
+        assert_eq!(
+            replication.diagnostics(),
+            Diagnostics {
+                hourly: DiagnosticsItem {
+                    ok: 0,
+                    errored: 0,
+                    errors: HashMap::new(),
+                }
+            }
+        )
+    }
+
+    #[rstest]
     fn test_replication_filter_each_entry(
         mut notification: TransactionNotification,
         mut remote_bucket: MockRmBucket,
