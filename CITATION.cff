@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Timin"
+  given-names: "Alexey"
+  orcid: "https://orcid.org/0009-0009-1191-0564"
+title: "ReductStore"
+url: "https://github.com/reductstore/reductstore"

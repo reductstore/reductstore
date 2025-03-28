@@ -33,7 +33,7 @@ log = "0.4.26"
 chrono = { version = "0.4.40", features = ["serde"] }
 thread-id = "5.0.0"
 zip = "2.2.3"
-tempfile = "3.18.0"
+tempfile = "3.19.0"
 hex = "0.4.3"
 prost = "0.13.1"
 prost-wkt = "0.6.0"
@@ -45,7 +45,7 @@ regex = "1.11.1"
 bytes = "1.10.1"
 axum = { version = "0.8.1", features = ["default", "macros"] }
 axum-extra = { version = "0.10.0", features = ["default", "typed-header"] }
-tokio = { version = "1.43.0", features = ["full"] }
+tokio = { version = "1.44.1", features = ["full"] }
 hyper = { version = "1.6.0", features = ["full"] }
 tower = "0.5.2"
 futures-util = "0.3.31"
@@ -73,7 +73,7 @@ chrono = "0.4.40"
 
 [dev-dependencies]
 mockall = "0.13.1"
-rstest = "0.24.0"
+rstest = "0.25.0"
 serial_test = "3.2.0"
 test-log = "0.2.17"
 reqwest = { version = "0.12.15", default-features = false, features = ["rustls-tls", "blocking"] }
