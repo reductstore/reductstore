@@ -39,7 +39,6 @@ pub struct ReplicationTask {
     filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<Storage>,
-    remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
@@ -111,7 +110,6 @@ impl ReplicationTask {
         let config = settings.clone();
         let replication_name = name.clone();
         let thr_log_map = Arc::clone(&log_map);
-        let thr_bucket = Arc::clone(&remote_bucket);
         let thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
         let thr_system_options = system_options.clone();
@@ -152,7 +150,7 @@ impl ReplicationTask {
                 thr_storage.clone(),
                 config.clone(),
                 thr_hourly_diagnostics,
-                thr_bucket,
+                remote_bucket,
             );
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
@@ -213,7 +211,6 @@ impl ReplicationTask {
             storage,
             filter_map: filter,
             log_map,
-            remote_bucket,
             hourly_diagnostics,
             stop_flag,
             is_active,

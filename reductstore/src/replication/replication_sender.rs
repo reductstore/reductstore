@@ -8,7 +8,7 @@ use crate::replication::transaction_log::TransactionLog;
 use crate::storage::storage::Storage;
 use std::cmp::PartialEq;
 
-use log::{debug, error, info};
+use log::{debug, error};
 use reduct_base::error::{ErrorCode, ReductError};
 
 use crate::replication::diagnostics::DiagnosticsCounter;

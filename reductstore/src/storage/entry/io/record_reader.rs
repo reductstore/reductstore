@@ -8,7 +8,7 @@ use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use bytes::Bytes;
-use log::{debug, error};
+use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::cmp::min;
