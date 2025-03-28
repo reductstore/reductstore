@@ -11,15 +11,16 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::cfg::io::IoConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
-use crate::ext::ext_repository::ExtRepository;
+use crate::ext::ext_repository::{create_ext_repository, ManageExtensions};
 use log::info;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";
@@ -37,7 +38,7 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub cert_path: String,
     pub cert_key_path: String,
     pub license_path: Option<String>,
-    pub ext_path: String,
+    pub ext_path: Option<String>,
     pub cors_allow_origin: Vec<String>,
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
@@ -61,7 +62,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             cert_path: env.get_masked("RS_CERT_PATH", "".to_string()),
             cert_key_path: env.get_masked("RS_CERT_KEY_PATH", "".to_string()),
             license_path: env.get_optional("RS_LICENSE_PATH"),
-            ext_path: env.get("RS_EXT_PATH", "/ext".to_string()),
+            ext_path: env.get_optional("RS_EXT_PATH"),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
@@ -80,13 +81,21 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         let console = create_asset_manager(load_console());
         let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
 
+        let ext_path = if let Some(ext_path) = &self.ext_path {
+            Some(PathBuf::try_from(ext_path).map_err(|e| {
+                internal_server_error!("Failed to resolve extension path {}: {}", ext_path, e)
+            })?)
+        } else {
+            None
+        };
+
         Ok(Components {
             storage,
             token_repo: tokio::sync::RwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.api_token),
             console,
             replication_repo: tokio::sync::RwLock::new(replication_engine),
-            ext_repo: ExtRepository::try_load(&PathBuf::from(&self.ext_path))?,
+            ext_repo: create_ext_repository(ext_path)?,
 
             base_path: self.api_base_path.clone(),
             io_settings: self.io_conf.clone(),

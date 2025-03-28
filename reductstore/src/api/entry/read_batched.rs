@@ -15,7 +15,7 @@ use bytes::Bytes;
 use futures_util::Stream;
 
 use crate::cfg::io::IoConfig;
-use crate::ext::ext_repository::ExtRepository;
+use crate::ext::ext_repository::{BoxedManageExtensions, ManageExtensions};
 use crate::storage::query::QueryRx;
 use futures_util::Future;
 use log::debug;
@@ -80,7 +80,7 @@ async fn fetch_and_response_batched_records(
     query_id: u64,
     empty_body: bool,
     io_settings: &IoConfig,
-    ext_repository: &ExtRepository,
+    ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
     let make_header = |reader: &BoxedReadRecord| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
@@ -130,7 +130,7 @@ async fn fetch_and_response_batched_records(
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
             io_settings.batch_records_timeout,
-            &ext_repository,
+            ext_repository,
         )
         .await
         {
@@ -206,7 +206,7 @@ async fn next_record_reader(
     rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
     recv_timeout: Duration,
-    ext_repository: &ExtRepository,
+    ext_repository: &BoxedManageExtensions,
 ) -> ProcessStatus {
     // we need to wait for the first record
     if let Ok(result) = timeout(
@@ -276,6 +276,7 @@ mod tests {
 
     use crate::api::tests::{components, headers, path_to_entry_1};
 
+    use crate::ext::ext_repository::create_ext_repository;
     use rstest::*;
     use tempfile::tempdir;
     use tokio::time::sleep;
@@ -437,7 +438,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_next_record_reader_timeout(ext_repository: ExtRepository) {
+        async fn test_next_record_reader_timeout(ext_repository: BoxedManageExtensions) {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             assert!(
@@ -462,7 +463,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_next_record_reader_closed_tx(ext_repository: ExtRepository) {
+        async fn test_next_record_reader_closed_tx(ext_repository: BoxedManageExtensions) {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
@@ -488,8 +489,8 @@ mod tests {
     }
 
     #[fixture]
-    fn ext_repository() -> ExtRepository {
-        ExtRepository::try_load(&tempdir().unwrap().into_path()).unwrap()
+    fn ext_repository() -> BoxedManageExtensions {
+        create_ext_repository(Some(tempdir().unwrap().into_path())).unwrap()
     }
 
     mod stream_wrapper {

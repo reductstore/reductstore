@@ -5,12 +5,14 @@ use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
 use crate::storage::query::filters::WhenFilter;
 use crate::storage::query::QueryRx;
+use async_trait::async_trait;
+use axum::extract::Path;
 use dlopen2::wrapper::{Container, WrapperApi};
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, IoExtension, ProcessStatus};
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::{unprocessable_entity, Labels};
+use reduct_base::{internal_server_error, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -25,6 +27,24 @@ struct ExtensionApi {
     get_ext: extern "C" fn() -> *mut (dyn IoExtension + Send + Sync),
 }
 
+#[async_trait]
+pub(crate) trait ManageExtensions {
+    fn register_query(
+        &self,
+        query_id: u64,
+        bucket_name: &str,
+        entry_name: &str,
+        query: QueryEntry,
+    ) -> Result<(), ReductError>;
+    async fn next_processed_record(
+        &self,
+        query_id: u64,
+        query_rx: Arc<AsyncRwLock<QueryRx>>,
+    ) -> ProcessStatus;
+}
+
+pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
+
 struct QueryContext {
     query_id: u64,
     query: QueryOptions,
@@ -33,7 +53,7 @@ struct QueryContext {
     ext_pipeline: Vec<IoExtRef>,
 }
 
-pub struct ExtRepository {
+struct ExtRepository {
     extension_map: IoExtMap,
     query_map: RwLock<HashMap<u64, QueryContext>>,
 
@@ -91,7 +111,36 @@ impl ExtRepository {
         })
     }
 
-    pub fn register_query(
+    fn send_record_to_ext_pipeline(
+        query_id: u64,
+        mut record: BoxedReadRecord,
+        query: &QueryContext,
+    ) -> ProcessStatus {
+        let mut computed_labels = Labels::new();
+        for ext in &query.ext_pipeline {
+            computed_labels.extend(record.computed_labels().clone().into_iter());
+            let status = ext.read().unwrap().next_processed_record(query_id, record);
+            if let ProcessStatus::Ready(result) = status {
+                if let Ok(processed_record) = result {
+                    record = processed_record;
+                } else {
+                    return ProcessStatus::Ready(result);
+                }
+            } else {
+                return status;
+            }
+        }
+
+        record
+            .computed_labels_mut()
+            .extend(computed_labels.clone().into_iter());
+        ProcessStatus::Ready(Ok(record))
+    }
+}
+
+#[async_trait]
+impl ManageExtensions for ExtRepository {
+    fn register_query(
         &self,
         query_id: u64,
         bucket_name: &str,
@@ -153,7 +202,7 @@ impl ExtRepository {
         Ok(())
     }
 
-    pub(crate) async fn next_processed_record(
+    async fn next_processed_record(
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
@@ -212,31 +261,42 @@ impl ExtRepository {
             ProcessStatus::Stop
         }
     }
+}
 
-    fn send_record_to_ext_pipeline(
-        query_id: u64,
-        mut record: BoxedReadRecord,
-        query: &QueryContext,
-    ) -> ProcessStatus {
-        let mut computed_labels = Labels::new();
-        for ext in &query.ext_pipeline {
-            computed_labels.extend(record.computed_labels().clone().into_iter());
-            let status = ext.read().unwrap().next_processed_record(query_id, record);
-            if let ProcessStatus::Ready(result) = status {
-                if let Ok(processed_record) = result {
-                    record = processed_record;
-                } else {
-                    return ProcessStatus::Ready(result);
+pub fn create_ext_repository(path: Option<PathBuf>) -> Result<BoxedManageExtensions, ReductError> {
+    if let Some(path) = path {
+        Ok(Box::new(ExtRepository::try_load(&path)?))
+    } else {
+        // Dummy extension repository if
+        struct NoExtRepository;
+
+        #[async_trait]
+        impl ManageExtensions for NoExtRepository {
+            fn register_query(
+                &self,
+                _query_id: u64,
+                _bucket_name: &str,
+                _entry_name: &str,
+                _query: QueryEntry,
+            ) -> Result<(), ReductError> {
+                Ok(())
+            }
+
+            async fn next_processed_record(
+                &self,
+                _query_id: u64,
+                query_rx: Arc<AsyncRwLock<QueryRx>>,
+            ) -> ProcessStatus {
+                let record = query_rx.write().await.recv().await;
+                match record {
+                    Some(Ok(record)) => ProcessStatus::Ready(Ok(Box::new(record))),
+                    Some(Err(e)) => ProcessStatus::Ready(Err(e)),
+                    None => ProcessStatus::Stop,
                 }
-            } else {
-                return status;
             }
         }
 
-        record
-            .computed_labels_mut()
-            .extend(computed_labels.clone().into_iter());
-        ProcessStatus::Ready(Ok(record))
+        Ok(Box::new(NoExtRepository))
     }
 }
 
