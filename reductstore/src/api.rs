@@ -16,6 +16,7 @@ use crate::auth::token_repository::ManageTokens;
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::env::StdEnvGetter;
+use crate::ext::ext_repository::ManageExtensions;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
 use axum::http::StatusCode;
@@ -44,6 +45,7 @@ pub struct Components {
     pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
+    pub ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub base_path: String,
     pub io_settings: IoConfig,
 }
@@ -156,13 +158,13 @@ fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
     use rstest::fixture;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::ReplicationSettings;
@@ -171,6 +173,7 @@ mod tests {
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
     use crate::cfg::replication::ReplicationConfig;
+    use crate::ext::ext_repository::create_ext_repository;
     use crate::replication::create_replication_repo;
 
     use super::*;
@@ -240,6 +243,7 @@ mod tests {
             base_path: "/".to_string(),
             replication_repo: RwLock::new(replication_repo),
             io_settings: IoConfig::default(),
+            ext_repo: create_ext_repository(None).expect("Failed to create extension repo"),
         };
 
         Arc::new(components)

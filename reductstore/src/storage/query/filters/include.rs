@@ -4,7 +4,7 @@
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::{RecordFilter, RecordMeta};
 
 /// Filter that excludes records with specific labels
 pub struct IncludeLabelFilter {
@@ -26,17 +26,12 @@ impl IncludeLabelFilter {
     }
 }
 
-impl<P> RecordFilter<P> for IncludeLabelFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
-        let result = self.labels.iter().all(|(key, value)| {
-            record
-                .labels()
-                .iter()
-                .any(|label| label.name == *key && label.value == *value)
-        });
+impl RecordFilter for IncludeLabelFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+        let result = self
+            .labels
+            .iter()
+            .all(|(key, value)| record.labels().iter().any(|(k, v)| k == key && v == value));
 
         Ok(result)
     }
@@ -47,6 +42,7 @@ mod tests {
     use super::*;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::Record;
+    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::*;
 
     #[rstest]
@@ -63,7 +59,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record).unwrap(), "Record should pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap(), "Record should pass");
     }
 
     #[rstest]
@@ -80,7 +77,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
+        let wrapper = RecordWrapper::from(record);
+        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
     }
 
     #[rstest]
@@ -107,8 +105,9 @@ mod tests {
             ..Default::default()
         };
 
+        let wrapper = RecordWrapper::from(record);
         assert!(
-            filter.filter(&record).unwrap(),
+            filter.filter(&wrapper).unwrap(),
             "Record should pass because it has key1=value1 and key2=value2"
         );
 
@@ -120,8 +119,9 @@ mod tests {
             ..Default::default()
         };
 
+        let wrapper = RecordWrapper::from(record);
         assert!(
-            !filter.filter(&record).unwrap(),
+            !filter.filter(&wrapper).unwrap(),
             "Record should not pass because it has only key1=value1"
         );
     }

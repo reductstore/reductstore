@@ -14,12 +14,12 @@ use futures_util::StreamExt;
 use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::{RecordDrainer, WriteRecordContent};
-use crate::storage::proto::record::Label;
+use crate::storage::entry::RecordDrainer;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
+use reduct_base::io::WriteRecord;
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -30,7 +30,7 @@ use tokio::time::timeout;
 struct WriteContext {
     time: u64,
     header: RecordHeader,
-    writer: Box<dyn WriteRecordContent + Sync + Send>,
+    writer: Box<dyn WriteRecord + Sync + Send>,
 }
 
 type ErrorMap = BTreeMap<u64, ReductError>;
@@ -107,15 +107,7 @@ pub(crate) async fn write_batched_records(
                             TransactionNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),
-                                labels: ctx
-                                    .header
-                                    .labels
-                                    .iter()
-                                    .map(|(k, v)| Label {
-                                        name: k.clone(),
-                                        value: v.clone(),
-                                    })
-                                    .collect::<Vec<Label>>(), // TODO: find a way to avoid cloning
+                                labels: ctx.header.labels.clone(),
                                 event: Transaction::WriteRecord(ctx.time),
                             },
                         )?;
@@ -201,7 +193,7 @@ fn spawn_getting_writers(
 }
 
 async fn write_chunk(
-    writer: &mut Box<dyn WriteRecordContent + Sync + Send>,
+    writer: &mut Box<dyn WriteRecord + Sync + Send>,
     chunk: Bytes,
     written: &mut usize,
     content_size: usize,
@@ -254,7 +246,7 @@ async fn start_writing(
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
-) -> Box<dyn WriteRecordContent + Sync + Send> {
+) -> Box<dyn WriteRecord + Sync + Send> {
     let get_writer = async {
         bucket
             .begin_write(
@@ -282,10 +274,10 @@ mod tests {
     use super::*;
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{components, headers, path_to_entry_1};
-    use crate::storage::proto::record::Label;
-    use axum_extra::headers::HeaderValue;
 
+    use axum_extra::headers::HeaderValue;
     use reduct_base::error::ErrorCode;
+    use reduct_base::io::{ReadRecord, RecordMeta};
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -387,19 +379,10 @@ mod tests {
                 .begin_read(1)
                 .await
                 .unwrap();
-            assert_eq!(
-                reader.labels()[0],
-                Label {
-                    name: "a".to_string(),
-                    value: "b".to_string(),
-                }
-            );
+            assert_eq!(&reader.labels()["a"], "b");
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 10);
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("1234567890"))
-            );
+            assert_eq!(reader.read().await.unwrap(), Ok(Bytes::from("1234567890")));
         }
         {
             let mut reader = bucket
@@ -409,17 +392,11 @@ mod tests {
                 .begin_read(2)
                 .await
                 .unwrap();
-            assert_eq!(
-                reader.labels()[0],
-                Label {
-                    name: "c".to_string(),
-                    value: "d,f".to_string(),
-                }
-            );
+            assert_eq!(&reader.labels()["c"], "d,f");
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 20);
             assert_eq!(
-                reader.rx().recv().await.unwrap(),
+                reader.read().await.unwrap(),
                 Ok(Bytes::from("abcdef1234567890abcd"))
             );
         }
@@ -435,7 +412,7 @@ mod tests {
             assert_eq!(reader.content_type(), "text/plain");
             assert_eq!(reader.content_length(), 18);
             assert_eq!(
-                reader.rx().recv().await.unwrap(),
+                reader.read().await.unwrap(),
                 Ok(Bytes::from("ef1234567890abcdef"))
             );
         }
@@ -506,16 +483,13 @@ mod tests {
         {
             let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
             assert_eq!(reader.content_length(), 10);
-            assert_eq!(
-                reader.rx().recv().await.unwrap(),
-                Ok(Bytes::from("1234567890"))
-            );
+            assert_eq!(reader.read().await.unwrap(), Ok(Bytes::from("1234567890")));
         }
         {
             let mut reader = bucket.begin_read("entry-1", 3).await.unwrap();
             assert_eq!(reader.content_length(), 18);
             assert_eq!(
-                reader.rx().recv().await.unwrap(),
+                reader.read().await.unwrap(),
                 Ok(Bytes::from("ef1234567890abcdef"))
             );
         }

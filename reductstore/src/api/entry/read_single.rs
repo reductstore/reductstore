@@ -19,9 +19,13 @@ use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
+use futures_util::Future;
+use hyper::http::HeaderValue;
 use reduct_base::bad_request;
+use reduct_base::io::{ReadRecord, RecordMeta};
 use std::collections::HashMap;
-use std::pin::Pin;
+use std::i64;
+use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::RwLock as AsyncRwLock;
@@ -66,8 +70,7 @@ async fn fetch_and_response_single_record(
     let make_headers = |record_reader: &RecordReader| {
         let mut headers = HeaderMap::new();
 
-        for label in record_reader.labels() {
-            let (k, v) = (&label.name, &label.value);
+        for (k, v) in record_reader.labels() {
             headers.insert(
                 format!("x-reduct-label-{}", k)
                     .parse::<HeaderName>()
@@ -78,19 +81,19 @@ async fn fetch_and_response_single_record(
 
         headers.insert(
             "content-type",
-            record_reader.content_type().to_string().parse().unwrap(),
+            HeaderValue::from_str(record_reader.content_type()).unwrap(),
         );
         headers.insert(
             "content-length",
-            record_reader.content_length().to_string().parse().unwrap(),
+            HeaderValue::from(record_reader.content_length()),
         );
         headers.insert(
             "x-reduct-time",
-            record_reader.timestamp().to_string().parse().unwrap(),
+            HeaderValue::from(record_reader.timestamp()),
         );
         headers.insert(
             "x-reduct-last",
-            u8::from(record_reader.last()).to_string().parse().unwrap(),
+            HeaderValue::from(i64::from(record_reader.last())),
         );
         headers
     };
@@ -145,7 +148,8 @@ impl Stream for ReaderWrapper {
             return Poll::Ready(None);
         }
 
-        if let Poll::Ready(data) = self.reader.rx().poll_recv(cx) {
+        let pinned_future = pin!(self.reader.read());
+        if let Poll::Ready(data) = pinned_future.poll(cx) {
             match data {
                 Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
                 Some(Err(e)) => Poll::Ready(Some(Err(HttpError::from(e)))),
@@ -374,6 +378,7 @@ mod tests {
     mod steam_wrapper {
         use super::*;
         use crate::storage::proto::Record;
+        use prost_wkt_types::Timestamp;
 
         #[rstest]
         fn test_size_hint() {
@@ -383,7 +388,7 @@ mod tests {
                 reader: RecordReader::form_record_with_rx(
                     rx,
                     Record {
-                        timestamp: None,
+                        timestamp: Some(Timestamp::default()),
                         begin: 0,
                         end: 0,
                         state: 0,

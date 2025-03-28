@@ -279,6 +279,7 @@ mod tests {
 
     use super::*;
     use crate::core::file_cache::FILE_CACHE;
+    use reduct_base::io::{ReadRecord, RecordMeta};
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -335,7 +336,7 @@ mod tests {
         assert_eq!(rec.content_type(), "text/plain");
 
         assert_eq!(
-            rec.rx().blocking_recv().unwrap().unwrap(),
+            rec.blocking_read().unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
 
@@ -345,7 +346,7 @@ mod tests {
         assert_eq!(rec.content_type(), "text/plain");
 
         assert_eq!(
-            rec.rx().blocking_recv().unwrap().unwrap(),
+            rec.blocking_read().unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
     }

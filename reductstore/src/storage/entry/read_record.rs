@@ -62,6 +62,7 @@ mod tests {
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use bytes::Bytes;
     use reduct_base::error::ReductError;
+    use reduct_base::io::{ReadRecord, RecordMeta};
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;
@@ -152,7 +153,7 @@ mod tests {
         write_stub_record(&mut entry, 1000000);
         let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(
-            reader.rx().blocking_recv().unwrap(),
+            reader.blocking_read().unwrap(),
             Ok(Bytes::from("0123456789"))
         );
     }
@@ -164,7 +165,7 @@ mod tests {
 
         let mut reader = entry.begin_read(1010000).wait().unwrap();
         assert_eq!(
-            reader.rx().blocking_recv().unwrap(),
+            reader.blocking_read().unwrap(),
             Ok(Bytes::from("0123456789"))
         );
     }
@@ -179,14 +180,14 @@ mod tests {
 
         let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(
-            reader.rx().blocking_recv().unwrap().unwrap().to_vec(),
+            reader.blocking_read().unwrap().unwrap().to_vec(),
             data[0..MAX_IO_BUFFER_SIZE]
         );
         assert_eq!(
-            reader.rx().blocking_recv().unwrap().unwrap().to_vec(),
+            reader.blocking_read().unwrap().unwrap().to_vec(),
             data[MAX_IO_BUFFER_SIZE..]
         );
-        assert_eq!(reader.rx().blocking_recv(), None);
+        assert_eq!(reader.blocking_read(), None);
     }
 
     #[rstest]
