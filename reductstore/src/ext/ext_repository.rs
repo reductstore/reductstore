@@ -244,17 +244,19 @@ impl ExtRepository {
 mod tests {
     use super::*;
     use reduct_base::ext::IoExtensionInfo;
+    use reqwest::blocking::get;
+    use reqwest::StatusCode;
     use rstest::{fixture, rstest};
-    use std::env;
+    use std::fmt::format;
+    use std::{env, fs};
     use test_log::test as log_test;
 
     #[log_test(rstest)]
-    fn test_load_extension(ext_path: PathBuf) {
-        let ext_repo = ExtRepository::try_load(&ext_path).unwrap();
+    fn test_load_extension(ext_repo: ExtRepository) {
         assert_eq!(ext_repo.extension_map.len(), 1);
         let ext = ext_repo
             .extension_map
-            .get("ext_stub")
+            .get("test-ext")
             .unwrap()
             .read()
             .unwrap();
@@ -262,22 +264,56 @@ mod tests {
         assert_eq!(
             info,
             IoExtensionInfo::builder()
-                .name("ext_stub")
-                .version("0.1")
+                .name("test-ext")
+                .version("0.1.0")
                 .build()
         );
     }
 
     #[fixture]
-    fn ext_path() -> PathBuf {
+    fn ext_repo() -> ExtRepository {
         // This is the path to the build directory of the extension from ext_stub crate
-        PathBuf::from(env::var("OUT_DIR").unwrap())
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf()
+        const EXTENSION_VERSION: &str = "0.1.0";
+
+        if !cfg!(target_arch = "x86_64") {
+            panic!("Unsupported architecture");
+        }
+
+        let file_name = if cfg!(target_os = "linux") {
+            // This is the path to the build directory of the extension from ext_stub crate
+            "libtest_ext-x86_64-unknown-linux-gnu.so"
+        } else if cfg!(target_os = "macos") {
+            "libtest_ext-x86_64-apple-darwin.dylib"
+        } else if cfg!(target_os = "windows") {
+            "libtest_ext-x86_64-pc-windows-gnu.dll"
+        } else {
+            panic!("Unsupported platform")
+        };
+
+        let ext_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("ext");
+        fs::create_dir_all(ext_path.clone()).unwrap();
+
+        let file_path = ext_path.join(file_name);
+        if !file_path.exists() {
+            let link = format!(
+                "https://github.com/reductstore/test-ext/releases/download/v{}/{}",
+                EXTENSION_VERSION, file_name
+            );
+
+            let mut resp = get(link).expect("Failed to download extension");
+            if resp.status() != StatusCode::OK {
+                if resp.status() == StatusCode::FOUND {
+                    resp = get(resp.headers().get("location").unwrap().to_str().unwrap())
+                        .expect("Failed to download extension");
+                } else {
+                    panic!("Failed to download extension: {}", resp.status());
+                }
+            }
+
+            fs::write(ext_path.join(file_name), resp.bytes().unwrap())
+                .expect("Failed to write extension");
+        }
+
+        ExtRepository::try_load(&ext_path.to_path_buf()).unwrap()
     }
 }
