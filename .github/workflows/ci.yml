@@ -797,7 +797,7 @@ jobs:
       - name: Run current ReductStore
         run: |
           docker run -d \
-            --name current \
+            --name reductstore \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
@@ -821,11 +821,11 @@ jobs:
       - name: Run ${{matrix.branch}} ReductStore
         run: |
           docker run -d \
-            --name current \
+            --name reductstore \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
-            ${{ github.repository }}:latest
+            reduct/store:${{matrix.branch}}
           sleep 5
           docker logs current
 
