@@ -794,14 +794,6 @@ jobs:
       - name: Load Docker image
         run: docker load --input /tmp/image.tar
 
-      - name: Clone external repository
-        run: git clone https://github.com/reductstore/sdk-benchmarks.git
-
-      - name: Replace files
-        run: |
-          cp .github/files/docker-compose.yml sdk-benchmarks/
-          cp .github/files/main.py sdk-benchmarks/python/
-
       - name: Run current ReductStore
         run: |
           docker run -d \
