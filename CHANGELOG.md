@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimum Rust version to 1.85
 - RS-633: Link runtime libraries statically, [PR-761](https://github.com/reductstore/reductstore/pull/761)
 
+### Fixed
+
+- RS-659: Fix replication timeout for large records, [PR-774](https://github.com/reductstore/reductstore/pull/774)
+
 ## [1.14.4] - 2025-03-28
 
 ### Fixed

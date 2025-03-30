@@ -19,12 +19,6 @@ pub(crate) async fn read_query_json(
     request: QueryEntry,
     headers: HeaderMap,
 ) -> Result<QueryInfoAxum, HttpError> {
-    assert_eq!(
-        request.query_type,
-        QueryType::Query,
-        "Query type must be Query"
-    );
-
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
 
