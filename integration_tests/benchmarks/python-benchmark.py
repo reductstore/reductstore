@@ -49,7 +49,7 @@ class Result:
         )
 
 
-async def bench(record_size: int, record_num: int) -> Result:
+async def bench(url: str, record_size: int, record_num: int) -> Result:
     """Run benchmark with given record size and record number."""
 
     result = Result()
@@ -57,7 +57,7 @@ async def bench(record_size: int, record_num: int) -> Result:
     result.record_num = record_num
 
     measure_time = time.time_ns() // 1000
-    async with Client("http://reductstore:8383", api_token="token") as client:
+    async with Client(url, api_token="token") as client:
         bucket: Bucket = await client.create_bucket(f"benchmark-{measure_time}")
         record_data = b"0" * record_size
         start_time = datetime.now()
@@ -128,6 +128,7 @@ async def bench(record_size: int, record_num: int) -> Result:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run benchmark")
+    parser.add_argument("url", type=str, help="URL of the server")
     parser.add_argument("output", type=Path, help="API token")
     args = parser.parse_args()
 
@@ -143,6 +144,6 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     with open(args.output, "w") as f:
         for record_size in RECORD_SIZES:
-            result = loop.run_until_complete(bench(record_size, RECORD_NUM))
+            result = loop.run_until_complete(bench(args.url, record_size, RECORD_NUM))
             print(result)
             f.write(result.to_csv() + "\n")

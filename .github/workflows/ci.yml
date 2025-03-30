@@ -798,6 +798,7 @@ jobs:
         run: |
           docker run -d \
             --name reductstore \
+            --env RS_HOST=localhost \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
@@ -811,7 +812,7 @@ jobs:
 
       - name: Run python benchmark
         run: |
-          python3 ./integration_tests/benchmarks/python-benchmark.py current.csv
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 current.csv
 
       - name: Stop and remove current container
         run: |
@@ -822,6 +823,7 @@ jobs:
         run: |
           docker run -d \
             --name reductstore \
+            --env RS_HOST=localhost \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
@@ -835,7 +837,7 @@ jobs:
 
       - name: Run python benchmark
         run: |
-          python3 ./integration_tests/benchmarks/python-benchmark.py ${{matrix.branch}}.csv
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 ${{matrix.branch}}.csv
 
       - name: Check result
         run: |
