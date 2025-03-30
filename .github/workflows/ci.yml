@@ -816,7 +816,7 @@ jobs:
 
       - name: Stop and remove current container
         run: |
-          docker stop
+          docker stop reductstore
           docker rm reductstore
 
       - name: Run ${{matrix.branch}} ReductStore
