@@ -803,7 +803,7 @@ jobs:
             --env RS_LOG_LEVEL=INFO \
             ${{ github.repository }}:latest
           sleep 5
-          docker logs current
+          docker logs reductstore
 
       - name: Install reduct-py
         run: |
@@ -816,7 +816,7 @@ jobs:
       - name: Stop and remove current container
         run: |
           docker stop
-          docker rm current
+          docker rm reductstore
 
       - name: Run ${{matrix.branch}} ReductStore
         run: |
@@ -827,7 +827,7 @@ jobs:
             --env RS_LOG_LEVEL=INFO \
             reduct/store:${{matrix.branch}}
           sleep 5
-          docker logs current
+          docker logs reductstore
 
       - name: Install reduct-py
         run: |
