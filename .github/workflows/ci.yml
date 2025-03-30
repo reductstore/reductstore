@@ -798,10 +798,10 @@ jobs:
         run: |
           docker run -d \
             --name reductstore \
-            --env RS_HOST=localhost \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
+            -p 8383:8383 \
             ${{ github.repository }}:latest
           sleep 5
           docker logs reductstore
@@ -823,10 +823,10 @@ jobs:
         run: |
           docker run -d \
             --name reductstore \
-            --env RS_HOST=localhost \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
+            -p 8383:8383 \
             reduct/store:${{matrix.branch}}
           sleep 5
           docker logs reductstore
