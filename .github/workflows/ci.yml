@@ -132,15 +132,15 @@ jobs:
       - rust_fmt
       - build_binaries
     strategy:
-      matrix:
-        os: [ubuntu-24.04, windows-2022, macos-13]
-        include:
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-          - os: windows-2022
-            target: x86_64-pc-windows-gnu
-          - os: macos-13
-            target: x86_64-apple-darwin
+    matrix:
+      os: [ubuntu-24.04, windows-2022, macos-13]
+      include:
+        - os: ubuntu-24.04
+          target: x86_64-unknown-linux-gnu
+        - os: windows-2022
+          target: x86_64-pc-windows-gnu
+        - os: macos-13
+          target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.os }}
     env:
@@ -804,32 +804,47 @@ jobs:
 
       - name: Run current ReductStore
         run: |
-          run: |
-            docker run -d \
-              --name current \
-              --env RS_DATA_PATH=/data \
-              --env RS_API_TOKEN=token \
-              --env RS_LOG_LEVEL=INFO \
-              ${{ github.repository }}:latest
-            sleep 5
-            docker logs current
+          docker run -d \
+            --name current \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            --env RS_LOG_LEVEL=INFO \
+            ${{ github.repository }}:latest
+          sleep 5
+          docker logs current
 
-      - name: Run docker compose with current image
-        working-directory: ./sdk-benchmarks
+      - name: Install reduct-py
         run: |
-          REDUCT_IMAGE=${{github.repository}}:latest docker compose up --exit-code-from bench-py
+          pip install reduct-py>=1.14
 
-      - name: Copy result
-        run: cp sdk-benchmarks/results/python.csv current.csv
-
-      - name: Run docker compose with ${{matrix.branch}}
-        working-directory: ./sdk-benchmarks
+      - name: Run python benchmark
         run: |
-          REDUCT_IMAGE=reduct/store:${{matrix.branch}} docker compose up --exit-code-from bench-py
+          python3 ./integration_tests/benchmarks/python-benchmark.py current.csv
 
-      - name: Copy result
-        run: cp sdk-benchmarks/results/python.csv ${{matrix.branch}}.csv
+      - name: Stop and remove current container
+        run: |
+          docker stop
+          docker rm current
+
+      - name: Run ${{matrix.branch}} ReductStore
+        run: |
+          docker run -d \
+            --name current \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            --env RS_LOG_LEVEL=INFO \
+            ${{ github.repository }}:latest
+          sleep 5
+          docker logs current
+
+      - name: Install reduct-py
+        run: |
+          pip install reduct-py>=1.14
+
+      - name: Run python benchmark
+        run: |
+          python3 ./integration_tests/benchmarks/python-benchmark.py ${{matrix.branch}}.csv
 
       - name: Check result
         run: |
-          python3 .github/files/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv
+          python3 integration_tests/benchmarks/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv

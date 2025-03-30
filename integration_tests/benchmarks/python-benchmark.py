@@ -1,6 +1,9 @@
+import argparse
 import asyncio
+import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 from reduct import Batch, Bucket, Client
 
@@ -124,8 +127,21 @@ async def bench(record_size: int, record_num: int) -> Result:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run benchmark")
+    parser.add_argument("output", type=Path, help="API token")
+    args = parser.parse_args()
+
+    # Check and create output directory
+    directory = args.output.parent
+    try:
+        if not directory.exists():
+            directory.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
     loop = asyncio.get_event_loop()
-    with open("/results/python.csv", "w") as f:
+    with open(args.output, "w") as f:
         for record_size in RECORD_SIZES:
             result = loop.run_until_complete(bench(record_size, RECORD_NUM))
             print(result)
