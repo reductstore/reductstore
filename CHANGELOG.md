@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Python client benchmarks in CI, [PR-764](https://github.com/reductstore/reductstore/pull/764)
+
 ### Changed
 
 - Minimum Rust version to 1.85
