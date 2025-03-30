@@ -802,6 +802,7 @@ jobs:
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
             -p 8383:8383 \
+            -v ./data:/data \
             ${{ github.repository }}:latest
           sleep 5
           docker logs reductstore
@@ -827,6 +828,7 @@ jobs:
             --env RS_API_TOKEN=token \
             --env RS_LOG_LEVEL=INFO \
             -p 8383:8383 \
+            -v ./data:/data \
             reduct/store:${{matrix.branch}}
           sleep 5
           docker logs reductstore
