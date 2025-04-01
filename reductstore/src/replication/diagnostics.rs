@@ -106,7 +106,7 @@ impl DiagnosticsCounter {
         for _ in 0..delta {
             self.frame_last = Instant::now();
             self.frames.push(DiagnosticsItem::default());
-            if self.frames.len() > self.frame_count.try_into().unwrap() {
+            if self.frames.len() > self.frame_count as usize {
                 self.frames.remove(0);
             }
         }

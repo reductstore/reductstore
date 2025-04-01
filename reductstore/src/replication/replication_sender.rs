@@ -40,8 +40,8 @@ pub(super) enum SyncState {
     BrokenLog(String),
 }
 
-const MAX_PAYLOAD_SIZE: u64 = 16_000_000;
-const MAX_BATCH_SIZE: usize = 100;
+const MAX_PAYLOAD_SIZE: u64 = 4_000_000;
+const MAX_BATCH_SIZE: usize = 80;
 
 impl ReplicationSender {
     pub fn new(
@@ -80,16 +80,16 @@ impl ReplicationSender {
                             );
 
                             let record_to_sync = self.read_record(entry_name, &transaction);
+                            processed_transactions += 1;
+
                             if let Some(record_to_sync) = record_to_sync {
                                 let record_size = record_to_sync.content_length();
-                                if total_size > 0 && total_size + record_size > MAX_PAYLOAD_SIZE {
-                                    break;
-                                }
                                 total_size += record_size;
                                 batch.push((record_to_sync, transaction));
-                                processed_transactions += 1;
-                            } else {
-                                processed_transactions += 1; // we count to remove errored transactions from log
+
+                                if total_size >= MAX_PAYLOAD_SIZE {
+                                    break;
+                                }
                             }
                         }
 

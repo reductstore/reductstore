@@ -118,7 +118,7 @@ jobs:
           path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
 
       - name: Build and export tests
-        run: cargo export target/${{ matrix.target }}/tests -- test --release --target ${{ matrix.target }}
+        run: cargo export target/${{ matrix.target }}/tests -- test --release --target ${{ matrix.target }} --lib
 
       - name: Upload tests
         uses: actions/upload-artifact@v4
@@ -403,7 +403,11 @@ jobs:
     strategy:
       matrix:
         include:
-          # Many small blobs
+          # 10Kb blobs max records in a batch
+          - max_blob_size: 0.01
+            entries: 4
+            records: 1536
+          # 1MB blobs
           - max_blob_size: 1
             entries: 4
             records: 1536
