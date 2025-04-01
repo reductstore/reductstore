@@ -563,6 +563,16 @@ jobs:
         run: |
           python3 integration_tests/benchmarks/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv
 
+      - name: Save docker logs
+        if: always()
+        run: docker logs reductstore | zip > /tmp/docker-log.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-log-benchmark-${{matrix.cmd}}
+          path: /tmp/docker-log.zip
+
   build_snap:
     runs-on: ubuntu-latest
     name: Build snap package

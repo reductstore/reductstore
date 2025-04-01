@@ -78,11 +78,13 @@ async def bench(url: str, record_size: int, record_num: int) -> Result:
         result.write_req_per_sec = int(record_num / delta)
         result.write_bytes_per_sec = int(record_num * record_size / delta)
 
+        await asyncio.sleep(1)  # let the data settle
+
         # Read
         start_time = datetime.now()
         count = 0
         async for record in bucket.query("python-bench", start=0, stop=record_num):
-            async for chunk in record.read(n=16_000):
+            async for chunk in record.read(16_000):
                 count += len(chunk)
 
         if count != record_num * record_size:
