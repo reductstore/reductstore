@@ -129,7 +129,7 @@ async def bench(url: str, record_size: int, record_num: int) -> Result:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run benchmark")
     parser.add_argument("url", type=str, help="URL of the server")
-    parser.add_argument("output", type=Path, help="API token")
+    parser.add_argument("output", type=Path, help="path to the output CSV file")
     args = parser.parse_args()
 
     # Check and create output directory
