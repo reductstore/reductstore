@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-659: Fix replication timeout for large records, [PR-774](https://github.com/reductstore/reductstore/pull/774)
+- Fix double sync of block descriptor for a new block, [PR-775](https://github.com/reductstore/reductstore/pull/775)
 
 ## [1.14.4] - 2025-03-28
 
