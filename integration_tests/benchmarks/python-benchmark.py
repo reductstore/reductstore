@@ -5,9 +5,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from reduct import Batch, Bucket, Client
+from reduct import Batch, Bucket, Client, BucketSettings
 
-RECORD_NUM = 2000
 RECORD_SIZES = [2**x * 1024 for x in range(11)]  # 1 KiB ~ 4 MiB
 
 MAX_BATCH_SIZE = 8_000_000
@@ -62,10 +61,11 @@ async def bench(url: str, record_size: int, record_num: int) -> Result:
         record_data = b"0" * record_size
         start_time = datetime.now()
 
+        print("bucket name:", bucket.name)
         # Write
         batch = Batch()
         for i in range(record_num):
-            batch.add(i, record_data, labels={"key": "value"})
+            batch.add(i, record_data, labels={"key": "value", "index": str(i)})
             if len(batch) >= MAX_BATCH_RECORDS or batch.size >= MAX_BATCH_SIZE:
                 await bucket.write_batch("python-bench", batch)
                 batch.clear()
@@ -78,14 +78,18 @@ async def bench(url: str, record_size: int, record_num: int) -> Result:
         result.write_req_per_sec = int(record_num / delta)
         result.write_bytes_per_sec = int(record_num * record_size / delta)
 
-        await asyncio.sleep(1)  # let the data settle
-
         # Read
         start_time = datetime.now()
         count = 0
-        async for record in bucket.query("python-bench", start=0, stop=record_num):
-            async for chunk in record.read(16_000):
-                count += len(chunk)
+        record_count = 0
+        async for record in bucket.query("python-bench"):
+            count += len(await record.read_all())
+            record_count += 1
+
+        if record_count != record_num:
+            raise Exception(
+                f"Read {record_count} records, expected {record_num} records."
+            )
 
         if count != record_num * record_size:
             raise Exception(
@@ -146,6 +150,7 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     with open(args.output, "w") as f:
         for record_size in RECORD_SIZES:
-            result = loop.run_until_complete(bench(args.url, record_size, RECORD_NUM))
+            num = min(10000, 100_000_000 // record_size)
+            result = loop.run_until_complete(bench(args.url, record_size, num))
             print(result)
             f.write(result.to_csv() + "\n")
