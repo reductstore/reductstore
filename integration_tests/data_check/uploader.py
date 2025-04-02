@@ -3,7 +3,7 @@ import json
 import time
 from hashlib import md5
 
-from reduct import Client, Bucket, ServerInfo
+from reduct import Client, Bucket, ServerInfo, BucketSettings
 from os import getenv
 import random
 
@@ -21,7 +21,13 @@ async def load():
         "http://127.0.0.1:8383", api_token=getenv("RS_API_TOKEN")
     ) as client:
         report = {}
-        bucket: Bucket = await client.create_bucket(BUCKET_NAME, exist_ok=True)
+        bucket: Bucket = await client.create_bucket(
+            BUCKET_NAME,
+            exist_ok=True,
+            settings=BucketSettings(
+                max_block_records=NUMBER_OF_RECORDS // 4 + random.randint(-10, 10)
+            ),
+        )
 
         tasks = []
 
