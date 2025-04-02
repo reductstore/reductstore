@@ -499,7 +499,7 @@ jobs:
       - unit_tests
     strategy:
       matrix:
-        branch: ["latest", "main"]
+        branch: ["main"]
 
     steps:
       - uses: actions/checkout@v4
@@ -570,7 +570,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: docker-log-benchmark-${{matrix.cmd}}
+          name: docker-log-benchmark-${{matrix.branch}}
           path: /tmp/docker-log.zip
 
   build_snap:
