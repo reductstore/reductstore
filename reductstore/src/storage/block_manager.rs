@@ -47,6 +47,9 @@ pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
 
+const WRITE_BLOCK_CACHE_SIZE: usize = 2; // we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
+const READ_BLOCK_CACHE_SIZE: usize = 64;
+
 impl BlockManager {
     /// Create a new block manager.
     ///
@@ -67,7 +70,11 @@ impl BlockManager {
             bucket,
             entry,
             block_index: index,
-            block_cache: BlockCache::new(1, 64, IO_OPERATION_TIMEOUT),
+            block_cache: BlockCache::new(
+                WRITE_BLOCK_CACHE_SIZE,
+                READ_BLOCK_CACHE_SIZE,
+                IO_OPERATION_TIMEOUT,
+            ),
             wal: wal::create_wal(path.clone()),
         }
     }
@@ -778,8 +785,10 @@ mod tests {
                 "index not updated"
             );
 
-            // drop cache in disk when block is changed
+            // drop cache in disk when block is changed (we need two blocks because of cache)
             let _ = bm.start_new_block(block_id + 1, 1024).unwrap();
+            let _ = bm.start_new_block(block_id + 2, 1024).unwrap();
+
             let err = bm.wal.read(block_id).err().unwrap();
             assert_eq!(
                 err.status(),
