@@ -7,7 +7,7 @@ from pathlib import Path
 
 from reduct import Batch, Bucket, Client, BucketSettings
 
-RECORD_SIZES = [2**x * 1024 for x in range(11)]  # 1 KiB ~ 4 MiB
+RECORD_SIZES = [1000, 100_000, 10_000_000]
 
 MAX_BATCH_SIZE = 8_000_000
 MAX_BATCH_RECORDS = 80
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     with open(args.output, "w") as f:
         for record_size in RECORD_SIZES:
-            num = min(10000, 500_000_000 // record_size)
+            num = min(10000, 1000_000_000 // record_size)
             result = loop.run_until_complete(bench(args.url, record_size, num))
             print(result)
             f.write(result.to_csv() + "\n")
