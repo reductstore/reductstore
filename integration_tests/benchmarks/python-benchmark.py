@@ -150,7 +150,7 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     with open(args.output, "w") as f:
         for record_size in RECORD_SIZES:
-            num = min(10000, 100_000_000 // record_size)
+            num = min(10000, 500_000_000 // record_size)
             result = loop.run_until_complete(bench(args.url, record_size, num))
             print(result)
             f.write(result.to_csv() + "\n")
