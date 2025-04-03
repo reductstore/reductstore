@@ -321,35 +321,17 @@ mod tests {
     use reqwest::StatusCode;
     use rstest::{fixture, rstest};
 
-    use chrono::Duration;
+    use crate::storage::entry::RecordReader;
+    use crate::storage::proto::Record;
     use mockall::mock;
     use mockall::predicate::eq;
+    use prost_wkt_types::Timestamp;
+    use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use serde_json::json;
     use std::fs;
     use std::thread::sleep;
     use tempfile::tempdir;
     use test_log::test as log_test;
-
-    mock! {
-        IoExtension {}
-
-        impl IoExtension for IoExtension {
-            fn info(&self) -> &IoExtensionInfo;
-            fn register_query(
-                &self,
-                query_id: u64,
-                bucket_name: &str,
-                entry_name: &str,
-                query: &QueryEntry,
-            ) -> Result<(), ReductError>;
-            fn next_processed_record(
-                &self,
-                query_id: u64,
-                record: BoxedReadRecord,
-            ) -> ProcessStatus;
-        }
-
-    }
 
     #[log_test(rstest)]
     fn test_load_extension(ext_repo: ExtRepository) {
@@ -371,6 +353,8 @@ mod tests {
     }
     mod register_query {
         use super::*;
+        use mockall::predicate::ge;
+        use std::time::Duration;
         #[rstest]
         fn test_no_ext_part(mock_ext: MockIoExtension) {
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
@@ -447,7 +431,7 @@ mod tests {
 
             mock_ext
                 .expect_register_query()
-                .with(eq(1), eq("bucket"), eq("entry"), eq(query.clone()))
+                .with(ge(1), eq("bucket"), eq("entry"), eq(query.clone()))
                 .returning(move |_, _, _, _| Ok(()));
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
@@ -455,18 +439,169 @@ mod tests {
                 .register_query(1, "bucket", "entry", query.clone())
                 .is_ok());
 
-            let query_map = mocked_ext_repo.query_map.read().unwrap();
-            assert_eq!(query_map.len(), 1);
+            {
+                let query_map = mocked_ext_repo.query_map.read().unwrap();
+                assert_eq!(query_map.len(), 1);
+            }
 
-            sleep(Duration::seconds(2).to_std().unwrap());
+            sleep(Duration::from_secs(2));
             assert!(mocked_ext_repo
                 .register_query(2, "bucket", "entry", query)
                 .is_ok());
-            let query_map = mocked_ext_repo.query_map.read().unwrap();
-            assert_eq!(query_map.len(), 1,);
+            {
+                let query_map = mocked_ext_repo.query_map.read().unwrap();
+                assert_eq!(query_map.len(), 1,);
 
-            assert!(query_map.get(&1).is_none(), "Query 1 should be expired");
-            assert!(query_map.get(&2).is_some());
+                assert!(query_map.get(&1).is_none(), "Query 1 should be expired");
+                assert!(query_map.get(&2).is_some());
+            }
+        }
+    }
+
+    mod next_processed_record {
+        use super::*;
+        use crate::storage::entry::RecordReader;
+        use assert_matches::assert_matches;
+        use mockall::predicate;
+        use reduct_base::internal_server_error;
+        use reduct_base::io::ReadRecord;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_empty_query() {
+            let mocked_ext_repo = mocked_ext_repo("test-ext", MockIoExtension::new());
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            drop(tx);
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+            assert_matches!(
+                mocked_ext_repo.next_processed_record(1, query_rx).await,
+                ProcessStatus::Stop
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_error_query() {
+            let mocked_ext_repo = mocked_ext_repo("test-ext", MockIoExtension::new());
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let err = internal_server_error!("Test error!");
+            tx.send(Err(err.clone())).await.unwrap();
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+            assert_matches!(
+                mocked_ext_repo.next_processed_record(1, query_rx).await,
+                ProcessStatus::Ready(Err(err))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_registered_query(record_reader: RecordReader) {
+            let mocked_ext_repo = mocked_ext_repo("test-ext", MockIoExtension::new());
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+
+            tx.send(Ok(record_reader)).await.unwrap();
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+            assert_matches!(
+                mocked_ext_repo.next_processed_record(1, query_rx).await,
+                ProcessStatus::Ready(Ok(_))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_process_not_ready(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+        ) {
+            mock_ext.expect_register_query().return_const(Ok(()));
+            mock_ext
+                .expect_next_processed_record()
+                .with(eq(1), predicate::always())
+                .return_once(|_, _| ProcessStatus::NotReady);
+
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "test1": {},
+                })),
+                ..Default::default()
+            };
+
+            let mut mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            tx.send(Ok(record_reader)).await.unwrap();
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+            let status = mocked_ext_repo.next_processed_record(1, query_rx).await;
+            let ProcessStatus::NotReady = status else {
+                panic!("Expected ProcessStatus::NotReady");
+            };
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_process_in_pipeline(record_reader: RecordReader) {
+            let record1 = Box::new(MockRecord::new("key1", "val1"));
+            let record2 = Box::new(MockRecord::new("key2", "val2"));
+
+            let mut mock1 = MockIoExtension::new();
+            let mut mock2 = MockIoExtension::new();
+
+            mock1.expect_register_query().return_const(Ok(()));
+            mock2.expect_register_query().return_const(Ok(()));
+            mock1
+                .expect_next_processed_record()
+                .with(eq(1), predicate::always())
+                .return_once(|_, record| ProcessStatus::Ready(Ok(record1)));
+            mock2
+                .expect_next_processed_record()
+                .with(eq(1), predicate::always())
+                .return_once(|_, record| ProcessStatus::Ready(Ok(record2)));
+
+            let mut mocked_ext_repo = mocked_ext_repo("test1", mock1);
+            mocked_ext_repo
+                .extension_map
+                .insert("test2".to_string(), Arc::new(RwLock::new(Box::new(mock2))));
+
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "test1": {},
+                    "test2": {}
+                })),
+                ..Default::default()
+            };
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .unwrap();
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+
+            tx.send(Ok(record_reader)).await.unwrap();
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+            let status = mocked_ext_repo.next_processed_record(1, query_rx).await;
+
+            let ProcessStatus::Ready(record) = status else {
+                panic!("Expected ProcessStatus::Ready");
+            };
+
+            assert_eq!(
+                record.unwrap().computed_labels(),
+                &Labels::from_iter(
+                    vec![
+                        ("key1".to_string(), "val1".to_string()),
+                        ("key2".to_string(), "val2".to_string())
+                    ]
+                    .into_iter()
+                ),
+                "Computed labels to be merged from both extensions"
+            );
         }
     }
 
@@ -519,11 +654,97 @@ mod tests {
         MockIoExtension::new()
     }
 
+    #[fixture]
+    fn record_reader() -> RecordReader {
+        let record = Record {
+            timestamp: Some(Timestamp {
+                seconds: 1,
+                nanos: 0,
+            }),
+            ..Default::default()
+        };
+        RecordReader::form_record(record, false)
+    }
+
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
         let mut ext_repo = ExtRepository::try_load(&PathBuf::from("ext")).unwrap();
         ext_repo
             .extension_map
             .insert(name.to_string(), Arc::new(RwLock::new(Box::new(mock_ext))));
         ext_repo
+    }
+
+    mock! {
+        IoExtension {}
+
+        impl IoExtension for IoExtension {
+            fn info(&self) -> &IoExtensionInfo;
+
+            fn register_query(
+                &self,
+                query_id: u64,
+                bucket_name: &str,
+                entry_name: &str,
+                query: &QueryEntry,
+            ) -> Result<(), ReductError>;
+
+            fn next_processed_record(
+                &self,
+                query_id: u64,
+                record: BoxedReadRecord,
+            ) -> ProcessStatus;
+        }
+
+    }
+
+    struct MockRecord {
+        computed_labels: Labels,
+    }
+
+    impl MockRecord {
+        fn new(key: &str, val: &str) -> Self {
+            MockRecord {
+                computed_labels: Labels::from_iter(
+                    vec![(key.to_string(), val.to_string())].into_iter(),
+                ),
+            }
+        }
+    }
+
+    impl RecordMeta for MockRecord {
+        fn timestamp(&self) -> u64 {
+            todo!()
+        }
+
+        fn labels(&self) -> &Labels {
+            todo!()
+        }
+    }
+
+    #[async_trait]
+    impl ReadRecord for MockRecord {
+        async fn read(&mut self) -> ReadChunk {
+            None
+        }
+
+        fn last(&self) -> bool {
+            todo!()
+        }
+
+        fn computed_labels(&self) -> &Labels {
+            &self.computed_labels
+        }
+
+        fn computed_labels_mut(&mut self) -> &mut Labels {
+            &mut self.computed_labels
+        }
+
+        fn content_length(&self) -> u64 {
+            todo!()
+        }
+
+        fn content_type(&self) -> &str {
+            todo!()
+        }
     }
 }
