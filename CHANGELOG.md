@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-659: Fix replication timeout for large records, [PR-774](https://github.com/reductstore/reductstore/pull/774)
 - Fix double sync of block descriptor for a new block, [PR-775](https://github.com/reductstore/reductstore/pull/775)
+- Update Web Console up to 1.9.1, [PR-776](https://github.com/reductstore/reductstore/pull/776)
 
 ## [1.14.4] - 2025-03-28
 
