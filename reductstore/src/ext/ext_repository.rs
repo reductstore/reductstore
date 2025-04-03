@@ -529,7 +529,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let mut mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
 
             mocked_ext_repo
                 .register_query(1, "bucket", "entry", query)
