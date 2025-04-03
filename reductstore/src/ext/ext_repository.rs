@@ -23,7 +23,7 @@ type IoExtMap = HashMap<String, IoExtRef>;
 
 #[derive(WrapperApi)]
 struct ExtensionApi {
-    get_ext: extern "C" fn() -> *mut (dyn IoExtension + Send + Sync),
+    get_ext: extern "Rust" fn() -> *mut (dyn IoExtension + Send + Sync),
 }
 
 #[async_trait]
