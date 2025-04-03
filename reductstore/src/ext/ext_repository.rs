@@ -81,7 +81,7 @@ impl ExtRepository {
             if path.is_file()
                 && path
                     .extension()
-                    .map_or(false, |ext| ext == "so" || ext == "dll")
+                    .map_or(false, |ext| ext == "so" || ext == "dll" || ext == "dylib")
             {
                 let ext_wrapper = unsafe {
                     match Container::<ExtensionApi>::load(path.clone()) {
