@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.5] - 2025-04-03
+
 ### Fixed
 
 - RS-659: Fix replication timeout for large records, [PR-774](https://github.com/reductstore/reductstore/pull/774)
@@ -946,7 +948,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.4...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.5...HEAD
+
+[1.14.5]: https://github.com/reductstore/reductstore/compare/v1.14.4...v1.14.5
 
 [1.14.4]: https://github.com/reductstore/reductstore/compare/v1.14.3...v1.14.4
 
