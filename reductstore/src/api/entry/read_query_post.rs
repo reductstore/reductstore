@@ -8,7 +8,7 @@ use crate::auth::policy::ReadAccessPolicy;
 
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
-use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType};
+use reduct_base::msg::entry_api::{QueryEntry, QueryInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
 
