@@ -140,6 +140,18 @@ impl ExtRepository {
 
 #[async_trait]
 impl ManageExtensions for ExtRepository {
+    /// Register a query with the extension
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The ID of the query
+    /// * `bucket_name` - The name of the bucket
+    /// * `entry_name` - The name of the entry
+    /// * `query_request` - The query request
+    ///
+    /// # Errors
+    ///
+    /// * `ReductError::InternalServerError` - If the query is not valid
     fn register_query(
         &self,
         query_id: u64,
@@ -172,6 +184,7 @@ impl ManageExtensions for ExtRepository {
             }
         });
 
+        // check if the query has references to computed labels and no extension is found
         let condition_filter = if let Some(condition) = &query_options.when {
             let node = Parser::new().parse(condition)?;
             if subscribers.is_empty() && node.stage() == &EvaluationStage::Compute {
@@ -308,9 +321,36 @@ mod tests {
     use reqwest::StatusCode;
     use rstest::{fixture, rstest};
 
+    use chrono::Duration;
+    use mockall::mock;
+    use mockall::predicate::{eq, le};
+    use serde_json::json;
+    use std::thread::sleep;
     use std::{env, fs};
     use tempfile::tempdir;
     use test_log::test as log_test;
+    use tokio::join;
+
+    mock! {
+        IoExtension {}
+
+        impl IoExtension for IoExtension {
+            fn info(&self) -> &IoExtensionInfo;
+            fn register_query(
+                &self,
+                query_id: u64,
+                bucket_name: &str,
+                entry_name: &str,
+                query: &QueryEntry,
+            ) -> Result<(), ReductError>;
+            fn next_processed_record(
+                &self,
+                query_id: u64,
+                record: BoxedReadRecord,
+            ) -> ProcessStatus;
+        }
+
+    }
 
     #[log_test(rstest)]
     fn test_load_extension(ext_repo: ExtRepository) {
@@ -329,6 +369,106 @@ mod tests {
                 .version("0.1.0")
                 .build()
         );
+    }
+    mod register_query {
+        use super::*;
+        #[rstest]
+        fn test_no_ext_part(mock_ext: MockIoExtension) {
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", QueryEntry::default())
+                .is_ok());
+
+            let query_map = mocked_ext_repo.query_map.read().unwrap();
+            assert_eq!(
+                query_map.len(),
+                0,
+                "We don't need to register the query without 'ext' part"
+            );
+        }
+
+        #[rstest]
+        fn test_with_ext_part(mut mock_ext: MockIoExtension) {
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "test-ext": {},
+                })),
+                ..Default::default()
+            };
+
+            mock_ext
+                .expect_register_query()
+                .with(eq(1), eq("bucket"), eq("entry"), eq(query.clone()))
+                .return_once(move |_, _, _, _| Ok(()));
+
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .is_ok());
+
+            let query_map = mocked_ext_repo.query_map.read().unwrap();
+            assert_eq!(
+                query_map.len(),
+                1,
+                "We need to register the query with 'ext' part"
+            );
+        }
+
+        #[rstest]
+        fn test_without_ext_but_computed_labels(mut mock_ext: MockIoExtension) {
+            let query = QueryEntry {
+                when: Some(json!({"@label": { "$eq": "value" }})),
+                ..Default::default()
+            };
+            mock_ext.expect_register_query().never();
+
+            let mocked_ext_repo = mocked_ext_repo("test", mock_ext);
+
+            assert_eq!(
+                mocked_ext_repo
+                    .register_query(1, "bucket", "entry", query)
+                    .err()
+                    .unwrap(),
+                unprocessable_entity!(
+                    "There is at least one reference to computed labels but no extension is found"
+                )
+            );
+        }
+
+        #[rstest]
+        fn test_ttl(mut mock_ext: MockIoExtension) {
+            let query = QueryEntry {
+                ttl: Some(1),
+                ext: Some(json!({
+                    "test-ext": {},
+                })),
+                ..Default::default()
+            };
+
+            mock_ext
+                .expect_register_query()
+                .with(eq(1), eq("bucket"), eq("entry"), eq(query.clone()))
+                .returning(move |_, _, _, _| Ok(()));
+
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query.clone())
+                .is_ok());
+
+            let query_map = mocked_ext_repo.query_map.read().unwrap();
+            assert_eq!(query_map.len(), 1);
+
+            sleep(Duration::seconds(2).to_std().unwrap());
+            assert!(mocked_ext_repo
+                .register_query(2, "bucket", "entry", query)
+                .is_ok());
+            let query_map = mocked_ext_repo.query_map.read().unwrap();
+            assert_eq!(query_map.len(), 1,);
+
+            assert!(query_map.get(&1).is_none(), "Query 1 should be expired");
+            assert!(query_map.get(&2).is_some());
+        }
     }
 
     #[fixture]
@@ -373,5 +513,18 @@ mod tests {
             .expect("Failed to write extension");
 
         ExtRepository::try_load(&ext_path.to_path_buf()).unwrap()
+    }
+
+    #[fixture]
+    fn mock_ext() -> MockIoExtension {
+        MockIoExtension::new()
+    }
+
+    fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
+        let mut ext_repo = ExtRepository::try_load(&PathBuf::from("ext")).unwrap();
+        ext_repo
+            .extension_map
+            .insert(name.to_string(), Arc::new(RwLock::new(Box::new(mock_ext))));
+        ext_repo
     }
 }
