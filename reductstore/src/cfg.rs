@@ -11,7 +11,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::cfg::io::IoConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
-use crate::ext::ext_repository::{create_ext_repository, ManageExtensions};
+use crate::ext::ext_repository::create_ext_repository;
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -20,7 +20,7 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";

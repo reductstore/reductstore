@@ -164,7 +164,6 @@ mod tests {
     use bytes::Bytes;
     use rstest::fixture;
     use std::collections::HashMap;
-    use std::path::PathBuf;
 
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::ReplicationSettings;

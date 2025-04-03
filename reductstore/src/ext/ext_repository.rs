@@ -6,13 +6,12 @@ use crate::storage::query::condition::{EvaluationStage, Parser};
 use crate::storage::query::filters::WhenFilter;
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
-use axum::extract::Path;
 use dlopen2::wrapper::{Container, WrapperApi};
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, IoExtension, ProcessStatus};
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::{internal_server_error, unprocessable_entity, Labels};
+use reduct_base::{unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -247,6 +246,7 @@ impl ManageExtensions for ExtRepository {
                         return status;
                     }
 
+                    // filter with computed labels
                     if let ProcessStatus::Ready(record) = &status {
                         match query
                             .condition_filter
@@ -323,13 +323,12 @@ mod tests {
 
     use chrono::Duration;
     use mockall::mock;
-    use mockall::predicate::{eq, le};
+    use mockall::predicate::eq;
     use serde_json::json;
+    use std::fs;
     use std::thread::sleep;
-    use std::{env, fs};
     use tempfile::tempdir;
     use test_log::test as log_test;
-    use tokio::join;
 
     mock! {
         IoExtension {}
