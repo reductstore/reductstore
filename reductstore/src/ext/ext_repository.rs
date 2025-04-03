@@ -309,6 +309,7 @@ mod tests {
     use rstest::{fixture, rstest};
 
     use std::{env, fs};
+    use tempfile::tempdir;
     use test_log::test as log_test;
 
     #[log_test(rstest)]
@@ -350,29 +351,26 @@ mod tests {
             panic!("Unsupported platform")
         };
 
-        let ext_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("ext");
+        let ext_path = PathBuf::from(tempdir().unwrap().into_path()).join("ext");
         fs::create_dir_all(ext_path.clone()).unwrap();
 
-        let file_path = ext_path.join(file_name);
-        if !file_path.exists() {
-            let link = format!(
-                "https://github.com/reductstore/test-ext/releases/download/v{}/{}",
-                EXTENSION_VERSION, file_name
-            );
+        let link = format!(
+            "https://github.com/reductstore/test-ext/releases/download/v{}/{}",
+            EXTENSION_VERSION, file_name
+        );
 
-            let mut resp = get(link).expect("Failed to download extension");
-            if resp.status() != StatusCode::OK {
-                if resp.status() == StatusCode::FOUND {
-                    resp = get(resp.headers().get("location").unwrap().to_str().unwrap())
-                        .expect("Failed to download extension");
-                } else {
-                    panic!("Failed to download extension: {}", resp.status());
-                }
+        let mut resp = get(link).expect("Failed to download extension");
+        if resp.status() != StatusCode::OK {
+            if resp.status() == StatusCode::FOUND {
+                resp = get(resp.headers().get("location").unwrap().to_str().unwrap())
+                    .expect("Failed to download extension");
+            } else {
+                panic!("Failed to download extension: {}", resp.status());
             }
-
-            fs::write(ext_path.join(file_name), resp.bytes().unwrap())
-                .expect("Failed to write extension");
         }
+
+        fs::write(ext_path.join(file_name), resp.bytes().unwrap())
+            .expect("Failed to write extension");
 
         ExtRepository::try_load(&ext_path.to_path_buf()).unwrap()
     }
