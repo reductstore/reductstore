@@ -333,23 +333,35 @@ mod tests {
     use tempfile::tempdir;
     use test_log::test as log_test;
 
-    #[log_test(rstest)]
-    fn test_load_extension(ext_repo: ExtRepository) {
-        assert_eq!(ext_repo.extension_map.len(), 1);
-        let ext = ext_repo
-            .extension_map
-            .get("test-ext")
-            .unwrap()
-            .read()
-            .unwrap();
-        let info = ext.info().clone();
-        assert_eq!(
-            info,
-            IoExtensionInfo::builder()
-                .name("test-ext")
-                .version("0.1.0")
-                .build()
-        );
+    mod load {
+        use super::*;
+        #[log_test(rstest)]
+        fn test_load_extension(ext_repo: ExtRepository) {
+            assert_eq!(ext_repo.extension_map.len(), 1);
+            let ext = ext_repo
+                .extension_map
+                .get("test-ext")
+                .unwrap()
+                .read()
+                .unwrap();
+            let info = ext.info().clone();
+            assert_eq!(
+                info,
+                IoExtensionInfo::builder()
+                    .name("test-ext")
+                    .version("0.1.0")
+                    .build()
+            );
+        }
+
+        #[log_test(rstest)]
+        fn test_failed_load() {
+            let path = PathBuf::from("ext");
+            fs::create_dir_all(&path).unwrap();
+            fs::write(&path.join("libtest.so"), b"test").unwrap();
+            let ext_repo = ExtRepository::try_load(&path).unwrap();
+            assert_eq!(ext_repo.extension_map.len(), 0);
+        }
     }
     mod register_query {
         use super::*;
@@ -458,6 +470,58 @@ mod tests {
         }
     }
 
+    mod send_record_to_ext_pipeline {
+        use super::*;
+        use assert_matches::assert_matches;
+        use mockall::predicate::always;
+        use reduct_base::internal_server_error;
+
+        #[rstest]
+        fn test_no_ext() {
+            let record = Box::new(MockRecord::new("key1", "val1"));
+            let query = QueryContext {
+                query_id: 1,
+                query: QueryOptions::default(),
+                condition_filter: None,
+                last_access: Instant::now(),
+                ext_pipeline: vec![],
+            };
+
+            let status = ExtRepository::send_record_to_ext_pipeline(1, record, &query);
+            assert_matches!(status, ProcessStatus::Ready(_));
+        }
+
+        #[rstest]
+        fn test_stop_pipeline_at_errors() {
+            let record = Box::new(MockRecord::new("key1", "val1"));
+            let mut mock_ext_1 = MockIoExtension::new();
+            let mut mock_ext_2 = MockIoExtension::new();
+
+            mock_ext_1
+                .expect_next_processed_record()
+                .with(eq(1), always())
+                .return_once(|_, _| ProcessStatus::Ready(Err(internal_server_error!("test"))));
+            mock_ext_2.expect_next_processed_record().never();
+
+            let query = QueryContext {
+                query_id: 1,
+                query: QueryOptions::default(),
+                condition_filter: None,
+                last_access: Instant::now(),
+                ext_pipeline: vec![
+                    Arc::new(RwLock::new(Box::new(mock_ext_1))),
+                    Arc::new(RwLock::new(Box::new(mock_ext_2))),
+                ],
+            };
+
+            let status = ExtRepository::send_record_to_ext_pipeline(1, record, &query);
+            let ProcessStatus::Ready(result) = status else {
+                panic!("Expected ProcessStatus::Ready");
+            };
+
+            assert_eq!(result.err().unwrap(), internal_server_error!("test"));
+        }
+    }
     mod next_processed_record {
         use super::*;
         use crate::storage::entry::RecordReader;
@@ -697,6 +761,7 @@ mod tests {
 
     }
 
+    #[derive(Clone, PartialEq, Debug)]
     struct MockRecord {
         computed_labels: Labels,
     }
