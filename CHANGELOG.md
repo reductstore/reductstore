@@ -12,10 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimum Rust version to 1.85
 - RS-633: Link runtime libraries statically, [PR-761](https://github.com/reductstore/reductstore/pull/761)
 
+## [1.14.5] - 2025-04-03
+
 ### Fixed
 
 - RS-659: Fix replication timeout for large records, [PR-774](https://github.com/reductstore/reductstore/pull/774)
 - Fix double sync of block descriptor for a new block, [PR-775](https://github.com/reductstore/reductstore/pull/775)
+- Update Web Console up to 1.9.1, [PR-776](https://github.com/reductstore/reductstore/pull/776)
 
 ## [1.14.4] - 2025-03-28
 
@@ -950,7 +953,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.4...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.5...HEAD
+
+[1.14.5]: https://github.com/reductstore/reductstore/compare/v1.14.4...v1.14.5
 
 [1.14.4]: https://github.com/reductstore/reductstore/compare/v1.14.3...v1.14.4
 
