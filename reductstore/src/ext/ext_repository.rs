@@ -11,7 +11,7 @@ use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, IoExtension, ProcessStatus};
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::{unprocessable_entity, Labels};
+use reduct_base::{internal_server_error, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -67,12 +67,10 @@ impl ExtRepository {
         let query_map = RwLock::new(HashMap::new());
 
         if !path.exists() {
-            error!("No extension found in path {}", path.display());
-            return Ok(ExtRepository {
-                extension_map,
-                query_map,
-                ext_wrappers: Vec::new(),
-            });
+            return Err(internal_server_error!(
+                "Extension directory {:?} does not exist",
+                path
+            ));
         }
 
         let mut ext_wrappers = Vec::new();
@@ -134,6 +132,30 @@ impl ExtRepository {
             .computed_labels_mut()
             .extend(computed_labels.clone().into_iter());
         ProcessStatus::Ready(Ok(record))
+    }
+
+    fn filter_record(query: &mut QueryContext, status: ProcessStatus) -> ProcessStatus {
+        // filter with computed labels
+        if let ProcessStatus::Ready(record) = &status {
+            match query
+                .condition_filter
+                .as_mut()
+                .unwrap()
+                .filter_with_computed(&record.as_ref().unwrap())
+            {
+                Ok(true) => status,
+                Ok(false) => ProcessStatus::NotReady,
+                Err(e) => {
+                    if query.query.strict {
+                        ProcessStatus::Ready(Err(e))
+                    } else {
+                        status
+                    }
+                }
+            }
+        } else {
+            status
+        }
     }
 }
 
@@ -246,27 +268,7 @@ impl ManageExtensions for ExtRepository {
                         return status;
                     }
 
-                    // filter with computed labels
-                    if let ProcessStatus::Ready(record) = &status {
-                        match query
-                            .condition_filter
-                            .as_mut()
-                            .unwrap()
-                            .filter_with_computed(&record.as_ref().unwrap())
-                        {
-                            Ok(true) => status,
-                            Ok(false) => ProcessStatus::NotReady,
-                            Err(e) => {
-                                if query.query.strict {
-                                    ProcessStatus::Ready(Err(e))
-                                } else {
-                                    status
-                                }
-                            }
-                        }
-                    } else {
-                        status
-                    }
+                    Self::filter_record(query, status)
                 }
                 Err(e) => ProcessStatus::Ready(Err(e)),
             }
@@ -356,17 +358,72 @@ mod tests {
 
         #[log_test(rstest)]
         fn test_failed_load() {
-            let path = PathBuf::from("ext");
+            let path = tempdir().unwrap().into_path();
             fs::create_dir_all(&path).unwrap();
             fs::write(&path.join("libtest.so"), b"test").unwrap();
             let ext_repo = ExtRepository::try_load(&path).unwrap();
             assert_eq!(ext_repo.extension_map.len(), 0);
+        }
+
+        #[log_test(rstest)]
+        fn test_failed_open_dir() {
+            let path = PathBuf::from("non_existing_dir");
+            let ext_repo = ExtRepository::try_load(&path);
+            assert_eq!(
+                ext_repo.err().unwrap(),
+                internal_server_error!("Extension directory \"non_existing_dir\" does not exist")
+            );
+        }
+
+        #[fixture]
+        fn ext_repo() -> ExtRepository {
+            // This is the path to the build directory of the extension from ext_stub crate
+            const EXTENSION_VERSION: &str = "0.1.0";
+
+            if !cfg!(target_arch = "x86_64") {
+                panic!("Unsupported architecture");
+            }
+
+            let file_name = if cfg!(target_os = "linux") {
+                // This is the path to the build directory of the extension from ext_stub crate
+                "libtest_ext-x86_64-unknown-linux-gnu.so"
+            } else if cfg!(target_os = "macos") {
+                "libtest_ext-x86_64-apple-darwin.dylib"
+            } else if cfg!(target_os = "windows") {
+                "libtest_ext-x86_64-pc-windows-gnu.dll"
+            } else {
+                panic!("Unsupported platform")
+            };
+
+            let ext_path = PathBuf::from(tempdir().unwrap().into_path()).join("ext");
+            fs::create_dir_all(ext_path.clone()).unwrap();
+
+            let link = format!(
+                "https://github.com/reductstore/test-ext/releases/download/v{}/{}",
+                EXTENSION_VERSION, file_name
+            );
+
+            let mut resp = get(link).expect("Failed to download extension");
+            if resp.status() != StatusCode::OK {
+                if resp.status() == StatusCode::FOUND {
+                    resp = get(resp.headers().get("location").unwrap().to_str().unwrap())
+                        .expect("Failed to download extension");
+                } else {
+                    panic!("Failed to download extension: {}", resp.status());
+                }
+            }
+
+            fs::write(ext_path.join(file_name), resp.bytes().unwrap())
+                .expect("Failed to write extension");
+
+            ExtRepository::try_load(&ext_path.to_path_buf()).unwrap()
         }
     }
     mod register_query {
         use super::*;
         use mockall::predicate::ge;
         use std::time::Duration;
+
         #[rstest]
         fn test_no_ext_part(mock_ext: MockIoExtension) {
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
@@ -394,7 +451,7 @@ mod tests {
             mock_ext
                 .expect_register_query()
                 .with(eq(1), eq("bucket"), eq("entry"), eq(query.clone()))
-                .return_once(move |_, _, _, _| Ok(()));
+                .return_const(Ok(()));
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
 
@@ -444,28 +501,33 @@ mod tests {
             mock_ext
                 .expect_register_query()
                 .with(ge(1), eq("bucket"), eq("entry"), eq(query.clone()))
-                .returning(move |_, _, _, _| Ok(()));
+                .return_const(Ok(()));
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
             assert!(mocked_ext_repo
                 .register_query(1, "bucket", "entry", query.clone())
                 .is_ok());
 
+            assert!(mocked_ext_repo
+                .register_query(2, "bucket", "entry", query.clone())
+                .is_ok());
+
             {
                 let query_map = mocked_ext_repo.query_map.read().unwrap();
-                assert_eq!(query_map.len(), 1);
+                assert_eq!(query_map.len(), 2);
             }
 
             sleep(Duration::from_secs(2));
             assert!(mocked_ext_repo
-                .register_query(2, "bucket", "entry", query)
+                .register_query(3, "bucket", "entry", query)
                 .is_ok());
             {
                 let query_map = mocked_ext_repo.query_map.read().unwrap();
                 assert_eq!(query_map.len(), 1,);
 
                 assert!(query_map.get(&1).is_none(), "Query 1 should be expired");
-                assert!(query_map.get(&2).is_some());
+                assert!(query_map.get(&2).is_none(), "Query 2 should be expired");
+                assert!(query_map.get(&3).is_some());
             }
         }
     }
@@ -639,6 +701,7 @@ mod tests {
                     "test1": {},
                     "test2": {}
                 })),
+                when: Some(json!({"@key2": { "$eq": "val2" }})),
                 ..Default::default()
             };
             mocked_ext_repo
@@ -667,50 +730,6 @@ mod tests {
                 "Computed labels to be merged from both extensions"
             );
         }
-    }
-
-    #[fixture]
-    fn ext_repo() -> ExtRepository {
-        // This is the path to the build directory of the extension from ext_stub crate
-        const EXTENSION_VERSION: &str = "0.1.0";
-
-        if !cfg!(target_arch = "x86_64") {
-            panic!("Unsupported architecture");
-        }
-
-        let file_name = if cfg!(target_os = "linux") {
-            // This is the path to the build directory of the extension from ext_stub crate
-            "libtest_ext-x86_64-unknown-linux-gnu.so"
-        } else if cfg!(target_os = "macos") {
-            "libtest_ext-x86_64-apple-darwin.dylib"
-        } else if cfg!(target_os = "windows") {
-            "libtest_ext-x86_64-pc-windows-gnu.dll"
-        } else {
-            panic!("Unsupported platform")
-        };
-
-        let ext_path = PathBuf::from(tempdir().unwrap().into_path()).join("ext");
-        fs::create_dir_all(ext_path.clone()).unwrap();
-
-        let link = format!(
-            "https://github.com/reductstore/test-ext/releases/download/v{}/{}",
-            EXTENSION_VERSION, file_name
-        );
-
-        let mut resp = get(link).expect("Failed to download extension");
-        if resp.status() != StatusCode::OK {
-            if resp.status() == StatusCode::FOUND {
-                resp = get(resp.headers().get("location").unwrap().to_str().unwrap())
-                    .expect("Failed to download extension");
-            } else {
-                panic!("Failed to download extension: {}", resp.status());
-            }
-        }
-
-        fs::write(ext_path.join(file_name), resp.bytes().unwrap())
-            .expect("Failed to write extension");
-
-        ExtRepository::try_load(&ext_path.to_path_buf()).unwrap()
     }
 
     #[fixture]
@@ -764,6 +783,7 @@ mod tests {
     #[derive(Clone, PartialEq, Debug)]
     struct MockRecord {
         computed_labels: Labels,
+        labels: Labels,
     }
 
     impl MockRecord {
@@ -772,6 +792,7 @@ mod tests {
                 computed_labels: Labels::from_iter(
                     vec![(key.to_string(), val.to_string())].into_iter(),
                 ),
+                labels: Labels::new(),
             }
         }
     }
@@ -782,7 +803,7 @@ mod tests {
         }
 
         fn labels(&self) -> &Labels {
-            todo!()
+            &self.labels
         }
     }
 
