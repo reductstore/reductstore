@@ -348,6 +348,7 @@ mod tests {
 
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
+        use prost_wkt_types::Timestamp;
         use std::time::Duration;
 
         #[rstest]
@@ -391,6 +392,50 @@ mod tests {
                 find_task_group(&task_group).is_none(),
                 "The task should finish after reading the record"
             );
+        }
+
+        #[rstest]
+        fn test_state(mut record: Record) {
+            record.state = 1;
+            let mut reader = RecordReader::form_record(record, false);
+            assert_eq!(reader.state(), 1);
+        }
+
+        #[rstest]
+        fn test_computed_labels(record: Record) {
+            let mut reader = RecordReader::form_record(record, false);
+            reader
+                .computed_labels_mut()
+                .insert("key".to_string(), "value".to_string());
+            assert_eq!(
+                reader.computed_labels(),
+                &Labels::from([("key".to_string(), "value".to_string())])
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_read_timeout(record: Record) {
+            let (_tx, rx) = channel(CHANNEL_BUFFER_SIZE);
+            let mut reader = RecordReader::form_record_with_rx(rx, record, false);
+
+            let result = reader.read_timeout(Duration::from_millis(100)).await;
+            assert_eq!(
+                result,
+                Some(Err(internal_server_error!(
+                    "Timeout reading record: deadline has elapsed"
+                )))
+            );
+        }
+
+        #[fixture]
+        fn record() -> Record {
+            let mut record = Record::default();
+            record.timestamp = Some(Timestamp {
+                seconds: 1000,
+                nanos: 0,
+            });
+            record
         }
     }
 }
