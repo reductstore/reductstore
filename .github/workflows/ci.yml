@@ -1,16 +1,16 @@
 name: ci
 on:
   push:
-    branches: [ main, stable ]
+    branches: [main, stable]
     tags:
-      - 'v*'
+      - "v*"
     paths-ignore:
       - docs/**
       - README.md
       - CHANGELOG.md
 
   pull_request:
-    branches: [ main, stable ]
+    branches: [main, stable]
     paths-ignore:
       - docs/**
       - README.md
@@ -58,7 +58,12 @@ jobs:
       - rust_fmt
     strategy:
       matrix:
-        target: [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-apple-darwin" ]
+        target:
+          [
+            "x86_64-unknown-linux-gnu",
+            "x86_64-pc-windows-gnu",
+            "x86_64-apple-darwin",
+          ]
         include:
           - target: "x86_64-unknown-linux-gnu"
             os: ubuntu-24.04
@@ -70,12 +75,11 @@ jobs:
             os: macos-13
             compiler: "gcc"
 
-
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v3
         with:
-          version: '26.x'
+          version: "26.x"
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
 
       - name: Install Rust
@@ -122,7 +126,6 @@ jobs:
           name: reductstore-tests-${{ matrix.target }}
           path: target/${{ matrix.target }}/tests
 
-
   unit_tests:
     name: Run Unit Tests
     needs:
@@ -130,7 +133,7 @@ jobs:
       - build_binaries
     strategy:
       matrix:
-        os: [ ubuntu-24.04, windows-2022, macos-13 ]
+        os: [ubuntu-24.04, windows-2022, macos-13]
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
@@ -180,7 +183,7 @@ jobs:
 
       - uses: arduino/setup-protoc@v3
         with:
-          version: '26.x'
+          version: "26.x"
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
 
       - name: Generate code coverage
@@ -202,9 +205,9 @@ jobs:
       - build
     strategy:
       matrix:
-        token: [ "", "XXXX" ]
-        cert_path: [ "", "/misc/certificate.crt" ]
-        license_path: [ "", "/misc/license.lic" ]
+        token: ["", "XXXX"]
+        cert_path: ["", "/misc/certificate.crt"]
+        license_path: ["", "/misc/license.lic"]
         include:
           - cert_path: "/misc/certificate.crt"
             url: https://127.0.0.1:8383
@@ -249,7 +252,6 @@ jobs:
           --env LICENSE_PATH=${{matrix.license_path}}
           --env STORAGE_URL=${{matrix.url}} api
 
-
       - name: Print docker logs
         if: always()
         run: docker logs reduct
@@ -262,7 +264,18 @@ jobs:
       - build
     strategy:
       matrix:
-        version: [ 'latest', 'v1.14.0', 'v1.13.5', 'v1.12.4', 'v1.11.2', 'v1.10.1', 'v1.9.5', 'v1.8.2', 'v1.7.3' ]
+        version:
+          [
+            "latest",
+            "v1.14.0",
+            "v1.13.5",
+            "v1.12.4",
+            "v1.11.2",
+            "v1.10.1",
+            "v1.9.5",
+            "v1.8.2",
+            "v1.7.3",
+          ]
     env:
       RS_API_TOKEN: XXXX
     steps:
@@ -324,7 +337,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        cmd: [ "stop", "kill" ]
+        cmd: ["stop", "kill"]
     needs:
       - unit_tests
       - build
@@ -477,6 +490,89 @@ jobs:
         run: |
           curl -H "Authorization: Bearer ${RS_API_TOKEN}" http://127.0.0.1:8383/api/v1/replications/replication | jq
 
+
+  benchmark:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    needs:
+      - build # for docker image
+      - unit_tests
+    strategy:
+      matrix:
+        branch: ["main", "latest"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load Docker image
+        run: docker load --input /tmp/image.tar
+
+      - name: Run current ReductStore
+        run: |
+          docker run -d \
+            --name reductstore \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            --env RS_LOG_LEVEL=INFO \
+            -p 8383:8383 \
+            -v ./data:/data \
+            ${{ github.repository }}:latest
+          sleep 5
+          docker logs reductstore
+
+      - name: Install reduct-py
+        run: |
+          pip install reduct-py>=1.14
+
+      - name: Run python benchmark
+        run: |
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 current.csv
+
+      - name: Stop and remove current container
+        run: |
+          docker stop reductstore
+          docker rm reductstore
+
+      - name: Run ${{matrix.branch}} ReductStore
+        run: |
+          docker run -d \
+            --name reductstore \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            --env RS_LOG_LEVEL=INFO \
+            -p 8383:8383 \
+            -v ./data:/data \
+            reduct/store:${{matrix.branch}}
+          sleep 5
+          docker logs reductstore
+
+      - name: Install reduct-py
+        run: |
+          pip install reduct-py>=1.14
+
+      - name: Run python benchmark
+        run: |
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 ${{matrix.branch}}.csv
+
+      - name: Check result
+        run: |
+          python3 integration_tests/benchmarks/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv
+
+      - name: Save docker logs
+        if: always()
+        run: docker logs reductstore | zip > /tmp/docker-log.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-log-benchmark-${{matrix.branch}}
+          path: /tmp/docker-log.zip
+
   build_snap:
     runs-on: ubuntu-latest
     name: Build snap package
@@ -488,7 +584,7 @@ jobs:
       - uses: snapcore/action-build@v1
         id: build-snap
         with:
-          snapcraft-args: '--enable-experimental-extensions --verbose'
+          snapcraft-args: "--enable-experimental-extensions --verbose"
 
       # Make sure the snap is installable
       - run: |
@@ -522,7 +618,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [ amd64, arm64 ]
+        arch: [amd64, arm64]
     needs:
       - build_snap
       - api_tests
@@ -555,7 +651,7 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
-        platform: [ linux/amd64, linux/arm64 ]
+        platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
@@ -636,7 +732,6 @@ jobs:
           find /tmp/digests -type f -print0 | xargs -0 mv -t /tmp/merged_digests
           ls /tmp/merged_digests
 
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Docker meta
@@ -676,7 +771,7 @@ jobs:
           toolchain: ${{ env.MINIMAL_RUST_VERSION }}
       - uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
       - name: Login
         run: |
