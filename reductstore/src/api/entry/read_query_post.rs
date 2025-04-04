@@ -8,7 +8,7 @@ use crate::auth::policy::ReadAccessPolicy;
 
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
-use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType};
+use reduct_base::msg::entry_api::{QueryEntry, QueryInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,12 +19,6 @@ pub(crate) async fn read_query_json(
     request: QueryEntry,
     headers: HeaderMap,
 ) -> Result<QueryInfoAxum, HttpError> {
-    assert_eq!(
-        request.query_type,
-        QueryType::Query,
-        "Query type must be Query"
-    );
-
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
 

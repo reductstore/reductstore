@@ -3,13 +3,13 @@ import json
 import time
 from hashlib import md5
 
-from reduct import Client, Bucket, ServerInfo
+from reduct import Client, Bucket, ServerInfo, BucketSettings
 from os import getenv
 import random
 
 NUMBER_OF_ENTRIES = int(getenv("NUMBER_OF_ENTRIES", 18))
 NUMBER_OF_RECORDS = int(getenv("NUMBER_OF_RECORDS", 512))
-MAX_BLOB_SIZE = 1024 * 1024 * int(getenv("MAX_BLOB_SIZE", 1))
+MAX_BLOB_SIZE = int(1024 * 1024 * float(getenv("MAX_BLOB_SIZE", 1)))
 
 BLOB = random.randbytes(MAX_BLOB_SIZE)
 BUCKET_NAME = getenv("BUCKET_NAME", "data_check")
@@ -21,7 +21,13 @@ async def load():
         "http://127.0.0.1:8383", api_token=getenv("RS_API_TOKEN")
     ) as client:
         report = {}
-        bucket: Bucket = await client.create_bucket(BUCKET_NAME, exist_ok=True)
+        bucket: Bucket = await client.create_bucket(
+            BUCKET_NAME,
+            exist_ok=True,
+            settings=BucketSettings(
+                max_block_records=NUMBER_OF_RECORDS // 4 + random.randint(-10, 10)
+            ),
+        )
 
         tasks = []
 

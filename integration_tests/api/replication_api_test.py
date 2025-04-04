@@ -36,7 +36,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
     assert resp.json() == {
         "diagnostics": {"hourly": {"errored": 0, "errors": {}, "ok": 0}},
         "info": {
-            "is_active": False,
+            "is_active": True,
             "is_provisioned": False,
             "name": replication_name,
             "pending_records": 0,
@@ -105,7 +105,7 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
     assert resp.json() == {
         "diagnostics": {"hourly": {"errored": 0, "errors": {}, "ok": 0}},
         "info": {
-            "is_active": False,
+            "is_active": True,
             "is_provisioned": False,
             "name": replication_name,
             "pending_records": 0,

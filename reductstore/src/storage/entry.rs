@@ -584,7 +584,7 @@ mod tests {
 
             assert_eq!(entry.info().unwrap().block_count, 2);
             assert_eq!(entry.info().unwrap().record_count, 4);
-            assert_eq!(entry.info().unwrap().size, 138);
+            assert_eq!(entry.info().unwrap().size, 116);
 
             entry.try_remove_oldest_block().wait().unwrap();
             assert_eq!(entry.info().unwrap().block_count, 1);

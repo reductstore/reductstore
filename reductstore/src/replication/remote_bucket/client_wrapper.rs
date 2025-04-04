@@ -66,7 +66,7 @@ impl ReductClient {
 
         let client = Client::builder()
             .default_headers(headers)
-            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(10))
             .danger_accept_invalid_certs(true)
             .http1_only()
             .build()

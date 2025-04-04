@@ -8,7 +8,7 @@ use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::debug;
+use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, Labels};
@@ -175,7 +175,7 @@ impl RecordReader {
         };
 
         if let Err(e) = read_all() {
-            debug!(
+            error!(
                 "Failed to send record {}/{}/{}: {}",
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
             )
