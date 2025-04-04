@@ -124,6 +124,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -611,6 +617,29 @@ name = "displaydoc"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "dlopen2"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e1297103d2bbaea85724fcee6294c2d50b1081f9ad47d0f6f6f61eda65315a6"
+dependencies = [
+ "dlopen2_derive",
+ "libc",
+ "once_cell",
+ "winapi",
+]
+
+[[package]]
+name = "dlopen2_derive"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b99bf03862d7f545ebc28ddd33a665b50865f4dfd84031a393823879bd4c54"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1975,12 +2004,15 @@ dependencies = [
 name = "reduct-base"
 version = "1.15.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "chrono",
  "http",
  "int-enum",
  "rstest",
  "serde",
  "serde_json",
+ "tokio",
  "url",
 ]
 
@@ -1996,6 +2028,7 @@ dependencies = [
 name = "reductstore"
 version = "1.15.0"
 dependencies = [
+ "assert_matches",
  "async-stream",
  "async-trait",
  "axum",
@@ -2008,6 +2041,7 @@ dependencies = [
  "chrono",
  "crc64fast",
  "crossbeam-channel",
+ "dlopen2",
  "futures-util",
  "hex",
  "hyper",

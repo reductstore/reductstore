@@ -1,8 +1,9 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::RecordFilter;
 use reduct_base::error::ReductError;
+use reduct_base::io::RecordMeta;
 
 /// Filter that passes every N-th record
 pub struct EachNFilter {
@@ -19,11 +20,8 @@ impl EachNFilter {
     }
 }
 
-impl<P> RecordFilter<P> for EachNFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, _: &P) -> Result<bool, ReductError> {
+impl RecordFilter for EachNFilter {
+    fn filter(&mut self, _record: &dyn RecordMeta) -> Result<bool, ReductError> {
         let ret = self.count % self.n == 0;
         self.count += 1;
         Ok(ret)
@@ -34,6 +32,7 @@ where
 mod tests {
     use super::*;
     use crate::storage::proto::Record;
+    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::*;
 
     #[rstest]
@@ -41,14 +40,15 @@ mod tests {
         let mut filter = EachNFilter::new(2);
         let record = Record::default();
 
-        assert!(filter.filter(&record).unwrap(), "First time should pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap(), "First time should pass");
         assert!(
-            !filter.filter(&record).unwrap(),
+            !filter.filter(&wrapper).unwrap(),
             "Second time should not pass"
         );
-        assert!(filter.filter(&record).unwrap(), "Third time should pass");
+        assert!(filter.filter(&wrapper).unwrap(), "Third time should pass");
         assert!(
-            !filter.filter(&record).unwrap(),
+            !filter.filter(&wrapper).unwrap(),
             "Fourth time should not pass"
         );
     }

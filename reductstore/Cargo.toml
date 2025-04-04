@@ -26,8 +26,8 @@ crate-type = ["lib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-reduct-base = { path = "../reduct_base", version = "1.11.0" }
-reduct-macros = { path = "../reduct_macros", version = "1.11.0" }
+reduct-base = { path = "../reduct_base", version = "1.15.0", features = ["ext"] }
+reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
 
 log = "0.4.26"
 chrono = { version = "0.4.40", features = ["serde"] }
@@ -64,6 +64,7 @@ crc64fast = "1.1.0"
 rustls = "0.23.23"
 byteorder = "1.5.0"
 crossbeam-channel = "0.5.14"
+dlopen2="0.7.0"
 
 [build-dependencies]
 prost-build = "0.13.1"
@@ -75,6 +76,8 @@ mockall = "0.13.1"
 rstest = "0.25.0"
 serial_test = "3.2.0"
 test-log = "0.2.17"
+reqwest = { version = "0.12.15", default-features = false, features = ["rustls-tls", "blocking"] }
+assert_matches = "1.5"
 
 [package.metadata.docs.rs]
 no-default-features = true
