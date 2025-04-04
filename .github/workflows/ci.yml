@@ -499,7 +499,7 @@ jobs:
       - unit_tests
     strategy:
       matrix:
-        branch: ["main"]
+        branch: ["main", "latest"]
 
     steps:
       - uses: actions/checkout@v4
