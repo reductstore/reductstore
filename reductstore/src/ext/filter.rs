@@ -1,11 +1,10 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::ext::ext_repository::QueryContext;
 use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
+use reduct_base::conflict;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, ProcessStatus};
-use reduct_base::{conflict, unprocessable_entity};
 use std::collections::HashMap;
 
 pub(super) struct ExtWhenFilter {

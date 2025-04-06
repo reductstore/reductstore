@@ -297,7 +297,6 @@ pub(super) mod tests {
     use reqwest::StatusCode;
     use rstest::{fixture, rstest};
 
-    use crate::ext::ext_repository;
     use crate::storage::entry::RecordReader;
     use crate::storage::proto::Record;
     use mockall::mock;

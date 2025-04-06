@@ -4,9 +4,6 @@
 use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
 use crate::storage::query::filters::{RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
-use reduct_base::ext::BoxedReadRecord;
-use reduct_base::unprocessable_entity;
-use std::collections::HashMap;
 
 /// A node representing a when filter with a condition.
 pub struct WhenFilter {

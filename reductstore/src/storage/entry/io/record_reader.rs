@@ -397,7 +397,7 @@ mod tests {
         #[rstest]
         fn test_state(mut record: Record) {
             record.state = 1;
-            let mut reader = RecordReader::form_record(record, false);
+            let reader = RecordReader::form_record(record, false);
             assert_eq!(reader.state(), 1);
         }
 
