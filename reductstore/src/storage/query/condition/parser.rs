@@ -371,6 +371,35 @@ mod tests {
         }
     }
 
+    mod staged_all_of {
+        use super::*;
+        use rstest::rstest;
+
+        #[rstest]
+        fn test_staged_all_of() {
+            let operands: Vec<BoxedNode> = vec![
+                Constant::boxed(Value::Bool(true)),
+                Constant::boxed(Value::Bool(false)),
+            ];
+            let staged_all_of = StagedAllOff::boxed(operands);
+            assert_eq!(
+                staged_all_of.unwrap().print(),
+                "AllOf([Bool(true), Bool(false)])"
+            );
+        }
+
+        #[rstest]
+        fn test_run_only_staged_all_of() {
+            let operands: Vec<BoxedNode> = vec![
+                Constant::boxed(Value::Bool(false)), // ignored because not in stage
+            ];
+
+            let staged_all_of = StagedAllOff::boxed(operands).unwrap();
+            let context = Context::new(HashMap::new(), EvaluationStage::Compute);
+            assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(true));
+        }
+    }
+
     #[fixture]
     fn parser() -> Parser {
         Parser::new()

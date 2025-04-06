@@ -55,6 +55,7 @@ impl Reference {
 mod tests {
     use super::*;
     use crate::storage::query::condition::value::Value;
+    use rstest::rstest;
 
     #[test]
     fn apply() {
@@ -82,5 +83,21 @@ mod tests {
         let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
         let result = reference.print();
         assert_eq!(result, "Ref(label)");
+    }
+
+    #[test]
+    fn operands() {
+        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
+        let result = reference.operands();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[rstest]
+    #[case(EvaluationStage::Retrieve)]
+    #[case(EvaluationStage::Compute)]
+    fn test_stage(#[case] stage: EvaluationStage) {
+        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
+        let result = reference.stage();
+        assert_eq!(result, &EvaluationStage::Retrieve);
     }
 }

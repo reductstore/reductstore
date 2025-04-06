@@ -299,6 +299,20 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_ext_path(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_EXT_PATH"))
+            .times(1)
+            .return_const(Ok("/tmp/ext".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let cfg = Cfg::from_env(env_getter);
+        assert_eq!(cfg.ext_path, Some("/tmp/ext".to_string()));
+    }
+
     #[fixture]
     fn env_getter() -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();

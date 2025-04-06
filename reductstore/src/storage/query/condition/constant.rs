@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::value::Value;
@@ -72,6 +72,20 @@ mod tests {
             let constant = Constant::new(Value::Bool(true));
             let result = constant.print();
             assert_eq!(result, "Bool(true)");
+        }
+
+        #[test]
+        fn operands() {
+            let constant = Constant::new(Value::Bool(true));
+            let result = constant.operands();
+            assert_eq!(result.len(), 0);
+        }
+
+        #[test]
+        fn from_bool() {
+            let constant = Constant::from(true);
+            let result = constant.apply(&Context::default()).unwrap();
+            assert_eq!(result, Value::Bool(true));
         }
     }
 }
