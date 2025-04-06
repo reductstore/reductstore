@@ -750,7 +750,7 @@ mod tests {
     }
 
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
-        let mut ext_repo = ExtRepository::try_load(&PathBuf::from("ext")).unwrap();
+        let mut ext_repo = ExtRepository::try_load(&tempdir().unwrap().into_path()).unwrap();
         ext_repo
             .extension_map
             .insert(name.to_string(), Arc::new(RwLock::new(Box::new(mock_ext))));
