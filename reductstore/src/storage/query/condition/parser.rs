@@ -29,6 +29,7 @@ struct StagedAllOff {
 impl Node for StagedAllOff {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
         for operand in self.operands.iter() {
+            // Filter out operands that are not in the current stage
             if operand.stage() == &context.stage {
                 let value = operand.apply(context)?;
                 if !value.as_bool()? {

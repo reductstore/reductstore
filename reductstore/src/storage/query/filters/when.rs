@@ -17,26 +17,6 @@ impl WhenFilter {
     pub fn new(condition: BoxedNode) -> Self {
         WhenFilter { condition }
     }
-
-    pub fn filter_with_computed(&mut self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
-        let mut labels = reader
-            .labels()
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect::<HashMap<_, _>>();
-
-        for (k, v) in reader.computed_labels() {
-            if labels.insert(k, v).is_some() {
-                return Err(unprocessable_entity!(
-                    "Computed label '@{}' already exists",
-                    k
-                ));
-            }
-        }
-
-        let context = Context::new(labels, EvaluationStage::Compute);
-        Ok(self.condition.apply(&context)?.as_bool()?)
-    }
 }
 
 impl RecordFilter for WhenFilter {

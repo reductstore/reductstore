@@ -1,9 +1,9 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::ext::filter::ExtWhenFilter;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
-use crate::storage::query::filters::WhenFilter;
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
@@ -44,10 +44,10 @@ pub(crate) trait ManageExtensions {
 
 pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 
-struct QueryContext {
+pub(crate) struct QueryContext {
     query_id: u64,
     query: QueryOptions,
-    condition_filter: Option<WhenFilter>,
+    condition_filter: ExtWhenFilter,
     last_access: Instant,
     ext_pipeline: Vec<IoExtRef>,
 }
@@ -133,30 +133,6 @@ impl ExtRepository {
             .extend(computed_labels.clone().into_iter());
         ProcessStatus::Ready(Ok(record))
     }
-
-    fn filter_record(query: &mut QueryContext, status: ProcessStatus) -> ProcessStatus {
-        // filter with computed labels
-        if let ProcessStatus::Ready(record) = &status {
-            match query
-                .condition_filter
-                .as_mut()
-                .unwrap()
-                .filter_with_computed(&record.as_ref().unwrap())
-            {
-                Ok(true) => status,
-                Ok(false) => ProcessStatus::NotReady,
-                Err(e) => {
-                    if query.query.strict {
-                        ProcessStatus::Ready(Err(e))
-                    } else {
-                        status
-                    }
-                }
-            }
-        } else {
-            status
-        }
-    }
 }
 
 #[async_trait]
@@ -206,14 +182,14 @@ impl ManageExtensions for ExtRepository {
         });
 
         // check if the query has references to computed labels and no extension is found
-        let condition_filter = if let Some(condition) = &query_options.when {
+        let condition = if let Some(condition) = &query_options.when {
             let node = Parser::new().parse(condition)?;
             if subscribers.is_empty() && node.stage() == &EvaluationStage::Compute {
                 return Err(unprocessable_entity!(
                     "There is at least one reference to computed labels but no extension is found"
                 ));
             }
-            Some(WhenFilter::new(node))
+            Some(node)
         } else {
             None
         };
@@ -227,7 +203,7 @@ impl ManageExtensions for ExtRepository {
             QueryContext {
                 query_id,
                 query: query_options,
-                condition_filter,
+                condition_filter: ExtWhenFilter::new(condition),
                 last_access: Instant::now(),
                 ext_pipeline: subscribers,
             }
@@ -264,11 +240,9 @@ impl ManageExtensions for ExtRepository {
                         ProcessStatus::Stop => return ProcessStatus::Stop,
                     };
 
-                    if query.condition_filter.is_none() {
-                        return status;
-                    }
-
-                    Self::filter_record(query, status)
+                    query
+                        .condition_filter
+                        .filter_record(status, query.query.strict)
                 }
                 Err(e) => ProcessStatus::Ready(Err(e)),
             }
@@ -316,13 +290,14 @@ pub fn create_ext_repository(path: Option<PathBuf>) -> Result<BoxedManageExtensi
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use reduct_base::ext::IoExtensionInfo;
     use reqwest::blocking::get;
     use reqwest::StatusCode;
     use rstest::{fixture, rstest};
 
+    use crate::ext::ext_repository;
     use crate::storage::entry::RecordReader;
     use crate::storage::proto::Record;
     use mockall::mock;
@@ -544,7 +519,7 @@ mod tests {
             let query = QueryContext {
                 query_id: 1,
                 query: QueryOptions::default(),
-                condition_filter: None,
+                condition_filter: ExtWhenFilter::new(None),
                 last_access: Instant::now(),
                 ext_pipeline: vec![],
             };
@@ -568,7 +543,7 @@ mod tests {
             let query = QueryContext {
                 query_id: 1,
                 query: QueryOptions::default(),
-                condition_filter: None,
+                condition_filter: ExtWhenFilter::new(None),
                 last_access: Instant::now(),
                 ext_pipeline: vec![
                     Arc::new(RwLock::new(Box::new(mock_ext_1))),
@@ -749,6 +724,11 @@ mod tests {
         RecordReader::form_record(record, false)
     }
 
+    #[fixture]
+    pub fn mocked_record() -> Box<MockRecord> {
+        Box::new(MockRecord::new("key1", "val1"))
+    }
+
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
         let mut ext_repo = ExtRepository::try_load(&tempdir().unwrap().into_path()).unwrap();
         ext_repo
@@ -781,19 +761,23 @@ mod tests {
     }
 
     #[derive(Clone, PartialEq, Debug)]
-    struct MockRecord {
+    pub struct MockRecord {
         computed_labels: Labels,
         labels: Labels,
     }
 
     impl MockRecord {
-        fn new(key: &str, val: &str) -> Self {
+        pub fn new(key: &str, val: &str) -> Self {
             MockRecord {
                 computed_labels: Labels::from_iter(
                     vec![(key.to_string(), val.to_string())].into_iter(),
                 ),
                 labels: Labels::new(),
             }
+        }
+
+        pub fn labels_mut(&mut self) -> &mut Labels {
+            &mut self.labels
         }
     }
 
