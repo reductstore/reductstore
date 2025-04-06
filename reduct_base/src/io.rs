@@ -95,7 +95,7 @@ pub trait WriteRecord {
 pub(crate) mod tests {
     use super::*;
     use rstest::rstest;
-    use std::thread::sleep;
+
     use tokio::task::spawn_blocking;
 
     #[rstest]

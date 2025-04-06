@@ -30,11 +30,10 @@ impl Debug for ProcessStatus {
 
 mod tests {
     use super::*;
-    use crate::error::ReductError;
+
     use crate::io::tests::MockRecord;
-    use crate::io::ReadRecord;
+
     use rstest::rstest;
-    use std::collections::HashMap;
 
     #[rstest]
     fn test_debug() {

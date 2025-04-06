@@ -96,8 +96,8 @@ mod tests {
     #[case(EvaluationStage::Retrieve)]
     #[case(EvaluationStage::Compute)]
     fn test_stage(#[case] stage: EvaluationStage) {
-        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
+        let reference = Reference::new("label".to_string(), stage.clone());
         let result = reference.stage();
-        assert_eq!(result, &EvaluationStage::Retrieve);
+        assert_eq!(result, &stage);
     }
 }

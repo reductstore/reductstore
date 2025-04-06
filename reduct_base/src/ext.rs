@@ -9,7 +9,6 @@ mod process_status;
 use crate::error::ReductError;
 use crate::io::ReadRecord;
 use crate::msg::entry_api::QueryEntry;
-use std::fmt::Debug;
 
 pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};
 

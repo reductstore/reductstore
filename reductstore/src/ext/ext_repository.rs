@@ -45,7 +45,6 @@ pub(crate) trait ManageExtensions {
 pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 
 pub(crate) struct QueryContext {
-    query_id: u64,
     query: QueryOptions,
     condition_filter: ExtWhenFilter,
     last_access: Instant,
@@ -201,7 +200,6 @@ impl ManageExtensions for ExtRepository {
 
         query_map.insert(query_id, {
             QueryContext {
-                query_id,
                 query: query_options,
                 condition_filter: ExtWhenFilter::new(condition),
                 last_access: Instant::now(),
@@ -534,7 +532,6 @@ pub(super) mod tests {
         fn test_no_ext() {
             let record = Box::new(MockRecord::new("key1", "val1"));
             let query = QueryContext {
-                query_id: 1,
                 query: QueryOptions::default(),
                 condition_filter: ExtWhenFilter::new(None),
                 last_access: Instant::now(),
@@ -558,7 +555,6 @@ pub(super) mod tests {
             mock_ext_2.expect_next_processed_record().never();
 
             let query = QueryContext {
-                query_id: 1,
                 query: QueryOptions::default(),
                 condition_filter: ExtWhenFilter::new(None),
                 last_access: Instant::now(),
@@ -582,7 +578,6 @@ pub(super) mod tests {
         use assert_matches::assert_matches;
         use mockall::predicate;
         use reduct_base::internal_server_error;
-        use reduct_base::io::ReadRecord;
 
         #[rstest]
         #[tokio::test]
@@ -609,7 +604,7 @@ pub(super) mod tests {
             let query_rx = Arc::new(AsyncRwLock::new(rx));
             assert_matches!(
                 mocked_ext_repo.next_processed_record(1, query_rx).await,
-                ProcessStatus::Ready(Err(err))
+                ProcessStatus::Ready(Err(_))
             );
         }
 
@@ -677,11 +672,11 @@ pub(super) mod tests {
             mock1
                 .expect_next_processed_record()
                 .with(eq(1), predicate::always())
-                .return_once(|_, record| ProcessStatus::Ready(Ok(record1)));
+                .return_once(|_, _| ProcessStatus::Ready(Ok(record1)));
             mock2
                 .expect_next_processed_record()
                 .with(eq(1), predicate::always())
-                .return_once(|_, record| ProcessStatus::Ready(Ok(record2)));
+                .return_once(|_, _| ProcessStatus::Ready(Ok(record2)));
 
             let mut mocked_ext_repo = mocked_ext_repo("test1", mock1);
             mocked_ext_repo

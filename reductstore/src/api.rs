@@ -41,13 +41,13 @@ use tower_http::cors::{Any, CorsLayer};
 
 pub struct Components {
     pub storage: Arc<Storage>,
-    pub auth: TokenAuthorization,
-    pub token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
-    pub console: Box<dyn ManageStaticAsset + Send + Sync>,
-    pub replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
-    pub ext_repo: Box<dyn ManageExtensions + Send + Sync>,
-    pub base_path: String,
-    pub io_settings: IoConfig,
+    pub(crate) auth: TokenAuthorization,
+    pub(crate) token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
+    pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
+    pub(crate) replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
+    pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
+    pub(crate) base_path: String,
+    pub(crate) io_settings: IoConfig,
 }
 
 #[derive(Twin, PartialEq)]

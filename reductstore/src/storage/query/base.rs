@@ -60,6 +60,7 @@ pub(crate) struct QueryOptions {
     /// Strict condition
     pub strict: bool,
     /// Extension part
+    #[allow(dead_code)] // used in extension
     pub ext: Option<Value>,
 }
 

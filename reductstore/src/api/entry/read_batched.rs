@@ -15,7 +15,7 @@ use bytes::Bytes;
 use futures_util::Stream;
 
 use crate::cfg::io::IoConfig;
-use crate::ext::ext_repository::{BoxedManageExtensions, ManageExtensions};
+use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
 use futures_util::Future;
 use log::debug;

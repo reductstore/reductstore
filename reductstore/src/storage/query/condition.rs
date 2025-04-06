@@ -21,7 +21,7 @@ pub(crate) struct Context<'a> {
     stage: EvaluationStage,
 }
 
-#[derive(PartialEq, Debug, Default)]
+#[derive(PartialEq, Debug, Default, Clone)]
 pub(crate) enum EvaluationStage {
     #[default]
     Retrieve,
