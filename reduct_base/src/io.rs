@@ -140,7 +140,7 @@ pub(crate) mod tests {
     #[async_trait]
     impl ReadRecord for MockRecord {
         async fn read(&mut self) -> ReadChunk {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
             Some(Ok(Bytes::from("test")))
         }
 
