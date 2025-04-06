@@ -90,3 +90,78 @@ pub trait WriteRecord {
         timeout: Duration,
     ) -> Result<(), ReductError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+    use std::thread::sleep;
+    use tokio::task::spawn_blocking;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_blocking_read() {
+        let result = spawn_blocking(move || {
+            let mut record = MockRecord {};
+            record.blocking_read()
+        });
+        assert_eq!(
+            result.await.unwrap().unwrap(),
+            Ok(Bytes::from_static(b"test"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_default_read_timeout() {
+        let mut record = MockRecord {};
+        let result = record.read_timeout(Duration::from_secs(1)).await;
+        assert_eq!(result.unwrap(), Ok(Bytes::from_static(b"test")));
+
+        let result = record.read_timeout(Duration::from_millis(5)).await;
+        assert_eq!(
+            result.unwrap().err().unwrap(),
+            internal_server_error!("Timeout reading record: deadline has elapsed")
+        );
+    }
+
+    struct MockRecord {}
+
+    impl RecordMeta for MockRecord {
+        fn timestamp(&self) -> u64 {
+            todo!()
+        }
+
+        fn labels(&self) -> &Labels {
+            todo!()
+        }
+    }
+
+    #[async_trait]
+    impl ReadRecord for MockRecord {
+        async fn read(&mut self) -> ReadChunk {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            Some(Ok(Bytes::from("test")))
+        }
+
+        fn last(&self) -> bool {
+            todo!()
+        }
+
+        fn computed_labels(&self) -> &Labels {
+            todo!()
+        }
+
+        fn computed_labels_mut(&mut self) -> &mut Labels {
+            todo!()
+        }
+
+        fn content_length(&self) -> u64 {
+            todo!()
+        }
+
+        fn content_type(&self) -> &str {
+            todo!()
+        }
+    }
+}

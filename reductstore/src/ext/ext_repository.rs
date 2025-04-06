@@ -233,16 +233,14 @@ impl ManageExtensions for ExtRepository {
                     let query = query.unwrap();
                     query.last_access = Instant::now();
 
-                    let status = match Self::send_record_to_ext_pipeline(query_id, record, &query) {
-                        ProcessStatus::Ready(Ok(record)) => ProcessStatus::Ready(Ok(record)),
-                        ProcessStatus::Ready(Err(e)) => return ProcessStatus::Ready(Err(e)),
-                        ProcessStatus::NotReady => return ProcessStatus::NotReady,
-                        ProcessStatus::Stop => return ProcessStatus::Stop,
-                    };
-
-                    query
-                        .condition_filter
-                        .filter_record(status, query.query.strict)
+                    let status = Self::send_record_to_ext_pipeline(query_id, record, &query);
+                    if let ProcessStatus::Ready(Ok(record)) = status {
+                        query
+                            .condition_filter
+                            .filter_record(ProcessStatus::Ready(Ok(record)), query.query.strict)
+                    } else {
+                        status
+                    }
                 }
                 Err(e) => ProcessStatus::Ready(Err(e)),
             }
@@ -503,6 +501,26 @@ pub(super) mod tests {
                 assert!(query_map.get(&2).is_none(), "Query 2 should be expired");
                 assert!(query_map.get(&3).is_some());
             }
+        }
+
+        #[rstest]
+        fn ignore_unknown_extension(mut mock_ext: MockIoExtension) {
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "unknown-ext": {},
+                })),
+                ..Default::default()
+            };
+
+            mock_ext.expect_register_query().never();
+
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .is_ok());
+
+            let query_map = mocked_ext_repo.query_map.read().unwrap();
+            assert_eq!(query_map.len(), 0);
         }
     }
 
