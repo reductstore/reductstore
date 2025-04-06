@@ -3,86 +3,42 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod ext_info;
+mod process_status;
+
 use crate::error::ReductError;
 use crate::io::ReadRecord;
 use crate::msg::entry_api::QueryEntry;
 use std::fmt::Debug;
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct IoExtensionInfo {
-    name: String,
-    version: String,
-}
+pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};
 
-pub struct IoExtensionInfoBuilder {
-    name: String,
-    version: String,
-}
-
-impl IoExtensionInfoBuilder {
-    fn new() -> Self {
-        Self {
-            name: String::new(),
-            version: String::new(),
-        }
-    }
-
-    pub fn name(mut self, name: &str) -> Self {
-        self.name = name.to_string();
-        self
-    }
-
-    pub fn version(mut self, version: &str) -> Self {
-        self.version = version.to_string();
-        self
-    }
-
-    pub fn build(self) -> IoExtensionInfo {
-        IoExtensionInfo {
-            name: self.name,
-            version: self.version,
-        }
-    }
-}
-
-impl IoExtensionInfo {
-    pub fn builder() -> IoExtensionInfoBuilder {
-        IoExtensionInfoBuilder::new()
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn version(&self) -> &str {
-        &self.version
-    }
-}
-
+pub use process_status::ProcessStatus;
 pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 
-/// The status of the processing of a record.
+/// The trait for the IO extension.
 ///
-/// The three possible states allow to aggregate records on the extension side.
-pub enum ProcessStatus {
-    Ready(Result<BoxedReadRecord, ReductError>),
-    NotReady,
-    Stop,
-}
-
-impl Debug for ProcessStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProcessStatus::Ready(_) => write!(f, "Ready(?)"),
-            ProcessStatus::NotReady => write!(f, "NotReady"),
-            ProcessStatus::Stop => write!(f, "Stop"),
-        }
-    }
-}
-
+/// This trait is used to register queries and process records in a pipeline of extensions.
 pub trait IoExtension {
+    /// Returns details about the extension.
     fn info(&self) -> &IoExtensionInfo;
 
+    /// Registers a query in the extension.
+    ///
+    /// This method is called before fetching records from the storage engine.
+    /// All records that are fetched from the storage engine will be passed to this extension.
+    ///
+    /// A client can use "ext" field in the query to specify the extension to use and its options.
+    ///
+    /// The extension can use the query ID to identify the query and the bucket name and entry name to identify the data.
+    /// It also can do some initialization based on the query options.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The ID of the query.
+    /// * `bucket_name` - The name of the bucket.
+    /// * `entry_name` - The name of the entry.
+    /// * `query` - The query options
     fn register_query(
         &self,
         query_id: u64,
@@ -91,5 +47,20 @@ pub trait IoExtension {
         query: &QueryEntry,
     ) -> Result<(), ReductError>;
 
+    /// Processes a record in the extension.
+    ///
+    /// This method is called for each record that is fetched from the storage engine.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The ID of the query.
+    /// * `record` - The record to process.
+    ///
+    /// # Returns
+    ///
+    /// The status of the processing of the record.
+    /// Ready status means that the record is ready to be processed by the next extension in the pipeline.
+    /// NotReady status means that the record is not ready to be processed by the next extension in the pipeline, but the pipeline should continue.
+    /// Stop status means that the pipeline should stop processing records.
     fn next_processed_record(&self, query_id: u64, record: BoxedReadRecord) -> ProcessStatus;
 }

@@ -92,7 +92,7 @@ pub trait WriteRecord {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use rstest::rstest;
     use std::thread::sleep;
@@ -125,7 +125,7 @@ mod tests {
         );
     }
 
-    struct MockRecord {}
+    pub struct MockRecord {}
 
     impl RecordMeta for MockRecord {
         fn timestamp(&self) -> u64 {
