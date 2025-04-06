@@ -8,36 +8,39 @@ use reduct_base::unprocessable_entity;
 
 /// A node representing an exists operation that checks if a label exists in the context.
 pub(crate) struct Exists {
-    op: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Exists {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value = self.op.apply(context)?.as_string()?;
+        let value = self.operands[0].apply(context)?.as_string()?;
         Ok(Value::Bool(context.labels.contains_key(value.as_str())))
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("Exists({:?})", self.op)
+        format!("Exists({:?})", self.operands[0])
     }
 }
 
 impl Boxed for Exists {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 1 {
             return Err(unprocessable_entity!(
                 "$exists requires exactly one operand"
             ));
         }
 
-        let op = operands.pop().unwrap();
-        Ok(Box::new(Exists::new(op)))
+        Ok(Box::new(Exists::new(operands)))
     }
 }
 
 impl Exists {
-    pub fn new(op: BoxedNode) -> Self {
-        Self { op }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 
@@ -51,7 +54,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Exists::new(Constant::boxed(Value::String("foo".to_string())));
+        let op = Exists::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
         assert_eq!(op.apply(&Context::default()).unwrap(), Value::Bool(false));
 
         let mut context = Context::default();
@@ -70,7 +73,7 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let and = Exists::new(Constant::boxed(Value::Bool(true)));
+        let and = Exists::new(vec![Constant::boxed(Value::Bool(true))]);
         assert_eq!(and.print(), "Exists(Bool(true))");
     }
 }

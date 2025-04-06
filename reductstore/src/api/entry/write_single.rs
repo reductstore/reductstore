@@ -11,7 +11,6 @@ use axum_extra::headers::{Expect, Header, HeaderMap};
 use crate::api::entry::common::{parse_content_length_from_header, parse_timestamp_from_query};
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
-use crate::storage::proto::record::Label;
 use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
@@ -117,10 +116,7 @@ pub(crate) async fn write_record(
                 .notify(TransactionNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),
-                    labels: labels
-                        .into_iter()
-                        .map(|(k, v)| Label { name: k, value: v })
-                        .collect(),
+                    labels,
                     event: WriteRecord(ts),
                 })?;
             Ok(())
@@ -142,8 +138,9 @@ mod tests {
     use super::*;
 
     use crate::api::tests::{components, empty_body, path_to_entry_1};
-    use crate::storage::proto::record::Label;
+
     use axum_extra::headers::{Authorization, HeaderMapExt};
+    use reduct_base::io::RecordMeta;
     use rstest::*;
 
     #[rstest]
@@ -177,13 +174,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            record.labels()[0],
-            Label {
-                name: "x".to_string(),
-                value: "y".to_string(),
-            }
-        );
+        assert_eq!(&record.labels()["x"], "y");
 
         let info = components
             .replication_repo

@@ -4,25 +4,31 @@
 use crate::core::file_cache::FileWeak;
 use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
-use crate::storage::proto::record::Label;
 use crate::storage::proto::{ts_to_us, Record};
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
+use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
+use reduct_base::{internal_server_error, Labels};
 use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Sender};
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
-    record: Record,
+    timestamp: u64,
+    content_type: String,
+    length: u64,
     last: bool,
+    labels: Labels,
+    computed_labels: Labels,
+    state: i32,
 }
 
 struct ReadContext {
@@ -104,11 +110,7 @@ impl RecordReader {
             });
         };
 
-        Ok(RecordReader {
-            rx: Some(rx),
-            record,
-            last,
-        })
+        Ok(Self::form_record_with_rx(rx, record, last))
     }
 
     /// Create a new record reader for a record with no content.
@@ -126,59 +128,28 @@ impl RecordReader {
     pub fn form_record(record: Record, last: bool) -> Self {
         RecordReader {
             rx: None,
-            record,
+            timestamp: ts_to_us(record.timestamp.as_ref().unwrap()),
+            length: record.end - record.begin,
+            content_type: record.content_type.clone(),
+            labels: record
+                .labels
+                .into_iter()
+                .map(|l| (l.name, l.value))
+                .collect(),
+            computed_labels: Labels::new(),
+            state: record.state,
             last,
         }
     }
 
-    #[cfg(test)]
     pub fn form_record_with_rx(rx: RecordRx, record: Record, last: bool) -> Self {
-        RecordReader {
-            rx: Some(rx),
-            record,
-            last,
-        }
-    }
-
-    pub fn timestamp(&self) -> u64 {
-        ts_to_us(self.record.timestamp.as_ref().unwrap())
-    }
-
-    pub fn content_type(&self) -> &str {
-        self.record.content_type.as_str()
-    }
-
-    pub fn labels(&self) -> &Vec<Label> {
-        &self.record.labels
-    }
-
-    pub fn content_length(&self) -> u64 {
-        self.record.end - self.record.begin
-    }
-
-    /// Get the receiver to read the record content
-    ///
-    /// # Returns
-    ///
-    /// * `&mut Receiver<Result<Bytes, ReductError>>` - The receiver to read the record content
-    ///
-    /// # Panics
-    ///
-    /// Panics if the receiver isn't set (we read only metadata)
-    pub fn rx(&mut self) -> &mut Receiver<Result<Bytes, ReductError>> {
-        self.rx.as_mut().unwrap()
-    }
-
-    pub fn last(&self) -> bool {
-        self.last
+        let mut me = Self::form_record(record, last);
+        me.rx = Some(rx);
+        me
     }
 
     pub fn set_last(&mut self, last: bool) {
         self.last = last;
-    }
-
-    pub fn record(&self) -> &Record {
-        &self.record
     }
 
     fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
@@ -209,6 +180,69 @@ impl RecordReader {
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
             )
         }
+    }
+}
+
+impl RecordMeta for RecordReader {
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn labels(&self) -> &Labels {
+        &self.labels
+    }
+
+    fn state(&self) -> i32 {
+        self.state
+    }
+}
+
+#[async_trait]
+impl ReadRecord for RecordReader {
+    async fn read(&mut self) -> ReadChunk {
+        if let Some(rx) = &mut self.rx {
+            rx.recv().await
+        } else {
+            None
+        }
+    }
+
+    async fn read_timeout(&mut self, timeout: std::time::Duration) -> ReadChunk {
+        match tokio::time::timeout(timeout, self.read()).await {
+            Ok(chunk) => chunk,
+            Err(er) => Some(Err(internal_server_error!(
+                "Timeout reading record: {}",
+                er
+            ))),
+        }
+    }
+
+    fn blocking_read(&mut self) -> ReadChunk {
+        if let Some(rx) = &mut self.rx {
+            rx.blocking_recv()
+        } else {
+            None
+        }
+    }
+
+    fn last(&self) -> bool {
+        self.last
+    }
+
+    fn computed_labels(&self) -> &Labels {
+        &self.computed_labels
+    }
+
+    fn computed_labels_mut(&mut self) -> &mut Labels {
+        &mut self.computed_labels
+    }
+
+    fn content_length(&self) -> u64 {
+        self.length
+    }
+
+    fn content_type(&self) -> &str {
+        &self.content_type
     }
 }
 
@@ -314,6 +348,7 @@ mod tests {
 
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
+        use prost_wkt_types::Timestamp;
         use std::time::Duration;
 
         #[rstest]
@@ -325,7 +360,7 @@ mod tests {
                 "We don't spawn a task for small records"
             );
             assert_eq!(
-                reader.rx().blocking_recv().unwrap().unwrap(),
+                reader.blocking_read().unwrap().unwrap(),
                 Bytes::from("0123456789")
             );
         }
@@ -347,7 +382,7 @@ mod tests {
                 "We spawn a task for big records"
             );
             assert_eq!(
-                reader.rx().blocking_recv().unwrap().unwrap().len(),
+                reader.blocking_read().unwrap().unwrap().len(),
                 MAX_IO_BUFFER_SIZE
             );
 
@@ -357,6 +392,50 @@ mod tests {
                 find_task_group(&task_group).is_none(),
                 "The task should finish after reading the record"
             );
+        }
+
+        #[rstest]
+        fn test_state(mut record: Record) {
+            record.state = 1;
+            let reader = RecordReader::form_record(record, false);
+            assert_eq!(reader.state(), 1);
+        }
+
+        #[rstest]
+        fn test_computed_labels(record: Record) {
+            let mut reader = RecordReader::form_record(record, false);
+            reader
+                .computed_labels_mut()
+                .insert("key".to_string(), "value".to_string());
+            assert_eq!(
+                reader.computed_labels(),
+                &Labels::from([("key".to_string(), "value".to_string())])
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_read_timeout(record: Record) {
+            let (_tx, rx) = channel(CHANNEL_BUFFER_SIZE);
+            let mut reader = RecordReader::form_record_with_rx(rx, record, false);
+
+            let result = reader.read_timeout(Duration::from_millis(100)).await;
+            assert_eq!(
+                result,
+                Some(Err(internal_server_error!(
+                    "Timeout reading record: deadline has elapsed"
+                )))
+            );
+        }
+
+        #[fixture]
+        fn record() -> Record {
+            let mut record = Record::default();
+            record.timestamp = Some(Timestamp {
+                seconds: 1000,
+                nanos: 0,
+            });
+            record
         }
     }
 }

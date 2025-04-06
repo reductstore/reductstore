@@ -16,12 +16,12 @@ use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;
 
+use crate::replication::Transaction;
+use crate::storage::entry::RecordReader;
+use reduct_base::io::ReadRecord;
 use std::sync::{Arc, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
-
-use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {

@@ -4,7 +4,7 @@
 use crate::storage::proto::record::State;
 use reduct_base::error::ReductError;
 
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::filters::{RecordFilter, RecordMeta};
 
 /// Filter that passes records with a specific state
 pub struct RecordStateFilter {
@@ -26,12 +26,9 @@ impl RecordStateFilter {
     }
 }
 
-impl<P> RecordFilter<P> for RecordStateFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
-        let result = *record.state() == self.state as i32;
+impl RecordFilter for RecordStateFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+        let result = record.state() == self.state as i32;
         Ok(result)
     }
 }
@@ -41,6 +38,7 @@ mod tests {
     use super::*;
     use crate::storage::proto::record::State;
     use crate::storage::proto::Record;
+    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::*;
 
     #[rstest]
@@ -51,7 +49,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(filter.filter(&record).unwrap(), "Record should pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(filter.filter(&wrapper).unwrap(), "Record should pass");
     }
 
     #[rstest]
@@ -62,6 +61,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!filter.filter(&record).unwrap(), "Record should not pass");
+        let wrapper = RecordWrapper::from(record.clone());
+        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
     }
 }

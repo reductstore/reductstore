@@ -3,11 +3,11 @@
 
 use crate::core::thread_pool::{unique, TaskHandle};
 use crate::storage::block_manager::BlockRef;
-use crate::storage::entry::io::record_writer::WriteRecordContent;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use log::debug;
 use reduct_base::error::ReductError;
+use reduct_base::io::WriteRecord;
 use reduct_base::Labels;
 use std::sync::Arc;
 
@@ -31,13 +31,13 @@ impl Entry {
         content_size: usize,
         content_type: String,
         labels: Labels,
-    ) -> TaskHandle<Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError>> {
+    ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
         let block_manager = self.block_manager.clone();
         let settings = self.settings.read().unwrap().clone();
         unique(
             &self.task_group(),
             "begin write",
-            move || -> Result<Box<dyn WriteRecordContent + Sync + Send>, ReductError> {
+            move || -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
                 let mut bm = block_manager.write().unwrap();
                 // When we write, the likely case is that we are writing the latest record
                 // in the entry. In this case, we can just append to the latest block.

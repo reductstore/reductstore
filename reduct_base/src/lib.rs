@@ -9,4 +9,10 @@ pub mod batch;
 pub mod error;
 pub mod msg;
 
+#[cfg(feature = "io")]
+pub mod io;
+
+#[cfg(feature = "ext")]
+pub mod ext;
+
 pub type Labels = HashMap<String, String>;

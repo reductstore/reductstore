@@ -541,6 +541,7 @@ mod tests {
     mod rename_bucket {
         use super::*;
         use crate::core::logger::Logger;
+        use reduct_base::io::ReadRecord;
 
         #[rstest]
         #[tokio::test]
@@ -572,7 +573,7 @@ mod tests {
             assert_eq!(bucket.name(), "new");
 
             let mut reader = bucket.begin_read("entry-1", 0).wait().unwrap();
-            let record = reader.rx().recv().await.unwrap().unwrap();
+            let record = reader.read().await.unwrap().unwrap();
             assert_eq!(record, Bytes::from("0123456789"));
         }
 

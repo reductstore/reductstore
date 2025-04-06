@@ -1,8 +1,8 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::condition::{BoxedNode, Context};
-use crate::storage::query::filters::{FilterPoint, RecordFilter};
+use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
+use crate::storage::query::filters::{RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
 
 /// A node representing a when filter with a condition.
@@ -16,17 +16,15 @@ impl WhenFilter {
     }
 }
 
-impl<P> RecordFilter<P> for WhenFilter
-where
-    P: FilterPoint,
-{
-    fn filter(&mut self, record: &P) -> Result<bool, ReductError> {
+impl RecordFilter for WhenFilter {
+    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
         let context = Context::new(
             record
                 .labels()
                 .iter()
-                .map(|l| (l.name.as_str(), l.value.as_str()))
+                .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
+            EvaluationStage::Retrieve,
         );
         Ok(self.condition.apply(&context)?.as_bool()?)
     }
@@ -38,6 +36,7 @@ mod tests {
     use crate::storage::proto::record::Label;
     use crate::storage::proto::Record;
     use crate::storage::query::condition::Parser;
+    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::rstest;
 
     #[rstest]
@@ -54,7 +53,9 @@ mod tests {
             }],
             ..Default::default()
         };
-        let result = filter.filter(&record).unwrap();
+
+        let wrapper = RecordWrapper::from(record.clone());
+        let result = filter.filter(&wrapper).unwrap();
         assert_eq!(result, true);
     }
 }

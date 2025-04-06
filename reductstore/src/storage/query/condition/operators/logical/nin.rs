@@ -8,14 +8,13 @@ use reduct_base::unprocessable_entity;
 
 /// A node representing an `nin` operation.
 pub(crate) struct Nin {
-    op: BoxedNode,
-    list: Vec<BoxedNode>,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Nin {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let op_value = self.op.apply(context)?;
-        for item in self.list.iter() {
+        let op_value = self.operands[0].apply(context)?;
+        for item in self.operands[1..].iter() {
             if item.apply(context)? == op_value {
                 return Ok(Value::Bool(false));
             }
@@ -23,9 +22,20 @@ impl Node for Nin {
 
         Ok(Value::Bool(true))
     }
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
 
     fn print(&self) -> String {
-        format!("Nin({:?}, {:?})", self.op, self.list)
+        format!(
+            "Nin({:?}, [{:}])",
+            self.operands[0],
+            self.operands[1..]
+                .iter()
+                .map(|op| format!("{:?}", op))
+                .reduce(|a, b| format!("{:?}, {:?}", a, b))
+                .unwrap()
+        )
     }
 }
 
@@ -41,9 +51,8 @@ impl Boxed for Nin {
 }
 
 impl Nin {
-    pub fn new(mut operands: Vec<BoxedNode>) -> Self {
-        let op = operands.remove(0);
-        Self { op, list: operands }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 

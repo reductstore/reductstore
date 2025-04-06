@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use crate::cfg::replication::ReplicationConfig;
 use crate::replication::replication_task::ReplicationTask;
-use crate::storage::proto::record::Label;
 use crate::storage::storage::Storage;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
+use reduct_base::Labels;
 
 mod diagnostics;
 pub mod proto;
@@ -67,7 +67,7 @@ impl TryFrom<u8> for Transaction {
 pub struct TransactionNotification {
     pub bucket: String,
     pub entry: String,
-    pub labels: Vec<Label>,
+    pub labels: Labels,
     pub event: Transaction,
 }
 pub trait ManageReplications {

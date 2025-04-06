@@ -607,7 +607,7 @@ mod tests {
         TransactionNotification {
             bucket: "src".to_string(),
             entry: "test1".to_string(),
-            labels: Vec::new(),
+            labels: Labels::new(),
             event: Transaction::WriteRecord(10),
         }
     }

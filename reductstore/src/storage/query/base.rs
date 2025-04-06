@@ -38,7 +38,7 @@ pub(in crate::storage) trait Query {
 
 /// QueryOptions is used to specify the options for a query.
 #[derive(Clone, Debug)]
-pub struct QueryOptions {
+pub(crate) struct QueryOptions {
     /// The time to live of the query.
     pub ttl: Duration,
     /// Only include the records that match the key-value pairs.
@@ -59,6 +59,9 @@ pub struct QueryOptions {
     pub when: Option<Value>,
     /// Strict condition
     pub strict: bool,
+    /// Extension part
+    #[allow(dead_code)] // used in extension
+    pub ext: Option<Value>,
 }
 
 impl From<QueryEntry> for QueryOptions {
@@ -74,6 +77,7 @@ impl From<QueryEntry> for QueryOptions {
             only_metadata: query.only_metadata.unwrap_or(false),
             when: query.when,
             strict: query.strict.unwrap_or(false),
+            ext: query.ext,
         }
     }
 }
@@ -91,6 +95,7 @@ impl Default for QueryOptions {
             only_metadata: false,
             when: None,
             strict: false,
+            ext: None,
         }
     }
 }

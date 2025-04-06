@@ -8,36 +8,37 @@ use reduct_base::unprocessable_entity;
 
 /// A node representing a cast operation.
 pub(crate) struct Cast {
-    op_1: BoxedNode,
-    op_2: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Cast {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let op = self.op_1.apply(context)?;
-        let type_name = self.op_2.apply(context)?.as_string()?;
+        let op = self.operands[0].apply(context)?;
+        let type_name = self.operands[1].apply(context)?.as_string()?;
         op.cast(type_name.as_str())
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
-        format!("Cast({:?}, {:?})", self.op_1, self.op_2)
+        format!("Cast({:?}, {:?})", self.operands[0], self.operands[1])
     }
 }
 
 impl Boxed for Cast {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 2 {
             return Err(unprocessable_entity!("$cast requires exactly two operands"));
         }
-        let op_2 = operands.pop().unwrap();
-        let op_1 = operands.pop().unwrap();
-        Ok(Box::new(Cast::new(op_1, op_2)))
+        Ok(Box::new(Cast::new(operands)))
     }
 }
 
 impl Cast {
-    pub fn new(op_1: BoxedNode, op_2: BoxedNode) -> Self {
-        Self { op_1, op_2 }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 
@@ -50,19 +51,19 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let sub = Cast::new(
+        let sub = Cast::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("float".to_string())),
-        );
+        ]);
         assert_eq!(sub.apply(&Context::default()).unwrap(), Value::Float(1.0));
     }
 
     #[rstest]
     fn apply_bad() {
-        let sub = Cast::new(
+        let sub = Cast::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("foo".to_string())),
-        );
+        ]);
         assert_eq!(
             sub.apply(&Context::default()),
             Err(unprocessable_entity!("Unknown type 'foo'"))
@@ -80,10 +81,10 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let op = Cast::new(
+        let op = Cast::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::String("bool".to_string())),
-        );
+        ]);
         assert_eq!(op.print(), "Cast(Bool(true), String(\"bool\"))");
     }
 }

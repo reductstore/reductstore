@@ -9,34 +9,36 @@ use reduct_base::unprocessable_entity;
 
 /// A node representing an absolute value operation.
 pub(crate) struct Abs {
-    op: BoxedNode,
+    operands: Vec<BoxedNode>,
 }
 
 impl Node for Abs {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value = self.op.apply(context)?;
+        let value = self.operands[0].apply(context)?;
         value.abs()
     }
 
     fn print(&self) -> String {
-        format!("Abs({:?})", self.op)
+        format!("Abs({:?})", self.operands[0])
+    }
+
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
     }
 }
 
 impl Boxed for Abs {
-    fn boxed(mut operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+    fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 1 {
             return Err(unprocessable_entity!("Abs requires exactly one operand"));
         }
-
-        let op = operands.pop().unwrap();
-        Ok(Box::new(Self::new(op)))
+        Ok(Box::new(Self::new(operands)))
     }
 }
 
 impl Abs {
-    pub fn new(op: BoxedNode) -> Self {
-        Self { op }
+    pub fn new(operands: Vec<BoxedNode>) -> Self {
+        Self { operands }
     }
 }
 
@@ -50,13 +52,13 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Abs::new(Constant::boxed(Value::Int(-1)));
+        let op = Abs::new(vec![Constant::boxed(Value::Int(-1))]);
         assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(1));
     }
 
     #[rstest]
     fn apply_bad() {
-        let op = Abs::new(Constant::boxed(Value::String("foo".to_string())));
+        let op = Abs::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
         assert_eq!(
             op.apply(&Context::default()).unwrap_err(),
             unprocessable_entity!("Cannot calculate absolute value of a string")
@@ -74,7 +76,7 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let and = Abs::new(Constant::boxed(Value::Bool(true)));
+        let and = Abs::new(vec![Constant::boxed(Value::Bool(true))]);
         assert_eq!(and.print(), "Abs(Bool(true))");
     }
 }

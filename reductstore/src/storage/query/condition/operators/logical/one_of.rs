@@ -23,6 +23,10 @@ impl Node for OneOf {
         Ok(Value::Bool(count == 1))
     }
 
+    fn operands(&self) -> &Vec<BoxedNode> {
+        &self.operands
+    }
+
     fn print(&self) -> String {
         format!("OneOf({:?})", self.operands)
     }

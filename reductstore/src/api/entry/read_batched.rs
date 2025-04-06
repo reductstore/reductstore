@@ -15,12 +15,15 @@ use bytes::Bytes;
 use futures_util::Stream;
 
 use crate::cfg::io::IoConfig;
-use crate::storage::entry::RecordReader;
+use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
-use log::{debug, warn};
+use futures_util::Future;
+use log::debug;
 use reduct_base::error::ReductError;
+use reduct_base::ext::{BoxedReadRecord, ProcessStatus};
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
+use std::pin::pin;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -66,6 +69,7 @@ pub(crate) async fn read_batched_records(
         query_id,
         method.name == "HEAD",
         &components.io_settings,
+        &components.ext_repo,
     )
     .await
 }
@@ -76,26 +80,27 @@ async fn fetch_and_response_batched_records(
     query_id: u64,
     empty_body: bool,
     io_settings: &IoConfig,
+    ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
-    let make_header = |reader: &RecordReader| {
+    let make_header = |reader: &BoxedReadRecord| {
         let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
         let mut meta_data = vec![
             reader.content_length().to_string(),
             reader.content_type().to_string(),
         ];
 
-        let mut labels: Vec<String> = reader
-            .labels()
-            .iter()
-            .map(|label| {
-                let (k, v) = (&label.name, &label.value);
-                if v.contains(",") {
-                    format!("{}=\"{}\"", k, v)
-                } else {
-                    format!("{}={}", k, v)
-                }
-            })
-            .collect();
+        let format_labels = |(k, v): (&String, &String)| {
+            if v.contains(",") {
+                format!("{}=\"{}\"", k, v)
+            } else {
+                format!("{}={}", k, v)
+            }
+        };
+
+        let mut labels: Vec<String> = reader.labels().iter().map(format_labels).collect();
+
+        labels.extend(reader.computed_labels().iter().map(format_labels));
+
         labels.sort();
 
         meta_data.append(&mut labels);
@@ -121,14 +126,17 @@ async fn fetch_and_response_batched_records(
     let start_time = std::time::Instant::now();
     loop {
         let reader = match next_record_reader(
+            query_id,
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
             io_settings.batch_records_timeout,
+            ext_repository,
         )
         .await
         {
-            Some(value) => value,
-            None => break,
+            ProcessStatus::Ready(value) => value,
+            ProcessStatus::NotReady => continue,
+            ProcessStatus::Stop => break,
         };
 
         match reader {
@@ -194,30 +202,28 @@ async fn fetch_and_response_batched_records(
 // This function is used to get the next record from the query receiver
 // created for better testing
 async fn next_record_reader(
+    query_id: u64,
     rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
     recv_timeout: Duration,
-) -> Option<Result<RecordReader, ReductError>> {
+    ext_repository: &BoxedManageExtensions,
+) -> ProcessStatus {
     // we need to wait for the first record
-    let result = if let Ok(result) = timeout(recv_timeout, rx.write().await.recv()).await {
+    if let Ok(result) = timeout(
+        recv_timeout,
+        ext_repository.next_processed_record(query_id, rx),
+    )
+    .await
+    {
         result
     } else {
         debug!("Timeout while waiting for record from query {}", query_path);
-        return None;
-    };
-
-    let reader = match result {
-        Some(reader) => reader,
-        None => {
-            warn!("Query {} is closed", query_path);
-            return None;
-        }
-    };
-    Some(reader)
+        ProcessStatus::Stop
+    }
 }
 
 struct ReadersWrapper {
-    readers: Vec<RecordReader>,
+    readers: Vec<BoxedReadRecord>,
     empty_body: bool,
 }
 
@@ -226,7 +232,7 @@ impl Stream for ReadersWrapper {
 
     fn poll_next(
         mut self: Pin<&mut ReadersWrapper>,
-        _cx: &mut Context<'_>,
+        ctx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.empty_body {
             return Poll::Ready(None);
@@ -238,7 +244,8 @@ impl Stream for ReadersWrapper {
 
         let mut index = 0;
         while index < self.readers.len() {
-            if let Poll::Ready(data) = self.readers[index].rx().poll_recv(_cx) {
+            let pinned_future = pin!(self.readers[index].read());
+            if let Poll::Ready(data) = pinned_future.poll(ctx) {
                 match data {
                     Some(Ok(chunk)) => {
                         return Poll::Ready(Some(Ok(chunk)));
@@ -269,7 +276,9 @@ mod tests {
 
     use crate::api::tests::{components, headers, path_to_entry_1};
 
+    use crate::ext::ext_repository::create_ext_repository;
     use rstest::*;
+    use tempfile::tempdir;
     use tokio::time::sleep;
 
     #[rstest]
@@ -429,38 +438,59 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_next_record_reader_timeout() {
+        async fn test_next_record_reader_timeout(ext_repository: BoxedManageExtensions) {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             assert!(
-                timeout(
-                    Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", Duration::from_millis(10))
-                )
-                .await
-                .unwrap()
-                .is_none(),
-                "should return None if no record is received after timeout"
+                matches!(
+                    timeout(
+                        Duration::from_secs(1),
+                        next_record_reader(
+                            1,
+                            rx.clone(),
+                            "",
+                            Duration::from_millis(10),
+                            &ext_repository
+                        )
+                    )
+                    .await
+                    .unwrap(),
+                    ProcessStatus::Stop,
+                ),
+                "should return None if the query is closed"
             );
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_next_record_reader_closed_tx() {
+        async fn test_next_record_reader_closed_tx(ext_repository: BoxedManageExtensions) {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert!(
-                timeout(
-                    Duration::from_secs(1),
-                    next_record_reader(rx.clone(), "", Duration::from_millis(0))
-                )
-                .await
-                .unwrap()
-                .is_none(),
+                matches!(
+                    timeout(
+                        Duration::from_secs(1),
+                        next_record_reader(
+                            1,
+                            rx.clone(),
+                            "",
+                            Duration::from_millis(0),
+                            &ext_repository
+                        )
+                    )
+                    .await
+                    .unwrap(),
+                    ProcessStatus::Stop
+                ),
                 "should return None if the query is closed"
             );
         }
+    }
+
+    #[fixture]
+    fn ext_repository() -> BoxedManageExtensions {
+        create_ext_repository(Some(tempdir().unwrap().into_path())).unwrap()
     }
 
     mod stream_wrapper {
