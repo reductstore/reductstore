@@ -39,12 +39,25 @@ pub trait IoExtension {
     /// * `entry_name` - The name of the entry.
     /// * `query` - The query options
     fn register_query(
-        &self,
+        &mut self,
         query_id: u64,
         bucket_name: &str,
         entry_name: &str,
         query: &QueryEntry,
     ) -> Result<(), ReductError>;
+
+    /// Unregisters a query in the extension.
+    ///
+    /// This method is called after fetching records from the storage engine.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The ID of the query.
+    ///
+    /// # Returns
+    ///
+    /// The status of the unregistering of the query.
+    fn unregister_query(&mut self, query_id: u64) -> Result<(), ReductError>;
 
     /// Processes a record in the extension.
     ///
@@ -61,5 +74,5 @@ pub trait IoExtension {
     /// Ready status means that the record is ready to be processed by the next extension in the pipeline.
     /// NotReady status means that the record is not ready to be processed by the next extension in the pipeline, but the pipeline should continue.
     /// Stop status means that the pipeline should stop processing records.
-    fn next_processed_record(&self, query_id: u64, record: BoxedReadRecord) -> ProcessStatus;
+    fn next_processed_record(&mut self, query_id: u64, record: BoxedReadRecord) -> ProcessStatus;
 }

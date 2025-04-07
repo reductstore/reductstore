@@ -45,6 +45,7 @@ pub(crate) trait ManageExtensions {
 pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 
 pub(crate) struct QueryContext {
+    id: u64,
     query: QueryOptions,
     condition_filter: ExtWhenFilter,
     last_access: Instant,
@@ -115,7 +116,7 @@ impl ExtRepository {
         let mut computed_labels = Labels::new();
         for ext in &query.ext_pipeline {
             computed_labels.extend(record.computed_labels().clone().into_iter());
-            let status = ext.read().unwrap().next_processed_record(query_id, record);
+            let status = ext.write().unwrap().next_processed_record(query_id, record);
             if let ProcessStatus::Ready(result) = status {
                 if let Ok(processed_record) = result {
                     record = processed_record;
@@ -155,7 +156,7 @@ impl ManageExtensions for ExtRepository {
         entry_name: &str,
         query_request: QueryEntry,
     ) -> Result<(), ReductError> {
-        let mut subscribers = Vec::new();
+        let mut pipeline = Vec::new();
         let mut query_map = self.query_map.write()?;
 
         for (name, ext) in self.extension_map.iter() {
@@ -166,7 +167,7 @@ impl ManageExtensions for ExtRepository {
 
                 ext.write()?
                     .register_query(query_id, bucket_name, entry_name, &query_request)?;
-                subscribers.push(Arc::clone(ext));
+                pipeline.push(Arc::clone(ext));
             }
         }
 
@@ -174,6 +175,12 @@ impl ManageExtensions for ExtRepository {
         // remove expired queries
         query_map.retain(|_, query| {
             if query.last_access.elapsed() > query.query.ttl {
+                // unregister the query from the extension
+                for ext in &query.ext_pipeline {
+                    if let Err(e) = ext.write().unwrap().unregister_query(query.id) {
+                        error!("Failed to unregister query {}: {:?}", query_id, e);
+                    }
+                }
                 false
             } else {
                 true
@@ -183,7 +190,7 @@ impl ManageExtensions for ExtRepository {
         // check if the query has references to computed labels and no extension is found
         let condition = if let Some(condition) = &query_options.when {
             let node = Parser::new().parse(condition)?;
-            if subscribers.is_empty() && node.stage() == &EvaluationStage::Compute {
+            if pipeline.is_empty() && node.stage() == &EvaluationStage::Compute {
                 return Err(unprocessable_entity!(
                     "There is at least one reference to computed labels but no extension is found"
                 ));
@@ -193,17 +200,18 @@ impl ManageExtensions for ExtRepository {
             None
         };
 
-        if subscribers.is_empty() {
+        if pipeline.is_empty() {
             // No extension found, we don't need to register the query
             return Ok(());
         }
 
         query_map.insert(query_id, {
             QueryContext {
+                id: query_id,
                 query: query_options,
                 condition_filter: ExtWhenFilter::new(condition),
                 last_access: Instant::now(),
-                ext_pipeline: subscribers,
+                ext_pipeline: pipeline,
             }
         });
 
@@ -472,6 +480,14 @@ pub(super) mod tests {
                 .expect_register_query()
                 .with(ge(1), eq("bucket"), eq("entry"), eq(query.clone()))
                 .return_const(Ok(()));
+            mock_ext
+                .expect_unregister_query()
+                .with(eq(1))
+                .return_const(Ok(()));
+            mock_ext
+                .expect_unregister_query()
+                .with(eq(2))
+                .return_const(Ok(()));
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
             assert!(mocked_ext_repo
@@ -532,13 +548,14 @@ pub(super) mod tests {
         fn test_no_ext() {
             let record = Box::new(MockRecord::new("key1", "val1"));
             let query = QueryContext {
+                id: 1,
                 query: QueryOptions::default(),
                 condition_filter: ExtWhenFilter::new(None),
                 last_access: Instant::now(),
                 ext_pipeline: vec![],
             };
 
-            let status = ExtRepository::send_record_to_ext_pipeline(1, record, &query);
+            let status = ExtRepository::send_record_to_ext_pipeline(query.id, record, &query);
             assert_matches!(status, ProcessStatus::Ready(_));
         }
 
@@ -555,6 +572,7 @@ pub(super) mod tests {
             mock_ext_2.expect_next_processed_record().never();
 
             let query = QueryContext {
+                id: 1,
                 query: QueryOptions::default(),
                 condition_filter: ExtWhenFilter::new(None),
                 last_access: Instant::now(),
@@ -564,7 +582,7 @@ pub(super) mod tests {
                 ],
             };
 
-            let status = ExtRepository::send_record_to_ext_pipeline(1, record, &query);
+            let status = ExtRepository::send_record_to_ext_pipeline(query.id, record, &query);
             let ProcessStatus::Ready(result) = status else {
                 panic!("Expected ProcessStatus::Ready");
             };
@@ -756,15 +774,17 @@ pub(super) mod tests {
             fn info(&self) -> &IoExtensionInfo;
 
             fn register_query(
-                &self,
+                &mut self,
                 query_id: u64,
                 bucket_name: &str,
                 entry_name: &str,
                 query: &QueryEntry,
             ) -> Result<(), ReductError>;
 
+            fn unregister_query(&mut self, query_id: u64) -> Result<(), ReductError>;
+
             fn next_processed_record(
-                &self,
+                &mut self,
                 query_id: u64,
                 record: BoxedReadRecord,
             ) -> ProcessStatus;
