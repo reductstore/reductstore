@@ -9,6 +9,7 @@ mod process_status;
 use crate::error::ReductError;
 use crate::io::ReadRecord;
 use crate::msg::entry_api::QueryEntry;
+use async_trait::async_trait;
 
 pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};
 
@@ -18,6 +19,7 @@ pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 /// The trait for the IO extension.
 ///
 /// This trait is used to register queries and process records in a pipeline of extensions.
+#[async_trait]
 pub trait IoExtension {
     /// Returns details about the extension.
     fn info(&self) -> &IoExtensionInfo;
@@ -74,5 +76,9 @@ pub trait IoExtension {
     /// Ready status means that the record is ready to be processed by the next extension in the pipeline.
     /// NotReady status means that the record is not ready to be processed by the next extension in the pipeline, but the pipeline should continue.
     /// Stop status means that the pipeline should stop processing records.
-    fn next_processed_record(&mut self, query_id: u64, record: BoxedReadRecord) -> ProcessStatus;
+    async fn next_processed_record(
+        &mut self,
+        query_id: u64,
+        record: BoxedReadRecord,
+    ) -> ProcessStatus;
 }

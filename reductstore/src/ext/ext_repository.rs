@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
+use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
+use tokio::task::block_in_place;
 
 type IoExtRef = Arc<RwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
@@ -108,15 +110,19 @@ impl ExtRepository {
         })
     }
 
-    fn send_record_to_ext_pipeline(
+    async fn send_record_to_ext_pipeline(
         query_id: u64,
         mut record: BoxedReadRecord,
-        query: &QueryContext,
+        ext_pipeline: Vec<IoExtRef>,
     ) -> ProcessStatus {
         let mut computed_labels = Labels::new();
-        for ext in &query.ext_pipeline {
+        for ext in ext_pipeline {
             computed_labels.extend(record.computed_labels().clone().into_iter());
-            let status = ext.write().unwrap().next_processed_record(query_id, record);
+            let mut lock = ext.write().unwrap();
+            let status = block_in_place(|| {
+                Handle::current().block_on(lock.next_processed_record(query_id, record))
+            });
+
             if let ProcessStatus::Ready(result) = status {
                 if let Ok(processed_record) = result {
                     record = processed_record;
@@ -228,19 +234,24 @@ impl ManageExtensions for ExtRepository {
             match record {
                 Ok(record) => {
                     let record = Box::new(record);
-                    // check if query is registered and
-                    let mut lock = self.query_map.write().unwrap();
+                    let pipline = {
+                        // check if query is registered and
+                        let mut lock = self.query_map.write().unwrap();
 
-                    let query = lock.get_mut(&query_id);
-                    if query.is_none() {
-                        return ProcessStatus::Ready(Ok(record));
-                    }
+                        let query = lock.get_mut(&query_id);
+                        if query.is_none() {
+                            return ProcessStatus::Ready(Ok(record));
+                        }
 
-                    let query = query.unwrap();
-                    query.last_access = Instant::now();
+                        let query = query.unwrap();
+                        query.last_access = Instant::now();
+                        query.ext_pipeline.clone()
+                    };
 
-                    let status = Self::send_record_to_ext_pipeline(query_id, record, &query);
+                    let status = Self::send_record_to_ext_pipeline(query_id, record, pipline).await;
                     if let ProcessStatus::Ready(Ok(record)) = status {
+                        let lock = self.query_map.read().unwrap();
+                        let query = lock.get(&query_id).unwrap();
                         query
                             .condition_filter
                             .filter_record(ProcessStatus::Ready(Ok(record)), query.query.strict)
@@ -545,7 +556,8 @@ pub(super) mod tests {
         use reduct_base::internal_server_error;
 
         #[rstest]
-        fn test_no_ext() {
+        #[tokio::test]
+        async fn test_no_ext() {
             let record = Box::new(MockRecord::new("key1", "val1"));
             let query = QueryContext {
                 id: 1,
@@ -555,12 +567,18 @@ pub(super) mod tests {
                 ext_pipeline: vec![],
             };
 
-            let status = ExtRepository::send_record_to_ext_pipeline(query.id, record, &query);
+            let status = ExtRepository::send_record_to_ext_pipeline(
+                query.id,
+                record,
+                query.ext_pipeline.clone(),
+            )
+            .await;
             assert_matches!(status, ProcessStatus::Ready(_));
         }
 
         #[rstest]
-        fn test_stop_pipeline_at_errors() {
+        #[tokio::test]
+        async fn test_stop_pipeline_at_errors() {
             let record = Box::new(MockRecord::new("key1", "val1"));
             let mut mock_ext_1 = MockIoExtension::new();
             let mut mock_ext_2 = MockIoExtension::new();
@@ -582,7 +600,12 @@ pub(super) mod tests {
                 ],
             };
 
-            let status = ExtRepository::send_record_to_ext_pipeline(query.id, record, &query);
+            let status = ExtRepository::send_record_to_ext_pipeline(
+                query.id,
+                record,
+                query.ext_pipeline.clone(),
+            )
+            .await;
             let ProcessStatus::Ready(result) = status else {
                 panic!("Expected ProcessStatus::Ready");
             };
@@ -770,6 +793,7 @@ pub(super) mod tests {
     mock! {
         IoExtension {}
 
+        #[async_trait]
         impl IoExtension for IoExtension {
             fn info(&self) -> &IoExtensionInfo;
 
@@ -783,7 +807,7 @@ pub(super) mod tests {
 
             fn unregister_query(&mut self, query_id: u64) -> Result<(), ReductError>;
 
-            fn next_processed_record(
+            async fn next_processed_record(
                 &mut self,
                 query_id: u64,
                 record: BoxedReadRecord,
