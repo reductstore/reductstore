@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Python client benchmarks in CI, [PR-764](https://github.com/reductstore/reductstore/pull/764)
 - RS-629: Extension API v0.1 and core implementation, [PR-762](https://github.com/reductstore/reductstore/pull/762)
+- RS-628: Improve Extension API, [PR-779](https://github.com/reductstore/reductstore/pull/779)
 
 ### Changed
 
