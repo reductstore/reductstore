@@ -577,7 +577,7 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_stop_pipeline_at_errors() {
             let record = Box::new(MockRecord::new("key1", "val1"));
             let mut mock_ext_1 = MockIoExtension::new();
@@ -665,7 +665,7 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_process_not_ready(
             record_reader: RecordReader,
             mut mock_ext: MockIoExtension,
@@ -700,7 +700,7 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_process_in_pipeline(record_reader: RecordReader) {
             let record1 = Box::new(MockRecord::new("key1", "val1"));
             let record2 = Box::new(MockRecord::new("key2", "val2"));
