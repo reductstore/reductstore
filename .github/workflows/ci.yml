@@ -493,7 +493,7 @@ jobs:
 
   benchmark:
     name: Run benchmarks
-    runs-on: linux-4core
+    runs-on: ubuntu-latest
     needs:
       - build # for docker image
       - unit_tests
