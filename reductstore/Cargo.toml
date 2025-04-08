@@ -32,7 +32,7 @@ reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
 log = "0.4.26"
 chrono = { version = "0.4.40", features = ["serde"] }
 thread-id = "5.0.0"
-zip = "2.5.0"
+zip = "2.6.1"
 tempfile = "3.19.1"
 hex = "0.4.3"
 prost = "0.13.1"
