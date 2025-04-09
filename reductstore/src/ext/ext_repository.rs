@@ -165,15 +165,24 @@ impl ManageExtensions for ExtRepository {
         let mut pipeline = Vec::new();
         let mut query_map = self.query_map.write()?;
 
-        for (name, ext) in self.extension_map.iter() {
-            if let Some(ext_query) = &query_request.ext {
-                if ext_query.get(name).is_none() {
-                    continue;
+        let ext_params = query_request.ext.as_ref();
+        if ext_params.is_some() && ext_params.unwrap().is_object() {
+            for (name, _) in ext_params.unwrap().as_object().unwrap().iter() {
+                if let Some(ext) = self.extension_map.get(name) {
+                    ext.write()?.register_query(
+                        query_id,
+                        bucket_name,
+                        entry_name,
+                        &query_request,
+                    )?;
+                    pipeline.push(Arc::clone(ext));
+                } else {
+                    return Err(unprocessable_entity!(
+                        "Unknown extension '{}' in query id={}",
+                        name,
+                        query_id
+                    ));
                 }
-
-                ext.write()?
-                    .register_query(query_id, bucket_name, entry_name, &query_request)?;
-                pipeline.push(Arc::clone(ext));
             }
         }
 
@@ -529,7 +538,7 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        fn ignore_unknown_extension(mut mock_ext: MockIoExtension) {
+        fn error_unknown_extension(mut mock_ext: MockIoExtension) {
             let query = QueryEntry {
                 ext: Some(json!({
                     "unknown-ext": {},
@@ -540,12 +549,13 @@ pub(super) mod tests {
             mock_ext.expect_register_query().never();
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
-            assert!(mocked_ext_repo
-                .register_query(1, "bucket", "entry", query)
-                .is_ok());
-
-            let query_map = mocked_ext_repo.query_map.read().unwrap();
-            assert_eq!(query_map.len(), 0);
+            assert_eq!(
+                mocked_ext_repo
+                    .register_query(1, "bucket", "entry", query)
+                    .err()
+                    .unwrap(),
+                unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1")
+            );
         }
     }
 
