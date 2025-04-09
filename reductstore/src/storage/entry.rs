@@ -78,7 +78,14 @@ impl Entry {
         let path = path.join(name);
         Ok(Self {
             name: name.to_string(),
-            bucket_name: path.file_name().unwrap().to_str().unwrap().to_string(),
+            bucket_name: path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
             settings: RwLock::new(settings),
             block_manager: Arc::new(RwLock::new(BlockManager::new(
                 path.clone(),
