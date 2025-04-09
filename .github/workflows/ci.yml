@@ -525,7 +525,7 @@ jobs:
             --name reductstore \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
-            --env RS_LOG_LEVEL=INFO \
+            --env RS_LOG_LEVEL=DEBUG \
             -p 8383:8383 \
             -v ./data:/data \
             ${{ github.repository }}:latest
