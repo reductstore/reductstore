@@ -117,7 +117,8 @@ async fn launch_server() {
     };
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+// IMPORTANT: Use only current_thread runtime for the main function, we have deadlocks with multi-threaded runtime
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     launch_server().await;
 }
