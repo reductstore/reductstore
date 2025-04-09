@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-633: Link runtime libraries statically, [PR-761](https://github.com/reductstore/reductstore/pull/761)
 - RS-628: Return error if extension not found in query, [PR-780](https://github.com/reductstore/reductstore/pull/780)
 
+### Fixed
+
+- RS-660: Fix deadlocks using curent_thread runtime, [PR-781](https://github.com/reductstore/reductstore/pull/781)
+
 ## [1.14.5] - 2025-04-03
 
 ### Fixed

@@ -22,6 +22,7 @@ env:
 
 jobs:
   rust_fmt:
+
     runs-on: ubuntu-latest
     name: Rust Linter
     steps:
@@ -143,6 +144,7 @@ jobs:
             target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
     steps:
@@ -168,6 +170,7 @@ jobs:
   coverage:
     name: Generate Code Coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - rust_fmt
     env:
@@ -213,6 +216,7 @@ jobs:
             url: https://127.0.0.1:8383
           - cert_path: ""
             url: http://127.0.0.1:8383
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -278,6 +282,7 @@ jobs:
           ]
     env:
       RS_API_TOKEN: XXXX
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -417,6 +422,7 @@ jobs:
             records: 128
     env:
       RS_API_TOKEN: XXXX
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -500,6 +506,7 @@ jobs:
     strategy:
       matrix:
         branch: ["main", "latest"]
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
@@ -518,7 +525,7 @@ jobs:
             --name reductstore \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
-            --env RS_LOG_LEVEL=INFO \
+            --env RS_LOG_LEVEL=DEBUG \
             -p 8383:8383 \
             -v ./data:/data \
             ${{ github.repository }}:latest

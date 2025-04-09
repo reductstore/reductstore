@@ -78,7 +78,10 @@ impl ReductClient {
             url.to_string()
         };
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         Self {
             client,
             server_url,

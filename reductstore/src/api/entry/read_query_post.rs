@@ -37,7 +37,8 @@ pub(crate) async fn read_query_json(
 
     components
         .ext_repo
-        .register_query(id, bucket_name, entry_name, request)?;
+        .register_query(id, bucket_name, entry_name, request)
+        .await?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }

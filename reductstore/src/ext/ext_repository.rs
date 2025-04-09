@@ -14,13 +14,11 @@ use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
-use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::task::block_in_place;
 
-type IoExtRef = Arc<RwLock<Box<dyn IoExtension + Send + Sync>>>;
+type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
 
 #[derive(WrapperApi)]
@@ -30,7 +28,7 @@ struct ExtensionApi {
 
 #[async_trait]
 pub(crate) trait ManageExtensions {
-    fn register_query(
+    async fn register_query(
         &self,
         query_id: u64,
         bucket_name: &str,
@@ -56,7 +54,7 @@ pub(crate) struct QueryContext {
 
 struct ExtRepository {
     extension_map: IoExtMap,
-    query_map: RwLock<HashMap<u64, QueryContext>>,
+    query_map: AsyncRwLock<HashMap<u64, QueryContext>>,
 
     #[allow(dead_code)]
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
@@ -66,7 +64,7 @@ impl ExtRepository {
     pub(crate) fn try_load(path: &PathBuf) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
-        let query_map = RwLock::new(HashMap::new());
+        let query_map = AsyncRwLock::new(HashMap::new());
 
         if !path.exists() {
             return Err(internal_server_error!(
@@ -93,12 +91,12 @@ impl ExtRepository {
                     }
                 };
 
-                let ext = unsafe { Arc::new(RwLock::new(Box::from_raw(ext_wrapper.get_ext()))) };
+                let ext = unsafe { Box::from_raw(ext_wrapper.get_ext()) };
 
-                info!("Load extension: {:?}", ext.read()?.info());
+                info!("Load extension: {:?}", ext.info());
 
-                let name = ext.read()?.info().name().to_string();
-                extension_map.insert(name, ext);
+                let name = ext.info().name().to_string();
+                extension_map.insert(name, Arc::new(AsyncRwLock::new(ext)));
                 ext_wrappers.push(ext_wrapper);
             }
         }
@@ -118,10 +116,11 @@ impl ExtRepository {
         let mut computed_labels = Labels::new();
         for ext in ext_pipeline {
             computed_labels.extend(record.computed_labels().clone().into_iter());
-            let mut lock = ext.write().unwrap();
-            let status = block_in_place(|| {
-                Handle::current().block_on(lock.next_processed_record(query_id, record))
-            });
+            let status = ext
+                .write()
+                .await
+                .next_processed_record(query_id, record)
+                .await;
 
             if let ProcessStatus::Ready(result) = status {
                 if let Ok(processed_record) = result {
@@ -155,7 +154,7 @@ impl ManageExtensions for ExtRepository {
     /// # Errors
     ///
     /// * `ReductError::InternalServerError` - If the query is not valid
-    fn register_query(
+    async fn register_query(
         &self,
         query_id: u64,
         bucket_name: &str,
@@ -163,13 +162,13 @@ impl ManageExtensions for ExtRepository {
         query_request: QueryEntry,
     ) -> Result<(), ReductError> {
         let mut pipeline = Vec::new();
-        let mut query_map = self.query_map.write()?;
+        let mut query_map = self.query_map.write().await;
 
         let ext_params = query_request.ext.as_ref();
         if ext_params.is_some() && ext_params.unwrap().is_object() {
             for (name, _) in ext_params.unwrap().as_object().unwrap().iter() {
                 if let Some(ext) = self.extension_map.get(name) {
-                    ext.write()?.register_query(
+                    ext.write().await.register_query(
                         query_id,
                         bucket_name,
                         entry_name,
@@ -188,19 +187,22 @@ impl ManageExtensions for ExtRepository {
 
         let query_options: QueryOptions = query_request.into();
         // remove expired queries
-        query_map.retain(|_, query| {
+        let mut ids_to_remove = Vec::new();
+
+        for (key, query) in query_map.iter() {
             if query.last_access.elapsed() > query.query.ttl {
-                // unregister the query from the extension
                 for ext in &query.ext_pipeline {
-                    if let Err(e) = ext.write().unwrap().unregister_query(query.id) {
+                    if let Err(e) = ext.write().await.unregister_query(query.id) {
                         error!("Failed to unregister query {}: {:?}", query_id, e);
                     }
                 }
-                false
-            } else {
-                true
+                ids_to_remove.push(*key);
             }
-        });
+        }
+
+        for key in ids_to_remove {
+            query_map.remove(&key);
+        }
 
         // check if the query has references to computed labels and no extension is found
         let condition = if let Some(condition) = &query_options.when {
@@ -245,7 +247,7 @@ impl ManageExtensions for ExtRepository {
                     let record = Box::new(record);
                     let pipline = {
                         // check if query is registered and
-                        let mut lock = self.query_map.write().unwrap();
+                        let mut lock = self.query_map.write().await;
 
                         let query = lock.get_mut(&query_id);
                         if query.is_none() {
@@ -259,7 +261,7 @@ impl ManageExtensions for ExtRepository {
 
                     let status = Self::send_record_to_ext_pipeline(query_id, record, pipline).await;
                     if let ProcessStatus::Ready(Ok(record)) = status {
-                        let lock = self.query_map.read().unwrap();
+                        let lock = self.query_map.read().await;
                         let query = lock.get(&query_id).unwrap();
                         query
                             .condition_filter
@@ -285,7 +287,7 @@ pub fn create_ext_repository(path: Option<PathBuf>) -> Result<BoxedManageExtensi
 
         #[async_trait]
         impl ManageExtensions for NoExtRepository {
-            fn register_query(
+            async fn register_query(
                 &self,
                 _query_id: u64,
                 _bucket_name: &str,
@@ -329,7 +331,6 @@ pub(super) mod tests {
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use serde_json::json;
     use std::fs;
-    use std::thread::sleep;
     use tempfile::tempdir;
     use test_log::test as log_test;
 
@@ -342,8 +343,7 @@ pub(super) mod tests {
                 .extension_map
                 .get("test-ext")
                 .unwrap()
-                .read()
-                .unwrap();
+                .blocking_read();
             let info = ext.info().clone();
             assert_eq!(
                 info,
@@ -423,13 +423,15 @@ pub(super) mod tests {
         use std::time::Duration;
 
         #[rstest]
-        fn test_no_ext_part(mock_ext: MockIoExtension) {
+        #[tokio::test]
+        async fn test_no_ext_part(mock_ext: MockIoExtension) {
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
             assert!(mocked_ext_repo
                 .register_query(1, "bucket", "entry", QueryEntry::default())
+                .await
                 .is_ok());
 
-            let query_map = mocked_ext_repo.query_map.read().unwrap();
+            let query_map = mocked_ext_repo.query_map.read().await;
             assert_eq!(
                 query_map.len(),
                 0,
@@ -438,7 +440,8 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        fn test_with_ext_part(mut mock_ext: MockIoExtension) {
+        #[tokio::test]
+        async fn test_with_ext_part(mut mock_ext: MockIoExtension) {
             let query = QueryEntry {
                 ext: Some(json!({
                     "test-ext": {},
@@ -455,9 +458,10 @@ pub(super) mod tests {
 
             assert!(mocked_ext_repo
                 .register_query(1, "bucket", "entry", query)
+                .await
                 .is_ok());
 
-            let query_map = mocked_ext_repo.query_map.read().unwrap();
+            let query_map = mocked_ext_repo.query_map.read().await;
             assert_eq!(
                 query_map.len(),
                 1,
@@ -466,7 +470,8 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        fn test_without_ext_but_computed_labels(mut mock_ext: MockIoExtension) {
+        #[tokio::test]
+        async fn test_without_ext_but_computed_labels(mut mock_ext: MockIoExtension) {
             let query = QueryEntry {
                 when: Some(json!({"@label": { "$eq": "value" }})),
                 ..Default::default()
@@ -478,6 +483,7 @@ pub(super) mod tests {
             assert_eq!(
                 mocked_ext_repo
                     .register_query(1, "bucket", "entry", query)
+                    .await
                     .err()
                     .unwrap(),
                 unprocessable_entity!(
@@ -487,7 +493,8 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        fn test_ttl(mut mock_ext: MockIoExtension) {
+        #[tokio::test]
+        async fn test_ttl(mut mock_ext: MockIoExtension) {
             let query = QueryEntry {
                 ttl: Some(1),
                 ext: Some(json!({
@@ -512,23 +519,26 @@ pub(super) mod tests {
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
             assert!(mocked_ext_repo
                 .register_query(1, "bucket", "entry", query.clone())
+                .await
                 .is_ok());
 
             assert!(mocked_ext_repo
                 .register_query(2, "bucket", "entry", query.clone())
+                .await
                 .is_ok());
 
             {
-                let query_map = mocked_ext_repo.query_map.read().unwrap();
+                let query_map = mocked_ext_repo.query_map.read().await;
                 assert_eq!(query_map.len(), 2);
             }
 
-            sleep(Duration::from_secs(2));
+            tokio::time::sleep(Duration::from_secs(2)).await;
             assert!(mocked_ext_repo
                 .register_query(3, "bucket", "entry", query)
+                .await
                 .is_ok());
             {
-                let query_map = mocked_ext_repo.query_map.read().unwrap();
+                let query_map = mocked_ext_repo.query_map.read().await;
                 assert_eq!(query_map.len(), 1,);
 
                 assert!(query_map.get(&1).is_none(), "Query 1 should be expired");
@@ -538,7 +548,8 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        fn error_unknown_extension(mut mock_ext: MockIoExtension) {
+        #[tokio::test]
+        async fn error_unknown_extension(mut mock_ext: MockIoExtension) {
             let query = QueryEntry {
                 ext: Some(json!({
                     "unknown-ext": {},
@@ -552,6 +563,7 @@ pub(super) mod tests {
             assert_eq!(
                 mocked_ext_repo
                     .register_query(1, "bucket", "entry", query)
+                    .await
                     .err()
                     .unwrap(),
                 unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1")
@@ -587,7 +599,7 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[tokio::test(flavor = "multi_thread")]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_stop_pipeline_at_errors() {
             let record = Box::new(MockRecord::new("key1", "val1"));
             let mut mock_ext_1 = MockIoExtension::new();
@@ -605,8 +617,8 @@ pub(super) mod tests {
                 condition_filter: ExtWhenFilter::new(None),
                 last_access: Instant::now(),
                 ext_pipeline: vec![
-                    Arc::new(RwLock::new(Box::new(mock_ext_1))),
-                    Arc::new(RwLock::new(Box::new(mock_ext_2))),
+                    Arc::new(AsyncRwLock::new(Box::new(mock_ext_1))),
+                    Arc::new(AsyncRwLock::new(Box::new(mock_ext_2))),
                 ],
             };
 
@@ -675,7 +687,7 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[tokio::test(flavor = "multi_thread")]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_process_not_ready(
             record_reader: RecordReader,
             mut mock_ext: MockIoExtension,
@@ -697,6 +709,7 @@ pub(super) mod tests {
 
             mocked_ext_repo
                 .register_query(1, "bucket", "entry", query)
+                .await
                 .unwrap();
 
             let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -710,7 +723,7 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[tokio::test(flavor = "multi_thread")]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_process_in_pipeline(record_reader: RecordReader) {
             let record1 = Box::new(MockRecord::new("key1", "val1"));
             let record2 = Box::new(MockRecord::new("key2", "val2"));
@@ -730,9 +743,10 @@ pub(super) mod tests {
                 .return_once(|_, _| ProcessStatus::Ready(Ok(record2)));
 
             let mut mocked_ext_repo = mocked_ext_repo("test1", mock1);
-            mocked_ext_repo
-                .extension_map
-                .insert("test2".to_string(), Arc::new(RwLock::new(Box::new(mock2))));
+            mocked_ext_repo.extension_map.insert(
+                "test2".to_string(),
+                Arc::new(AsyncRwLock::new(Box::new(mock2))),
+            );
 
             let query = QueryEntry {
                 ext: Some(json!({
@@ -744,6 +758,7 @@ pub(super) mod tests {
             };
             mocked_ext_repo
                 .register_query(1, "bucket", "entry", query)
+                .await
                 .unwrap();
             let (tx, rx) = tokio::sync::mpsc::channel(1);
 
@@ -794,9 +809,10 @@ pub(super) mod tests {
 
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
         let mut ext_repo = ExtRepository::try_load(&tempdir().unwrap().into_path()).unwrap();
-        ext_repo
-            .extension_map
-            .insert(name.to_string(), Arc::new(RwLock::new(Box::new(mock_ext))));
+        ext_repo.extension_map.insert(
+            name.to_string(),
+            Arc::new(AsyncRwLock::new(Box::new(mock_ext))),
+        );
         ext_repo
     }
 
