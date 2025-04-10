@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-660: Fix deadlocks using curent_thread runtime, [PR-781](https://github.com/reductstore/reductstore/pull/781)
 
+### Internal
+
+- RS-647: Build binaries for Linux and Macos ARM64, [PR-647](https://github.com/reductstore/reductstore/pull/782)
+
 ## [1.14.5] - 2025-04-03
 
 ### Fixed
