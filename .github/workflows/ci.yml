@@ -769,34 +769,34 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
-  publish_crate:
-    runs-on: ubuntu-latest
-    name: Publish crate
-    needs:
-      - api_tests
-      - migration_test
-      - replication_test
-      - check_tag # Only publish on tags
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/checkout@v2
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.MINIMAL_RUST_VERSION }}
-      - uses: arduino/setup-protoc@v1
-        with:
-          version: "3.x"
-          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-      - name: Login
-        run: |
-          cargo login ${{ secrets.CRATES_IO_TOKEN }}
-      - name: Publish reduct-base
-        run: cargo publish -p reduct-base
-      - name: Publish reduct-macros
-        run: cargo publish -p reduct-macros
-      - name: Publish reductstore
-        run: cargo publish -p reductstore
+#  publish_crate:
+#    runs-on: ubuntu-latest
+#    name: Publish crate
+#    needs:
+#      - api_tests
+#      - migration_test
+#      - replication_test
+#      - check_tag # Only publish on tags
+#    if: startsWith(github.ref, 'refs/tags/')
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Set up Rust
+#        uses: dtolnay/rust-toolchain@stable
+#        with:
+#          toolchain: ${{ env.MINIMAL_RUST_VERSION }}
+#      - uses: arduino/setup-protoc@v1
+#        with:
+#          version: "3.x"
+#          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+#      - name: Login
+#        run: |
+#          cargo login ${{ secrets.CRATES_IO_TOKEN }}
+#      - name: Publish reduct-base
+#        run: cargo publish -p reduct-base
+#      - name: Publish reduct-macros
+#        run: cargo publish -p reduct-macros
+#      - name: Publish reductstore
+#        run: cargo publish -p reductstore
 
   make_release:
     runs-on: ubuntu-latest
