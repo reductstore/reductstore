@@ -62,18 +62,26 @@ jobs:
         target:
           [
             "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
             "x86_64-pc-windows-gnu",
             "x86_64-apple-darwin",
+            "aarch64-apple-darwin",
           ]
         include:
           - target: "x86_64-unknown-linux-gnu"
             os: ubuntu-24.04
             compiler: "gcc"
+          - target: "aarch64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc-aarch64-linux-gnu"
           - target: "x86_64-pc-windows-gnu"
             os: ubuntu-24.04
             compiler: "gcc-mingw-w64-x86-64"
           - target: "x86_64-apple-darwin"
-            os: macos-13
+            os: macos-14
+            compiler: "gcc-x86_64-apple-darwin"
+          - target: "aarch64-apple-darwin"
+            os: macos-14
             compiler: "gcc"
 
     steps:
@@ -797,74 +805,77 @@ jobs:
       - migration_test
       - replication_test
       - check_tag # Only publish on tags
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     name: Make release
-    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/create-release@v1
+      - uses: softprops/action-gh-release@v2
         id: create_release
         with:
           draft: true
           prerelease: false
-          release_name: Release ${{ steps.version.outputs.version }}
-          tag_name: ${{ github.ref }}
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
           body: Copy changes from CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Download Linux artifact
+  upload_release:
+    runs-on: ubuntu-latest
+    needs:
+      - make_release
+    name: Upload artifacts
+    if: startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        target: [
+          "x86_64-unknown-linux-gnu",
+          "aarch64-unknown-linux-gnu",
+          "x86_64-pc-windows-gnu",
+          "x86_64-apple-darwin",
+          "aarch64-apple-darwin",
+        ]
+    steps:
+      - uses: actions/checkout@v4
+
+
+      - name: Download ${{ matrix.target }} artifact
         uses: actions/download-artifact@v4
         with:
-          name: reductstore-x86_64-unknown-linux-gnu
+          name: reductstore-${{ matrix.target }}
           path: /tmp/
-      - name: Load Linux image and get binary
+      - name: Archive binary for UNIX
+        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
         run: |
           cd /tmp
-          tar -czvf reductstore.linux-amd64.tar.gz reductstore
-      - name: Upload Linux artifact
+          tar -czvf reductstore.${{ matrix.target }}.tar.gz reductstore
+
+      - name: Archive binary for Windows
+        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
+        run: |
+          cd /tmp
+          zip -o reductstore.${{ matrix.target }}.zip reductstore.exe
+
+
+      - name: Upload Linux Unix artifact
+        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reductstore.linux-amd64.tar.gz
-          asset_name: reductstore.linux-amd64.tar.gz
-          asset_content_type: application/gzip
-      - name: Download Macos artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: reductstore-x86_64-apple-darwin
-          path: /tmp/
-      - name: Archive MacOs binary
-        run: |
-          cd /tmp
-          tar -czvf reductstore.macos-amd64.tar.gz  reductstore
-
-      - name: Upload MacOs artifact
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reductstore.macos-amd64.tar.gz
-          asset_name: reductstore.macos-amd64.tar.gz
+          upload_url: ${{ needs.make_release.outputs.upload_url }}
+          asset_path: /tmp/reductstore.${{ matrix.target }}.tar.gz
+          asset_name: reductstore.${{ matrix.target }}.tar.gz
           asset_content_type: application/gzip
 
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: reductstore-x86_64-pc-windows-gnu
-          path: /tmp/
-      - name: Archive Windows binary
-        run: |
-          cd /tmp
-          zip -o reductstore.win-amd64.zip  reductstore.exe
       - name: Upload Windows artifact
+        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /tmp/reductstore.win-amd64.zip
-          asset_name: reductstore.win-amd64.zip
+          upload_url: ${{ needs.make_release.outputs.upload_url }}
+          asset_path: /tmp/reductstore.${{ matrix.target }}.zip
+          asset_name: reductstore.${{ matrix.target }}.zip
           asset_content_type: application/zip
