@@ -37,7 +37,7 @@ impl Constant {
         }
     }
 
-    pub fn boxed(value: Value) -> Box<Self> {
+    pub fn boxed(value: Value) -> BoxedNode {
         Box::new(Constant::new(value))
     }
 }

@@ -6,15 +6,20 @@ use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
-/// A node representing an exists operation that checks if a label exists in the context.
+/// A node representing an exists operation that checks if all labels in the operands exist in the context.
 pub(crate) struct Exists {
     operands: Vec<BoxedNode>,
 }
 
 impl Node for Exists {
     fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        let value = self.operands[0].apply(context)?.as_string()?;
-        Ok(Value::Bool(context.labels.contains_key(value.as_str())))
+        for operand in &self.operands {
+            let value = operand.apply(context)?;
+            if !context.labels.contains_key(value.as_string()?.as_str()) {
+                return Ok(Value::Bool(false));
+            }
+        }
+        Ok(Value::Bool(true))
     }
 
     fn operands(&self) -> &Vec<BoxedNode> {
@@ -22,15 +27,15 @@ impl Node for Exists {
     }
 
     fn print(&self) -> String {
-        format!("Exists({:?})", self.operands[0])
+        format!("Exists({:?})", self.operands)
     }
 }
 
 impl Boxed for Exists {
     fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
-        if operands.len() != 1 {
+        if operands.is_empty() {
             return Err(unprocessable_entity!(
-                "$exists requires exactly one operand"
+                "$exists requires at least one operand"
             ));
         }
 
@@ -53,13 +58,19 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn apply_ok() {
-        let op = Exists::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
-        assert_eq!(op.apply(&Context::default()).unwrap(), Value::Bool(false));
+    #[case(vec!["foo".to_string()], true)]
+    #[case(vec!["foo".to_string(), "bazz".to_string()], false)]
+    fn apply_ok(#[case] labels: Vec<String>, #[case] expected: bool) {
+        let op = Exists::new(
+            labels
+                .iter()
+                .map(|label| Constant::boxed(Value::String(label.clone())))
+                .collect(),
+        );
 
         let mut context = Context::default();
         context.labels.insert("foo", "bar");
-        assert_eq!(op.apply(&context).unwrap(), Value::Bool(true));
+        assert_eq!(op.apply(&context).unwrap(), Value::Bool(expected));
     }
 
     #[rstest]
@@ -67,13 +78,13 @@ mod tests {
         let result = Exists::boxed(vec![]);
         assert_eq!(
             result.err().unwrap(),
-            unprocessable_entity!("$exists requires exactly one operand")
+            unprocessable_entity!("$exists requires at least one operand")
         );
     }
 
     #[rstest]
     fn print() {
         let and = Exists::new(vec![Constant::boxed(Value::Bool(true))]);
-        assert_eq!(and.print(), "Exists(Bool(true))");
+        assert_eq!(and.print(), "Exists([Bool(true)])");
     }
 }
