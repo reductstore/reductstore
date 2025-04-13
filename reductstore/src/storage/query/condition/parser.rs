@@ -189,6 +189,7 @@ impl Parser {
 
             // Misc
             "$exists" => Exists::boxed(operands),
+            "$has" => Exists::boxed(operands),
             "$cast" => Cast::boxed(operands),
             "$ref" => Ref::boxed(operands),
 
@@ -346,6 +347,7 @@ mod tests {
         #[case("$ends_with", "[\"abc\", \"bc\"]", Value::Bool(true))]
         // Misc
         #[case("$exists", "[\"label\"]", Value::Bool(true))]
+        #[case("$has", "[\"label\"]", Value::Bool(true))]
         #[case("$cast", "[10.0, \"int\"]", Value::Int(10))]
         #[case("$ref", "[\"label\"]", Value::Int(10))]
         fn test_parse_operator(
