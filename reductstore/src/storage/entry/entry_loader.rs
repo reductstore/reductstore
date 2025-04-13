@@ -629,6 +629,39 @@ mod tests {
             );
         }
 
+        #[rstest]
+        fn test_recovery_without_index(entry_fix: (Entry, PathBuf)) {
+            let (entry, path) = entry_fix;
+            let mut wal = create_wal(path.clone());
+
+            // Block #1 was appended
+            wal.append(
+                1,
+                WalEntry::WriteRecord(Record {
+                    timestamp: Some(us_to_ts(&1)),
+                    begin: 0,
+                    end: 10,
+                    content_type: "text/plain".to_string(),
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                }),
+            )
+            .unwrap();
+
+            // Create a new block but don't add it to the index
+            let mut bm = entry.block_manager.write().unwrap();
+            bm.start_new_block(1, 100).unwrap();
+            bm.index_mut().remove_block(1);
+            bm.index_mut().save().unwrap();
+
+            // Restore the entry
+            let entry = EntryLoader::restore_entry(path.clone(), entry.settings()).unwrap();
+            let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
+            let block = block.read().unwrap();
+
+            assert_eq!(block.record_count(), 1);
+        }
+
         #[fixture]
         fn record2() -> Record {
             Record {
