@@ -144,7 +144,7 @@ impl BlockManager {
                 if let Some(block_crc) = block.crc64 {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
-                        error!("Block descriptor {:?} is corrupted: index CRC {} missmatch with calculated CRC {}.\
+                        error!("Block descriptor {:?} is corrupted: index CRC {} mismatch with calculated CRC {}.\
                      Remove it and its data block, then restart the database", path, block_crc, crc.sum64());
                         return Err(internal_server_error!(
                             "Block descriptor {:?} is corrupted",
