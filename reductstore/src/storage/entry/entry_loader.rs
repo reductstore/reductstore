@@ -11,7 +11,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use bytesize::ByteSize;
 use crc64fast::Digest;
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use prost::Message;
 
 use reduct_base::error::ReductError;
@@ -206,7 +206,16 @@ impl EntryLoader {
                         "Loading block {}/{} from block manager",
                         entry.name, block_id
                     );
-                    block_manager.load_block(block_id)?
+                    match block_manager.load_block(block_id) {
+                        Ok(block_ref) => block_ref,
+                        Err(err) => {
+                            warn!("Failed to load block {}/{}: {}", entry.name, block_id, err);
+                            info!("Creating block {}/{} from WAL", entry.name, block_id);
+                            Arc::new(RwLock::new(
+                                crate::storage::block_manager::block::Block::new(block_id),
+                            ))
+                        }
+                    }
                 } else {
                     debug!("Creating block {}/{} from WAL", entry.name, block_id);
                     Arc::new(RwLock::new(

@@ -140,16 +140,23 @@ impl BlockManager {
             let mut crc = Digest::new();
             crc.write(&buf);
 
-            if let Some(block_crc) = self.block_index.get_block(block_id).unwrap().crc64 {
-                // we check crc if the crc is stored in the index for backward compatibility
-                if block_crc != crc.sum64() {
-                    error!("Block descriptor {:?} is corrupted: index CRC {} missmatch with calculated CRC {}.\
+            if let Some(block) = self.block_index.get_block(block_id) {
+                if let Some(block_crc) = block.crc64 {
+                    // we check crc if the crc is stored in the index for backward compatibility
+                    if block_crc != crc.sum64() {
+                        error!("Block descriptor {:?} is corrupted: index CRC {} missmatch with calculated CRC {}.\
                      Remove it and its data block, then restart the database", path, block_crc, crc.sum64());
-                    return Err(internal_server_error!(
-                        "Block descriptor {:?} is corrupted",
-                        path
-                    ));
+                        return Err(internal_server_error!(
+                            "Block descriptor {:?} is corrupted",
+                            path
+                        ));
+                    }
                 }
+            } else {
+                return Err(internal_server_error!(
+                    "Block descriptor {:?} is not in the index",
+                    path
+                ));
             }
 
             // parse the block descriptor
