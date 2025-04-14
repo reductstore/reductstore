@@ -12,7 +12,7 @@ pub(crate) struct Ref {
 }
 
 impl Node for Ref {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let label = self.operands[0].apply(context)?.as_string()?;
         context.labels.get(label.as_str()).map_or_else(
             || Err(not_found!("Label '{:?}' not found", label)),
@@ -55,7 +55,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Ref::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
+        let mut op = Ref::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
 
         let mut context = Context::default();
         context.labels.insert("foo", "bar");

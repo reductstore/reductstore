@@ -12,7 +12,7 @@ pub(crate) struct Contains {
 }
 
 impl Node for Contains {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let value_1 = self.operands[0].apply(context)?;
         let value_2 = self.operands[1].apply(context)?;
         Ok(Value::Bool(value_1.contains(value_2)?))
@@ -57,7 +57,7 @@ mod tests {
     #[case(Value::String("test".to_string()), Value::String("esx".to_string()), Value::Bool(false))]
     #[case(Value::String("test".to_string()), Value::String("test".to_string()), Value::Bool(true))]
     fn apply(#[case] op_1: Value, #[case] op_2: Value, #[case] expected: Value) {
-        let contains = Contains::new(vec![Constant::boxed(op_1), Constant::boxed(op_2)]);
+        let mut contains = Contains::new(vec![Constant::boxed(op_1), Constant::boxed(op_2)]);
         assert_eq!(contains.apply(&Context::default()).unwrap(), expected);
     }
 

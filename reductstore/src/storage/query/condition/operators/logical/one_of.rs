@@ -11,9 +11,9 @@ pub(crate) struct OneOf {
 }
 
 impl Node for OneOf {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let mut count = 0;
-        for operand in self.operands.iter() {
+        for operand in self.operands.iter_mut() {
             let value = operand.apply(context)?;
             if value.as_bool()? {
                 count += 1;
@@ -53,7 +53,7 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let xor = OneOf::new(vec![
+        let mut xor = OneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
@@ -62,7 +62,7 @@ mod tests {
 
         assert_eq!(xor.apply(&Context::default()).unwrap(), Value::Bool(false));
 
-        let xor = OneOf::new(vec![
+        let mut xor = OneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
@@ -73,7 +73,7 @@ mod tests {
 
     #[rstest]
     fn apply_empty() {
-        let xor = OneOf::new(vec![]);
+        let mut xor = OneOf::new(vec![]);
         assert_eq!(xor.apply(&Context::default()).unwrap(), Value::Bool(false));
     }
 

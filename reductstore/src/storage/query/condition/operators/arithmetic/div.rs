@@ -13,7 +13,7 @@ pub(crate) struct Div {
 }
 
 impl Node for Div {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let value_1 = self.operands[0].apply(context)?;
         let value_2 = self.operands[1].apply(context)?;
         value_1.divide(value_2)
@@ -53,7 +53,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let sub = Div::new(vec![
+        let mut sub = Div::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Int(2)),
         ]);
@@ -62,7 +62,7 @@ mod tests {
 
     #[rstest]
     fn apply_bad() {
-        let sub = Div::new(vec![
+        let mut sub = Div::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("foo".to_string())),
         ]);

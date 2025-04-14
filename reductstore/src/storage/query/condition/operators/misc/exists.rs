@@ -12,8 +12,8 @@ pub(crate) struct Exists {
 }
 
 impl Node for Exists {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        for operand in &self.operands {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
+        for operand in &mut self.operands {
             let value = operand.apply(context)?;
             if !context.labels.contains_key(value.as_string()?.as_str()) {
                 return Ok(Value::Bool(false));
@@ -61,7 +61,7 @@ mod tests {
     #[case(vec!["foo".to_string()], true)]
     #[case(vec!["foo".to_string(), "bazz".to_string()], false)]
     fn apply_ok(#[case] labels: Vec<String>, #[case] expected: bool) {
-        let op = Exists::new(
+        let mut op = Exists::new(
             labels
                 .iter()
                 .map(|label| Constant::boxed(Value::String(label.clone())))

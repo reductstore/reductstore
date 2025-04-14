@@ -20,7 +20,7 @@ impl ExtWhenFilter {
         ExtWhenFilter { condition }
     }
 
-    pub fn filter_record(&self, status: ProcessStatus, strict: bool) -> ProcessStatus {
+    pub fn filter_record(&mut self, status: ProcessStatus, strict: bool) -> ProcessStatus {
         if self.condition.is_none() {
             return status;
         }
@@ -43,7 +43,7 @@ impl ExtWhenFilter {
         }
     }
 
-    fn filter_with_computed(&self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
+    fn filter_with_computed(&mut self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
         let mut labels = reader
             .labels()
             .iter()
@@ -59,7 +59,7 @@ impl ExtWhenFilter {
         let context = Context::new(labels, EvaluationStage::Compute);
         Ok(self
             .condition
-            .as_ref()
+            .as_mut()
             .unwrap()
             .apply(&context)?
             .as_bool()?)
@@ -77,7 +77,7 @@ mod tests {
 
     #[rstest]
     fn pass_status_if_condition_none(mocked_record: Box<MockRecord>) {
-        let filter = ExtWhenFilter::new(None);
+        let mut filter = ExtWhenFilter::new(None);
         let status = ProcessStatus::Ready(Ok(mocked_record));
         assert_matches!(
             filter.filter_record(status, false),
@@ -87,7 +87,7 @@ mod tests {
 
     #[rstest]
     fn not_ready_if_condition_false(mocked_record: Box<MockRecord>) {
-        let filter = ExtWhenFilter::new(Some(
+        let mut filter = ExtWhenFilter::new(Some(
             Parser::new()
                 .parse(&json!({"$and": [false, "@key1"]}))
                 .unwrap(),
@@ -98,7 +98,7 @@ mod tests {
 
     #[rstest]
     fn ready_if_condition_true(mocked_record: Box<MockRecord>) {
-        let filter = ExtWhenFilter::new(Some(
+        let mut filter = ExtWhenFilter::new(Some(
             Parser::new()
                 .parse(&json!({"$and": [true, "@key1"]}))
                 .unwrap(),
@@ -109,7 +109,7 @@ mod tests {
 
     #[rstest]
     fn ready_with_error_strict(mocked_record: Box<MockRecord>) {
-        let filter = ExtWhenFilter::new(Some(
+        let mut filter = ExtWhenFilter::new(Some(
             Parser::new()
                 .parse(&json!({"$and": [true, "@not-exit"]}))
                 .unwrap(),
@@ -123,7 +123,7 @@ mod tests {
 
     #[rstest]
     fn ready_without_error(mocked_record: Box<MockRecord>) {
-        let filter = ExtWhenFilter::new(Some(
+        let mut filter = ExtWhenFilter::new(Some(
             Parser::new()
                 .parse(&json!({"$and": [true, "@not-exit"]}))
                 .unwrap(),
@@ -134,7 +134,7 @@ mod tests {
 
     #[rstest]
     fn conflict(mut mocked_record: Box<MockRecord>) {
-        let filter = ExtWhenFilter::new(Some(
+        let mut filter = ExtWhenFilter::new(Some(
             Parser::new()
                 .parse(&json!({"$and": [true, "@key1"]}))
                 .unwrap(),

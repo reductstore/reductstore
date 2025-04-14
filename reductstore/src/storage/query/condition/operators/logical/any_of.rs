@@ -11,8 +11,8 @@ pub(crate) struct AnyOf {
 }
 
 impl Node for AnyOf {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        for operand in self.operands.iter() {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
+        for operand in self.operands.iter_mut() {
             let value = operand.apply(context)?;
             if value.as_bool()? {
                 return Ok(Value::Bool(true));
@@ -52,7 +52,7 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let or = AnyOf::new(vec![
+        let mut or = AnyOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
@@ -60,7 +60,7 @@ mod tests {
         ]);
         assert_eq!(or.apply(&Context::default()).unwrap(), Value::Bool(true));
 
-        let or = AnyOf::new(vec![
+        let mut or = AnyOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
@@ -70,7 +70,7 @@ mod tests {
 
     #[rstest]
     fn apply_empty() {
-        let or = AnyOf::new(vec![]);
+        let mut or = AnyOf::new(vec![]);
         assert_eq!(or.apply(&Context::default()).unwrap(), Value::Bool(false));
     }
 

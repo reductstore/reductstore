@@ -11,8 +11,8 @@ pub(crate) struct NoneOf {
 }
 
 impl Node for NoneOf {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        for operand in self.operands.iter() {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
+        for operand in self.operands.iter_mut() {
             let value = operand.apply(context)?;
             if value.as_bool()? {
                 return Ok(Value::Bool(false));
@@ -52,7 +52,7 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let not = NoneOf::new(vec![
+        let mut not = NoneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
@@ -60,7 +60,7 @@ mod tests {
         ]);
         assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(false));
 
-        let not = NoneOf::new(vec![
+        let mut not = NoneOf::new(vec![
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(false)),
@@ -70,7 +70,7 @@ mod tests {
 
     #[rstest]
     fn apply_empty() {
-        let not = NoneOf::new(vec![]);
+        let mut not = NoneOf::new(vec![]);
         assert_eq!(not.apply(&Context::default()).unwrap(), Value::Bool(true));
     }
 

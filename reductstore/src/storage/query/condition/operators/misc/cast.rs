@@ -12,7 +12,7 @@ pub(crate) struct Cast {
 }
 
 impl Node for Cast {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let op = self.operands[0].apply(context)?;
         let type_name = self.operands[1].apply(context)?.as_string()?;
         op.cast(type_name.as_str())
@@ -51,7 +51,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let sub = Cast::new(vec![
+        let mut sub = Cast::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("float".to_string())),
         ]);
@@ -60,7 +60,7 @@ mod tests {
 
     #[rstest]
     fn apply_bad() {
-        let sub = Cast::new(vec![
+        let mut sub = Cast::new(vec![
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::String("foo".to_string())),
         ]);

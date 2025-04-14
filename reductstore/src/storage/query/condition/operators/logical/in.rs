@@ -12,9 +12,9 @@ pub(crate) struct In {
 }
 
 impl Node for In {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let op_value = self.operands[0].apply(context)?;
-        for item in self.operands[1..].iter() {
+        for item in self.operands[1..].iter_mut() {
             if item.apply(context)? == op_value {
                 return Ok(Value::Bool(true));
             }
@@ -72,7 +72,7 @@ mod tests {
         let mut operands: Vec<BoxedNode> = vec![Constant::boxed(op)];
         operands.extend(list.iter().map(|v| Constant::boxed(v.clone()) as BoxedNode));
 
-        let op = In::new(operands);
+        let mut op = In::new(operands);
         assert_eq!(op.apply(&Context::default()).unwrap(), expected);
     }
 

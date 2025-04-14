@@ -11,8 +11,8 @@ pub(crate) struct AllOf {
 }
 
 impl Node for AllOf {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        for operand in self.operands.iter() {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
+        for operand in self.operands.iter_mut() {
             let value = operand.apply(context)?;
             if !value.as_bool()? {
                 return Ok(Value::Bool(false));
@@ -52,7 +52,7 @@ mod tests {
 
     #[rstest]
     fn apply() {
-        let and = AllOf::new(vec![
+        let mut and = AllOf::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(-2.0)),
@@ -60,7 +60,7 @@ mod tests {
         ]);
         assert_eq!(and.apply(&Context::default()).unwrap(), Value::Bool(true));
 
-        let and = AllOf::new(vec![
+        let mut and = AllOf::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
             Constant::boxed(Value::Bool(true)),
