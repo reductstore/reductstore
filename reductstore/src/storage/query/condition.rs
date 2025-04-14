@@ -39,7 +39,7 @@ impl<'a> Context<'a> {
 /// Nodes can be evaluated in a context to produce a value.
 pub(crate) trait Node {
     /// Evaluates the node in the given context.
-    fn apply(&self, context: &Context) -> Result<Value, ReductError>;
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError>;
 
     fn operands(&self) -> &Vec<BoxedNode>;
 

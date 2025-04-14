@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
+use crate::storage::query::condition::operators::aggregation::EachN;
 use crate::storage::query::condition::operators::arithmetic::{
     Abs, Add, Div, DivNum, Mult, Rem, Sub,
 };
@@ -27,8 +28,8 @@ struct StagedAllOff {
 }
 
 impl Node for StagedAllOff {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
-        for operand in self.operands.iter() {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
+        for operand in self.operands.iter_mut() {
             // Filter out operands that are not in the current stage
             if operand.stage() == &context.stage {
                 let value = operand.apply(context)?;
@@ -153,6 +154,8 @@ impl Parser {
 
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         match operator {
+            // Aggregation operators
+            "$each_n" => EachN::boxed(operands),
             // Arithmetic operators
             "$add" => Add::boxed(operands),
             "$sub" => Sub::boxed(operands),
@@ -217,14 +220,14 @@ mod tests {
     #[rstest]
     fn test_parser_array_syntax(parser: Parser, context: Context) {
         let json = serde_json::from_str(r#"{"$and": [true, {"$gt": [20, 10]}]}"#).unwrap();
-        let node = parser.parse(&json).unwrap();
+        let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parser_object_syntax(parser: Parser) {
         let json = serde_json::from_str(r#"{"&label": {"$gt": 10}}"#).unwrap();
-        let node = parser.parse(&json).unwrap();
+        let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
             HashMap::from_iter(vec![("label", "20")]),
             EvaluationStage::Retrieve,
@@ -235,21 +238,21 @@ mod tests {
     #[rstest]
     fn test_parse_int(parser: Parser, context: Context) {
         let json = serde_json::from_str(r#"{"$and": [1, -2]}"#).unwrap();
-        let node = parser.parse(&json).unwrap();
+        let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parse_float(parser: Parser, context: Context) {
         let json = serde_json::from_str(r#"{"$and": [1.1, -2.2]}"#).unwrap();
-        let node = parser.parse(&json).unwrap();
+        let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parse_string(parser: Parser, context: Context) {
         let json = serde_json::from_str(r#"{"$and": ["a", "b"]}"#).unwrap();
-        let node = parser.parse(&json).unwrap();
+        let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -257,7 +260,7 @@ mod tests {
     fn test_parser_multiline(parser: Parser) {
         let json =
             serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
-        let node = parser.parse(&json).unwrap();
+        let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
             HashMap::from_iter(vec![("label", "true")]),
             EvaluationStage::Retrieve,
@@ -315,6 +318,8 @@ mod tests {
     mod parse_operators {
         use super::*;
         #[rstest]
+        // Aggregation operators
+        #[case("$each_n", "[1]", Value::Bool(true))]
         // Arithmetic operators
         #[case("$add", "[1, 2.0]", Value::Float(3.0))]
         #[case("$sub", "[1, 2]", Value::Int(-1))]
@@ -364,7 +369,7 @@ mod tests {
                 operands
             ))
             .unwrap();
-            let node = parser.parse(&json).unwrap();
+            let mut node = parser.parse(&json).unwrap();
             assert!(
                 node.apply(&context).unwrap().as_bool().unwrap(),
                 "{}",
@@ -396,7 +401,7 @@ mod tests {
                 Constant::boxed(Value::Bool(false)), // ignored because not in stage
             ];
 
-            let staged_all_of = StagedAllOff::boxed(operands).unwrap();
+            let mut staged_all_of = StagedAllOff::boxed(operands).unwrap();
             let context = Context::new(HashMap::new(), EvaluationStage::Compute);
             assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(true));
         }

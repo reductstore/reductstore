@@ -13,7 +13,7 @@ pub(crate) struct Abs {
 }
 
 impl Node for Abs {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let value = self.operands[0].apply(context)?;
         value.abs()
     }
@@ -30,7 +30,7 @@ impl Node for Abs {
 impl Boxed for Abs {
     fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         if operands.len() != 1 {
-            return Err(unprocessable_entity!("Abs requires exactly one operand"));
+            return Err(unprocessable_entity!("$abs requires exactly one operand"));
         }
         Ok(Box::new(Self::new(operands)))
     }
@@ -52,13 +52,13 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Abs::new(vec![Constant::boxed(Value::Int(-1))]);
+        let mut op = Abs::new(vec![Constant::boxed(Value::Int(-1))]);
         assert_eq!(op.apply(&Context::default()).unwrap(), Value::Int(1));
     }
 
     #[rstest]
     fn apply_bad() {
-        let op = Abs::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
+        let mut op = Abs::new(vec![Constant::boxed(Value::String("foo".to_string()))]);
         assert_eq!(
             op.apply(&Context::default()).unwrap_err(),
             unprocessable_entity!("Cannot calculate absolute value of a string")
@@ -70,7 +70,7 @@ mod tests {
         let result = Abs::boxed(vec![]);
         assert_eq!(
             result.err().unwrap(),
-            unprocessable_entity!("Abs requires exactly one operand")
+            unprocessable_entity!("$abs requires exactly one operand")
         );
     }
 

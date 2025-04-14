@@ -12,10 +12,10 @@ pub(crate) struct Mult {
 }
 
 impl Node for Mult {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let mut prod: Option<Value> = None;
 
-        for operand in self.operands.iter() {
+        for operand in self.operands.iter_mut() {
             let value = operand.apply(context)?;
             match prod {
                 Some(s) => prod = Some(s.multiply(value)?),
@@ -57,7 +57,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let op = Mult::new(vec![
+        let mut op = Mult::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Int(1)),
             Constant::boxed(Value::Float(2.0)),
@@ -68,7 +68,7 @@ mod tests {
 
     #[rstest]
     fn apply_bad() {
-        let op = Mult::new(vec![
+        let mut op = Mult::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::String("xxx".to_string())),
         ]);

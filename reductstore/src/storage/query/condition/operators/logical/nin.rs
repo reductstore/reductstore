@@ -12,9 +12,9 @@ pub(crate) struct Nin {
 }
 
 impl Node for Nin {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let op_value = self.operands[0].apply(context)?;
-        for item in self.operands[1..].iter() {
+        for item in self.operands[1..].iter_mut() {
             if item.apply(context)? == op_value {
                 return Ok(Value::Bool(false));
             }
@@ -71,7 +71,7 @@ mod tests {
         let mut operands: Vec<BoxedNode> = vec![Constant::boxed(op)];
         operands.extend(list.iter().map(|v| Constant::boxed(v.clone()) as BoxedNode));
 
-        let op = Nin::new(operands);
+        let mut op = Nin::new(operands);
         assert_eq!(op.apply(&Context::default()).unwrap(), expected);
     }
 

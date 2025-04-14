@@ -14,7 +14,7 @@ pub(super) struct Reference {
 }
 
 impl Node for Reference {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let label_value = context
             .labels
             .get(self.name.as_str())
@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn apply() {
-        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
+        let mut reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
         let mut context = Context::default();
         context.labels.insert("label", "true");
         let result = reference.apply(&context).unwrap();
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn apply_not_found() {
-        let reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
+        let mut reference = Reference::new("label".to_string(), EvaluationStage::Retrieve);
         let context = Context::default();
         let result = reference.apply(&context);
         assert!(result

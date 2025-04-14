@@ -12,10 +12,10 @@ pub(crate) struct Add {
 }
 
 impl Node for Add {
-    fn apply(&self, context: &Context) -> Result<Value, ReductError> {
+    fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let mut sum: Option<Value> = None;
 
-        for operand in self.operands.iter() {
+        for operand in self.operands.iter_mut() {
             let value = operand.apply(context)?;
             match sum {
                 Some(s) => sum = Some(s.add(value)?),
@@ -57,7 +57,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let add = Add::new(vec![
+        let mut add = Add::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::Bool(false)),
         ]);
@@ -67,7 +67,7 @@ mod tests {
 
     #[rstest]
     fn apply_bad() {
-        let add = Add::new(vec![
+        let mut add = Add::new(vec![
             Constant::boxed(Value::Bool(true)),
             Constant::boxed(Value::String("xxx".to_string())),
         ]);

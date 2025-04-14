@@ -261,8 +261,8 @@ impl ManageExtensions for ExtRepository {
 
                     let status = Self::send_record_to_ext_pipeline(query_id, record, pipline).await;
                     if let ProcessStatus::Ready(Ok(record)) = status {
-                        let lock = self.query_map.read().await;
-                        let query = lock.get(&query_id).unwrap();
+                        let mut lock = self.query_map.write().await;
+                        let query = lock.get_mut(&query_id).unwrap();
                         query
                             .condition_filter
                             .filter_record(ProcessStatus::Ready(Ok(record)), query.query.strict)
