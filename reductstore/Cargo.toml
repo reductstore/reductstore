@@ -61,7 +61,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 async-stream = "0.3.6"
 tower-http = { version = "0.6.2", features = ["cors"] }
 crc64fast = "1.1.0"
-rustls = "0.23.23"
+rustls = "0.23.26"
 byteorder = "1.5.0"
 crossbeam-channel = "0.5.15"
 dlopen2="0.7.0"
