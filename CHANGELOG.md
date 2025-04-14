@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-629: Extension API v0.1 and core implementation, [PR-762](https://github.com/reductstore/reductstore/pull/762)
 - RS-622: Improve Extension API, [PR-779](https://github.com/reductstore/reductstore/pull/779)
 - RS-652: `$exists\$has` operator checks multiple labels, [PR-786](https://github.com/reductstore/reductstore/pull/786)
+- RS-643: Implement `$each_n` operator, [PR-788](https://github.com/reductstore/reductstore/pull/788)
 
 ### Changed
 
