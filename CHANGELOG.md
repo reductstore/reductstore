@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-622: Improve Extension API, [PR-779](https://github.com/reductstore/reductstore/pull/779)
 - RS-652: `$exists\$has` operator checks multiple labels, [PR-786](https://github.com/reductstore/reductstore/pull/786)
 - RS-643: Implement `$each_n` operator, [PR-788](https://github.com/reductstore/reductstore/pull/788)
+- RS-644: Implement `$each_t` operator, [PR-792](https://github.com/reductstore/reductstore/pull/792)
 
 ### Changed
 
@@ -30,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-647: Build binaries for Linux and Macos ARM64, [PR-647](https://github.com/reductstore/reductstore/pull/782)
 
-## [1.4.6] - 2025-04-17
+## [1.14.6] - 2025-04-17
 
 ### Fixed
 

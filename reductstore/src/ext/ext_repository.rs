@@ -865,7 +865,7 @@ pub(super) mod tests {
 
     impl RecordMeta for MockRecord {
         fn timestamp(&self) -> u64 {
-            todo!()
+            0
         }
 
         fn labels(&self) -> &Labels {

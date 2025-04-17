@@ -56,7 +56,7 @@ impl ExtWhenFilter {
             }
         }
 
-        let context = Context::new(labels, EvaluationStage::Compute);
+        let context = Context::new(reader.timestamp(), labels, EvaluationStage::Compute);
         Ok(self
             .condition
             .as_mut()

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::aggregation::EachN;
+use crate::storage::query::condition::operators::aggregation::{EachN, EachT};
 use crate::storage::query::condition::operators::arithmetic::{
     Abs, Add, Div, DivNum, Mult, Rem, Sub,
 };
@@ -156,6 +156,7 @@ impl Parser {
         match operator {
             // Aggregation operators
             "$each_n" => EachN::boxed(operands),
+            "$each_t" => EachT::boxed(operands),
             // Arithmetic operators
             "$add" => Add::boxed(operands),
             "$sub" => Sub::boxed(operands),
@@ -229,6 +230,7 @@ mod tests {
         let json = serde_json::from_str(r#"{"&label": {"$gt": 10}}"#).unwrap();
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
+            0,
             HashMap::from_iter(vec![("label", "20")]),
             EvaluationStage::Retrieve,
         );
@@ -262,6 +264,7 @@ mod tests {
             serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
+            0,
             HashMap::from_iter(vec![("label", "true")]),
             EvaluationStage::Retrieve,
         );
@@ -320,6 +323,7 @@ mod tests {
         #[rstest]
         // Aggregation operators
         #[case("$each_n", "[1]", Value::Bool(true))]
+        #[case("$each_t", "[1]", Value::Bool(false))]
         // Arithmetic operators
         #[case("$add", "[1, 2.0]", Value::Float(3.0))]
         #[case("$sub", "[1, 2]", Value::Int(-1))]
@@ -402,7 +406,7 @@ mod tests {
             ];
 
             let mut staged_all_of = StagedAllOff::boxed(operands).unwrap();
-            let context = Context::new(HashMap::new(), EvaluationStage::Compute);
+            let context = Context::new(0, HashMap::new(), EvaluationStage::Compute);
             assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(true));
         }
     }
