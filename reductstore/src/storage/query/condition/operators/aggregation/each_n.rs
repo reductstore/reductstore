@@ -48,12 +48,12 @@ impl Node for EachN {
         }
     }
 
-    fn print(&self) -> String {
-        format!("EachN({:?})", self.operands[0])
-    }
-
     fn operands(&self) -> &Vec<BoxedNode> {
         &self.operands
+    }
+
+    fn print(&self) -> String {
+        format!("EachN({:?})", self.operands[0])
     }
 }
 

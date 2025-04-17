@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-647: Build binaries for Linux and Macos ARM64, [PR-647](https://github.com/reductstore/reductstore/pull/782)
 
-## [1.4.6] - 2025-04-17
+## [1.14.6] - 2025-04-17
 
 ### Fixed
 
