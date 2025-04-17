@@ -509,7 +509,9 @@ jobs:
         run: |
           cargo install cargo-get
           for PKG_NAME in reduct_base reduct_macros reductstore; do
-            if [ "v$(cargo get package.version --entry $PKG_NAME/)" != "${GITHUB_REF_NAME}" ]; then
+            version = $(cargo get package.version --entry $PKG_NAME)
+            echo "Version in $PKG_NAME/Cargo.toml: $version"
+            if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
               echo "Tag ${GITHUB_REF_NAME} does not match version in $PKG_NAME/Cargo.toml"
               exit 1
             fi
