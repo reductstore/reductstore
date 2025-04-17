@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-647: Build binaries for Linux and Macos ARM64, [PR-647](https://github.com/reductstore/reductstore/pull/782)
 
+## [1.4.6] - 2025-04-17
+
+### Fixed
+
+- RS-692: Fix removal of replication task after update with invalid configuration, [PR-790](https://github.com/reductstore/reductstore/pull/790)
+- RS-669: Fix JSON format in error messages with quotes, [PR-791](https://github.com/reductstore/reductstore/pull/791)
+
 ## [1.14.5] - 2025-04-03
 
 ### Fixed
@@ -971,7 +978,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.5...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.6...HEAD
+
+[1.14.6]: https://github.com/reductstore/reductstore/compare/v1.14.5...v1.14.6
 
 [1.14.5]: https://github.com/reductstore/reductstore/compare/v1.14.4...v1.14.5
 

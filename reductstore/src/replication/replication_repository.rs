@@ -147,7 +147,6 @@ impl ManageReplications for ReplicationRepository {
             ))),
         }?;
 
-        self.replications.remove(name); // remove old replication because it may have a different connection configuration
         self.create_or_update_replication_task(&name, settings)
     }
 
@@ -268,7 +267,7 @@ impl ReplicationRepository {
 
     fn create_or_update_replication_task(
         &mut self,
-        name: &&str,
+        name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
         // check if destination host is valid
@@ -312,6 +311,9 @@ impl ReplicationRepository {
                 ));
             }
         }
+
+        // remove old replication because before creating new one
+        self.replications.remove(name);
 
         let replication = ReplicationTask::new(
             name.to_string(),
@@ -547,6 +549,26 @@ mod tests {
                 )),
                 "Should not update replication with non existing source bucket"
             );
+        }
+
+        #[rstest]
+        fn test_remove_old_replication_only_for_valid(
+            mut repo: ReplicationRepository,
+            mut settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+            settings.when = Some(serde_json::json!({"$not-exist": [true, true]}));
+
+            let err = repo.update_replication("test", settings).err().unwrap();
+            assert_eq!(
+                err,
+                unprocessable_entity!(
+                    "Invalid replication condition: [UnprocessableEntity] Operator '$not-exist' not supported"
+                ),
+                "Should not update replication with invalid when condition"
+            );
+
+            assert!(repo.get_replication("test").is_ok(), "Was not removed");
         }
     }
 

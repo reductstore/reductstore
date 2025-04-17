@@ -80,7 +80,8 @@ impl StdError for HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let err: BaseHttpError = self.into();
-        let body = format!("{{\"detail\": \"{}\"}}", err.message.to_string());
+        let converted_quotes = err.message.to_string().replace("\"", "'");
+        let body = format!("{{\"detail\": \"{}\"}}", converted_quotes);
 
         // its often easiest to implement `IntoResponse` by calling other implementations
         let mut resp = (StatusCode::from_u16(err.status as u16).unwrap(), body).into_response();
@@ -176,6 +177,46 @@ mod tests {
     use crate::replication::create_replication_repo;
 
     use super::*;
+
+    mod http_error {
+        use super::*;
+        use axum::body::to_bytes;
+        use rstest::rstest;
+        use tokio;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error() {
+            let error = HttpError::new(ErrorCode::BadRequest, "Test error");
+            let resp = error.into_response();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                HeaderValue::from_static("application/json")
+            );
+            assert_eq!(
+                resp.headers().get("x-reduct-error").unwrap(),
+                HeaderValue::from_static("Test error")
+            );
+
+            let body: Bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+            assert_eq!(body, Bytes::from(r#"{"detail": "Test error"}"#))
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_json_format() {
+            let error = HttpError::new(ErrorCode::BadRequest, "Test \"error\"");
+            let resp = error.into_response();
+            assert_eq!(
+                resp.headers().get("x-reduct-error").unwrap(),
+                HeaderValue::from_static("Test \"error\"")
+            );
+
+            let body: Bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+            assert_eq!(body, Bytes::from(r#"{"detail": "Test 'error'"}"#))
+        }
+    }
 
     #[fixture]
     pub(crate) async fn components() -> Arc<Components> {
