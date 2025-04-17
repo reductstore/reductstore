@@ -229,6 +229,7 @@ mod tests {
         let json = serde_json::from_str(r#"{"&label": {"$gt": 10}}"#).unwrap();
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
+            0,
             HashMap::from_iter(vec![("label", "20")]),
             EvaluationStage::Retrieve,
         );
@@ -262,6 +263,7 @@ mod tests {
             serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
+            0,
             HashMap::from_iter(vec![("label", "true")]),
             EvaluationStage::Retrieve,
         );
@@ -402,7 +404,7 @@ mod tests {
             ];
 
             let mut staged_all_of = StagedAllOff::boxed(operands).unwrap();
-            let context = Context::new(HashMap::new(), EvaluationStage::Compute);
+            let context = Context::new(0, HashMap::new(), EvaluationStage::Compute);
             assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(true));
         }
     }

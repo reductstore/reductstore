@@ -17,6 +17,7 @@ mod value;
 /// The context contains a set of labels that can be referenced by conditions.
 #[derive(Debug, Default)]
 pub(crate) struct Context<'a> {
+    timestamp: u64,
     labels: HashMap<&'a str, &'a str>,
     stage: EvaluationStage,
 }
@@ -29,8 +30,12 @@ pub(crate) enum EvaluationStage {
 }
 
 impl<'a> Context<'a> {
-    pub fn new(labels: HashMap<&'a str, &'a str>, stage: EvaluationStage) -> Self {
-        Context { labels, stage }
+    pub fn new(timestamp: u64, labels: HashMap<&'a str, &'a str>, stage: EvaluationStage) -> Self {
+        Context {
+            timestamp,
+            labels,
+            stage,
+        }
     }
 }
 
