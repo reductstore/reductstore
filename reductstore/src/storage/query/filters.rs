@@ -12,6 +12,16 @@ pub(crate) mod when;
 /// Trait for record filters in queries.
 pub trait RecordFilter {
     /// Filter the record by condition.
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - The record metadata to filter.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` if the record passes the filter, `Ok(false)` otherwise.
+    /// * Err(`ReductError::Interrupt`) if the filter is interrupted
+    /// * `Err(ReductError)` if an error occurs during filtering.
     fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError>;
 }
 
