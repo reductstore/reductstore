@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-692: Fix removal of replication task after update with invalid configuration, [PR-790](https://github.com/reductstore/reductstore/pull/790)
+- RS-669: Fix JSON format in error messages with quotes, [PR-791](https://github.com/reductstore/reductstore/pull/791)
 
 ## [1.14.5] - 2025-04-03
 
