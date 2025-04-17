@@ -3,6 +3,8 @@
 
 mod each_n;
 mod each_t;
+mod limit;
 
 pub(crate) use each_n::EachN;
 pub(crate) use each_t::EachT;
+pub(crate) use limit::Limit;

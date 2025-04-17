@@ -14,6 +14,7 @@ use url::ParseError;
 #[repr(i16)]
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone, IntEnum)]
 pub enum ErrorCode {
+    Interrupt = -5, // used for interrupting a long-running task or query
     UrlParseError = -4,
     ConnectionError = -3,
     Timeout = -2,

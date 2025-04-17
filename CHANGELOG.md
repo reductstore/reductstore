@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-652: `$exists\$has` operator checks multiple labels, [PR-786](https://github.com/reductstore/reductstore/pull/786)
 - RS-643: Implement `$each_n` operator, [PR-788](https://github.com/reductstore/reductstore/pull/788)
 - RS-644: Implement `$each_t` operator, [PR-792](https://github.com/reductstore/reductstore/pull/792)
+- RS-672: Implement `$limit` operator, [PR-793](https://github.com/reductstore/reductstore/pull/793)
 
 ### Changed
 

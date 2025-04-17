@@ -13,7 +13,7 @@ use crate::storage::query::filters::{
     EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter,
     RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
@@ -32,6 +32,8 @@ pub struct HistoricalQuery {
     only_metadata: bool,
     /// Strict mode
     strict: bool,
+    /// Interrupted query
+    is_interrupted: bool,
 }
 
 impl HistoricalQuery {
@@ -75,6 +77,7 @@ impl HistoricalQuery {
             filters,
             only_metadata: options.only_metadata,
             strict: options.strict,
+            is_interrupted: false,
         })
     }
 }
@@ -84,7 +87,7 @@ impl Query for HistoricalQuery {
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        if self.records_from_current_block.is_empty() {
+        if self.records_from_current_block.is_empty() && !self.is_interrupted {
             let start = if let Some(block) = &self.current_block {
                 let block = block.read()?;
                 block.latest_record_time()
@@ -113,7 +116,9 @@ impl Query for HistoricalQuery {
                 let block_ref = bm.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
-                let mut found_records = self.filter_records_from_current_block()?;
+                let (mut found_records, continue_query) =
+                    self.filter_records_from_current_block()?;
+                self.is_interrupted = !continue_query;
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
                 self.records_from_current_block.extend(found_records);
                 if !self.records_from_current_block.is_empty() {
@@ -179,7 +184,7 @@ impl From<Record> for RecordMetaWrapper {
 }
 
 impl HistoricalQuery {
-    fn filter_records_from_current_block(&mut self) -> Result<Vec<Record>, ReductError> {
+    fn filter_records_from_current_block(&mut self) -> Result<(Vec<Record>, bool), ReductError> {
         let block = self.current_block.as_ref().unwrap().read()?;
         let mut filtered_records = Vec::new();
         for record in block.record_index().values() {
@@ -192,7 +197,14 @@ impl HistoricalQuery {
                         break;
                     }
                     Ok(true) => {}
+
                     Err(err) => {
+                        // if the filter is interrupted, we return what we have
+                        // and notify the caller to stop the query
+                        if err.status == ErrorCode::Interrupt {
+                            return Ok((filtered_records, false));
+                        }
+
                         if self.strict {
                             // in strict mode, we return an error if a filter fails
                             return Err(err);
@@ -209,7 +221,7 @@ impl HistoricalQuery {
             }
         }
 
-        Ok(filtered_records)
+        Ok((filtered_records, true))
     }
 }
 
@@ -415,6 +427,25 @@ mod tests {
             query.next(block_manager.clone()).err(),
             Some(not_found!("Reference 'NOT_EXIST' not found"))
         );
+    }
+
+    #[rstest]
+    fn test_when_with_interruption(block_manager: Arc<RwLock<BlockManager>>) {
+        let mut query = HistoricalQuery::try_new(
+            0,
+            1001,
+            QueryOptions {
+                when: Some(serde_json::from_str(r#"{"$limit": [1]}"#).unwrap()),
+                strict: true,
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+
+        let records = read_to_vector(&mut query, block_manager);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.timestamp(), 0);
     }
 
     #[rstest]
