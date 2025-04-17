@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- RS-692: Fix removal of replication task after update with invalid configuration, [PR-790](https://github.com/reductstore/reductstore/pull/790)
+
 ## [1.14.5] - 2025-04-03
 
 ### Fixed
