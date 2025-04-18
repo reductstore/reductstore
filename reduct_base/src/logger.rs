@@ -29,12 +29,18 @@ impl Log for Logger {
                 "(unknown)"
             };
 
+            let package_name = if let Some(package_name) = record.target().split_once(':') {
+                package_name.0
+            } else {
+                record.target()
+            };
+
             println!(
-                "{} ({:>5}) [{}] -- ({:}) {:}:{:} {:?}",
+                "{} ({:>5}) [{}] -- {:}/{:}:{:} {:?}",
                 now.format("%Y-%m-%d %H:%M:%S.%3f"),
                 thread_id::get() % 100000,
                 record.level(),
-                record.target(),
+                package_name,
                 file,
                 record.line().unwrap(),
                 record.args(),
