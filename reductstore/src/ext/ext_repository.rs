@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, IoExtension, ProcessStatus};
+use reduct_base::ext::{BoxedReadRecord, ExtSettings, IoExtension, ProcessStatus};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity, Labels};
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ type IoExtMap = HashMap<String, IoExtRef>;
 
 #[derive(WrapperApi)]
 struct ExtensionApi {
-    get_ext: extern "Rust" fn() -> *mut (dyn IoExtension + Send + Sync),
+    get_ext: extern "Rust" fn(settings: ExtSettings) -> *mut (dyn IoExtension + Send + Sync),
 }
 
 #[async_trait]
@@ -61,7 +61,10 @@ struct ExtRepository {
 }
 
 impl ExtRepository {
-    pub(crate) fn try_load(path: &PathBuf) -> Result<ExtRepository, ReductError> {
+    pub(crate) fn try_load(
+        path: &PathBuf,
+        settings: ExtSettings,
+    ) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
         let query_map = AsyncRwLock::new(HashMap::new());
@@ -91,7 +94,7 @@ impl ExtRepository {
                     }
                 };
 
-                let ext = unsafe { Box::from_raw(ext_wrapper.get_ext()) };
+                let ext = unsafe { Box::from_raw(ext_wrapper.get_ext(settings.clone())) };
 
                 info!("Load extension: {:?}", ext.info());
 
@@ -278,9 +281,12 @@ impl ManageExtensions for ExtRepository {
     }
 }
 
-pub fn create_ext_repository(path: Option<PathBuf>) -> Result<BoxedManageExtensions, ReductError> {
+pub fn create_ext_repository(
+    path: Option<PathBuf>,
+    settings: ExtSettings,
+) -> Result<BoxedManageExtensions, ReductError> {
     if let Some(path) = path {
-        Ok(Box::new(ExtRepository::try_load(&path)?))
+        Ok(Box::new(ExtRepository::try_load(&path, settings)?))
     } else {
         // Dummy extension repository if
         struct NoExtRepository;
