@@ -30,13 +30,14 @@ impl Log for Logger {
             };
 
             println!(
-                "{} ({:>5}) [{}] -- {:}:{:} {:?}",
+                "{} ({:>5}) [{}] -- ({:}) {:}:{:} {:?}",
                 now.format("%Y-%m-%d %H:%M:%S.%3f"),
                 thread_id::get() % 100000,
                 record.level(),
+                record.target(),
                 file,
                 record.line().unwrap(),
-                record.args()
+                record.args(),
             );
         }
     }
