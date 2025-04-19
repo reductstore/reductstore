@@ -540,8 +540,8 @@ mod tests {
 
     mod rename_bucket {
         use super::*;
-        use crate::core::logger::Logger;
         use reduct_base::io::ReadRecord;
+        use reduct_base::logger::Logger;
 
         #[rstest]
         #[tokio::test]

@@ -14,5 +14,6 @@ pub mod io;
 
 #[cfg(feature = "ext")]
 pub mod ext;
+pub mod logger;
 
 pub type Labels = HashMap<String, String>;

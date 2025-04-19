@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod ext_info;
+mod ext_settings;
 mod process_status;
 
 use crate::error::ReductError;
@@ -14,6 +15,8 @@ use async_trait::async_trait;
 pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};
 
 pub use process_status::ProcessStatus;
+
+pub use ext_settings::{ExtSettings, ExtSettingsBuilder};
 pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 
 /// The trait for the IO extension.

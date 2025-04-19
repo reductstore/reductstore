@@ -7,10 +7,10 @@ use axum_server::tls_rustls::RustlsConfig;
 
 use axum_server::Handle;
 use log::info;
+use reduct_base::logger::Logger;
 use reductstore::api::create_axum_app;
 use reductstore::cfg::Cfg;
 use reductstore::core::env::StdEnvGetter;
-use reductstore::core::logger::Logger;
 use reductstore::storage::storage::Storage;
 use std::str::FromStr;
 use std::sync::Arc;

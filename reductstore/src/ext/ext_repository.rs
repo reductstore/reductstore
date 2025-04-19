@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, IoExtension, ProcessStatus};
+use reduct_base::ext::{BoxedReadRecord, ExtSettings, IoExtension, ProcessStatus};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity, Labels};
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ type IoExtMap = HashMap<String, IoExtRef>;
 
 #[derive(WrapperApi)]
 struct ExtensionApi {
-    get_ext: extern "Rust" fn() -> *mut (dyn IoExtension + Send + Sync),
+    get_ext: extern "Rust" fn(settings: ExtSettings) -> *mut (dyn IoExtension + Send + Sync),
 }
 
 #[async_trait]
@@ -61,7 +61,10 @@ struct ExtRepository {
 }
 
 impl ExtRepository {
-    pub(crate) fn try_load(path: &PathBuf) -> Result<ExtRepository, ReductError> {
+    pub(crate) fn try_load(
+        path: &PathBuf,
+        settings: ExtSettings,
+    ) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
         let query_map = AsyncRwLock::new(HashMap::new());
@@ -91,7 +94,7 @@ impl ExtRepository {
                     }
                 };
 
-                let ext = unsafe { Box::from_raw(ext_wrapper.get_ext()) };
+                let ext = unsafe { Box::from_raw(ext_wrapper.get_ext(settings.clone())) };
 
                 info!("Load extension: {:?}", ext.info());
 
@@ -278,9 +281,12 @@ impl ManageExtensions for ExtRepository {
     }
 }
 
-pub fn create_ext_repository(path: Option<PathBuf>) -> Result<BoxedManageExtensions, ReductError> {
+pub fn create_ext_repository(
+    path: Option<PathBuf>,
+    settings: ExtSettings,
+) -> Result<BoxedManageExtensions, ReductError> {
     if let Some(path) = path {
-        Ok(Box::new(ExtRepository::try_load(&path)?))
+        Ok(Box::new(ExtRepository::try_load(&path, settings)?))
     } else {
         // Dummy extension repository if
         struct NoExtRepository;
@@ -349,24 +355,24 @@ pub(super) mod tests {
                 info,
                 IoExtensionInfo::builder()
                     .name("test-ext")
-                    .version("0.1.0")
+                    .version("0.1.1")
                     .build()
             );
         }
 
         #[log_test(rstest)]
-        fn test_failed_load() {
+        fn test_failed_load(ext_settings: ExtSettings) {
             let path = tempdir().unwrap().into_path();
             fs::create_dir_all(&path).unwrap();
             fs::write(&path.join("libtest.so"), b"test").unwrap();
-            let ext_repo = ExtRepository::try_load(&path).unwrap();
+            let ext_repo = ExtRepository::try_load(&path, ext_settings).unwrap();
             assert_eq!(ext_repo.extension_map.len(), 0);
         }
 
         #[log_test(rstest)]
-        fn test_failed_open_dir() {
+        fn test_failed_open_dir(ext_settings: ExtSettings) {
             let path = PathBuf::from("non_existing_dir");
-            let ext_repo = ExtRepository::try_load(&path);
+            let ext_repo = ExtRepository::try_load(&path, ext_settings);
             assert_eq!(
                 ext_repo.err().unwrap(),
                 internal_server_error!("Extension directory \"non_existing_dir\" does not exist")
@@ -374,9 +380,14 @@ pub(super) mod tests {
         }
 
         #[fixture]
-        fn ext_repo() -> ExtRepository {
+        fn ext_settings() -> ExtSettings {
+            ExtSettings::default()
+        }
+
+        #[fixture]
+        fn ext_repo(ext_settings: ExtSettings) -> ExtRepository {
             // This is the path to the build directory of the extension from ext_stub crate
-            const EXTENSION_VERSION: &str = "0.1.0";
+            const EXTENSION_VERSION: &str = "0.1.1";
 
             if !cfg!(target_arch = "x86_64") {
                 panic!("Unsupported architecture");
@@ -414,7 +425,7 @@ pub(super) mod tests {
             fs::write(ext_path.join(file_name), resp.bytes().unwrap())
                 .expect("Failed to write extension");
 
-            ExtRepository::try_load(&ext_path.to_path_buf()).unwrap()
+            ExtRepository::try_load(&ext_path.to_path_buf(), ext_settings).unwrap()
         }
     }
     mod register_query {
@@ -808,7 +819,9 @@ pub(super) mod tests {
     }
 
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
-        let mut ext_repo = ExtRepository::try_load(&tempdir().unwrap().into_path()).unwrap();
+        let ext_settings = ExtSettings::default();
+        let mut ext_repo =
+            ExtRepository::try_load(&tempdir().unwrap().into_path(), ext_settings).unwrap();
         ext_repo.extension_map.insert(
             name.to_string(),
             Arc::new(AsyncRwLock::new(Box::new(mock_ext))),

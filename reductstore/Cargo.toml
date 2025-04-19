@@ -29,14 +29,11 @@ crate-type = ["lib"]
 reduct-base = { path = "../reduct_base", version = "1.15.0", features = ["ext"] }
 reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
 
-log = "0.4.26"
 chrono = { version = "0.4.40", features = ["serde"] }
-thread-id = "5.0.0"
 zip = "2.6.1"
 tempfile = "3.19.1"
 hex = "0.4.3"
 prost = "0.13.1"
-prost-wkt = "0.6.0"
 prost-wkt-types = "0.6.0"
 rand = "0.9.0"
 serde = { version = "1.0.219", features = ["derive"] }
@@ -47,7 +44,6 @@ axum = { version = "0.8.1", features = ["default", "macros"] }
 axum-extra = { version = "0.10.0", features = ["default", "typed-header"] }
 tokio = { version = "1.44.2", features = ["full"] }
 hyper = { version = "1.6.0", features = ["full"] }
-tower = "0.5.2"
 futures-util = "0.3.31"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 mime_guess = "2.0.5"
@@ -65,6 +61,7 @@ rustls = "0.23.26"
 byteorder = "1.5.0"
 crossbeam-channel = "0.5.15"
 dlopen2="0.7.0"
+log = "0.4"
 
 [build-dependencies]
 prost-build = "0.13.1"

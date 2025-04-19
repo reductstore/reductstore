@@ -163,12 +163,12 @@ mod tests {
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
-    use rstest::fixture;
-    use std::collections::HashMap;
-
+    use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::ReplicationSettings;
     use reduct_base::msg::token_api::Permissions;
+    use rstest::fixture;
+    use std::collections::HashMap;
 
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
@@ -283,7 +283,8 @@ mod tests {
             base_path: "/".to_string(),
             replication_repo: RwLock::new(replication_repo),
             io_settings: IoConfig::default(),
-            ext_repo: create_ext_repository(None).expect("Failed to create extension repo"),
+            ext_repo: create_ext_repository(None, ExtSettings::default())
+                .expect("Failed to create extension repo"),
         };
 
         Arc::new(components)

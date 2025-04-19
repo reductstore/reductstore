@@ -14,6 +14,7 @@ use crate::core::env::{Env, GetEnv};
 use crate::ext::ext_repository::create_ext_repository;
 use log::info;
 use reduct_base::error::ReductError;
+use reduct_base::ext::ExtSettings;
 use reduct_base::internal_server_error;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
@@ -95,7 +96,10 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             auth: TokenAuthorization::new(&self.api_token),
             console,
             replication_repo: tokio::sync::RwLock::new(replication_engine),
-            ext_repo: create_ext_repository(ext_path)?,
+            ext_repo: create_ext_repository(
+                ext_path,
+                ExtSettings::builder().log_level(&self.log_level).build(),
+            )?,
 
             base_path: self.api_base_path.clone(),
             io_settings: self.io_conf.clone(),
