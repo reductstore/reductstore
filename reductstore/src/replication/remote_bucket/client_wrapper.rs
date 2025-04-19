@@ -441,6 +441,30 @@ mod tests {
 
     type Tx = Sender<Result<Bytes, ReductError>>;
 
+    mod check_response {
+        use super::*;
+        #[rstest]
+        fn response_ok() {
+            let response = http::Response::builder()
+                .status(200)
+                .body(Bytes::new())
+                .unwrap();
+            let response = Ok(response).map(|r| r.into());
+            assert!(check_response(response).is_ok());
+        }
+
+        #[rstest]
+        fn response_error() {
+            let response = http::Response::builder()
+                .status(404)
+                .header("x-reduct-error", "404,Not Found")
+                .body(Bytes::new())
+                .unwrap();
+            let response = Ok(response).map(|r| r.into());
+            assert!(check_response(response).is_err());
+        }
+    }
+
     #[fixture]
     fn records() -> (Vec<RecordReader>, Vec<Tx>) {
         let rec1 = Record {
