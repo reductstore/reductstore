@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - RS-660: Fix deadlocks using `current_thread` runtime, [PR-781](https://github.com/reductstore/reductstore/pull/781)
-- RS-689: Fix WAL recovery when a block wasn't saved in block index, [PR-785](https://github.com/reductstore/reductstore/pull/785)
+- RS-689: Fix WAL recovery when a block wasn't saved in block index, [PR-785](https://github.com/reductstore/reductstore/pull/785
+- Fix replication recovery from broken record, [PR-795](https://github.com/reductstore/reductstore/pull/795)
 
 ### Internal
 
