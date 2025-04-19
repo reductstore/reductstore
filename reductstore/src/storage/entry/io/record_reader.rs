@@ -161,6 +161,10 @@ impl RecordReader {
                     match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes) {
                         Ok((buf, read)) => (buf, read),
                         Err(e) => {
+                            error!(
+                                "Failed to read record {}/{}/{}: {}",
+                                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
+                            );
                             tx.blocking_send(Err(e))?;
                             break;
                         }

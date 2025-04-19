@@ -9,7 +9,7 @@ use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
 use log::{debug, error, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
-use reduct_base::error::{IntEnum, ReductError};
+use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::io::RecordMeta;
 use std::collections::BTreeMap;
 
@@ -35,21 +35,25 @@ impl BucketAvailableState {
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         // if it is a network error, we can retry got to unavailable state and wait
 
-        if err.status.int_value() < 0 {
-            error!(
-                "Failed to write record to remote bucket {}{}: {}",
-                self.bucket.server_url(),
-                self.bucket.name(),
-                err
-            );
-            Box::new(BucketUnavailableState::new(
-                self.client,
-                self.bucket.name().to_string(),
-                err,
-            ))
-        } else {
-            self.last_result = Err(err);
-            self
+        match err.status {
+            ErrorCode::Timeout | ErrorCode::ConnectionError => {
+                debug!(
+                    "Failed to write record to remote bucket {}{}: {}",
+                    self.bucket.server_url(),
+                    self.bucket.name(),
+                    err
+                );
+
+                Box::new(BucketUnavailableState::new(
+                    self.client,
+                    self.bucket.name().to_string(),
+                    err,
+                ))
+            }
+            _ => {
+                self.last_result = Err(err);
+                self
+            }
         }
     }
 }
