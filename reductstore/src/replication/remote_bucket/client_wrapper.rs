@@ -215,6 +215,8 @@ fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> 
             ErrorCode::ConnectionError
         } else if error.is_timeout() {
             ErrorCode::Timeout
+        } else if error.is_request() {
+            ErrorCode::InvalidRequest
         } else {
             ErrorCode::Unknown
         };

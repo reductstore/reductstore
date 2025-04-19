@@ -161,6 +161,10 @@ impl RecordReader {
                     match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes) {
                         Ok((buf, read)) => (buf, read),
                         Err(e) => {
+                            error!(
+                                "Failed to read record {}/{}/{}: {}",
+                                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
+                            );
                             tx.blocking_send(Err(e))?;
                             break;
                         }
@@ -344,6 +348,7 @@ mod tests {
     mod reader {
         use super::*;
         use crate::storage::entry::Entry;
+        use std::fs;
         use std::thread::sleep;
 
         use crate::core::thread_pool::find_task_group;
@@ -391,6 +396,19 @@ mod tests {
             assert!(
                 find_task_group(&task_group).is_none(),
                 "The task should finish after reading the record"
+            );
+        }
+
+        #[rstest]
+        fn test_read_with_error(mut entry: Entry) {
+            write_record(&mut entry, 1000, vec![0; 100]);
+
+            fs::write(entry.path().join("1000.blk"), "").unwrap();
+            let mut reader = entry.begin_read(1000).wait().unwrap();
+
+            assert_eq!(
+                reader.blocking_read().unwrap().err().unwrap(),
+                internal_server_error!("Failed to read record chunk: EOF")
             );
         }
 

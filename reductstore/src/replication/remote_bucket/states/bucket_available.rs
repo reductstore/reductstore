@@ -7,9 +7,9 @@ use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
-use reduct_base::error::{IntEnum, ReductError};
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::RecordMeta;
 use std::collections::BTreeMap;
 
@@ -35,21 +35,25 @@ impl BucketAvailableState {
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         // if it is a network error, we can retry got to unavailable state and wait
 
-        if err.status.int_value() < 0 {
-            error!(
-                "Failed to write record to remote bucket {}{}: {}",
-                self.bucket.server_url(),
-                self.bucket.name(),
-                err
-            );
-            Box::new(BucketUnavailableState::new(
-                self.client,
-                self.bucket.name().to_string(),
-                err,
-            ))
-        } else {
-            self.last_result = Err(err);
-            self
+        match err.status {
+            ErrorCode::Timeout | ErrorCode::ConnectionError => {
+                debug!(
+                    "Failed to write record to remote bucket {}{}: {}",
+                    self.bucket.server_url(),
+                    self.bucket.name(),
+                    err
+                );
+
+                Box::new(BucketUnavailableState::new(
+                    self.client,
+                    self.bucket.name().to_string(),
+                    err,
+                ))
+            }
+            _ => {
+                self.last_result = Err(err);
+                self
+            }
         }
     }
 }
@@ -155,6 +159,7 @@ mod tests {
     use crate::storage::entry::RecordReader;
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::{fixture, rstest};
+    use test_log;
 
     #[rstest]
     #[tokio::test]
@@ -210,16 +215,19 @@ mod tests {
         assert!(state.is_available());
     }
 
-    #[rstest]
+    #[test_log::test(rstest)]
+    #[case(ErrorCode::Timeout)]
+    #[case(ErrorCode::ConnectionError)]
     #[tokio::test]
     async fn test_write_record_conn_err(
+        #[case] err: ErrorCode,
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
         record_to_write: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
-            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
         bucket.expect_update_batch().times(0);
 
         let state = Box::new(BucketAvailableState::new(
@@ -228,16 +236,16 @@ mod tests {
         ));
 
         let state = state.write_batch("test", vec![record_to_write]);
-        assert_eq!(
-            state.last_result(),
-            &Err(ReductError::new(ErrorCode::Timeout, ""))
-        );
+        assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(!state.is_available());
     }
 
-    #[rstest]
+    #[test_log::test(rstest)]
+    #[case(ErrorCode::Timeout)]
+    #[case(ErrorCode::ConnectionError)]
     #[tokio::test]
     async fn test_update_record_conn_err(
+        #[case] err: ErrorCode,
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
         record_to_update: (RecordReader, Transaction),
@@ -245,7 +253,7 @@ mod tests {
         bucket.expect_write_batch().times(0);
         bucket
             .expect_update_batch()
-            .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "")));
+            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
@@ -253,23 +261,23 @@ mod tests {
         ));
 
         let state = state.write_batch("test", vec![record_to_update]);
-        assert_eq!(
-            state.last_result(),
-            &Err(ReductError::new(ErrorCode::Timeout, ""))
-        );
+        assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(!state.is_available());
     }
 
-    #[rstest]
+    #[test_log::test(rstest)]
+    #[case(ErrorCode::InternalServerError)]
+    #[case(ErrorCode::InvalidRequest)]
     #[tokio::test]
-    async fn test_write_record_server_err(
+    async fn test_write_record_unrecoverable_err(
+        #[case] err: ErrorCode,
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
         record_to_write: (RecordReader, Transaction),
     ) {
         bucket
             .expect_write_batch()
-            .returning(|_, _| Err(ReductError::new(ErrorCode::InternalServerError, "")));
+            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
@@ -277,10 +285,7 @@ mod tests {
         ));
 
         let state = state.write_batch("test", vec![record_to_write]);
-        assert_eq!(
-            state.last_result(),
-            &Err(ReductError::new(ErrorCode::InternalServerError, ""))
-        );
+        assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(state.is_available());
     }
 
