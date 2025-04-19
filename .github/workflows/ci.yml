@@ -163,8 +163,6 @@ jobs:
 
       - name: Run tests
         shell: bash
-        env:
-          RUST_LOG: trace
         run: |
           set -e -x
           for f in ./tmp/tests/*; do
@@ -185,6 +183,7 @@ jobs:
       - rust_fmt
     env:
       CARGO_TERM_COLOR: always
+      RUST_LOG: trace # expand logging
     steps:
       - uses: actions/checkout@v4
 
