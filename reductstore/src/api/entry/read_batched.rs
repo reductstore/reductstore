@@ -277,6 +277,7 @@ mod tests {
     use crate::api::tests::{components, headers, path_to_entry_1};
 
     use crate::ext::ext_repository::create_ext_repository;
+    use reduct_base::ext::ExtSettings;
     use rstest::*;
     use tempfile::tempdir;
     use tokio::time::sleep;
@@ -490,7 +491,7 @@ mod tests {
 
     #[fixture]
     fn ext_repository() -> BoxedManageExtensions {
-        create_ext_repository(Some(tempdir().unwrap().into_path())).unwrap()
+        create_ext_repository(Some(tempdir().unwrap().into_path()), ExtSettings::default()).unwrap()
     }
 
     mod stream_wrapper {
