@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
+use futures_util::future::err;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::io::{ReadRecord, RecordMeta};
 use reduct_base::unprocessable_entity;
@@ -215,6 +216,8 @@ fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> 
             ErrorCode::ConnectionError
         } else if error.is_timeout() {
             ErrorCode::Timeout
+        } else if error.is_request() {
+            ErrorCode::InvalidRequest
         } else {
             ErrorCode::Unknown
         };
