@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
-use futures_util::future::err;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::io::{ReadRecord, RecordMeta};
 use reduct_base::unprocessable_entity;
