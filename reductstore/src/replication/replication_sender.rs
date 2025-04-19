@@ -62,8 +62,24 @@ impl ReplicationSender {
 
     pub fn run(&self) -> SyncState {
         let mut sync_something = false;
-        for (entry_name, log) in self.log_map.read().unwrap().iter() {
-            let transactions = log.write().unwrap().front(MAX_BATCH_SIZE);
+        let entries = self
+            .log_map
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for entry_name in entries.iter() {
+            let transactions = {
+                // we can't hold the lock while we read the log
+                if let Some(log) = self.log_map.read().unwrap().get(entry_name) {
+                    log.write().unwrap().front(MAX_BATCH_SIZE)
+                } else {
+                    // log might be removed
+                    continue;
+                }
+            };
             let state = match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
@@ -124,7 +140,15 @@ impl ReplicationSender {
                         }
 
                         if bucket.is_active() {
-                            if let Err(err) = log.write().unwrap().pop_front(processed_transactions)
+                            if let Err(err) = self
+                                .log_map
+                                .read()
+                                .unwrap()
+                                .get(entry_name)
+                                .and_then(|log| {
+                                    Some(log.write().unwrap().pop_front(processed_transactions))
+                                })
+                                .unwrap_or(Ok(0))
                             {
                                 error!("Failed to remove transaction: {:?}", err);
                             }
