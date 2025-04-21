@@ -216,18 +216,23 @@ mod tests {
     use super::*;
     use crate::storage::query::condition::Context;
     use rstest::{fixture, rstest};
+    use serde_json::json;
     use std::collections::HashMap;
 
     #[rstest]
     fn test_parser_array_syntax(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": [true, {"$gt": [20, 10]}]}"#).unwrap();
+        let json = json!({
+        "$and": [true, {"$gt": [20, 10]}]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parser_object_syntax(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&label": {"$gt": 10}}"#).unwrap();
+        let json = json!({
+            "&label": {"$gt": 10}
+        });
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
             0,
@@ -239,29 +244,40 @@ mod tests {
 
     #[rstest]
     fn test_parse_int(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": [1, -2]}"#).unwrap();
+        let json = json!({
+            "$and": [1, -2]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parse_float(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": [1.1, -2.2]}"#).unwrap();
+        let json = json!({
+            "$and": [1.1, -2.2]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parse_string(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": ["a", "b"]}"#).unwrap();
+        let json = json!({
+            "$and": [                "a","b"]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parser_multiline(parser: Parser) {
-        let json =
-            serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
+        let json = json!({
+            "$and": [
+                {"&label": {"$and": true}},
+                true
+            ]
+        }        );
+
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
             0,
@@ -269,6 +285,18 @@ mod tests {
             EvaluationStage::Retrieve,
         );
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_nullary_operator(parser: Parser, context: Context) {
+        let json = json!({
+            "$add": [
+                "$timestamp",
+                1
+            ]
+        });
+        let mut node = parser.parse(&json).unwrap();
+        assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
     }
 
     #[rstest]
