@@ -8,7 +8,7 @@ use crate::storage::query::condition::operators::arithmetic::{
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, Nin, NoneOf, OneOf};
-use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref};
+use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref, Timestamp};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
@@ -106,6 +106,9 @@ impl Parser {
                         value[1..].to_string(),
                         EvaluationStage::Compute,
                     )])
+                } else if value.starts_with("$") {
+                    // operator without operands (nullary)
+                    Ok(vec![Self::parse_operator(value, vec![])?])
                 } else {
                     Ok(vec![Constant::boxed(Value::String(value.clone()))])
                 }
@@ -168,14 +171,10 @@ impl Parser {
             "$abs" => Abs::boxed(operands),
 
             // Logical operators
-            "$and" => AllOf::boxed(operands),
-            "$all_of" => AllOf::boxed(operands),
-            "$or" => AnyOf::boxed(operands),
-            "$any_of" => AnyOf::boxed(operands),
-            "$not" => NoneOf::boxed(operands),
-            "$none_of" => NoneOf::boxed(operands),
-            "$xor" => OneOf::boxed(operands),
-            "$one_of" => OneOf::boxed(operands),
+            "$and" | "$all_of" => AllOf::boxed(operands),
+            "$or" | "$any_of" => AnyOf::boxed(operands),
+            "$not" | "$none_of" => NoneOf::boxed(operands),
+            "$xor" | "$one_of" => OneOf::boxed(operands),
             "$in" => In::boxed(operands),
             "$nin" => Nin::boxed(operands),
 
@@ -193,10 +192,10 @@ impl Parser {
             "$ends_with" => EndsWith::boxed(operands),
 
             // Misc
-            "$exists" => Exists::boxed(operands),
-            "$has" => Exists::boxed(operands),
+            "$exists" | "$has" => Exists::boxed(operands),
             "$cast" => Cast::boxed(operands),
             "$ref" => Ref::boxed(operands),
+            "$timestamp" | "$id" => Timestamp::boxed(operands),
 
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
@@ -361,6 +360,8 @@ mod tests {
         #[case("$has", "[\"label\"]", Value::Bool(true))]
         #[case("$cast", "[10.0, \"int\"]", Value::Int(10))]
         #[case("$ref", "[\"label\"]", Value::Int(10))]
+        #[case("$timestamp", "[]", Value::Int(0))]
+        #[case("$id", "[]", Value::Int(0))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
