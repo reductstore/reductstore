@@ -77,15 +77,8 @@ impl Parser {
                     } else {
                         // For unary operators, we need to parse the value
                         let operands = self.parse_intern(value)?;
-                        if operands.len() == 1 {
-                            expressions.extend(operands);
-                        } else {
-                            return Err(unprocessable_entity!(
-                                "The '{}' filed must contain a single value, array or object: {}",
-                                key,
-                                json
-                            ));
-                        }
+                        let operator = Self::parse_operator(key, operands)?;
+                        expressions.push(operator);
                     }
                 }
 
