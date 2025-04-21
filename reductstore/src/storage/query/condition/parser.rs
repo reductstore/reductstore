@@ -75,10 +75,17 @@ impl Parser {
                         // Parse object notation e.g. {"&label": {"$and": true}}
                         expressions.push(self.parse_object_syntax(key, operator_right_operand)?);
                     } else {
-                        return Err(unprocessable_entity!(
-                            "A filed must contain array or object: {}",
-                            json
-                        ));
+                        // For unary operators, we need to parse the value
+                        let operands = self.parse_intern(value)?;
+                        if operands.len() == 1 {
+                            expressions.extend(operands);
+                        } else {
+                            return Err(unprocessable_entity!(
+                                "The '{}' filed must contain a single value, array or object: {}",
+                                key,
+                                json
+                            ));
+                        }
                     }
                 }
 
@@ -300,15 +307,19 @@ mod tests {
     }
 
     #[rstest]
-    fn test_parser_invalid_json(parser: Parser) {
-        let json = serde_json::from_str(r#"{"$and": [true, true], "invalid": "json"}"#).unwrap();
-        let result = parser.parse(&json);
-        assert_eq!(result.err().unwrap().to_string(), "[UnprocessableEntity] A filed must contain array or object: {\"$and\":[true,true],\"invalid\":\"json\"}");
+    fn test_parse_unary_operator(parser: Parser, context: Context) {
+        let json = json!({
+        "$limit": 100
+        });
+        let mut node = parser.parse(&json).unwrap();
+        assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
     }
 
     #[rstest]
     fn test_parser_invalid_operator(parser: Parser) {
-        let json = serde_json::from_str(r#"{"$xx": [true, true]}"#).unwrap();
+        let json = json!( {
+            "$xx": [true, true]
+        });
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -318,7 +329,12 @@ mod tests {
 
     #[rstest]
     fn test_parser_invalid_object_notation(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&ref": {"$and": true, "x": "y"}}"#).unwrap();
+        let json = json!({
+                "&ref": {
+                    "$and": true,
+                    "x": "y"
+                }
+            }        );
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -328,7 +344,11 @@ mod tests {
 
     #[rstest]
     fn test_parser_invalid_array_type(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&label": {"$in": [10, 20]}}"#).unwrap();
+        let json = json!({
+            "&label": {
+                "$in": [10, 20]
+            }
+        });
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -338,7 +358,11 @@ mod tests {
 
     #[rstest]
     fn test_parser_invalid_null(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&ref": {"$and": null}}"#).unwrap();
+        let json = json!({
+            "&ref": {
+                "$and": null
+            }
+        });
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
