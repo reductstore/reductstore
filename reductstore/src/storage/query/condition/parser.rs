@@ -8,7 +8,7 @@ use crate::storage::query::condition::operators::arithmetic::{
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, Nin, NoneOf, OneOf};
-use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref};
+use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref, Timestamp};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
@@ -75,10 +75,10 @@ impl Parser {
                         // Parse object notation e.g. {"&label": {"$and": true}}
                         expressions.push(self.parse_object_syntax(key, operator_right_operand)?);
                     } else {
-                        return Err(unprocessable_entity!(
-                            "A filed must contain array or object: {}",
-                            json
-                        ));
+                        // For unary operators, we need to parse the value
+                        let operands = self.parse_intern(value)?;
+                        let operator = Self::parse_operator(key, operands)?;
+                        expressions.push(operator);
                     }
                 }
 
@@ -106,6 +106,9 @@ impl Parser {
                         value[1..].to_string(),
                         EvaluationStage::Compute,
                     )])
+                } else if value.starts_with("$") {
+                    // operator without operands (nullary)
+                    Ok(vec![Self::parse_operator(value, vec![])?])
                 } else {
                     Ok(vec![Constant::boxed(Value::String(value.clone()))])
                 }
@@ -168,14 +171,10 @@ impl Parser {
             "$abs" => Abs::boxed(operands),
 
             // Logical operators
-            "$and" => AllOf::boxed(operands),
-            "$all_of" => AllOf::boxed(operands),
-            "$or" => AnyOf::boxed(operands),
-            "$any_of" => AnyOf::boxed(operands),
-            "$not" => NoneOf::boxed(operands),
-            "$none_of" => NoneOf::boxed(operands),
-            "$xor" => OneOf::boxed(operands),
-            "$one_of" => OneOf::boxed(operands),
+            "$and" | "$all_of" => AllOf::boxed(operands),
+            "$or" | "$any_of" => AnyOf::boxed(operands),
+            "$not" | "$none_of" => NoneOf::boxed(operands),
+            "$xor" | "$one_of" => OneOf::boxed(operands),
             "$in" => In::boxed(operands),
             "$nin" => Nin::boxed(operands),
 
@@ -193,10 +192,10 @@ impl Parser {
             "$ends_with" => EndsWith::boxed(operands),
 
             // Misc
-            "$exists" => Exists::boxed(operands),
-            "$has" => Exists::boxed(operands),
+            "$exists" | "$has" => Exists::boxed(operands),
             "$cast" => Cast::boxed(operands),
             "$ref" => Ref::boxed(operands),
+            "$timestamp" | "$id" => Timestamp::boxed(operands),
 
             _ => Err(unprocessable_entity!(
                 "Operator '{}' not supported",
@@ -217,18 +216,23 @@ mod tests {
     use super::*;
     use crate::storage::query::condition::Context;
     use rstest::{fixture, rstest};
+    use serde_json::json;
     use std::collections::HashMap;
 
     #[rstest]
     fn test_parser_array_syntax(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": [true, {"$gt": [20, 10]}]}"#).unwrap();
+        let json = json!({
+        "$and": [true, {"$gt": [20, 10]}]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parser_object_syntax(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&label": {"$gt": 10}}"#).unwrap();
+        let json = json!({
+            "&label": {"$gt": 10}
+        });
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
             0,
@@ -240,29 +244,40 @@ mod tests {
 
     #[rstest]
     fn test_parse_int(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": [1, -2]}"#).unwrap();
+        let json = json!({
+            "$and": [1, -2]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parse_float(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": [1.1, -2.2]}"#).unwrap();
+        let json = json!({
+            "$and": [1.1, -2.2]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parse_string(parser: Parser, context: Context) {
-        let json = serde_json::from_str(r#"{"$and": ["a", "b"]}"#).unwrap();
+        let json = json!({
+            "$and": [                "a","b"]
+        });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
     fn test_parser_multiline(parser: Parser) {
-        let json =
-            serde_json::from_str(r#"{"&label": {"$and": true}, "$and": [true, true]}"#).unwrap();
+        let json = json!({
+            "$and": [
+                {"&label": {"$and": true}},
+                true
+            ]
+        }        );
+
         let mut node = parser.parse(&json).unwrap();
         let context = Context::new(
             0,
@@ -273,15 +288,31 @@ mod tests {
     }
 
     #[rstest]
-    fn test_parser_invalid_json(parser: Parser) {
-        let json = serde_json::from_str(r#"{"$and": [true, true], "invalid": "json"}"#).unwrap();
-        let result = parser.parse(&json);
-        assert_eq!(result.err().unwrap().to_string(), "[UnprocessableEntity] A filed must contain array or object: {\"$and\":[true,true],\"invalid\":\"json\"}");
+    fn test_parse_nullary_operator(parser: Parser, context: Context) {
+        let json = json!({
+            "$add": [
+                "$timestamp",
+                1
+            ]
+        });
+        let mut node = parser.parse(&json).unwrap();
+        assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
+    }
+
+    #[rstest]
+    fn test_parse_unary_operator(parser: Parser, context: Context) {
+        let json = json!({
+        "$limit": 100
+        });
+        let mut node = parser.parse(&json).unwrap();
+        assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
     }
 
     #[rstest]
     fn test_parser_invalid_operator(parser: Parser) {
-        let json = serde_json::from_str(r#"{"$xx": [true, true]}"#).unwrap();
+        let json = json!( {
+            "$xx": [true, true]
+        });
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -291,7 +322,12 @@ mod tests {
 
     #[rstest]
     fn test_parser_invalid_object_notation(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&ref": {"$and": true, "x": "y"}}"#).unwrap();
+        let json = json!({
+                "&ref": {
+                    "$and": true,
+                    "x": "y"
+                }
+            }        );
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -301,7 +337,11 @@ mod tests {
 
     #[rstest]
     fn test_parser_invalid_array_type(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&label": {"$in": [10, 20]}}"#).unwrap();
+        let json = json!({
+            "&label": {
+                "$in": [10, 20]
+            }
+        });
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -311,7 +351,11 @@ mod tests {
 
     #[rstest]
     fn test_parser_invalid_null(parser: Parser) {
-        let json = serde_json::from_str(r#"{"&ref": {"$and": null}}"#).unwrap();
+        let json = json!({
+            "&ref": {
+                "$and": null
+            }
+        });
         let result = parser.parse(&json);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -361,6 +405,8 @@ mod tests {
         #[case("$has", "[\"label\"]", Value::Bool(true))]
         #[case("$cast", "[10.0, \"int\"]", Value::Int(10))]
         #[case("$ref", "[\"label\"]", Value::Int(10))]
+        #[case("$timestamp", "[]", Value::Int(0))]
+        #[case("$id", "[]", Value::Int(0))]
         fn test_parse_operator(
             parser: Parser,
             context: Context,
