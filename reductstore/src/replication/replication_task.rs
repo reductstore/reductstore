@@ -12,6 +12,7 @@ use std::time::Duration;
 use log::{error, info};
 
 use crate::cfg::replication::ReplicationConfig;
+use crate::core::file_cache::FILE_CACHE;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
@@ -177,7 +178,7 @@ impl ReplicationTask {
                             &entry_name,
                             &replication_name,
                         );
-                        if let Err(err) = fs::remove_file(&path) {
+                        if let Err(err) = FILE_CACHE.remove(&path) {
                             error!("Failed to remove transaction log: {:?}", err);
                         }
 
