@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-689: Fix WAL recovery when a block wasn't saved in block index, [PR-785](https://github.com/reductstore/reductstore/pull/785)
 - Fix replication recovery from broken record, [PR-795](https://github.com/reductstore/reductstore/pull/795)
 - Fix deadlock in replication task, [PR-796](https://github.com/reductstore/reductstore/pull/796)
+- Remove broken transaction log through file cache, [PR-799](https://github.com/reductstore/reductstore/pull/799)
 
 ### Internal
 
