@@ -333,6 +333,16 @@ jobs:
       - name: Check data after migration
         run: python3 ./integration_tests/data_check/checker.py
 
+      - name: Restart current ReductStore
+        run: |
+          docker stop current
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
+          sleep 5
+          docker logs current
+
+      - name: Check data after restart
+        run: python3 ./integration_tests/data_check/checker.py
+
       - name: Save docker logs
         if: always()
         run: docker logs current | zip > /tmp/docker-log.zip
