@@ -335,8 +335,7 @@ jobs:
 
       - name: Restart current ReductStore
         run: |
-          docker stop current
-          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
+          docker restart current
           sleep 5
           docker logs current
 
