@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Ignore the `Content-Length` header when updating labels, [PR-800](https://github.com/reductstore/reductstore/pull/800)
+
 ## [1.4.6] - 2025-04-17
 
 ### Fixed
