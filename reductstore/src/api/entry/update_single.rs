@@ -10,7 +10,7 @@ use axum_extra::headers::HeaderMap;
 
 use reduct_base::Labels;
 
-use crate::api::entry::common::{parse_content_length_from_header, parse_timestamp_from_query};
+use crate::api::entry::common::parse_timestamp_from_query;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
@@ -34,16 +34,6 @@ pub(crate) async fn update_record(
         },
     )
     .await?;
-
-    let content_size = parse_content_length_from_header(&headers)?;
-
-    // we update only labels, so content-length must be 0
-    if content_size > 0 {
-        return Err(HttpError::new(
-            ErrorCode::UnprocessableEntity,
-            "content-length header must be 0",
-        ));
-    }
 
     let ts = parse_timestamp_from_query(&params)?;
 
@@ -250,7 +240,6 @@ mod tests {
     #[fixture]
     pub fn headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-label-x", "z".parse().unwrap()); // update
         headers.insert("x-reduct-label-b", "".parse().unwrap()); // remove
         headers.insert("x-reduct-label-1", "2".parse().unwrap()); // add

@@ -38,7 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-647: Build binaries for Linux and Macos ARM64, [PR-647](https://github.com/reductstore/reductstore/pull/782)
 
-## [1.14.6] - 2025-04-17
+## [1.4.7] - 2025-04-24
+
+### Fixed
+
+- Ignore the `Content-Length` header when updating labels, [PR-800](https://github.com/reductstore/reductstore/pull/800)
+
+## [1.4.6] - 2025-04-17
 
 ### Fixed
 
@@ -986,7 +992,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.6...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.7...HEAD
+
+[1.14.7]: https://github.com/reductstore/reductstore/compare/v1.14.6...v1.14.7
 
 [1.14.6]: https://github.com/reductstore/reductstore/compare/v1.14.5...v1.14.6
 
