@@ -11,7 +11,7 @@ use axum_extra::headers::HeaderMap;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time};
 use reduct_base::Labels;
 
-use crate::api::entry::common::{err_to_batched_header, parse_content_length_from_header};
+use crate::api::entry::common::err_to_batched_header;
 use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
@@ -35,16 +35,6 @@ pub(crate) async fn update_batched_records(
         },
     )
     .await?;
-
-    let content_size = parse_content_length_from_header(&headers)?;
-
-    // we update only labels, so content-length must be 0
-    if content_size > 0 {
-        return Err(HttpError::new(
-            ErrorCode::UnprocessableEntity,
-            "content-length header must be 0",
-        ));
-    }
 
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
@@ -120,7 +110,6 @@ mod tests {
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-time-yyy", "10".parse().unwrap());
 
         let err = update_batched_records(
@@ -150,7 +139,6 @@ mod tests {
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-time-1", "".parse().unwrap());
 
         let err = update_batched_records(
@@ -178,7 +166,6 @@ mod tests {
         #[future] empty_body: Body,
     ) {
         let components = components.await;
-        headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-time-0", "0,,x=z,b=,1=2".parse().unwrap());
 
         let err_map = update_batched_records(
@@ -256,7 +243,6 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
         }
 
-        headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-time-0", "0,,".parse().unwrap());
         headers.insert("x-reduct-time-1", "0,,".parse().unwrap());
 
