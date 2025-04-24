@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -328,6 +327,7 @@ impl Drop for ReplicationTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     use bytes::Bytes;
 

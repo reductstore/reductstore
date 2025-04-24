@@ -13,7 +13,7 @@ use reduct_base::Labels;
 
 use crate::api::entry::common::err_to_batched_header;
 use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
@@ -95,6 +95,7 @@ pub(crate) async fn update_batched_records(
 mod tests {
     use super::*;
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
+    use crate::api::ErrorCode;
 
     use axum::response::IntoResponse;
     use axum_extra::headers::HeaderValue;
