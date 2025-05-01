@@ -5,18 +5,21 @@ use crate::core::file_cache::FileWeak;
 use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
 use crate::storage::proto::{ts_to_us, Record};
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
-use reduct_base::{internal_server_error, Labels};
+use reduct_base::{internal_server_error, timeout, Labels};
 use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
-use tokio::sync::mpsc::error::SendError;
+use std::thread::sleep;
+use std::time::Duration;
+use std::time::Instant;
+use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{channel, Sender};
 
 /// RecordReader is responsible for reading the content of a record from the storage.
@@ -154,28 +157,30 @@ impl RecordReader {
 
     fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
         let mut read_bytes = 0;
-
+        let path = format!(
+            "{}/{}/{}",
+            ctx.bucket_name, ctx.entry_name, ctx.record_timestamp
+        );
         let mut read_all = || {
             while read_bytes < ctx.content_size {
                 let (buf, read) =
                     match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes) {
                         Ok((buf, read)) => (buf, read),
                         Err(e) => {
-                            error!(
-                                "Failed to read record {}/{}/{}: {}",
-                                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
-                            );
-                            tx.blocking_send(Err(e))?;
+                            error!("Failed to read record {}: {}", path, e);
+                            Self::blocking_send_with_timeout(&tx, Err(e), IO_OPERATION_TIMEOUT)??;
                             break;
                         }
                     };
 
-                tx.blocking_send(Ok(buf.into()))?;
-
+                Self::blocking_send_with_timeout(&tx, Ok(Bytes::from(buf)), IO_OPERATION_TIMEOUT)??;
                 read_bytes += read as u64;
             }
 
-            Ok::<(), SendError<_>>(())
+            Ok::<Result<(), SendError<_>>, ReductError>(Ok::<
+                (),
+                SendError<Result<Bytes, ReductError>>,
+            >(()))
         };
 
         if let Err(e) = read_all() {
@@ -184,6 +189,31 @@ impl RecordReader {
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e
             )
         }
+    }
+
+    fn blocking_send_with_timeout(
+        tx: &Sender<Result<Bytes, ReductError>>,
+        mut msg: Result<Bytes, ReductError>,
+        timeout: Duration,
+    ) -> Result<Result<(), SendError<Result<Bytes, ReductError>>>, ReductError> {
+        let now = Instant::now();
+
+        while now.elapsed() < timeout {
+            match tx.try_send(msg) {
+                Ok(_) => {
+                    return Ok(Ok(()));
+                }
+                Err(TrySendError::Full(ret)) => {
+                    sleep(std::time::Duration::from_millis(1));
+                    msg = ret;
+                }
+                Err(TrySendError::Closed(ret)) => {
+                    return Ok(Err(SendError { 0: ret }));
+                }
+            }
+        }
+
+        Err(timeout!("Channel send timeout: {} s", timeout.as_secs()))
     }
 }
 
@@ -444,6 +474,18 @@ mod tests {
                     "Timeout reading record: deadline has elapsed"
                 )))
             );
+        }
+
+        #[rstest]
+        fn test_channel_timeout() {
+            let msg = Ok(Bytes::from("test"));
+            let (tx, _rx) = channel(1);
+
+            tx.blocking_send(msg.clone()).unwrap(); // full
+            let result =
+                RecordReader::blocking_send_with_timeout(&tx, msg, Duration::from_millis(1));
+
+            assert_eq!(result, Err(timeout!("Channel send timeout: 0 s")));
         }
 
         #[fixture]

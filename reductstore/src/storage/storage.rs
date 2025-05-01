@@ -21,7 +21,7 @@ use reduct_base::{conflict, not_found, unprocessable_entity};
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
-pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const IO_OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Storage is the main entry point for the storage service.
 pub struct Storage {

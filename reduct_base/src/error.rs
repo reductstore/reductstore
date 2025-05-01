@@ -1,4 +1,4 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -9,6 +9,9 @@ use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 use std::sync::PoisonError;
 use std::time::SystemTimeError;
 use url::ParseError;
+
+#[cfg(feature = "io")]
+use tokio::sync::mpsc::error::SendError;
 
 /// HTTP status codes + client errors (negative).
 #[repr(i16)]
@@ -138,6 +141,17 @@ impl From<Box<dyn std::any::Any + Send>> for ReductError {
     }
 }
 
+#[cfg(feature = "io")]
+impl<T> From<SendError<T>> for ReductError {
+    fn from(err: SendError<T>) -> Self {
+        // A send error is an internal reductstore error
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: err.to_string(),
+        }
+    }
+}
+
 impl Error for ReductError {
     fn description(&self) -> &str {
         &self.message
@@ -164,6 +178,13 @@ impl ReductError {
         ReductError {
             status: ErrorCode::OK,
             message: "".to_string(),
+        }
+    }
+
+    pub fn timeout(msg: &str) -> ReductError {
+        ReductError {
+            status: ErrorCode::Timeout,
+            message: msg.to_string(),
         }
     }
 
@@ -241,6 +262,17 @@ impl ReductError {
 }
 
 // Macros for creating errors with a message.
+
+#[macro_export]
+macro_rules! timeout {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::timeout(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::timeout($msg)
+    };
+}
+
 #[macro_export]
 macro_rules! no_content {
     ($msg:expr, $($arg:tt)*) => {
@@ -318,4 +350,118 @@ macro_rules! unauthorized {
     ($msg:expr) => {
         ReductError::unauthorized($msg)
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn creates_internal_server_error() {
+        let error = ReductError::internal_server_error("Unexpected server error");
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "Unexpected server error");
+    }
+
+    #[test]
+    fn converts_io_error_to_reduct_error() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::Other, "IO failure");
+        let error: ReductError = io_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "IO failure");
+    }
+
+    #[test]
+    fn converts_system_time_error_to_reduct_error() {
+        let system_time_error = UNIX_EPOCH.duration_since(SystemTime::now()).unwrap_err();
+        let error: ReductError = system_time_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "second time provided was later than self");
+    }
+
+    #[test]
+    fn converts_url_parse_error_to_reduct_error() {
+        let parse_error = ParseError::EmptyHost;
+        let error: ReductError = parse_error.into();
+        assert_eq!(error.status, ErrorCode::UrlParseError);
+        assert_eq!(error.message, "empty host");
+    }
+
+    #[test]
+    fn converts_poison_error_to_reduct_error() {
+        let poison_error: PoisonError<()> = PoisonError::new(());
+        let error: ReductError = poison_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "Poison error");
+    }
+
+    #[cfg(feature = "io")]
+    #[test]
+    fn converts_send_error_to_reduct_error() {
+        let send_error: SendError<()> = SendError(());
+        let error: ReductError = send_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "channel closed");
+    }
+
+    mod macros {
+        use super::*;
+
+        #[test]
+        fn test_timeout_macro() {
+            let error = timeout!("Timeout error: {}", 42);
+            assert_eq!(error.status, ErrorCode::Timeout);
+            assert_eq!(error.message, "Timeout error: 42");
+        }
+
+        #[test]
+        fn test_no_content_macro() {
+            let error = no_content!("No content error: {}", 42);
+            assert_eq!(error.status, ErrorCode::NoContent);
+            assert_eq!(error.message, "No content error: 42");
+        }
+
+        #[test]
+        fn test_bad_request_macro() {
+            let error = bad_request!("Bad request error: {}", 42);
+            assert_eq!(error.status, ErrorCode::BadRequest);
+            assert_eq!(error.message, "Bad request error: 42");
+        }
+
+        #[test]
+        fn test_unprocessable_entity_macro() {
+            let error = unprocessable_entity!("Unprocessable entity error: {}", 42);
+            assert_eq!(error.status, ErrorCode::UnprocessableEntity);
+            assert_eq!(error.message, "Unprocessable entity error: 42");
+        }
+
+        #[test]
+        fn test_not_found_macro() {
+            let error = not_found!("Not found error: {}", 42);
+            assert_eq!(error.status, ErrorCode::NotFound);
+            assert_eq!(error.message, "Not found error: 42");
+        }
+
+        #[test]
+        fn test_conflict_macro() {
+            let error = conflict!("Conflict error: {}", 42);
+            assert_eq!(error.status, ErrorCode::Conflict);
+            assert_eq!(error.message, "Conflict error: 42");
+        }
+
+        #[test]
+        fn test_too_early_macro() {
+            let error = too_early!("Too early error: {}", 42);
+            assert_eq!(error.status, ErrorCode::TooEarly);
+            assert_eq!(error.message, "Too early error: 42");
+        }
+
+        #[test]
+        fn test_internal_server_error_macro() {
+            let error = internal_server_error!("Internal server error: {}", 42);
+            assert_eq!(error.status, ErrorCode::InternalServerError);
+            assert_eq!(error.message, "Internal server error: 42");
+        }
+    }
 }
