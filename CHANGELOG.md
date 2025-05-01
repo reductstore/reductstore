@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimum Rust version to 1.85
 - RS-633: Link runtime libraries statically, [PR-761](https://github.com/reductstore/reductstore/pull/761)
 - RS-628: Return error if extension not found in query, [PR-780](https://github.com/reductstore/reductstore/pull/780)
+- Timout for IO operation 5s, [PR-804](https://github.com/reductstore/reductstore/pull/804)
 
 ### Fixed
 
