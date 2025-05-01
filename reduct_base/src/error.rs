@@ -402,7 +402,7 @@ mod tests {
         let send_error: SendError<()> = SendError(());
         let error: ReductError = send_error.into();
         assert_eq!(error.status, ErrorCode::InternalServerError);
-        assert_eq!(error.message, "SendError");
+        assert_eq!(error.message, "channel closed");
     }
 
     mod macros {
