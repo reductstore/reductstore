@@ -21,8 +21,6 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{channel, Sender};
-use tokio::time::error::Elapsed;
-use tokio::time::{timeout, Timeout};
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
@@ -481,7 +479,7 @@ mod tests {
         #[rstest]
         fn test_channel_timeout() {
             let msg = Ok(Bytes::from("test"));
-            let (tx, mut rx) = channel(1);
+            let (tx, _rx) = channel(1);
 
             tx.blocking_send(msg.clone()).unwrap(); // full
             let result =
