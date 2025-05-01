@@ -17,6 +17,7 @@ use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
 use std::thread::sleep;
+use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{channel, Sender};
@@ -169,12 +170,12 @@ impl RecordReader {
                         Ok((buf, read)) => (buf, read),
                         Err(e) => {
                             error!("Failed to read record {}: {}", path, e);
-                            Self::blocking_send_with_timeout(&tx, Err(e))??;
+                            Self::blocking_send_with_timeout(&tx, Err(e), IO_OPERATION_TIMEOUT)??;
                             break;
                         }
                     };
 
-                Self::blocking_send_with_timeout(&tx, Ok(Bytes::from(buf)))??;
+                Self::blocking_send_with_timeout(&tx, Ok(Bytes::from(buf)), IO_OPERATION_TIMEOUT)??;
                 read_bytes += read as u64;
             }
 
@@ -195,10 +196,11 @@ impl RecordReader {
     fn blocking_send_with_timeout(
         tx: &Sender<Result<Bytes, ReductError>>,
         mut msg: Result<Bytes, ReductError>,
+        timeout: Duration,
     ) -> Result<Result<(), SendError<Result<Bytes, ReductError>>>, ReductError> {
         let now = Instant::now();
 
-        while now.elapsed() < IO_OPERATION_TIMEOUT {
+        while now.elapsed() < timeout {
             match tx.try_send(msg) {
                 Ok(_) => {
                     return Ok(Ok(()));
@@ -213,10 +215,7 @@ impl RecordReader {
             }
         }
 
-        Err(timeout!(
-            "Channel send timeout: {} s",
-            IO_OPERATION_TIMEOUT.as_secs()
-        ))
+        Err(timeout!("Channel send timeout: {} s", timeout.as_secs()))
     }
 }
 
@@ -477,6 +476,18 @@ mod tests {
                     "Timeout reading record: deadline has elapsed"
                 )))
             );
+        }
+
+        #[rstest]
+        fn test_channel_timeout() {
+            let msg = Ok(Bytes::from("test"));
+            let (tx, mut rx) = channel(1);
+
+            tx.blocking_send(msg.clone()).unwrap(); // full
+            let result =
+                RecordReader::blocking_send_with_timeout(&tx, msg, Duration::from_millis(1));
+
+            assert_eq!(result, Err(timeout!("Channel send timeout: 0 s")));
         }
 
         #[fixture]
