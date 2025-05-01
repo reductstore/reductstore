@@ -8,6 +8,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Error as FmtError, Formatter};
 use std::sync::PoisonError;
 use std::time::SystemTimeError;
+use tokio::sync::mpsc::error::SendError;
 use url::ParseError;
 
 /// HTTP status codes + client errors (negative).
@@ -138,6 +139,16 @@ impl From<Box<dyn std::any::Any + Send>> for ReductError {
     }
 }
 
+impl<T> From<SendError<T>> for ReductError {
+    fn from(err: SendError<T>) -> Self {
+        // A send error is an internal reductstore error
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: err.to_string(),
+        }
+    }
+}
+
 impl Error for ReductError {
     fn description(&self) -> &str {
         &self.message
@@ -164,6 +175,13 @@ impl ReductError {
         ReductError {
             status: ErrorCode::OK,
             message: "".to_string(),
+        }
+    }
+
+    pub fn timeout(msg: &str) -> ReductError {
+        ReductError {
+            status: ErrorCode::Timeout,
+            message: msg.to_string(),
         }
     }
 
@@ -241,6 +259,17 @@ impl ReductError {
 }
 
 // Macros for creating errors with a message.
+
+#[macro_export]
+macro_rules! timeout {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::timeout(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::timeout($msg)
+    };
+}
+
 #[macro_export]
 macro_rules! no_content {
     ($msg:expr, $($arg:tt)*) => {
