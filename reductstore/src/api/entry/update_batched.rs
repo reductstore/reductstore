@@ -93,14 +93,14 @@ pub(crate) async fn update_batched_records(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
     use crate::storage::proto::record::Label;
     use axum::response::IntoResponse;
     use axum_extra::headers::HeaderValue;
     use bytes::Bytes;
+    use reduct_base::error::ErrorCode;
     use rstest::rstest;
-
-    use super::*;
 
     #[rstest]
     #[tokio::test]
