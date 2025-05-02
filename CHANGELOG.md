@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RS-647: Build binaries for Linux and Macos ARM64, [PR-647](https://github.com/reductstore/reductstore/pull/782)
 
+## [1.4.8] - 2025-05-02
+
+### Fixed
+
+- Update Web Console up to 1.9.2 with start/stop query fix, [PR-805](https://github.com/reductstore/reductstore/pull/805)
+
 ## [1.4.7] - 2025-04-24
 
 ### Fixed
@@ -994,7 +1000,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.7...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.8...HEAD
+
+[1.14.8]: https://github.com/reductstore/reductstore/compare/v1.14.7...v1.14.8
 
 [1.14.7]: https://github.com/reductstore/reductstore/compare/v1.14.6...v1.14.7
 
