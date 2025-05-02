@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Update Web Console up to 1.9.2 with start/stop query fix, [PR-805](https://github.com/reductstore/reductstore/pull/805)
+
 ## [1.4.7] - 2025-04-24
 
 ### Fixed
