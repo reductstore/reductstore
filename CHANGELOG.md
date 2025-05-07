@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2025-05-07
+
 ### Added
 
 - Python client benchmarks in CI, [PR-764](https://github.com/reductstore/reductstore/pull/764)
@@ -1001,7 +1003,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.14.8...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.0...HEAD
+
+[1.15.0]: https://github.com/reductstore/reductstore/compare/v1.14.8...v1.15.0
 
 [1.14.8]: https://github.com/reductstore/reductstore/compare/v1.14.7...v1.14.8
 
