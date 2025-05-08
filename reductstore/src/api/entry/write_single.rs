@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -52,12 +52,6 @@ pub(crate) async fn write_record(
         for (k, v) in headers.iter() {
             if k.as_str().starts_with("x-reduct-label-") {
                 let key = k.as_str()[15..].to_string();
-                if key.starts_with("@") {
-                    return Err(unprocessable_entity!(
-                        "Label names must not start with '@': reserved for computed labels",
-                    )
-                    .into());
-                }
                 let value = match v.to_str() {
                     Ok(value) => value.to_string(),
                     Err(_) => {

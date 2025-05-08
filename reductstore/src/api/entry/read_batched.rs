@@ -272,16 +272,17 @@ impl Stream for ReadersWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use axum::body::to_bytes;
+    use async_trait::async_trait;
 
     use crate::api::entry::tests::query;
+    use axum::body::to_bytes;
+    use mockall::mock;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
 
     use crate::ext::ext_repository::create_ext_repository;
     use reduct_base::ext::ExtSettings;
-    use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
+    use reduct_base::io::{ReadRecord, RecordMeta};
     use reduct_base::Labels;
     use rstest::*;
     use tempfile::tempdir;
@@ -496,10 +497,20 @@ mod tests {
 
     #[rstest]
     fn test_batch_compute_labels() {
-        let record: BoxedReadRecord = Box::new(MockRecord {
-            labels: HashMap::from_iter(vec![("a".to_string(), "b".to_string())]),
-            computed_labels: HashMap::from_iter(vec![("x".to_string(), "y".to_string())]),
-        });
+        let mut record = MockRecord::new();
+        record.expect_timestamp().return_const(1000u64);
+        record.expect_content_length().return_const(100u64);
+        record
+            .expect_content_type()
+            .return_const("text/plain".to_string());
+        record
+            .expect_labels()
+            .return_const(Labels::from_iter(vec![("a".to_string(), "b".to_string())]));
+        record
+            .expect_computed_labels()
+            .return_const(Labels::from_iter(vec![("x".to_string(), "y".to_string())]));
+
+        let record: BoxedReadRecord = Box::new(record);
 
         let (name, value) = make_batch_header(&record);
         assert_eq!(name, HeaderName::from_static("x-reduct-time-1000"));
@@ -524,44 +535,28 @@ mod tests {
         }
     }
 
-    struct MockRecord {
-        labels: Labels,
-        computed_labels: Labels,
-    }
+    mock! {
+        Record {}
 
-    impl RecordMeta for MockRecord {
-        fn timestamp(&self) -> u64 {
-            1000
+        impl RecordMeta for Record {
+            fn timestamp(&self) -> u64;
+
+            fn labels(&self) -> &Labels;
         }
 
-        fn labels(&self) -> &Labels {
-            &self.labels
-        }
-    }
-    #[async_trait::async_trait]
-    impl ReadRecord for MockRecord {
-        async fn read(&mut self) -> ReadChunk {
-            todo!()
-        }
+        #[async_trait]
+        impl ReadRecord for Record {
+            async fn read(&mut self) -> Option<Result<Bytes, ReductError>>;
 
-        fn last(&self) -> bool {
-            todo!()
-        }
+            fn content_length(&self) -> u64;
 
-        fn computed_labels(&self) -> &Labels {
-            &self.computed_labels
-        }
+            fn content_type(&self) -> &str;
 
-        fn computed_labels_mut(&mut self) -> &mut Labels {
-            todo!()
-        }
+            fn last(&self) -> bool;
 
-        fn content_length(&self) -> u64 {
-            100
-        }
+            fn computed_labels(&self) -> &Labels;
 
-        fn content_type(&self) -> &str {
-            "text/plain"
+            fn computed_labels_mut(&mut self) -> &mut Labels;
         }
     }
 }
