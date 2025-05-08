@@ -142,6 +142,7 @@ mod tests {
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::io::RecordMeta;
+    use reduct_base::not_found;
     use rstest::*;
 
     #[rstest]
@@ -212,10 +213,7 @@ mod tests {
         .err()
         .unwrap();
 
-        assert_eq!(
-            err,
-            HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found")
-        );
+        assert_eq!(err, not_found!("Bucket 'XXX' is not found").into());
     }
 
     #[rstest]
@@ -243,10 +241,7 @@ mod tests {
 
         assert_eq!(
             err,
-            HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "'ts' must be an unix timestamp in microseconds",
-            )
+            unprocessable_entity!("'ts' must be an unix timestamp in microseconds").into()
         );
     }
 
