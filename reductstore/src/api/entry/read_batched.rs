@@ -74,6 +74,38 @@ pub(crate) async fn read_batched_records(
     .await
 }
 
+fn make_batch_header(reader: &BoxedReadRecord) -> (HeaderName, HeaderValue) {
+    let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
+    let mut meta_data = vec![
+        reader.content_length().to_string(),
+        reader.content_type().to_string(),
+    ];
+
+    let format_labels = |(k, v): (&String, &String)| {
+        if v.contains(",") {
+            format!("{}=\"{}\"", k, v)
+        } else {
+            format!("{}={}", k, v)
+        }
+    };
+
+    let mut labels: Vec<String> = reader.labels().iter().map(format_labels).collect();
+
+    labels.extend(
+        reader
+            .computed_labels()
+            .iter()
+            .map(|(k, v)| format_labels((&format!("@{}", k), v))),
+    );
+
+    labels.sort();
+
+    meta_data.append(&mut labels);
+    let value: HeaderValue = meta_data.join(",").parse().unwrap();
+
+    (name, value)
+}
+
 async fn fetch_and_response_batched_records(
     bucket: Arc<Bucket>,
     entry_name: &str,
@@ -82,33 +114,6 @@ async fn fetch_and_response_batched_records(
     io_settings: &IoConfig,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
-    let make_header = |reader: &BoxedReadRecord| {
-        let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
-        let mut meta_data = vec![
-            reader.content_length().to_string(),
-            reader.content_type().to_string(),
-        ];
-
-        let format_labels = |(k, v): (&String, &String)| {
-            if v.contains(",") {
-                format!("{}=\"{}\"", k, v)
-            } else {
-                format!("{}={}", k, v)
-            }
-        };
-
-        let mut labels: Vec<String> = reader.labels().iter().map(format_labels).collect();
-
-        labels.extend(reader.computed_labels().iter().map(format_labels));
-
-        labels.sort();
-
-        meta_data.append(&mut labels);
-        let value: HeaderValue = meta_data.join(",").parse().unwrap();
-
-        (name, value)
-    };
-
     let mut header_size = 0usize;
     let mut body_size = 0u64;
     let mut headers = HeaderMap::new();
@@ -142,7 +147,7 @@ async fn fetch_and_response_batched_records(
         match reader {
             Ok(reader) => {
                 {
-                    let (name, value) = make_header(&reader);
+                    let (name, value) = make_batch_header(&reader);
                     header_size += name.as_str().len() + value.to_str().unwrap().len() + 2;
                     body_size += reader.content_length();
                     headers.insert(name, value);
@@ -154,8 +159,6 @@ async fn fetch_and_response_batched_records(
                     || readers.len() > io_settings.batch_max_records
                     || start_time.elapsed() > io_settings.batch_timeout
                 {
-                    // This is not correct, because we should check sizes before adding the record
-                    // but we can't know the size in advance and after next() we can't go back
                     break;
                 }
             }
@@ -278,6 +281,8 @@ mod tests {
 
     use crate::ext::ext_repository::create_ext_repository;
     use reduct_base::ext::ExtSettings;
+    use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
+    use reduct_base::Labels;
     use rstest::*;
     use tempfile::tempdir;
     use tokio::time::sleep;
@@ -489,6 +494,18 @@ mod tests {
         }
     }
 
+    #[rstest]
+    fn test_batch_compute_labels() {
+        let record: BoxedReadRecord = Box::new(MockRecord {
+            labels: HashMap::from_iter(vec![("a".to_string(), "b".to_string())]),
+            computed_labels: HashMap::from_iter(vec![("x".to_string(), "y".to_string())]),
+        });
+
+        let (name, value) = make_batch_header(&record);
+        assert_eq!(name, HeaderName::from_static("x-reduct-time-1000"));
+        assert_eq!(value.to_str().unwrap(), "100,text/plain,@x=y,a=b");
+    }
+
     #[fixture]
     fn ext_repository() -> BoxedManageExtensions {
         create_ext_repository(Some(tempdir().unwrap().into_path()), ExtSettings::default()).unwrap()
@@ -504,6 +521,47 @@ mod tests {
                 empty_body: false,
             };
             assert_eq!(wrapper.size_hint(), (0, None));
+        }
+    }
+
+    struct MockRecord {
+        labels: Labels,
+        computed_labels: Labels,
+    }
+
+    impl RecordMeta for MockRecord {
+        fn timestamp(&self) -> u64 {
+            1000
+        }
+
+        fn labels(&self) -> &Labels {
+            &self.labels
+        }
+    }
+    #[async_trait::async_trait]
+    impl ReadRecord for MockRecord {
+        async fn read(&mut self) -> ReadChunk {
+            todo!()
+        }
+
+        fn last(&self) -> bool {
+            todo!()
+        }
+
+        fn computed_labels(&self) -> &Labels {
+            &self.computed_labels
+        }
+
+        fn computed_labels_mut(&mut self) -> &mut Labels {
+            todo!()
+        }
+
+        fn content_length(&self) -> u64 {
+            100
+        }
+
+        fn content_type(&self) -> &str {
+            "text/plain"
         }
     }
 }
