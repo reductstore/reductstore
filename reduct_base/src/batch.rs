@@ -1,4 +1,4 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -47,6 +47,12 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
     let mut rest = rest.to_string();
     while let Some(pair) = rest.split_once('=') {
         let (key, value) = pair;
+        if key.starts_with("@") {
+            return Err(unprocessable_entity!(
+                "Label names must not start with '@': reserved for computed labels",
+            ));
+        }
+
         rest = if value.starts_with('\"') {
             let value = value[1..].to_string();
             let (value, rest) = value

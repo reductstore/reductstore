@@ -15,7 +15,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::{bad_request, Labels};
+use reduct_base::{bad_request, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::timeout;
@@ -52,13 +52,20 @@ pub(crate) async fn write_record(
         for (k, v) in headers.iter() {
             if k.as_str().starts_with("x-reduct-label-") {
                 let key = k.as_str()[15..].to_string();
+                if key.starts_with("@") {
+                    return Err(unprocessable_entity!(
+                        "Label names must not start with '@': reserved for computed labels",
+                    )
+                    .into());
+                }
                 let value = match v.to_str() {
                     Ok(value) => value.to_string(),
                     Err(_) => {
-                        return Err(HttpError::new(
-                            ErrorCode::UnprocessableEntity,
-                            &format!("Label values for {} must be valid UTF-8 strings", k),
-                        ));
+                        return Err(unprocessable_entity!(
+                            "Label values for {} must be valid UTF-8 strings",
+                            k
+                        )
+                        .into());
                     }
                 };
                 labels.insert(key, value);
