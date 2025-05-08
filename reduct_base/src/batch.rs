@@ -1,4 +1,4 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -47,6 +47,13 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
     let mut rest = rest.to_string();
     while let Some(pair) = rest.split_once('=') {
         let (key, value) = pair;
+        let key = key.trim();
+        if key.starts_with("@") {
+            return Err(unprocessable_entity!(
+                "Label names must not start with '@': reserved for computed labels",
+            ));
+        }
+
         rest = if value.starts_with('\"') {
             let value = value[1..].to_string();
             let (value, rest) = value
@@ -59,7 +66,7 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
             labels.insert(key.trim().to_string(), value.trim().to_string());
             rest.trim().to_string()
         } else {
-            labels.insert(key.trim().to_string(), value.trim().to_string());
+            labels.insert(key.to_string(), value.trim().to_string());
             break;
         };
     }
@@ -151,9 +158,19 @@ mod tests {
     #[case("xxx")]
     fn test_parse_header_bad_header(#[case] header: &str) {
         let err = parse_batched_header(header).err().unwrap();
+        assert_eq!(err, unprocessable_entity!("Invalid batched header"));
+    }
+
+    #[rstest]
+    fn test_parse_header_bad_label() {
+        let err = parse_batched_header("123, text/plain, @label1=value1, label2=value2")
+            .err()
+            .unwrap();
         assert_eq!(
             err,
-            ReductError::unprocessable_entity("Invalid batched header")
+            unprocessable_entity!(
+                "Label names must not start with '@': reserved for computed labels"
+            )
         );
     }
 }

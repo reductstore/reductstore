@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -15,7 +15,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::{bad_request, Labels};
+use reduct_base::{bad_request, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::timeout;
@@ -55,10 +55,11 @@ pub(crate) async fn write_record(
                 let value = match v.to_str() {
                     Ok(value) => value.to_string(),
                     Err(_) => {
-                        return Err(HttpError::new(
-                            ErrorCode::UnprocessableEntity,
-                            &format!("Label values for {} must be valid UTF-8 strings", k),
-                        ));
+                        return Err(unprocessable_entity!(
+                            "Label values for {} must be valid UTF-8 strings",
+                            k
+                        )
+                        .into());
                     }
                 };
                 labels.insert(key, value);
@@ -141,6 +142,7 @@ mod tests {
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::io::RecordMeta;
+    use reduct_base::not_found;
     use rstest::*;
 
     #[rstest]
@@ -211,10 +213,7 @@ mod tests {
         .err()
         .unwrap();
 
-        assert_eq!(
-            err,
-            HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found")
-        );
+        assert_eq!(err, not_found!("Bucket 'XXX' is not found").into());
     }
 
     #[rstest]
@@ -242,10 +241,7 @@ mod tests {
 
         assert_eq!(
             err,
-            HttpError::new(
-                ErrorCode::UnprocessableEntity,
-                "'ts' must be an unix timestamp in microseconds",
-            )
+            unprocessable_entity!("'ts' must be an unix timestamp in microseconds").into()
         );
     }
 
