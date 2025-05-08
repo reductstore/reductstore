@@ -19,6 +19,8 @@ pub use process_status::ProcessStatus;
 pub use ext_settings::{ExtSettings, ExtSettingsBuilder};
 pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 
+pub const EXTENSION_API_VERSION: &str = "0.2";
+
 /// The trait for the IO extension.
 ///
 /// This trait is used to register queries and process records in a pipeline of extensions.
