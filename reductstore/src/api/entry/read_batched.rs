@@ -283,6 +283,7 @@ mod tests {
     use crate::ext::ext_repository::create_ext_repository;
     use reduct_base::ext::ExtSettings;
     use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
     use rstest::*;
     use tempfile::tempdir;
@@ -519,7 +520,13 @@ mod tests {
 
     #[fixture]
     fn ext_repository() -> BoxedManageExtensions {
-        create_ext_repository(Some(tempdir().unwrap().into_path()), ExtSettings::default()).unwrap()
+        create_ext_repository(
+            Some(tempdir().unwrap().into_path()),
+            ExtSettings::builder()
+                .server_info(ServerInfo::default())
+                .build(),
+        )
+        .unwrap()
     }
 
     mod stream_wrapper {
