@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+### Added
+
+- Pass server information to extensions, [PR-816](https://github.com/reductstore/reductstore/pull/816)
+
 ### Changed
 
 - Add "@" prefix to computed labels, [PR-815](https://github.com/reductstore/reductstore/pull/815)
