@@ -159,6 +159,11 @@ fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
 
 #[cfg(test)]
 mod tests {
+    use crate::asset::asset_manager::create_asset_manager;
+    use crate::auth::token_repository::create_token_repository;
+    use crate::cfg::replication::ReplicationConfig;
+    use crate::ext::ext_repository::create_ext_repository;
+    use crate::replication::create_replication_repo;
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
@@ -166,15 +171,10 @@ mod tests {
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::ReplicationSettings;
+    use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
     use std::collections::HashMap;
-
-    use crate::asset::asset_manager::create_asset_manager;
-    use crate::auth::token_repository::create_token_repository;
-    use crate::cfg::replication::ReplicationConfig;
-    use crate::ext::ext_repository::create_ext_repository;
-    use crate::replication::create_replication_repo;
 
     use super::*;
 
@@ -283,8 +283,13 @@ mod tests {
             base_path: "/".to_string(),
             replication_repo: RwLock::new(replication_repo),
             io_settings: IoConfig::default(),
-            ext_repo: create_ext_repository(None, ExtSettings::default())
-                .expect("Failed to create extension repo"),
+            ext_repo: create_ext_repository(
+                None,
+                ExtSettings::builder()
+                    .server_info(ServerInfo::default())
+                    .build(),
+            )
+            .expect("Failed to create extension repo"),
         };
 
         Arc::new(components)

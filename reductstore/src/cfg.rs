@@ -90,6 +90,8 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             None
         };
 
+        let server_info = storage.info()?;
+
         Ok(Components {
             storage,
             token_repo: tokio::sync::RwLock::new(token_repo),
@@ -98,7 +100,10 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             replication_repo: tokio::sync::RwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
-                ExtSettings::builder().log_level(&self.log_level).build(),
+                ExtSettings::builder()
+                    .log_level(&self.log_level)
+                    .server_info(server_info)
+                    .build(),
             )?,
 
             base_path: self.api_base_path.clone(),

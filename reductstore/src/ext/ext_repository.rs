@@ -335,6 +335,7 @@ pub(super) mod tests {
     use mockall::predicate::eq;
     use prost_wkt_types::Timestamp;
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
+    use reduct_base::msg::server_api::ServerInfo;
     use serde_json::json;
     use std::fs;
     use tempfile::tempdir;
@@ -342,6 +343,7 @@ pub(super) mod tests {
 
     mod load {
         use super::*;
+        use reduct_base::msg::server_api::ServerInfo;
         #[log_test(rstest)]
         fn test_load_extension(ext_repo: ExtRepository) {
             assert_eq!(ext_repo.extension_map.len(), 1);
@@ -381,7 +383,9 @@ pub(super) mod tests {
 
         #[fixture]
         fn ext_settings() -> ExtSettings {
-            ExtSettings::default()
+            ExtSettings::builder()
+                .server_info(ServerInfo::default())
+                .build()
         }
 
         #[fixture]
@@ -819,7 +823,9 @@ pub(super) mod tests {
     }
 
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
-        let ext_settings = ExtSettings::default();
+        let ext_settings = ExtSettings::builder()
+            .server_info(ServerInfo::default())
+            .build();
         let mut ext_repo =
             ExtRepository::try_load(&tempdir().unwrap().into_path(), ext_settings).unwrap();
         ext_repo.extension_map.insert(
