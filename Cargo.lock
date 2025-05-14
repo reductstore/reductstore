@@ -2050,7 +2050,6 @@ dependencies = [
  "log",
  "mime_guess",
  "mockall",
- "prost",
  "prost-build",
  "prost-wkt-types",
  "rand",
