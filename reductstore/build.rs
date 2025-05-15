@@ -107,6 +107,5 @@ fn download_ext(name: &str, version: &str) {
 
     fs::write(ext_path, resp.bytes().unwrap())
         .expect(format!("Failed to write {}.zip", name).as_str());
-    fs::copy(ext_path, format!("{}/{}", out_dir, ext_path))
-        .expect("Failed to copy extension");
+    fs::copy(ext_path, format!("{}/{}", out_dir, ext_path)).expect("Failed to copy extension");
 }

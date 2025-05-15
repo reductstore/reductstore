@@ -23,7 +23,6 @@ pub trait ManageStaticAsset {
     /// The file content as string.
     fn read(&self, relative_path: &str) -> Result<Bytes, ReductError>;
 
-
     /// Get the absolute path of a file extracted from the zip archive.
     fn absolut_path(&self, relative_path: &str) -> Result<PathBuf, ReductError>;
 }

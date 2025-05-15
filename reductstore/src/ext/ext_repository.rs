@@ -1,6 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::asset::asset_manager::ManageStaticAsset;
 use crate::ext::filter::ExtWhenFilter;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
@@ -17,7 +18,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock as AsyncRwLock;
-use crate::asset::asset_manager::ManageStaticAsset;
 
 type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
@@ -87,8 +87,8 @@ impl ExtRepository {
                 let path = entry?.path();
                 if path.is_file()
                     && path
-                    .extension()
-                    .map_or(false, |ext| ext == "so" || ext == "dll" || ext == "dylib")
+                        .extension()
+                        .map_or(false, |ext| ext == "so" || ext == "dll" || ext == "dylib")
                 {
                     let ext_wrapper = unsafe {
                         match Container::<ExtensionApi>::load(path.clone()) {
@@ -115,7 +115,7 @@ impl ExtRepository {
             extension_map,
             query_map,
             ext_wrappers,
-            embedded_extensions
+            embedded_extensions,
         })
     }
 
@@ -307,7 +307,11 @@ pub fn create_ext_repository(
             }
         }
 
-        Ok(Box::new(ExtRepository::try_load(paths, embedded_extensions, settings)?))
+        Ok(Box::new(ExtRepository::try_load(
+            paths,
+            embedded_extensions,
+            settings,
+        )?))
     } else {
         // Dummy extension repository if
         struct NoExtRepository;
