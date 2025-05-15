@@ -1,12 +1,11 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-
-use std::{env, fs};
+extern crate core;
+use reqwest::blocking::{get, Client};
+use reqwest::{StatusCode, Url};
 use std::path::Path;
 use std::time::SystemTime;
-use reqwest::blocking::{get, Client};
-use reqwest::header::HeaderMap;
-use reqwest::StatusCode;
+use std::{env, fs};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // build protos
@@ -26,10 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     #[cfg(feature = "web-console")]
-    download_web_console();
+    download_web_console("v1.10.0");
 
-    // #[cfg(feature = "extensions")]
-    // download_extensions();
+    #[cfg(feature = "select-ext")]
+    download_ext("select-ext", "v0.1.0");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
@@ -46,21 +45,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rustc-env=COMMIT={}", commit);
     Ok(())
 }
-
-
-pub(crate) fn download_web_console() {
-    const WEB_CONSOLE_VERSION: &str = "v1.10.0";
+fn download_web_console(version: &str) {
     let out_dir = env::var("OUT_DIR").unwrap();
-    let console_path = &format!("{}/console-{}.zip", out_dir, WEB_CONSOLE_VERSION);
+    let console_path = &format!("{}/console-{}.zip", out_dir, version);
     if Path::exists(Path::new(console_path)) {
         return;
     }
 
     let mut resp = get(format!(
         "https://github.com/reductstore/web-console/releases/download/{}/web-console.build.zip",
-        WEB_CONSOLE_VERSION
+        version
     ))
-        .expect("Failed to download Web Console");
+    .expect("Failed to download Web Console");
     if resp.status() != StatusCode::OK {
         if resp.status() == StatusCode::FOUND {
             resp = get(resp.headers().get("location").unwrap().to_str().unwrap())
@@ -73,85 +69,44 @@ pub(crate) fn download_web_console() {
     fs::copy(console_path, format!("{}/console.zip", out_dir)).expect("Failed to copy console.zip");
 }
 
-
-pub(crate) fn download_extensions() {
-    let access_token = env::var("GITHUB_TOKEN").unwrap_or_default();
-    if access_token.is_empty() {
-        panic!("GITHUB_TOKEN is not set, disable the extensions feature");
+fn download_ext(name: &str, version: &str) {
+    let sas_url = env::var("ARTIFACT_SAS_URL").unwrap_or_default();
+    if sas_url.is_empty() {
+        panic!("ARTIFACT_SAS_URL is not set, disable the extensions feature");
     }
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "Authorization",
-        format!("Bearer {}", access_token).parse().unwrap(),
-    );
-    // headers.insert("Accept", "application/vnd.github.v3+json".parse().unwrap());
-    // headers.insert("X-GitHub-Api-Version", "2022-11-28".parse().unwrap());
+    let sas_url = Url::parse(&sas_url).expect("Failed to parse ARTIFACT_SAS_URL");
 
-    println!("{:?}", headers);
-
-    let extensions: Vec<(&str, &str)> = vec![("select-ext", "v0.1.0")];
     let target = env::var("TARGET").unwrap();
     let out_dir = env::var("OUT_DIR").unwrap();
 
-    for (name, version) in extensions {
-        let ext_path = &format!("{}/{}.zip", out_dir.clone(), name);
-        if Path::exists(Path::new(ext_path)) {
-            continue;
-        }
-
-        println!("Downloading {}...", name);
-        let client = Client::builder().user_agent("ReductStore").build().unwrap();
-        let mut resp = client
-            .get(format!(
-                "https://api.github.com/repos/reductstore/{}/releases/tags/{}",
-                name, version
-            ))
-            .headers(headers.clone())
-            .send()
-            .expect(&format!("Failed to download: {}", name));
-
-        if resp.status() != StatusCode::OK {
-            panic!(
-                "Failed to fetch release information {}: {}",
-                resp.url(),
-                resp.status()
-            );
-        }
-
-        let download_url = resp
-            .json::<serde_json::Value>()
-            .expect(&format!("Failed to parse JSON response for {}", name))
-            .get("assets")
-            .expect(&format!("Failed to get assets for {}", name))
-            .as_array()
-            .expect(&format!("Failed to parse assets for {}", name))
-            .iter()
-            .find(|asset| {
-                asset
-                    .get("name")
-                    .expect(&format!("Failed to get name for {}", name))
-                    .as_str()
-                    .unwrap()
-                    == format!("{}.zip", target)
-            })
-            .expect(&format!("Failed to find asset for {}", name))
-            .get("url")
-            .expect(&format!("Failed to get URL for {}", name))
-            .to_string();
-
-        resp = client
-            .get(&download_url)
-            .headers(headers.clone())
-            .send()
-            .expect(&format!("Failed to download: {} ", download_url));
-        if resp.status() != StatusCode::OK {
-            panic!("Failed to download {}: {}", name, resp.status());
-        }
-
-        println!("Writing {}.zip...", name);
-
-        fs::write(ext_path, resp.bytes().unwrap())
-            .expect(format!("Failed to write {}.zip", name).as_str());
+    let ext_path = &format!("{}/{}.zip", out_dir.clone(), name);
+    if Path::exists(Path::new(ext_path)) {
+        return;
     }
+
+    println!("Downloading {}...", name);
+    let mut ext_url = sas_url
+        .join(&format!(
+            "/artifacts/{}/{}/{}.zip/{}.zip",
+            name, version, target, target
+        ))
+        .expect("Failed to create URL");
+    ext_url.set_query(sas_url.query());
+
+    let client = Client::builder().user_agent("ReductStore").build().unwrap();
+    let resp = client
+        .get(ext_url)
+        .send()
+        .expect(format!("Failed to download {}.zip", name).as_str());
+    if resp.status() != StatusCode::OK {
+        panic!("Failed to download {}: {}", name, resp.status());
+    }
+
+    println!("Writing {}.zip...", name);
+
+    fs::write(ext_path, resp.bytes().unwrap())
+        .expect(format!("Failed to write {}.zip", name).as_str());
+    fs::copy(ext_path, format!("{}/{}", out_dir, ext_path))
+        .expect("Failed to copy extension");
 }

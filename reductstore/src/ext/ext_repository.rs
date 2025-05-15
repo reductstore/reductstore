@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock as AsyncRwLock;
+use crate::asset::asset_manager::ManageStaticAsset;
 
 type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
@@ -58,49 +59,55 @@ struct ExtRepository {
 
     #[allow(dead_code)]
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
+
+    #[allow(dead_code)]
+    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>, // we need to keep them prevent from cleaning up
 }
 
 impl ExtRepository {
-    pub(crate) fn try_load(
-        path: &PathBuf,
+    fn try_load(
+        paths: Vec<PathBuf>,
+        embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
         settings: ExtSettings,
     ) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
         let query_map = AsyncRwLock::new(HashMap::new());
-
-        if !path.exists() {
-            return Err(internal_server_error!(
-                "Extension directory {:?} does not exist",
-                path
-            ));
-        }
-
         let mut ext_wrappers = Vec::new();
-        for entry in path.read_dir()? {
-            let path = entry?.path();
-            if path.is_file()
-                && path
+
+        for path in paths {
+            if !path.exists() {
+                return Err(internal_server_error!(
+                    "Extension directory {:?} does not exist",
+                    path
+                ));
+            }
+
+            for entry in path.read_dir()? {
+                let path = entry?.path();
+                if path.is_file()
+                    && path
                     .extension()
                     .map_or(false, |ext| ext == "so" || ext == "dll" || ext == "dylib")
-            {
-                let ext_wrapper = unsafe {
-                    match Container::<ExtensionApi>::load(path.clone()) {
-                        Ok(wrapper) => wrapper,
-                        Err(e) => {
-                            error!("Failed to load extension '{:?}': {:?}", path, e);
-                            continue;
+                {
+                    let ext_wrapper = unsafe {
+                        match Container::<ExtensionApi>::load(path.clone()) {
+                            Ok(wrapper) => wrapper,
+                            Err(e) => {
+                                error!("Failed to load extension '{:?}': {:?}", path, e);
+                                continue;
+                            }
                         }
-                    }
-                };
+                    };
 
-                let ext = unsafe { Box::from_raw(ext_wrapper.get_ext(settings.clone())) };
+                    let ext = unsafe { Box::from_raw(ext_wrapper.get_ext(settings.clone())) };
 
-                info!("Load extension: {:?}", ext.info());
+                    info!("Load extension: {:?}", ext.info());
 
-                let name = ext.info().name().to_string();
-                extension_map.insert(name, Arc::new(AsyncRwLock::new(ext)));
-                ext_wrappers.push(ext_wrapper);
+                    let name = ext.info().name().to_string();
+                    extension_map.insert(name, Arc::new(AsyncRwLock::new(ext)));
+                    ext_wrappers.push(ext_wrapper);
+                }
             }
         }
 
@@ -108,6 +115,7 @@ impl ExtRepository {
             extension_map,
             query_map,
             ext_wrappers,
+            embedded_extensions
         })
     }
 
@@ -282,11 +290,24 @@ impl ManageExtensions for ExtRepository {
 }
 
 pub fn create_ext_repository(
-    path: Option<PathBuf>,
+    external_path: Option<PathBuf>,
+    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
     settings: ExtSettings,
 ) -> Result<BoxedManageExtensions, ReductError> {
-    if let Some(path) = path {
-        Ok(Box::new(ExtRepository::try_load(&path, settings)?))
+    if external_path.is_some() || !embedded_extensions.is_empty() {
+        let mut paths = if let Some(path) = external_path {
+            vec![path]
+        } else {
+            Vec::new()
+        };
+
+        for embedded in &embedded_extensions {
+            if let Ok(path) = embedded.absolut_path("") {
+                paths.push(path);
+            }
+        }
+
+        Ok(Box::new(ExtRepository::try_load(paths, embedded_extensions, settings)?))
     } else {
         // Dummy extension repository if
         struct NoExtRepository;

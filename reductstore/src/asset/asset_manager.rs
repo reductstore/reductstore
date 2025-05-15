@@ -5,6 +5,7 @@ use bytes::Bytes;
 use log::{debug, trace};
 use std::fs::File;
 use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
 use tempfile::{tempdir, TempDir};
 use zip::ZipArchive;
 
@@ -21,6 +22,10 @@ pub trait ManageStaticAsset {
     ///
     /// The file content as string.
     fn read(&self, relative_path: &str) -> Result<Bytes, ReductError>;
+
+
+    /// Get the absolute path of a file extracted from the zip archive.
+    fn absolut_path(&self, relative_path: &str) -> Result<PathBuf, ReductError>;
 }
 
 /// Asset manager that reads files from a zip archive as hex string and returns them as string
@@ -95,6 +100,16 @@ impl ManageStaticAsset for ZipAssetManager {
 
         Ok(Bytes::from(content))
     }
+
+    fn absolut_path(&self, relative_path: &str) -> Result<PathBuf, ReductError> {
+        let path = self.path.path().join(relative_path);
+        if !path.try_exists()? {
+            return Err(ReductError::not_found(
+                format!("File {:?} not found", path).as_str(),
+            ));
+        }
+        Ok(path)
+    }
 }
 
 /// Empty asset manager that does not support any files
@@ -102,6 +117,10 @@ struct NoAssetManager;
 
 impl ManageStaticAsset for NoAssetManager {
     fn read(&self, _relative_path: &str) -> Result<Bytes, ReductError> {
+        Err(ReductError::not_found("No static files supported"))
+    }
+
+    fn absolut_path(&self, _relative_path: &str) -> Result<PathBuf, ReductError> {
         Err(ReductError::not_found("No static files supported"))
     }
 }
