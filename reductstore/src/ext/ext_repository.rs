@@ -61,7 +61,7 @@ struct ExtRepository {
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
 
     #[allow(dead_code)]
-    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>, // we need to keep them prevent from cleaning up
+    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>, // we need to keep them from being cleaned up
 }
 
 impl ExtRepository {
