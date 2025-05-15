@@ -1,6 +1,6 @@
 import json
 
-from integration_tests.api.conftest import requires_env
+from .conftest import requires_env
 
 
 @requires_env("LICENSE_PATH")
