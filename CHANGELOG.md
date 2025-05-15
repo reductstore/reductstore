@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix replication of record updates, [PR-822](https://github.com/reductstore/reductstore/pull/822)
+
 ## [1.15.0] - 2025-05-07
 
 ### Added
