@@ -84,7 +84,7 @@ fn download_ext(name: &str, version: &str) {
     let target = env::var("TARGET").unwrap();
     let out_dir = env::var("OUT_DIR").unwrap();
 
-    let ext_path = &format!("{}/{}.zip", out_dir.clone(), name);
+    let ext_path = &format!("{}/{}-{}.zip", out_dir.clone(), name, version);
     if Path::exists(Path::new(ext_path)) {
         return;
     }
@@ -107,9 +107,9 @@ fn download_ext(name: &str, version: &str) {
         panic!("Failed to download {}: {}", name, resp.status());
     }
 
-    println!("Writing {}.zip...", name);
+    println!("Writing {}.zip...", ext_path);
 
     fs::write(ext_path, resp.bytes().unwrap())
         .expect(format!("Failed to write {}.zip", name).as_str());
-    fs::copy(ext_path, format!("{}/{}", out_dir, ext_path)).expect("Failed to copy extension");
+    fs::copy(ext_path, format!("{}/{}.zip", out_dir, name)).expect("Failed to copy extension");
 }
