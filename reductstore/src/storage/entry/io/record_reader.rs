@@ -368,7 +368,7 @@ mod tests {
         }
         #[fixture]
         fn file_to_read(content_size: usize) -> PathBuf {
-            let tmp_file = tempdir().unwrap().into_path().join("test_file");
+            let tmp_file = tempdir().unwrap().keep().join("test_file");
             std::fs::write(&tmp_file, vec![0; content_size]).unwrap();
 
             tmp_file

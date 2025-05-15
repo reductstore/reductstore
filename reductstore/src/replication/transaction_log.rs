@@ -445,7 +445,7 @@ mod tests {
 
     #[fixture]
     fn path() -> PathBuf {
-        let path = tempdir().unwrap().into_path().join("transaction_log");
+        let path = tempdir().unwrap().keep().join("transaction_log");
         path
     }
 }

@@ -97,7 +97,7 @@ mod tests {
         }
         "#;
 
-        let license_path = tempdir().unwrap().into_path().join("license.jwt");
+        let license_path = tempdir().unwrap().keep().join("license.jwt");
         fs::write(&license_path, license_file).unwrap();
         license_path
     }
@@ -111,7 +111,7 @@ mod tests {
         }
         "#;
 
-        let license_path = tempdir().unwrap().into_path().join("license.jwt");
+        let license_path = tempdir().unwrap().keep().join("license.jwt");
         fs::write(&license_path, license_file).unwrap();
         license_path
     }

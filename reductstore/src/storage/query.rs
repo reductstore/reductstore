@@ -315,7 +315,7 @@ mod tests {
     fn block_manager() -> Arc<RwLock<BlockManager>> {
         let path = tempfile::tempdir()
             .unwrap()
-            .into_path()
+            .keep()
             .join("bucket")
             .join("entry");
 

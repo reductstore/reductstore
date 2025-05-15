@@ -620,7 +620,7 @@ mod tests {
 
     #[fixture]
     pub(super) fn path() -> PathBuf {
-        tempfile::tempdir().unwrap().into_path().join("bucket")
+        tempfile::tempdir().unwrap().keep().join("bucket")
     }
 
     pub fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) {

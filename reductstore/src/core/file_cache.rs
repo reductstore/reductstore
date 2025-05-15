@@ -390,6 +390,6 @@ mod tests {
 
     #[fixture]
     fn tmp_dir() -> PathBuf {
-        tempfile::tempdir().unwrap().into_path()
+        tempfile::tempdir().unwrap().keep()
     }
 }

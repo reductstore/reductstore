@@ -1,6 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::asset::asset_manager::ManageStaticAsset;
 use crate::ext::filter::ExtWhenFilter;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
@@ -58,49 +59,55 @@ struct ExtRepository {
 
     #[allow(dead_code)]
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
+
+    #[allow(dead_code)]
+    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>, // we need to keep them from being cleaned up
 }
 
 impl ExtRepository {
-    pub(crate) fn try_load(
-        path: &PathBuf,
+    fn try_load(
+        paths: Vec<PathBuf>,
+        embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
         settings: ExtSettings,
     ) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
         let query_map = AsyncRwLock::new(HashMap::new());
-
-        if !path.exists() {
-            return Err(internal_server_error!(
-                "Extension directory {:?} does not exist",
-                path
-            ));
-        }
-
         let mut ext_wrappers = Vec::new();
-        for entry in path.read_dir()? {
-            let path = entry?.path();
-            if path.is_file()
-                && path
-                    .extension()
-                    .map_or(false, |ext| ext == "so" || ext == "dll" || ext == "dylib")
-            {
-                let ext_wrapper = unsafe {
-                    match Container::<ExtensionApi>::load(path.clone()) {
-                        Ok(wrapper) => wrapper,
-                        Err(e) => {
-                            error!("Failed to load extension '{:?}': {:?}", path, e);
-                            continue;
+
+        for path in paths {
+            if !path.exists() {
+                return Err(internal_server_error!(
+                    "Extension directory {:?} does not exist",
+                    path
+                ));
+            }
+
+            for entry in path.read_dir()? {
+                let path = entry?.path();
+                if path.is_file()
+                    && path
+                        .extension()
+                        .map_or(false, |ext| ext == "so" || ext == "dll" || ext == "dylib")
+                {
+                    let ext_wrapper = unsafe {
+                        match Container::<ExtensionApi>::load(path.clone()) {
+                            Ok(wrapper) => wrapper,
+                            Err(e) => {
+                                error!("Failed to load extension '{:?}': {:?}", path, e);
+                                continue;
+                            }
                         }
-                    }
-                };
+                    };
 
-                let ext = unsafe { Box::from_raw(ext_wrapper.get_ext(settings.clone())) };
+                    let ext = unsafe { Box::from_raw(ext_wrapper.get_ext(settings.clone())) };
 
-                info!("Load extension: {:?}", ext.info());
+                    info!("Load extension: {:?}", ext.info());
 
-                let name = ext.info().name().to_string();
-                extension_map.insert(name, Arc::new(AsyncRwLock::new(ext)));
-                ext_wrappers.push(ext_wrapper);
+                    let name = ext.info().name().to_string();
+                    extension_map.insert(name, Arc::new(AsyncRwLock::new(ext)));
+                    ext_wrappers.push(ext_wrapper);
+                }
             }
         }
 
@@ -108,6 +115,7 @@ impl ExtRepository {
             extension_map,
             query_map,
             ext_wrappers,
+            embedded_extensions,
         })
     }
 
@@ -282,11 +290,28 @@ impl ManageExtensions for ExtRepository {
 }
 
 pub fn create_ext_repository(
-    path: Option<PathBuf>,
+    external_path: Option<PathBuf>,
+    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
     settings: ExtSettings,
 ) -> Result<BoxedManageExtensions, ReductError> {
-    if let Some(path) = path {
-        Ok(Box::new(ExtRepository::try_load(&path, settings)?))
+    if external_path.is_some() || !embedded_extensions.is_empty() {
+        let mut paths = if let Some(path) = external_path {
+            vec![path]
+        } else {
+            Vec::new()
+        };
+
+        for embedded in &embedded_extensions {
+            if let Ok(path) = embedded.absolut_path("") {
+                paths.push(path);
+            }
+        }
+
+        Ok(Box::new(ExtRepository::try_load(
+            paths,
+            embedded_extensions,
+            settings,
+        )?))
     } else {
         // Dummy extension repository if
         struct NoExtRepository;
@@ -364,17 +389,17 @@ pub(super) mod tests {
 
         #[log_test(rstest)]
         fn test_failed_load(ext_settings: ExtSettings) {
-            let path = tempdir().unwrap().into_path();
+            let path = tempdir().unwrap().keep();
             fs::create_dir_all(&path).unwrap();
             fs::write(&path.join("libtest.so"), b"test").unwrap();
-            let ext_repo = ExtRepository::try_load(&path, ext_settings).unwrap();
+            let ext_repo = ExtRepository::try_load(vec![path], vec![], ext_settings).unwrap();
             assert_eq!(ext_repo.extension_map.len(), 0);
         }
 
         #[log_test(rstest)]
         fn test_failed_open_dir(ext_settings: ExtSettings) {
             let path = PathBuf::from("non_existing_dir");
-            let ext_repo = ExtRepository::try_load(&path, ext_settings);
+            let ext_repo = ExtRepository::try_load(vec![path], vec![], ext_settings);
             assert_eq!(
                 ext_repo.err().unwrap(),
                 internal_server_error!("Extension directory \"non_existing_dir\" does not exist")
@@ -408,7 +433,7 @@ pub(super) mod tests {
                 panic!("Unsupported platform")
             };
 
-            let ext_path = PathBuf::from(tempdir().unwrap().into_path()).join("ext");
+            let ext_path = PathBuf::from(tempdir().unwrap().keep()).join("ext");
             fs::create_dir_all(ext_path.clone()).unwrap();
 
             let link = format!(
@@ -429,7 +454,8 @@ pub(super) mod tests {
             fs::write(ext_path.join(file_name), resp.bytes().unwrap())
                 .expect("Failed to write extension");
 
-            ExtRepository::try_load(&ext_path.to_path_buf(), ext_settings).unwrap()
+            let empty_ext_path = tempdir().unwrap().keep();
+            ExtRepository::try_load(vec![ext_path, empty_ext_path], vec![], ext_settings).unwrap()
         }
     }
     mod register_query {
@@ -827,7 +853,7 @@ pub(super) mod tests {
             .server_info(ServerInfo::default())
             .build();
         let mut ext_repo =
-            ExtRepository::try_load(&tempdir().unwrap().into_path(), ext_settings).unwrap();
+            ExtRepository::try_load(vec![tempdir().unwrap().keep()], vec![], ext_settings).unwrap();
         ext_repo.extension_map.insert(
             name.to_string(),
             Arc::new(AsyncRwLock::new(Box::new(mock_ext))),

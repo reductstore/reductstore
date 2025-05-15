@@ -80,6 +80,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         let storage = Arc::new(self.provision_buckets());
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
+        let select_ext = create_asset_manager(load_select_ext());
         let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
 
         let ext_path = if let Some(ext_path) = &self.ext_path {
@@ -100,6 +101,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             replication_repo: tokio::sync::RwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
+                vec![select_ext],
                 ExtSettings::builder()
                     .log_level(&self.log_level)
                     .server_info(server_info)
@@ -131,6 +133,18 @@ fn load_console() -> &'static [u8] {
 #[cfg(not(feature = "web-console"))]
 fn load_console() -> &'static [u8] {
     info!("Web Console is disabled");
+    b""
+}
+
+#[cfg(feature = "select-ext")]
+fn load_select_ext() -> &'static [u8] {
+    info!("Load Reduct Select Extension");
+    include_bytes!(concat!(env!("OUT_DIR"), "/select-ext.zip"))
+}
+
+#[cfg(not(feature = "select-ext"))]
+fn load_select_ext() -> &'static [u8] {
+    info!("Reduct Select Extension is disabled");
     b""
 }
 

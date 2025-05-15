@@ -934,7 +934,7 @@ mod tests {
 
     #[fixture]
     fn path() -> PathBuf {
-        tempdir().unwrap().into_path()
+        tempdir().unwrap().keep()
     }
 
     #[fixture]

@@ -400,7 +400,7 @@ mod tests {
     #[fixture]
     fn path() -> PathBuf {
         let tmp = tempfile::tempdir().unwrap();
-        tmp.into_path()
+        tmp.keep()
     }
 
     #[fixture]

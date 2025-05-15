@@ -521,7 +521,8 @@ mod tests {
     #[fixture]
     fn ext_repository() -> BoxedManageExtensions {
         create_ext_repository(
-            Some(tempdir().unwrap().into_path()),
+            Some(tempdir().unwrap().keep()),
+            vec![],
             ExtSettings::builder()
                 .server_info(ServerInfo::default())
                 .build(),

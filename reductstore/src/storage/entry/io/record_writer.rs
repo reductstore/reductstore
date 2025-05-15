@@ -421,7 +421,7 @@ mod tests {
 
         #[fixture]
         fn path() -> PathBuf {
-            tempdir().unwrap().into_path().join("bucket").join("entry")
+            tempdir().unwrap().keep().join("bucket").join("entry")
         }
 
         #[fixture]

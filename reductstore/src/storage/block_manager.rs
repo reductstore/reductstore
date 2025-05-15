@@ -1073,7 +1073,7 @@ mod tests {
 
     #[fixture]
     fn block_manager(block_id: u64) -> BlockManager {
-        let path = tempdir().unwrap().into_path().join("bucket").join("entry");
+        let path = tempdir().unwrap().keep().join("bucket").join("entry");
 
         let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
         let block_ref = bm.start_new_block(block_id, 1024).unwrap().clone();

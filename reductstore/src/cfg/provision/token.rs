@@ -200,7 +200,7 @@ mod tests {
         mock_getter
             .expect_get()
             .with(eq("RS_DATA_PATH"))
-            .return_const(Ok(tmp.into_path().to_str().unwrap().to_string()));
+            .return_const(Ok(tmp.keep().to_str().unwrap().to_string()));
         mock_getter
             .expect_get()
             .with(eq("RS_API_TOKEN"))

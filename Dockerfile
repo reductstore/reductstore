@@ -1,5 +1,9 @@
 FROM ubuntu:22.04 AS  builder
 
+ARG GIT_COMMIT=unspecified
+ARG ARTIFACT_SAS_URL
+ARG RUST_VERSION
+
 RUN apt-get update && apt-get install -y \
     cmake \
     build-essential \
@@ -10,6 +14,7 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
 # Add .cargo/bin to PATH
 ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup default ${RUST_VERSION}
 
 WORKDIR /src
 
@@ -20,8 +25,7 @@ COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 
-ARG GIT_COMMIT=unspecified
-RUN GIT_COMMIT=${GIT_COMMIT} cargo build --release
+RUN GIT_COMMIT=${GIT_COMMIT} ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} cargo build --release --all-features
 
 FROM ubuntu:22.04
 
