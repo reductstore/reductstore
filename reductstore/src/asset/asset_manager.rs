@@ -161,6 +161,7 @@ mod tests {
 
     mod zip_asset {
         use super::*;
+        use reduct_base::error::ErrorCode;
         use rstest::fixture;
         use std::fs;
         use std::fs::File;
@@ -174,6 +175,15 @@ mod tests {
             assert_eq!(
                 asset_manager.absolut_path("").unwrap(),
                 asset_manager.path.path()
+            );
+        }
+
+        #[rstest]
+        fn test_absolute_path_not_found(zip_file: PathBuf) {
+            let asset_manager = ZipAssetManager::new(fs::read(zip_file).unwrap().as_slice());
+            assert_eq!(
+                asset_manager.absolut_path("xxx.txt").unwrap_err().status,
+                ErrorCode::NotFound
             );
         }
 
