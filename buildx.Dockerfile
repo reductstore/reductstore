@@ -35,8 +35,8 @@ COPY Cargo.lock Cargo.lock
 
 
 RUN cargo install --force --locked bindgen-cli
-RUN GIT_COMMIT=${GIT_COMMIT} ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} cargo build --release --target ${CARGO_TARGET} --package reductstore
-RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release --all-features
+RUN GIT_COMMIT=${GIT_COMMIT} ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} cargo build --release --target ${CARGO_TARGET} --package reductstore --all-features
+RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release
 
 RUN mkdir /data
 
