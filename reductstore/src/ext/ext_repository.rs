@@ -392,14 +392,14 @@ pub(super) mod tests {
             let path = tempdir().unwrap().keep();
             fs::create_dir_all(&path).unwrap();
             fs::write(&path.join("libtest.so"), b"test").unwrap();
-            let ext_repo = ExtRepository::try_load(&path, ext_settings).unwrap();
+            let ext_repo = ExtRepository::try_load(vec![path], vec![], ext_settings).unwrap();
             assert_eq!(ext_repo.extension_map.len(), 0);
         }
 
         #[log_test(rstest)]
         fn test_failed_open_dir(ext_settings: ExtSettings) {
             let path = PathBuf::from("non_existing_dir");
-            let ext_repo = ExtRepository::try_load(&path, ext_settings);
+            let ext_repo = ExtRepository::try_load(vec![path], vec![], ext_settings);
             assert_eq!(
                 ext_repo.err().unwrap(),
                 internal_server_error!("Extension directory \"non_existing_dir\" does not exist")
@@ -454,7 +454,7 @@ pub(super) mod tests {
             fs::write(ext_path.join(file_name), resp.bytes().unwrap())
                 .expect("Failed to write extension");
 
-            ExtRepository::try_load(&ext_path.to_path_buf(), ext_settings).unwrap()
+            ExtRepository::try_load(vec![ext_path], vec![], ext_settings).unwrap()
         }
     }
     mod register_query {
@@ -852,7 +852,7 @@ pub(super) mod tests {
             .server_info(ServerInfo::default())
             .build();
         let mut ext_repo =
-            ExtRepository::try_load(&tempdir().unwrap().keep(), ext_settings).unwrap();
+            ExtRepository::try_load(vec![tempdir().unwrap().keep()], vec![], ext_settings).unwrap();
         ext_repo.extension_map.insert(
             name.to_string(),
             Arc::new(AsyncRwLock::new(Box::new(mock_ext))),

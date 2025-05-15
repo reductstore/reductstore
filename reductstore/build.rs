@@ -1,8 +1,10 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-extern crate core;
-use reqwest::blocking::{get, Client};
-use reqwest::{StatusCode, Url};
+#[allow(unused_imports)]
+use reqwest::{
+    blocking::{get, Client},
+    StatusCode, Url,
+};
 use std::path::Path;
 use std::time::SystemTime;
 use std::{env, fs};
@@ -45,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rustc-env=COMMIT={}", commit);
     Ok(())
 }
+#[cfg(feature = "web-console")]
 fn download_web_console(version: &str) {
     let out_dir = env::var("OUT_DIR").unwrap();
     let console_path = &format!("{}/console-{}.zip", out_dir, version);
@@ -69,6 +72,7 @@ fn download_web_console(version: &str) {
     fs::copy(console_path, format!("{}/console.zip", out_dir)).expect("Failed to copy console.zip");
 }
 
+#[cfg(feature = "select-ext")]
 fn download_ext(name: &str, version: &str) {
     let sas_url = env::var("ARTIFACT_SAS_URL").unwrap_or_default();
     if sas_url.is_empty() {

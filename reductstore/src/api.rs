@@ -285,6 +285,7 @@ mod tests {
             io_settings: IoConfig::default(),
             ext_repo: create_ext_repository(
                 None,
+                vec![],
                 ExtSettings::builder()
                     .server_info(ServerInfo::default())
                     .build(),
