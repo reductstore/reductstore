@@ -18,7 +18,6 @@ on:
 
 env:
   REGISTRY_IMAGE: reduct/store
-  ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
 
 jobs:
   rust_fmt:
@@ -121,6 +120,7 @@ jobs:
       - name: Build binary
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
+          ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
         run: cargo build --release -p reductstore --target ${{ matrix.target }} --all-features
 
       - name: Upload binary
