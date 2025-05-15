@@ -220,7 +220,7 @@ mod tests {
 
     #[fixture]
     pub(crate) async fn components() -> Arc<Components> {
-        let data_path = tempfile::tempdir().unwrap().into_path();
+        let data_path = tempfile::tempdir().unwrap().keep();
 
         let storage = Storage::load(data_path.clone(), None);
         let mut token_repo = create_token_repository(data_path.clone(), "init-token");

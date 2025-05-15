@@ -626,7 +626,7 @@ mod tests {
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationSender {
-        let tmp_dir = tempfile::tempdir().unwrap().into_path();
+        let tmp_dir = tempfile::tempdir().unwrap().keep();
 
         let storage = Arc::new(Storage::load(tmp_dir, None));
 

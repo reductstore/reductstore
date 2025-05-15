@@ -5,7 +5,7 @@ use bytes::Bytes;
 use log::{debug, trace};
 use std::fs::File;
 use std::io::{Cursor, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tempfile::{tempdir, TempDir};
 use zip::ZipArchive;
 

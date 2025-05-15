@@ -91,7 +91,7 @@ mod tests {
     }
 
     fn setup() -> (Box<dyn ManageTokens>, TokenAuthorization) {
-        let repo = create_token_repository(tempdir().unwrap().into_path(), "test");
+        let repo = create_token_repository(tempdir().unwrap().keep(), "test");
         let auth = TokenAuthorization::new("test");
 
         (repo, auth)

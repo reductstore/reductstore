@@ -377,7 +377,7 @@ mod tests {
 
     #[fixture]
     fn wal() -> WalImpl {
-        let path = tempfile::tempdir().unwrap().into_path();
+        let path = tempfile::tempdir().unwrap().keep();
         std::fs::create_dir_all(path.join("wal")).unwrap();
         WalImpl::new(path.join("wal"))
     }

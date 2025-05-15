@@ -389,7 +389,7 @@ pub(super) mod tests {
 
         #[log_test(rstest)]
         fn test_failed_load(ext_settings: ExtSettings) {
-            let path = tempdir().unwrap().into_path();
+            let path = tempdir().unwrap().keep();
             fs::create_dir_all(&path).unwrap();
             fs::write(&path.join("libtest.so"), b"test").unwrap();
             let ext_repo = ExtRepository::try_load(&path, ext_settings).unwrap();
@@ -433,7 +433,7 @@ pub(super) mod tests {
                 panic!("Unsupported platform")
             };
 
-            let ext_path = PathBuf::from(tempdir().unwrap().into_path()).join("ext");
+            let ext_path = PathBuf::from(tempdir().unwrap().keep()).join("ext");
             fs::create_dir_all(ext_path.clone()).unwrap();
 
             let link = format!(
@@ -852,7 +852,7 @@ pub(super) mod tests {
             .server_info(ServerInfo::default())
             .build();
         let mut ext_repo =
-            ExtRepository::try_load(&tempdir().unwrap().into_path(), ext_settings).unwrap();
+            ExtRepository::try_load(&tempdir().unwrap().keep(), ext_settings).unwrap();
         ext_repo.extension_map.insert(
             name.to_string(),
             Arc::new(AsyncRwLock::new(Box::new(mock_ext))),

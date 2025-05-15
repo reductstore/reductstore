@@ -293,7 +293,7 @@ mod tests {
 
         #[rstest]
         fn test_ok() {
-            let path = tempdir().unwrap().into_path().join(BLOCK_INDEX_FILE);
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
                 blocks: vec![BlockEntry {
@@ -327,7 +327,7 @@ mod tests {
 
         #[rstest]
         fn test_index_file_corrupted() {
-            let path = tempdir().unwrap().into_path().join(BLOCK_INDEX_FILE);
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
                 blocks: vec![BlockEntry {
@@ -351,7 +351,7 @@ mod tests {
 
         #[rstest]
         fn test_decode_err() {
-            let path = tempdir().unwrap().into_path().join(BLOCK_INDEX_FILE);
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
             fs::write(&path, vec![0, 1, 2, 3]).unwrap();
 
             let block_index = BlockIndex::try_load(path.clone()).err().unwrap();
@@ -364,7 +364,7 @@ mod tests {
 
         #[rstest]
         fn test_ok() {
-            let path = tempdir().unwrap().into_path().join(BLOCK_INDEX_FILE);
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let mut block_index = BlockIndex::new(path.clone());
             block_index.insert_or_update(BlockEntry {

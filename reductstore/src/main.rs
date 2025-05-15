@@ -232,12 +232,12 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown() {
         let handle = Handle::new();
-        let storage = Arc::new(Storage::load(tempdir().unwrap().into_path(), None));
+        let storage = Arc::new(Storage::load(tempdir().unwrap().keep(), None));
         shutdown_app(handle.clone(), storage.clone());
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {
-        let data_path = tempdir().unwrap().into_path();
+        let data_path = tempdir().unwrap().keep();
 
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
         env::set_var("RS_CERT_PATH", "");

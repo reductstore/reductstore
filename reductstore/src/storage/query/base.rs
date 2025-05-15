@@ -117,7 +117,7 @@ pub(crate) mod tests {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
-        let dir = tempdir().unwrap().into_path().join("bucket").join("entry");
+        let dir = tempdir().unwrap().keep().join("bucket").join("entry");
         let mut block_manager = BlockManager::new(dir.clone(), BlockIndex::new(dir.join("index")));
         let block_ref = block_manager.start_new_block(0, 10).unwrap();
 

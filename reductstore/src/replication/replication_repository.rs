@@ -734,7 +734,7 @@ mod tests {
     #[fixture]
     fn storage() -> Arc<Storage> {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::load(tmp_dir.into_path(), None);
+        let storage = Storage::load(tmp_dir.keep(), None);
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap()
