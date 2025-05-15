@@ -454,7 +454,8 @@ pub(super) mod tests {
             fs::write(ext_path.join(file_name), resp.bytes().unwrap())
                 .expect("Failed to write extension");
 
-            ExtRepository::try_load(vec![ext_path], vec![], ext_settings).unwrap()
+            let empty_ext_path = tempdir().unwrap().keep();
+            ExtRepository::try_load(vec![ext_path, empty_ext_path], vec![], ext_settings).unwrap()
         }
     }
     mod register_query {

@@ -135,13 +135,69 @@ pub fn create_asset_manager(zipped_content: &[u8]) -> Box<dyn ManageStaticAsset 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reduct_base::error::ReductError;
+    use rstest::rstest;
 
-    #[test]
-    fn test_empty_asset_manager() {
-        let asset_manager = create_asset_manager(&[]);
-        assert!(
-            asset_manager.read("test") == Err(ReductError::not_found("No static files supported"))
-        );
+    mod empty {
+        use super::*;
+        use reduct_base::not_found;
+        #[test]
+        fn test_empty_asset_manager() {
+            let asset_manager = create_asset_manager(&[]);
+            assert_eq!(
+                asset_manager.read("test"),
+                Err(not_found!("No static files supported"))
+            );
+        }
+
+        #[test]
+        fn test_absolute_path() {
+            let asset_manager = create_asset_manager(&[]);
+            assert_eq!(
+                asset_manager.absolut_path("test"),
+                Err(not_found!("No static files supported"))
+            );
+        }
+    }
+
+    mod zip_asset {
+        use super::*;
+        use rstest::fixture;
+        use std::fs;
+        use std::fs::File;
+        use std::io::Write;
+        use zip::write::{ExtendedFileOptions, FileOptions};
+        use zip::ZipWriter;
+
+        #[rstest]
+        fn test_absolute_path(zip_file: PathBuf) {
+            let asset_manager = ZipAssetManager::new(fs::read(zip_file).unwrap().as_slice());
+            assert_eq!(
+                asset_manager.absolut_path("").unwrap(),
+                asset_manager.path.path()
+            );
+        }
+
+        #[rstest]
+        fn test_read(zip_file: PathBuf) {
+            let asset_manager = ZipAssetManager::new(fs::read(zip_file).unwrap().as_slice());
+            let content = asset_manager.read("test.txt").unwrap();
+            assert_eq!(content, Bytes::from("test"));
+        }
+
+        #[fixture]
+        fn zip_file() -> PathBuf {
+            let archive = tempdir().unwrap().keep().join("test.zip");
+            let mut file = File::create(archive.clone()).unwrap();
+            file.write_all(b"test").unwrap();
+
+            // crete zip file
+            let mut zip = ZipWriter::new(file);
+
+            zip.start_file::<&str, ExtendedFileOptions>("test.txt", FileOptions::default())
+                .unwrap();
+            zip.write_all(b"test").unwrap();
+            zip.finish().unwrap();
+            archive
+        }
     }
 }
