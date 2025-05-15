@@ -307,6 +307,35 @@ mod tests {
     }
 
     #[rstest]
+    fn test_write_broken_type(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 100).unwrap();
+        assert_eq!(
+            transaction_log
+                .push_back(Transaction::WriteRecord(1))
+                .unwrap(),
+            None
+        );
+        {
+            let file = FILE_CACHE
+                .write_or_create(
+                    &path,
+                    SeekFrom::Start((transaction_log.write_pos - ENTRY_SIZE) as u64),
+                )
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let mut file = file.write().unwrap();
+            file.write_all(&[99]).unwrap();
+            file.sync_all().unwrap();
+        }
+
+        assert_eq!(
+            transaction_log.front(1).unwrap_err(),
+            internal_server_error!("Invalid transaction type",)
+        );
+    }
+
+    #[rstest]
     fn test_out_of_range(path: PathBuf) {
         let mut transaction_log = TransactionLog::try_load_or_create(path, 100).unwrap();
         assert_eq!(
