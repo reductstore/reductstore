@@ -5,6 +5,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::replication::Transaction;
 use log::{debug, error, warn};
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
@@ -225,11 +226,8 @@ impl TransactionLog {
 
             match transaction_type {
                 0 => transactions.push(Transaction::WriteRecord(timestamp)),
-                _ => {
-                    return Err(ReductError::internal_server_error(
-                        "Invalid transaction type",
-                    ))
-                }
+                1 => transactions.push(Transaction::UpdateRecord(timestamp)),
+                _ => return Err(internal_server_error!("Invalid transaction type",)),
             }
 
             read_pos += ENTRY_SIZE;
@@ -291,7 +289,7 @@ mod tests {
 
         assert_eq!(
             transaction_log
-                .push_back(Transaction::WriteRecord(2))
+                .push_back(Transaction::UpdateRecord(2))
                 .unwrap(),
             None
         );
@@ -299,13 +297,42 @@ mod tests {
         assert_eq!(transaction_log.is_empty(), false);
         assert_eq!(
             transaction_log.front(2).unwrap(),
-            vec![Transaction::WriteRecord(1), Transaction::WriteRecord(2),]
+            vec![Transaction::WriteRecord(1), Transaction::UpdateRecord(2),]
         );
 
         assert_eq!(transaction_log.pop_front(2).unwrap(), 2);
         assert_eq!(transaction_log.is_empty(), true);
 
         assert_eq!(transaction_log.pop_front(1).unwrap(), 0);
+    }
+
+    #[rstest]
+    fn test_write_broken_type(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 100).unwrap();
+        assert_eq!(
+            transaction_log
+                .push_back(Transaction::WriteRecord(1))
+                .unwrap(),
+            None
+        );
+        {
+            let file = FILE_CACHE
+                .write_or_create(
+                    &path,
+                    SeekFrom::Start((transaction_log.write_pos - ENTRY_SIZE) as u64),
+                )
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let mut file = file.write().unwrap();
+            file.write_all(&[99]).unwrap();
+            file.sync_all().unwrap();
+        }
+
+        assert_eq!(
+            transaction_log.front(1).unwrap_err(),
+            internal_server_error!("Invalid transaction type",)
+        );
     }
 
     #[rstest]
