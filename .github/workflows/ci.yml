@@ -42,10 +42,11 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
+          file: buildx.Dockerfile
           tags: ${{github.repository}}:latest
           outputs: type=docker,dest=/tmp/image.tar
           build-args: |
-            ARTIFACT_SAS_URL="${{ secrets.ARTIFACT_SAS_URL }}"
+            ARTIFACT_SAS_URL=${{ secrets.ARTIFACT_SAS_URL }}
             RUST_VERSION=${{ vars.MINIMAL_RUST_VERSION }}
 
       - name: Upload artifact
@@ -732,7 +733,7 @@ jobs:
             GIT_COMMIT=${{env.GITHUB_SHA}}
             CARGO_TARGET=${{matrix.cargo_target}}
             GCC_COMPILER=${{matrix.gcc_compiler}}
-            ARTIFACT_SAS_URL="${{ secrets.ARTIFACT_SAS_URL }}"
+            ARTIFACT_SAS_URL=${{ secrets.ARTIFACT_SAS_URL }}
             RUST_VERSION=${{ vars.MINIMAL_RUST_VERSION }}
 
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
