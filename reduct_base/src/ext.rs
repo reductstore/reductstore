@@ -5,19 +5,19 @@
 
 mod ext_info;
 mod ext_settings;
-mod process_status;
 
 use crate::error::ReductError;
 use crate::io::ReadRecord;
 use crate::msg::entry_api::QueryEntry;
 use async_trait::async_trait;
-
 pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};
-
-pub use process_status::ProcessStatus;
+use futures::stream::Stream;
+use std::io::Seek;
 
 pub use ext_settings::{ExtSettings, ExtSettingsBuilder};
 pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
+pub type BoxedRecordStream =
+    Box<dyn Stream<Item = Result<BoxedReadRecord, ReductError>> + Send + Sync>;
 
 pub const EXTENSION_API_VERSION: &str = "0.2";
 
@@ -77,13 +77,21 @@ pub trait IoExtension {
     ///
     /// # Returns
     ///
-    /// The status of the processing of the record.
-    /// Ready status means that the record is ready to be processed by the next extension in the pipeline.
-    /// NotReady status means that the record is not ready to be processed by the next extension in the pipeline, but the pipeline should continue.
-    /// Stop status means that the pipeline should stop processing records.
-    async fn next_processed_record(
+    ///  A stream of records that are processed by the extension. If the input represents data that has multiple entries,
+    ///  the extension can return a stream of records that are processed by the extension for each entry.
+    async fn process_record(&mut self, query_id: u64, record: BoxedReadRecord)
+        -> BoxedRecordStream;
+
+    /// Commit record after processing and filtering.
+    ///
+    /// This method is called after processing and filtering the record and
+    /// can be used to rebatch records when they represent entries of some data format like CVS lines, or JSON objects.
+    /// An extension can concatenate multiple records into one or split one record into multiple records depending on the query.
+    async fn commit_record(
         &mut self,
-        query_id: u64,
+        _query_id: u64,
         record: BoxedReadRecord,
-    ) -> ProcessStatus;
+    ) -> Option<Result<BoxedReadRecord, ReductError>> {
+        Some(Ok(record))
+    }
 }

@@ -1,10 +1,11 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::ext::process_status::ProcessStatus;
 use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
 use reduct_base::conflict;
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, ProcessStatus};
+use reduct_base::ext::BoxedReadRecord;
 use std::collections::HashMap;
 
 pub(super) struct ExtWhenFilter {
@@ -20,26 +21,26 @@ impl ExtWhenFilter {
         ExtWhenFilter { condition }
     }
 
-    pub fn filter_record(&mut self, status: ProcessStatus, strict: bool) -> ProcessStatus {
+    pub fn filter_record(
+        &mut self,
+        record: BoxedReadRecord,
+        strict: bool,
+    ) -> Option<Result<BoxedReadRecord, ReductError>> {
         if self.condition.is_none() {
-            return status;
+            return Some(Ok(record));
         }
 
         // filter with computed labels
-        if let ProcessStatus::Ready(record) = &status {
-            match self.filter_with_computed(&record.as_ref().unwrap()) {
-                Ok(true) => status,
-                Ok(false) => ProcessStatus::NotReady,
-                Err(e) => {
-                    if strict {
-                        ProcessStatus::Ready(Err(e))
-                    } else {
-                        status
-                    }
+        match self.filter_with_computed(&record) {
+            Ok(true) => Some(Ok(record)),
+            Ok(false) => None,
+            Err(e) => {
+                if strict {
+                    Some(Err(e))
+                } else {
+                    None
                 }
             }
-        } else {
-            status
         }
     }
 

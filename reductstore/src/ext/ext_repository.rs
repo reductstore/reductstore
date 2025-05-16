@@ -3,20 +3,27 @@
 
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::ext::filter::ExtWhenFilter;
+use crate::ext::process_status::ProcessStatus;
+use crate::ext::process_status::ProcessStatus::{NotReady, Ready, Stop};
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
 use crate::storage::query::QueryRx;
+use async_stream::stream;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
+use futures_util::StreamExt;
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, ExtSettings, IoExtension, ProcessStatus};
+use reduct_base::ext::{BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity, Labels};
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::pin;
 use tokio::sync::RwLock as AsyncRwLock;
 
 type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
@@ -50,7 +57,8 @@ pub(crate) struct QueryContext {
     query: QueryOptions,
     condition_filter: ExtWhenFilter,
     last_access: Instant,
-    ext_pipeline: Vec<IoExtRef>,
+    ext: IoExtRef,
+    current_stream: Option<Pin<BoxedRecordStream>>,
 }
 
 struct ExtRepository {
@@ -118,37 +126,6 @@ impl ExtRepository {
             embedded_extensions,
         })
     }
-
-    async fn send_record_to_ext_pipeline(
-        query_id: u64,
-        mut record: BoxedReadRecord,
-        ext_pipeline: Vec<IoExtRef>,
-    ) -> ProcessStatus {
-        let mut computed_labels = Labels::new();
-        for ext in ext_pipeline {
-            computed_labels.extend(record.computed_labels().clone().into_iter());
-            let status = ext
-                .write()
-                .await
-                .next_processed_record(query_id, record)
-                .await;
-
-            if let ProcessStatus::Ready(result) = status {
-                if let Ok(processed_record) = result {
-                    record = processed_record;
-                } else {
-                    return ProcessStatus::Ready(result);
-                }
-            } else {
-                return status;
-            }
-        }
-
-        record
-            .computed_labels_mut()
-            .extend(computed_labels.clone().into_iter());
-        ProcessStatus::Ready(Ok(record))
-    }
 }
 
 #[async_trait]
@@ -172,29 +149,42 @@ impl ManageExtensions for ExtRepository {
         entry_name: &str,
         query_request: QueryEntry,
     ) -> Result<(), ReductError> {
-        let mut pipeline = Vec::new();
         let mut query_map = self.query_map.write().await;
-
         let ext_params = query_request.ext.as_ref();
-        if ext_params.is_some() && ext_params.unwrap().is_object() {
-            for (name, _) in ext_params.unwrap().as_object().unwrap().iter() {
-                if let Some(ext) = self.extension_map.get(name) {
-                    ext.write().await.register_query(
-                        query_id,
-                        bucket_name,
-                        entry_name,
-                        &query_request,
-                    )?;
-                    pipeline.push(Arc::clone(ext));
-                } else {
-                    return Err(unprocessable_entity!(
-                        "Unknown extension '{}' in query id={}",
-                        name,
-                        query_id
-                    ));
-                }
+        let ext = if ext_params.is_some() && ext_params.unwrap().is_object() {
+            let ext_query = ext_params.unwrap().as_object().unwrap();
+            if ext_query.iter().count() > 1 {
+                return Err(unprocessable_entity!(
+                    "Multiple extensions are not supported in query id={}",
+                    query_id
+                ));
             }
-        }
+
+            let Some(name) = ext_query.keys().next() else {
+                return Err(unprocessable_entity!(
+                    "Extension name is not found in query id={}",
+                    query_id
+                ));
+            };
+
+            if let Some(ext) = self.extension_map.get(name) {
+                ext.write().await.register_query(
+                    query_id,
+                    bucket_name,
+                    entry_name,
+                    &query_request,
+                )?;
+                Some(Arc::clone(ext))
+            } else {
+                return Err(unprocessable_entity!(
+                    "Unknown extension '{}' in query id={}",
+                    name,
+                    query_id
+                ));
+            }
+        } else {
+            None
+        };
 
         let query_options: QueryOptions = query_request.into();
         // remove expired queries
@@ -202,10 +192,8 @@ impl ManageExtensions for ExtRepository {
 
         for (key, query) in query_map.iter() {
             if query.last_access.elapsed() > query.query.ttl {
-                for ext in &query.ext_pipeline {
-                    if let Err(e) = ext.write().await.unregister_query(query.id) {
-                        error!("Failed to unregister query {}: {:?}", query_id, e);
-                    }
+                if let Err(e) = query.ext.write().await.unregister_query(query.id) {
+                    error!("Failed to unregister query {}: {:?}", query_id, e);
                 }
                 ids_to_remove.push(*key);
             }
@@ -218,7 +206,7 @@ impl ManageExtensions for ExtRepository {
         // check if the query has references to computed labels and no extension is found
         let condition = if let Some(condition) = &query_options.when {
             let node = Parser::new().parse(condition)?;
-            if pipeline.is_empty() && node.stage() == &EvaluationStage::Compute {
+            if ext.is_none() && node.stage() == &EvaluationStage::Compute {
                 return Err(unprocessable_entity!(
                     "There is at least one reference to computed labels but no extension is found"
                 ));
@@ -228,20 +216,18 @@ impl ManageExtensions for ExtRepository {
             None
         };
 
-        if pipeline.is_empty() {
-            // No extension found, we don't need to register the query
-            return Ok(());
+        if let Some(ext) = ext {
+            query_map.insert(query_id, {
+                QueryContext {
+                    id: query_id,
+                    query: query_options,
+                    condition_filter: ExtWhenFilter::new(condition),
+                    last_access: Instant::now(),
+                    ext,
+                    current_stream: None,
+                }
+            });
         }
-
-        query_map.insert(query_id, {
-            QueryContext {
-                id: query_id,
-                query: query_options,
-                condition_filter: ExtWhenFilter::new(condition),
-                last_access: Instant::now(),
-                ext_pipeline: pipeline,
-            }
-        });
 
         Ok(())
     }
@@ -251,41 +237,76 @@ impl ManageExtensions for ExtRepository {
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
     ) -> ProcessStatus {
-        // check if registered
-        if let Some(record) = query_rx.write().await.recv().await {
-            match record {
-                Ok(record) => {
-                    let record = Box::new(record);
-                    let pipline = {
-                        // check if query is registered and
-                        let mut lock = self.query_map.write().await;
-
-                        let query = lock.get_mut(&query_id);
-                        if query.is_none() {
-                            return ProcessStatus::Ready(Ok(record));
-                        }
-
-                        let query = query.unwrap();
-                        query.last_access = Instant::now();
-                        query.ext_pipeline.clone()
-                    };
-
-                    let status = Self::send_record_to_ext_pipeline(query_id, record, pipline).await;
-                    if let ProcessStatus::Ready(Ok(record)) = status {
-                        let mut lock = self.query_map.write().await;
-                        let query = lock.get_mut(&query_id).unwrap();
-                        query
-                            .condition_filter
-                            .filter_record(ProcessStatus::Ready(Ok(record)), query.query.strict)
-                    } else {
-                        status
-                    }
-                }
-                Err(e) => ProcessStatus::Ready(Err(e)),
-            }
-        } else {
-            ProcessStatus::Stop
+        // if the query is not registered, just return the record
+        if self.query_map.read().await.get(&query_id).is_none() {
+            let Some(record) = query_rx.write().await.recv().await else {
+                return Stop;
+            };
+            return match record {
+                Ok(record) => Ready(Ok(Box::new(record))),
+                Err(e) => Ready(Err(e)),
+            };
         }
+
+        let mut lock = self.query_map.write().await;
+        let query = lock.get_mut(&query_id).unwrap();
+        query.last_access = Instant::now();
+
+        if let Some(mut current_stream) = query.current_stream.take() {
+            let item = current_stream.next().await;
+            if let Some(result) = item {
+                let record = match result {
+                    Ok(record) => record,
+                    Err(e) => return Ready(Err(e)),
+                };
+
+                // filter the record
+                query.current_stream = Some(current_stream);
+                let Some(filtered_result) = query
+                    .condition_filter
+                    .filter_record(record, query.query.strict)
+                else {
+                    return NotReady;
+                };
+
+                return match filtered_result {
+                    Ok(record) => {
+                        if let Some(commited_record) = query
+                            .ext
+                            .write()
+                            .await
+                            .commit_record(query.id, record)
+                            .await
+                        {
+                            Ready(commited_record)
+                        } else {
+                            return NotReady;
+                        }
+                    }
+                    Err(e) => Ready(Err(e)),
+                };
+            }
+        }
+
+        let Some(record) = query_rx.write().await.recv().await else {
+            return Stop;
+        };
+
+        let record = match record {
+            Ok(record) => record,
+            Err(e) => return Ready(Err(e)),
+        };
+
+        assert!(query.current_stream.is_none(), "Must be None");
+
+        let stream = query
+            .ext
+            .write()
+            .await
+            .process_record(query_id, Box::new(record))
+            .await;
+        query.current_stream = Some(Box::into_pin(stream));
+        NotReady
     }
 }
 
@@ -878,7 +899,7 @@ pub(super) mod tests {
 
             fn unregister_query(&mut self, query_id: u64) -> Result<(), ReductError>;
 
-            async fn next_processed_record(
+            async fn process_record(
                 &mut self,
                 query_id: u64,
                 record: BoxedReadRecord,

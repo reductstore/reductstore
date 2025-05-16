@@ -16,11 +16,12 @@ use futures_util::Stream;
 
 use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::BoxedManageExtensions;
+use crate::ext::process_status::ProcessStatus;
 use crate::storage::query::QueryRx;
 use futures_util::Future;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, ProcessStatus};
+use reduct_base::ext::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::pin::pin;

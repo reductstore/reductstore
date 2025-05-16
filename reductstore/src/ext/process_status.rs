@@ -3,8 +3,8 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::error::ReductError;
-use crate::ext::BoxedReadRecord;
+use reduct_base::error::ReductError;
+use reduct_base::ext::BoxedReadRecord;
 use std::fmt::Debug;
 
 /// The status of the processing of a record.
@@ -31,7 +31,7 @@ impl Debug for ProcessStatus {
 mod tests {
     use super::*;
 
-    use crate::io::tests::MockRecord;
+    use reduct_base::io::tests::MockRecord;
 
     use rstest::rstest;
 
