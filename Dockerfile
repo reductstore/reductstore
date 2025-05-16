@@ -1,7 +1,6 @@
 FROM ubuntu:22.04 AS  builder
 
-ARG GIT_COMMIT=unspecified
-ARG ARTIFACT_SAS_URL
+
 ARG RUST_VERSION
 
 RUN apt-get update && apt-get install -y \
@@ -25,6 +24,8 @@ COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 
+ARG GIT_COMMIT=unspecified
+ARG ARTIFACT_SAS_URL
 RUN GIT_COMMIT=${GIT_COMMIT} ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} cargo build --release --all-features
 
 FROM ubuntu:22.04
