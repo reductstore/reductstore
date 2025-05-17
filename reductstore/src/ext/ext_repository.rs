@@ -299,12 +299,17 @@ impl ManageExtensions for ExtRepository {
 
         assert!(query.current_stream.is_none(), "Must be None");
 
-        let stream = query
+        let stream = match query
             .ext
             .write()
             .await
             .process_record(query_id, Box::new(record))
-            .await;
+            .await
+        {
+            Ok(stream) => stream,
+            Err(e) => return Ready(Err(e)),
+        };
+
         query.current_stream = Some(Box::into_pin(stream));
         NotReady
     }

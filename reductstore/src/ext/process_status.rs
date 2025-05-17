@@ -31,8 +31,7 @@ impl Debug for ProcessStatus {
 mod tests {
     use super::*;
 
-    use reduct_base::io::tests::MockRecord;
-
+    use crate::storage::entry::RecordReader;
     use rstest::rstest;
 
     #[rstest]

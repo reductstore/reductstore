@@ -79,8 +79,11 @@ pub trait IoExtension {
     ///
     ///  A stream of records that are processed by the extension. If the input represents data that has multiple entries,
     ///  the extension can return a stream of records that are processed by the extension for each entry.
-    async fn process_record(&mut self, query_id: u64, record: BoxedReadRecord)
-        -> BoxedRecordStream;
+    async fn process_record(
+        &mut self,
+        query_id: u64,
+        record: BoxedReadRecord,
+    ) -> Result<BoxedRecordStream, ReductError>;
 
     /// Commit record after processing and filtering.
     ///
