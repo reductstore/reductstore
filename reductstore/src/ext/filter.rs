@@ -79,11 +79,7 @@ mod tests {
     #[rstest]
     fn pass_status_if_condition_none(mocked_record: Box<MockRecord>) {
         let mut filter = ExtWhenFilter::new(None);
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(
-            filter.filter_record(status, false),
-            ProcessStatus::Ready(Ok(_))
-        )
+        assert!(filter.filter_record(mocked_record, false).unwrap().is_ok())
     }
 
     #[rstest]
@@ -93,8 +89,7 @@ mod tests {
                 .parse(&json!({"$and": [false, "@key1"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(filter.filter_record(status, true), ProcessStatus::NotReady)
+        assert!(filter.filter_record(mocked_record, true).is_none())
     }
 
     #[rstest]
@@ -104,8 +99,7 @@ mod tests {
                 .parse(&json!({"$and": [true, "@key1"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(filter.filter_record(status, true), ProcessStatus::Ready(_))
+        assert!(filter.filter_record(mocked_record, true).unwrap().is_ok())
     }
 
     #[rstest]
@@ -115,11 +109,7 @@ mod tests {
                 .parse(&json!({"$and": [true, "@not-exit"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(
-            filter.filter_record(status, true),
-            ProcessStatus::Ready(Err(_))
-        )
+        assert!(filter.filter_record(mocked_record, true).unwrap().is_err())
     }
 
     #[rstest]
@@ -129,8 +119,10 @@ mod tests {
                 .parse(&json!({"$and": [true, "@not-exit"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(filter.filter_record(status, false), ProcessStatus::Ready(_))
+        assert!(
+            filter.filter_record(mocked_record, false).is_none(),
+            "ignore bad condition"
+        )
     }
 
     #[rstest]
@@ -144,13 +136,13 @@ mod tests {
         mocked_record
             .labels_mut()
             .insert("key1".to_string(), "value1".to_string()); // conflicts with computed key1
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        let ProcessStatus::Ready(result) = filter.filter_record(status, true) else {
-            panic!("Expected ProcessStatus::Ready");
-        };
 
         assert_eq!(
-            result.err().unwrap(),
+            filter
+                .filter_record(mocked_record, true)
+                .unwrap()
+                .err()
+                .unwrap(),
             conflict!("Computed label '@key1' already exists")
         )
     }

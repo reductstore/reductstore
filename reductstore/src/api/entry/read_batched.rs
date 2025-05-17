@@ -215,7 +215,7 @@ async fn next_record_reader(
     // we need to wait for the first record
     if let Ok(result) = timeout(
         recv_timeout,
-        ext_repository.next_processed_record(query_id, rx),
+        ext_repository.fetch_and_process_record(query_id, rx),
     )
     .await
     {
