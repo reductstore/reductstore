@@ -4,7 +4,7 @@
 use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
 use reduct_base::conflict;
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, ProcessStatus};
+use reduct_base::ext::BoxedReadRecord;
 use std::collections::HashMap;
 
 pub(super) struct ExtWhenFilter {
@@ -20,26 +20,26 @@ impl ExtWhenFilter {
         ExtWhenFilter { condition }
     }
 
-    pub fn filter_record(&mut self, status: ProcessStatus, strict: bool) -> ProcessStatus {
+    pub fn filter_record(
+        &mut self,
+        record: BoxedReadRecord,
+        strict: bool,
+    ) -> Option<Result<BoxedReadRecord, ReductError>> {
         if self.condition.is_none() {
-            return status;
+            return Some(Ok(record));
         }
 
         // filter with computed labels
-        if let ProcessStatus::Ready(record) = &status {
-            match self.filter_with_computed(&record.as_ref().unwrap()) {
-                Ok(true) => status,
-                Ok(false) => ProcessStatus::NotReady,
-                Err(e) => {
-                    if strict {
-                        ProcessStatus::Ready(Err(e))
-                    } else {
-                        status
-                    }
+        match self.filter_with_computed(&record) {
+            Ok(true) => Some(Ok(record)),
+            Ok(false) => None,
+            Err(e) => {
+                if strict {
+                    Some(Err(e))
+                } else {
+                    None
                 }
             }
-        } else {
-            status
         }
     }
 
@@ -71,18 +71,14 @@ mod tests {
     use super::*;
     use crate::ext::ext_repository::tests::{mocked_record, MockRecord};
     use crate::storage::query::condition::Parser;
-    use assert_matches::assert_matches;
+
     use rstest::rstest;
     use serde_json::json;
 
     #[rstest]
     fn pass_status_if_condition_none(mocked_record: Box<MockRecord>) {
         let mut filter = ExtWhenFilter::new(None);
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(
-            filter.filter_record(status, false),
-            ProcessStatus::Ready(Ok(_))
-        )
+        assert!(filter.filter_record(mocked_record, false).unwrap().is_ok())
     }
 
     #[rstest]
@@ -92,8 +88,7 @@ mod tests {
                 .parse(&json!({"$and": [false, "@key1"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(filter.filter_record(status, true), ProcessStatus::NotReady)
+        assert!(filter.filter_record(mocked_record, true).is_none())
     }
 
     #[rstest]
@@ -103,8 +98,7 @@ mod tests {
                 .parse(&json!({"$and": [true, "@key1"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(filter.filter_record(status, true), ProcessStatus::Ready(_))
+        assert!(filter.filter_record(mocked_record, true).unwrap().is_ok())
     }
 
     #[rstest]
@@ -114,11 +108,7 @@ mod tests {
                 .parse(&json!({"$and": [true, "@not-exit"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(
-            filter.filter_record(status, true),
-            ProcessStatus::Ready(Err(_))
-        )
+        assert!(filter.filter_record(mocked_record, true).unwrap().is_err())
     }
 
     #[rstest]
@@ -128,8 +118,10 @@ mod tests {
                 .parse(&json!({"$and": [true, "@not-exit"]}))
                 .unwrap(),
         ));
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        assert_matches!(filter.filter_record(status, false), ProcessStatus::Ready(_))
+        assert!(
+            filter.filter_record(mocked_record, false).is_none(),
+            "ignore bad condition"
+        )
     }
 
     #[rstest]
@@ -143,13 +135,13 @@ mod tests {
         mocked_record
             .labels_mut()
             .insert("key1".to_string(), "value1".to_string()); // conflicts with computed key1
-        let status = ProcessStatus::Ready(Ok(mocked_record));
-        let ProcessStatus::Ready(result) = filter.filter_record(status, true) else {
-            panic!("Expected ProcessStatus::Ready");
-        };
 
         assert_eq!(
-            result.err().unwrap(),
+            filter
+                .filter_record(mocked_record, true)
+                .unwrap()
+                .err()
+                .unwrap(),
             conflict!("Computed label '@key1' already exists")
         )
     }
