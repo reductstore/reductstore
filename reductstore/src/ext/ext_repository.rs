@@ -8,22 +8,19 @@ use crate::ext::process_status::ProcessStatus::{NotReady, Ready, Stop};
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
 use crate::storage::query::QueryRx;
-use async_stream::stream;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
-use futures_util::{Stream, StreamExt};
+use futures_util::StreamExt;
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension};
+use reduct_base::ext::{BoxedRecordStream, ExtSettings, IoExtension};
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::{internal_server_error, unprocessable_entity, Labels};
+use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::pin;
 use tokio::sync::RwLock as AsyncRwLock;
 
 type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
@@ -643,7 +640,7 @@ pub(super) mod tests {
         use super::*;
         use crate::storage::entry::RecordReader;
         use assert_matches::assert_matches;
-        use futures_util::Stream;
+
         use mockall::predicate;
         use reduct_base::internal_server_error;
 

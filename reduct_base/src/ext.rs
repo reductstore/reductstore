@@ -12,7 +12,6 @@ use crate::msg::entry_api::QueryEntry;
 use async_trait::async_trait;
 pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};
 use futures::stream::Stream;
-use std::io::Seek;
 
 pub use ext_settings::{ExtSettings, ExtSettingsBuilder};
 pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;

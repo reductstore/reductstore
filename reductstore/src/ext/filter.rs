@@ -1,7 +1,6 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::ext::process_status::ProcessStatus;
 use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
 use reduct_base::conflict;
 use reduct_base::error::ReductError;
@@ -72,7 +71,7 @@ mod tests {
     use super::*;
     use crate::ext::ext_repository::tests::{mocked_record, MockRecord};
     use crate::storage::query::condition::Parser;
-    use assert_matches::assert_matches;
+
     use rstest::rstest;
     use serde_json::json;
 
