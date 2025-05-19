@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 pub(super) struct ExtWhenFilter {
     condition: Option<BoxedNode>,
+    strict: bool,
 }
 
 /// This filter is used to filter records based on a condition.
@@ -16,14 +17,13 @@ pub(super) struct ExtWhenFilter {
 /// It is used in the `ext` module to filter records after they processed by extension,
 /// and it puts computed labels into the context.
 impl ExtWhenFilter {
-    pub fn new(condition: Option<BoxedNode>) -> Self {
-        ExtWhenFilter { condition }
+    pub fn new(condition: Option<BoxedNode>, strict: bool) -> Self {
+        ExtWhenFilter { condition, strict }
     }
 
     pub fn filter_record(
         &mut self,
         record: BoxedReadRecord,
-        strict: bool,
     ) -> Option<Result<BoxedReadRecord, ReductError>> {
         if self.condition.is_none() {
             return Some(Ok(record));
@@ -34,7 +34,7 @@ impl ExtWhenFilter {
             Ok(true) => Some(Ok(record)),
             Ok(false) => None,
             Err(e) => {
-                if strict {
+                if self.strict {
                     Some(Err(e))
                 } else {
                     None

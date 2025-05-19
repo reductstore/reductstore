@@ -13,13 +13,13 @@ use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedRecordStream, ExtSettings, IoExtension};
+use reduct_base::ext::{BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -52,7 +52,7 @@ pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 pub(crate) struct QueryContext {
     id: u64,
     query: QueryOptions,
-    condition_filter: ExtWhenFilter,
+    condition_filter: Arc<Mutex<ExtWhenFilter>>,
     last_access: Instant,
     ext: IoExtRef,
     current_stream: Option<Pin<BoxedRecordStream>>,
@@ -213,12 +213,13 @@ impl ManageExtensions for ExtRepository {
             None
         };
 
+        let filter = ExtWhenFilter::new(condition, query_options.strict);
         if let Some(ext) = ext {
             query_map.insert(query_id, {
                 QueryContext {
                     id: query_id,
                     query: query_options,
-                    condition_filter: ExtWhenFilter::new(condition),
+                    condition_filter: Arc::new(Mutex::new(filter)),
                     last_access: Instant::now(),
                     ext,
                     current_stream: None,
@@ -247,41 +248,17 @@ impl ManageExtensions for ExtRepository {
 
         let mut lock = self.query_map.write().await;
         let query = lock.get_mut(&query_id).unwrap();
+
+        let filter = query.condition_filter.clone();
+        let filter = move |record: BoxedReadRecord| filter.lock().unwrap().filter_record(record);
         query.last_access = Instant::now();
 
         if let Some(mut current_stream) = query.current_stream.take() {
             let item = current_stream.next().await;
+            query.current_stream = Some(current_stream);
+
             if let Some(result) = item {
-                let record = match result {
-                    Ok(record) => record,
-                    Err(e) => return Ready(Err(e)),
-                };
-
-                // filter the record
-                query.current_stream = Some(current_stream);
-                let Some(filtered_result) = query
-                    .condition_filter
-                    .filter_record(record, query.query.strict)
-                else {
-                    return NotReady;
-                };
-
-                return match filtered_result {
-                    Ok(record) => {
-                        if let Some(commited_record) = query
-                            .ext
-                            .write()
-                            .await
-                            .commit_record(query.id, record)
-                            .await
-                        {
-                            Ready(commited_record)
-                        } else {
-                            return NotReady;
-                        }
-                    }
-                    Err(e) => Ready(Err(e)),
-                };
+                return Ready(result);
             }
         }
 
@@ -300,7 +277,7 @@ impl ManageExtensions for ExtRepository {
             .ext
             .write()
             .await
-            .process_record(query_id, Box::new(record))
+            .process_record(query_id, Box::new(record), Box::new(filter))
             .await
         {
             Ok(stream) => stream,

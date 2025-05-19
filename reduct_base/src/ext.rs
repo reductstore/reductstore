@@ -82,6 +82,9 @@ pub trait IoExtension {
         &mut self,
         query_id: u64,
         record: BoxedReadRecord,
+        compute_filter: Box<
+            dyn FnOnce(BoxedReadRecord) -> Option<Result<BoxedReadRecord, ReductError>>,
+        >,
     ) -> Result<BoxedRecordStream, ReductError>;
 
     /// Commit record after processing and filtering.
