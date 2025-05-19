@@ -27,6 +27,25 @@ impl RecordMeta for TransactionNotification {
     fn labels(&self) -> &Labels {
         &self.labels
     }
+
+    fn last(&self) -> bool {
+        false
+    }
+    fn computed_labels(&self) -> &Labels {
+        &self.labels
+    }
+
+    fn computed_labels_mut(&mut self) -> &mut Labels {
+        &mut self.labels
+    }
+
+    fn content_length(&self) -> u64 {
+        0
+    }
+
+    fn content_type(&self) -> &str {
+        ""
+    }
 }
 
 impl TransactionFilter {

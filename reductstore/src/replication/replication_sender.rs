@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
-use reduct_base::io::ReadRecord;
+use reduct_base::io::{ReadRecord, RecordMeta};
 use std::sync::{Arc, RwLock};
 use std::thread::sleep;
 use std::time::Duration;

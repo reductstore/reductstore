@@ -229,6 +229,26 @@ impl RecordMeta for RecordReader {
     fn state(&self) -> i32 {
         self.state
     }
+
+    fn last(&self) -> bool {
+        self.last
+    }
+
+    fn computed_labels(&self) -> &Labels {
+        &self.computed_labels
+    }
+
+    fn computed_labels_mut(&mut self) -> &mut Labels {
+        &mut self.computed_labels
+    }
+
+    fn content_length(&self) -> u64 {
+        self.length
+    }
+
+    fn content_type(&self) -> &str {
+        &self.content_type
+    }
 }
 
 #[async_trait]
@@ -257,26 +277,6 @@ impl ReadRecord for RecordReader {
         } else {
             None
         }
-    }
-
-    fn last(&self) -> bool {
-        self.last
-    }
-
-    fn computed_labels(&self) -> &Labels {
-        &self.computed_labels
-    }
-
-    fn computed_labels_mut(&mut self) -> &mut Labels {
-        &mut self.computed_labels
-    }
-
-    fn content_length(&self) -> u64 {
-        self.length
-    }
-
-    fn content_type(&self) -> &str {
-        &self.content_type
     }
 }
 

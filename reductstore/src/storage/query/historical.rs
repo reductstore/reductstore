@@ -167,6 +167,26 @@ impl RecordMeta for RecordMetaWrapper {
     fn state(&self) -> i32 {
         self.state
     }
+
+    fn last(&self) -> bool {
+        todo!()
+    }
+
+    fn computed_labels(&self) -> &Labels {
+        todo!()
+    }
+
+    fn computed_labels_mut(&mut self) -> &mut Labels {
+        todo!()
+    }
+
+    fn content_length(&self) -> u64 {
+        todo!()
+    }
+
+    fn content_type(&self) -> &str {
+        todo!()
+    }
 }
 
 impl From<Record> for RecordMetaWrapper {

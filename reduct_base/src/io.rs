@@ -19,6 +19,25 @@ pub trait RecordMeta {
     fn state(&self) -> i32 {
         0
     }
+
+    /// Returns true if this is the last record in the stream.
+    fn last(&self) -> bool;
+
+    /// Returns computed labels associated with the record.
+    ///
+    /// Computed labels are labels that are added by query processing and are not part of the original record.
+    fn computed_labels(&self) -> &Labels;
+
+    /// Returns the labels associated with the record.
+    ///
+    /// Computed labels are labels that are added by query processing and are not part of the original record.
+    fn computed_labels_mut(&mut self) -> &mut Labels;
+
+    /// Returns the length of the record content in bytes.
+    fn content_length(&self) -> u64;
+
+    /// Returns the content type of the record as a MIME type.
+    fn content_type(&self) -> &str;
 }
 
 /// Represents a record in the storage engine that can be read as a stream of bytes.
@@ -54,25 +73,6 @@ pub trait ReadRecord: RecordMeta {
     fn blocking_read(&mut self) -> ReadChunk {
         Handle::current().block_on(self.read())
     }
-
-    /// Returns true if this is the last record in the stream.
-    fn last(&self) -> bool;
-
-    /// Returns computed labels associated with the record.
-    ///
-    /// Computed labels are labels that are added by query processing and are not part of the original record.
-    fn computed_labels(&self) -> &Labels;
-
-    /// Returns the labels associated with the record.
-    ///
-    /// Computed labels are labels that are added by query processing and are not part of the original record.
-    fn computed_labels_mut(&mut self) -> &mut Labels;
-
-    /// Returns the length of the record content in bytes.
-    fn content_length(&self) -> u64;
-
-    /// Returns the content type of the record as a MIME type.
-    fn content_type(&self) -> &str;
 }
 
 #[async_trait]
