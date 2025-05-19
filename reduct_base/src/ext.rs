@@ -19,7 +19,7 @@ pub type BoxedRecordStream =
     Box<dyn Stream<Item = Result<BoxedReadRecord, ReductError>> + Send + Sync>;
 
 pub type BoxedCondition =
-    Box<dyn FnOnce(BoxedReadRecord) -> Option<Result<BoxedReadRecord, ReductError>>>;
+    Box<dyn Fn(BoxedReadRecord) -> Option<Result<BoxedReadRecord, ReductError>> + Send + Sync>;
 
 pub const EXTENSION_API_VERSION: &str = "0.2";
 
