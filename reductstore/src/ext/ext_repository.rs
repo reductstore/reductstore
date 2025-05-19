@@ -255,11 +255,12 @@ impl ManageExtensions for ExtRepository {
 
         if let Some(mut current_stream) = query.current_stream.take() {
             let item = current_stream.next().await;
-            query.current_stream = Some(current_stream);
 
             if let Some(result) = item {
                 return Ready(result);
             }
+
+            query.current_stream = Some(current_stream);
         }
 
         let Some(record) = query_rx.write().await.recv().await else {
