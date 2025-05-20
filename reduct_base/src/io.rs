@@ -8,6 +8,7 @@ use tokio::runtime::Handle;
 pub type WriteChunk = Result<Option<Bytes>, ReductError>;
 pub type ReadChunk = Option<Result<Bytes, ReductError>>;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecordMeta {
     timestamp: u64,
     state: i32,
