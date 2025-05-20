@@ -13,7 +13,9 @@ use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension};
+use reduct_base::ext::{
+    BoxedCommiter, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
+};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
@@ -56,6 +58,7 @@ pub(crate) struct QueryContext {
     last_access: Instant,
     ext: IoExtRef,
     current_stream: Option<Pin<BoxedRecordStream>>,
+    current_commiter: Option<BoxedCommiter>,
 }
 
 struct ExtRepository {
@@ -223,6 +226,7 @@ impl ManageExtensions for ExtRepository {
                     last_access: Instant::now(),
                     ext,
                     current_stream: None,
+                    current_commiter: None,
                 }
             });
         }
@@ -246,6 +250,8 @@ impl ManageExtensions for ExtRepository {
             };
         }
 
+        // TODO: The code is awkward, we need to refactor it
+        // unfortunatly stream! macro does not work here and crashes compiler
         let mut lock = self.query_map.write().await;
         let query = lock.get_mut(&query_id).unwrap();
 
@@ -268,10 +274,10 @@ impl ManageExtensions for ExtRepository {
                         };
 
                         return match query
-                            .ext
-                            .write()
-                            .await
-                            .commit_record(query_id, record)
+                            .current_commiter
+                            .as_mut()
+                            .unwrap()
+                            .commit_record(record)
                             .await
                         {
                             Some(result) => Ready(result),
@@ -296,7 +302,7 @@ impl ManageExtensions for ExtRepository {
 
         assert!(query.current_stream.is_none(), "Must be None");
 
-        let stream = match query
+        let (stream, commiter) = match query
             .ext
             .write()
             .await
@@ -308,6 +314,7 @@ impl ManageExtensions for ExtRepository {
         };
 
         query.current_stream = Some(Box::into_pin(stream));
+        query.current_commiter = Some(commiter);
         NotReady
     }
 }

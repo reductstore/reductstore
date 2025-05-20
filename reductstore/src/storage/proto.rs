@@ -3,6 +3,7 @@
 
 use prost_wkt_types::Timestamp;
 use reduct_base::io::RecordMeta;
+use reduct_base::Labels;
 
 include!(concat!(env!("OUT_DIR"), "/reduct.proto.storage.rs"));
 
@@ -22,6 +23,16 @@ pub fn us_to_ts(ts: &u64) -> Timestamp {
 
 impl Into<RecordMeta> for Record {
     fn into(self) -> RecordMeta {
-        todo!()
+        RecordMeta::builder()
+            .timestamp(ts_to_us(self.timestamp.as_ref().unwrap()))
+            .content_length(self.end - self.begin)
+            .content_type(self.content_type)
+            .state(self.state)
+            .labels(Labels::from_iter(
+                self.labels
+                    .into_iter()
+                    .map(|label| (label.name, label.value)),
+            ))
+            .build()
     }
 }

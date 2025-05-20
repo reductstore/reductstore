@@ -20,6 +20,21 @@ pub type BoxedRecordStream =
 
 pub const EXTENSION_API_VERSION: &str = "0.2";
 
+#[async_trait]
+pub trait Commiter {
+    /// Commit record after processing and filtering.
+    ///
+    /// This method is called after processing and filtering the record and
+    /// can be used to rebatch records when they represent entries of some data format like CVS lines, or JSON objects.
+    /// An extension can concatenate multiple records into one or split one record into multiple records depending on the query.
+    async fn commit_record(
+        &mut self,
+        record: BoxedReadRecord,
+    ) -> Option<Result<BoxedReadRecord, ReductError>>;
+}
+
+pub type BoxedCommiter = Box<dyn Commiter + Send + Sync>;
+
 /// The trait for the IO extension.
 ///
 /// This trait is used to register queries and process records in a pipeline of extensions.
@@ -75,25 +90,12 @@ pub trait IoExtension {
     /// * `record` - The record to process.
     ///
     /// # Returns
-    ///
+    ////
     ///  A stream of records that are processed by the extension. If the input represents data that has multiple entries,
     ///  the extension can return a stream of records that are processed by the extension for each entry.
     async fn process_record(
         &mut self,
         query_id: u64,
         record: BoxedReadRecord,
-    ) -> Result<BoxedRecordStream, ReductError>;
-
-    /// Commit record after processing and filtering.
-    ///
-    /// This method is called after processing and filtering the record and
-    /// can be used to rebatch records when they represent entries of some data format like CVS lines, or JSON objects.
-    /// An extension can concatenate multiple records into one or split one record into multiple records depending on the query.
-    async fn commit_record(
-        &mut self,
-        _query_id: u64,
-        record: BoxedReadRecord,
-    ) -> Option<Result<BoxedReadRecord, ReductError>> {
-        Some(Ok(record))
-    }
+    ) -> Result<(BoxedRecordStream, BoxedCommiter), ReductError>;
 }
