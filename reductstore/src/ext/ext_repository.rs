@@ -12,10 +12,12 @@ use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
 use log::{error, info};
+use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
     BoxedCommiter, BoxedProcessor, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
 };
+use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
@@ -265,6 +267,7 @@ impl ManageExtensions for ExtRepository {
 
         if let Some(mut current_stream) = query.current_stream.take() {
             let item = current_stream.next().await;
+            query.current_stream = Some(current_stream);
 
             if let Some(result) = item {
                 if let Err(e) = result {
@@ -272,6 +275,7 @@ impl ManageExtensions for ExtRepository {
                 }
 
                 let record = result.unwrap();
+
                 return match query.condition_filter.filter_record(record) {
                     Some(result) => {
                         let record = match result {
@@ -279,16 +283,17 @@ impl ManageExtensions for ExtRepository {
                             Err(e) => return Ready(Err(e)),
                         };
 
-                        return match query.commiter.commit_record(record).await {
+                        match query.commiter.commit_record(record).await {
                             Some(result) => Ready(result),
                             None => NotReady,
-                        };
+                        }
                     }
                     None => NotReady,
                 };
+            } else {
+                // stream is empty, we need to process the next record
+                query.current_stream = None;
             }
-
-            query.current_stream = Some(current_stream);
         }
 
         let Some(record) = query_rx.write().await.recv().await else {
@@ -297,7 +302,13 @@ impl ManageExtensions for ExtRepository {
 
         let record = match record {
             Ok(record) => record,
-            Err(e) => return Ready(Err(e)),
+            Err(e) => {
+                return if e.status == NoContent {
+                    Stop(query.commiter.flush().await)
+                } else {
+                    Ready(Err(e))
+                }
+            }
         };
 
         assert!(query.current_stream.is_none(), "Must be None");

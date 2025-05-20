@@ -23,6 +23,7 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
+use ring::test::run;
 use std::collections::HashMap;
 use std::pin::pin;
 use std::pin::Pin;
@@ -130,8 +131,7 @@ async fn fetch_and_response_batched_records(
         .get_query_receiver(query_id)?;
 
     let start_time = std::time::Instant::now();
-    let mut running = true;
-    while running {
+    loop {
         let reader = match next_record_reader(
             query_id,
             rx.upgrade()?,
@@ -144,7 +144,7 @@ async fn fetch_and_response_batched_records(
             ProcessStatus::Ready(value) => value,
             ProcessStatus::NotReady => continue,
             ProcessStatus::Stop(value) => {
-                running = false;
+                last = true;
                 if let Some(value) = value {
                     value
                 } else {
