@@ -22,7 +22,7 @@ pub trait RecordFilter {
     /// * `Ok(true)` if the record passes the filter, `Ok(false)` otherwise.
     /// * Err(`ReductError::Interrupt`) if the filter is interrupted
     /// * `Err(ReductError)` if an error occurs during filtering.
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError>;
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError>;
 }
 
 pub(crate) use each_n::EachNFilter;
@@ -37,7 +37,7 @@ pub(crate) use when::WhenFilter;
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::proto::{ts_to_us, Record};
+    use crate::storage::proto::ts_to_us;
     use prost_wkt_types::Timestamp;
     use reduct_base::io::RecordMeta;
     use reduct_base::Labels;
@@ -48,36 +48,5 @@ mod tests {
         timestamp: u64,
         labels: Labels,
         state: i32,
-    }
-
-    impl RecordMeta for RecordWrapper {
-        fn timestamp(&self) -> u64 {
-            self.timestamp
-        }
-
-        fn labels(&self) -> &Labels {
-            &self.labels
-        }
-
-        fn state(&self) -> i32 {
-            self.state
-        }
-    }
-
-    impl From<Record> for RecordWrapper {
-        fn from(record: Record) -> Self {
-            RecordWrapper {
-                timestamp: ts_to_us(record.timestamp.as_ref().unwrap_or(&Timestamp {
-                    seconds: 0,
-                    nanos: 0,
-                })),
-                labels: record
-                    .labels
-                    .iter()
-                    .map(|l| (l.name.clone(), l.value.clone()))
-                    .collect(),
-                state: record.state,
-            }
-        }
     }
 }

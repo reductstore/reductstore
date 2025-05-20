@@ -52,7 +52,7 @@ pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 pub(crate) struct QueryContext {
     id: u64,
     query: QueryOptions,
-    condition_filter: Arc<Mutex<ExtWhenFilter>>,
+    condition_filter: ExtWhenFilter,
     last_access: Instant,
     ext: IoExtRef,
     current_stream: Option<Pin<BoxedRecordStream>>,
@@ -213,13 +213,13 @@ impl ManageExtensions for ExtRepository {
             None
         };
 
-        let filter = ExtWhenFilter::new(condition, query_options.strict);
+        let condition_filter = ExtWhenFilter::new(condition, query_options.strict);
         if let Some(ext) = ext {
             query_map.insert(query_id, {
                 QueryContext {
                     id: query_id,
                     query: query_options,
-                    condition_filter: Arc::new(Mutex::new(filter)),
+                    condition_filter,
                     last_access: Instant::now(),
                     ext,
                     current_stream: None,
@@ -249,15 +249,37 @@ impl ManageExtensions for ExtRepository {
         let mut lock = self.query_map.write().await;
         let query = lock.get_mut(&query_id).unwrap();
 
-        let filter = query.condition_filter.clone();
-        let filter = move |record: BoxedReadRecord| filter.lock().unwrap().filter_record(record);
         query.last_access = Instant::now();
 
         if let Some(mut current_stream) = query.current_stream.take() {
             let item = current_stream.next().await;
 
             if let Some(result) = item {
-                return Ready(result);
+                if let Err(e) = result {
+                    return Ready(Err(e));
+                }
+
+                let record = result.unwrap();
+                return match query.condition_filter.filter_record(record) {
+                    Some(result) => {
+                        let record = match result {
+                            Ok(record) => record,
+                            Err(e) => return Ready(Err(e)),
+                        };
+
+                        return match query
+                            .ext
+                            .write()
+                            .await
+                            .commit_record(query_id, record)
+                            .await
+                        {
+                            Some(result) => Ready(result),
+                            None => NotReady,
+                        };
+                    }
+                    None => NotReady,
+                };
             }
 
             query.current_stream = Some(current_stream);
@@ -278,7 +300,7 @@ impl ManageExtensions for ExtRepository {
             .ext
             .write()
             .await
-            .process_record(query_id, Box::new(record), Box::new(filter))
+            .process_record(query_id, Box::new(record))
             .await
         {
             Ok(stream) => stream,
@@ -350,6 +372,7 @@ pub fn create_ext_repository(
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use futures_util::Stream;
     use reduct_base::ext::IoExtensionInfo;
     use reqwest::blocking::get;
     use reqwest::StatusCode;
@@ -362,6 +385,7 @@ pub(super) mod tests {
     use prost_wkt_types::Timestamp;
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use reduct_base::msg::server_api::ServerInfo;
+    use reduct_base::Labels;
     use serde_json::json;
     use std::fs;
     use std::task::{Context, Poll};
@@ -789,32 +813,18 @@ pub(super) mod tests {
 
     #[derive(Clone, PartialEq, Debug)]
     pub struct MockRecord {
-        computed_labels: Labels,
-        labels: Labels,
+        meta: RecordMeta,
     }
 
     impl MockRecord {
         pub fn new(key: &str, val: &str) -> Self {
-            MockRecord {
-                computed_labels: Labels::from_iter(
+            let meta = RecordMeta::builder()
+                .timestamp(0)
+                .computed_labels(Labels::from_iter(
                     vec![(key.to_string(), val.to_string())].into_iter(),
-                ),
-                labels: Labels::new(),
-            }
-        }
-
-        pub fn labels_mut(&mut self) -> &mut Labels {
-            &mut self.labels
-        }
-    }
-
-    impl RecordMeta for MockRecord {
-        fn timestamp(&self) -> u64 {
-            0
-        }
-
-        fn labels(&self) -> &Labels {
-            &self.labels
+                ))
+                .build();
+            MockRecord { meta }
         }
     }
 
@@ -824,24 +834,8 @@ pub(super) mod tests {
             None
         }
 
-        fn last(&self) -> bool {
-            todo!()
-        }
-
-        fn computed_labels(&self) -> &Labels {
-            &self.computed_labels
-        }
-
-        fn computed_labels_mut(&mut self) -> &mut Labels {
-            &mut self.computed_labels
-        }
-
-        fn content_length(&self) -> u64 {
-            todo!()
-        }
-
-        fn content_type(&self) -> &str {
-            todo!()
+        fn meta(&self) -> &RecordMeta {
+            &self.meta
         }
     }
 }

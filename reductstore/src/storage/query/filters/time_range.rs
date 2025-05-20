@@ -27,7 +27,7 @@ impl TimeRangeFilter {
 }
 
 impl RecordFilter for TimeRangeFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let ts = record.timestamp() as u64;
         let ret = ts >= self.start && ts < self.stop;
         if ret {

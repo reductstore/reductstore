@@ -27,7 +27,7 @@ impl RecordStateFilter {
 }
 
 impl RecordFilter for RecordStateFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let result = record.state() == self.state as i32;
         Ok(result)
     }

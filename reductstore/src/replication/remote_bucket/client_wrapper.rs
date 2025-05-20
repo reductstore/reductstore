@@ -103,7 +103,7 @@ impl BucketWrapper {
         let content_length: u64 = if update_only {
             0
         } else {
-            records.iter().map(|r| r.content_length()).sum()
+            records.iter().map(|r| r.meta().content_length()).sum()
         };
 
         headers.insert(
@@ -116,18 +116,19 @@ impl BucketWrapper {
         );
 
         for record in records {
+            let meta = record.meta();
             let mut header_values = Vec::new();
             if update_only {
                 header_values.push("0".to_string());
                 header_values.push("".to_string());
             } else {
-                header_values.push(record.content_length().to_string());
-                header_values.push(record.content_type().to_string());
+                header_values.push(meta.content_length().to_string());
+                header_values.push(meta.content_type().to_string());
             }
 
-            if !record.labels().is_empty() {
+            if !meta.labels().is_empty() {
                 let mut label_headers = vec![];
-                for (name, value) in record.labels() {
+                for (name, value) in meta.labels() {
                     if value.contains(',') {
                         label_headers.push(format!("{}=\"{}\"", name, value));
                     } else {
@@ -140,7 +141,7 @@ impl BucketWrapper {
             }
 
             headers.insert(
-                HeaderName::from_str(&format!("x-reduct-time-{}", record.timestamp())).unwrap(),
+                HeaderName::from_str(&format!("x-reduct-time-{}", meta.timestamp())).unwrap(),
                 HeaderValue::from_str(&header_values.join(",").to_string()).unwrap(),
             );
         }
@@ -205,7 +206,7 @@ impl BucketWrapper {
     }
 
     fn sort_by_timestamp(records_to_update: &mut Vec<RecordReader>) {
-        records_to_update.sort_by(|a, b| b.timestamp().cmp(&a.timestamp()));
+        records_to_update.sort_by(|a, b| b.meta().timestamp().cmp(&a.meta().timestamp()));
     }
 }
 

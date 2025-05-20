@@ -10,7 +10,7 @@ use crate::storage::entry::RecordReader;
 use log::{debug, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::RecordMeta;
+use reduct_base::io::{ReadRecord, RecordMeta};
 use std::collections::BTreeMap;
 
 /// A state when the remote bucket is available.
@@ -99,7 +99,7 @@ impl RemoteBucketState for BucketAvailableState {
 
                     let mut error_map = BTreeMap::new();
                     for record in &records_to_update {
-                        error_map.insert(record.timestamp(), err.clone());
+                        error_map.insert(record.meta().timestamp(), err.clone());
                     }
                     error_map
                 }
@@ -110,7 +110,7 @@ impl RemoteBucketState for BucketAvailableState {
 
         // Write the records that failed to update with new records.
         while let Some(record) = records_to_update.pop() {
-            if error_map.contains_key(&record.timestamp()) {
+            if error_map.contains_key(&record.meta().timestamp()) {
                 records_to_write.push(record);
             }
         }

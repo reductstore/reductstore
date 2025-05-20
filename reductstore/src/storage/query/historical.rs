@@ -147,71 +147,14 @@ impl Query for HistoricalQuery {
     }
 }
 
-// Wrapper for RecordMeta to implement RecordMeta for Record
-// This is needed because we need different layout for labels in RecordMeta and Record
-struct RecordMetaWrapper {
-    time: u64,
-    labels: Labels,
-    state: i32,
-}
-
-impl RecordMeta for RecordMetaWrapper {
-    fn timestamp(&self) -> u64 {
-        self.time
-    }
-
-    fn labels(&self) -> &Labels {
-        &self.labels
-    }
-
-    fn state(&self) -> i32 {
-        self.state
-    }
-
-    fn last(&self) -> bool {
-        todo!()
-    }
-
-    fn computed_labels(&self) -> &Labels {
-        todo!()
-    }
-
-    fn computed_labels_mut(&mut self) -> &mut Labels {
-        todo!()
-    }
-
-    fn content_length(&self) -> u64 {
-        todo!()
-    }
-
-    fn content_type(&self) -> &str {
-        todo!()
-    }
-}
-
-impl From<Record> for RecordMetaWrapper {
-    fn from(record: Record) -> Self {
-        RecordMetaWrapper {
-            time: ts_to_us(record.timestamp.as_ref().unwrap()),
-            labels: record
-                .labels
-                .iter()
-                .map(|label| (label.name.clone(), label.value.clone()))
-                .collect(),
-            state: record.state,
-        }
-    }
-}
-
 impl HistoricalQuery {
     fn filter_records_from_current_block(&mut self) -> Result<(Vec<Record>, bool), ReductError> {
         let block = self.current_block.as_ref().unwrap().read()?;
         let mut filtered_records = Vec::new();
         for record in block.record_index().values() {
-            let wrapper = RecordMetaWrapper::from(record.clone());
             let mut include_record = true;
             for filter in self.filters.iter_mut() {
-                match filter.filter(&wrapper) {
+                match filter.filter(&record.clone().into()) {
                     Ok(false) => {
                         include_record = false;
                         break;

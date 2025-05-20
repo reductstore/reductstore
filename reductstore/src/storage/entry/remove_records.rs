@@ -6,7 +6,7 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
 use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::RecordMeta;
+use reduct_base::io::{ReadRecord, RecordMeta};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::not_found;
 use std::collections::BTreeMap;
@@ -86,7 +86,7 @@ impl Entry {
                     let result = rx.upgrade()?.blocking_write().blocking_recv();
                     match result {
                         Some(Ok(rec)) => {
-                            records_to_remove.push(rec.timestamp());
+                            records_to_remove.push(rec.meta().timestamp());
                         }
                         Some(Err(ReductError {
                             status: ErrorCode::NoContent,

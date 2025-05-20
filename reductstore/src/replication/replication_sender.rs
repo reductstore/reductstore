@@ -99,7 +99,7 @@ impl ReplicationSender {
                             processed_transactions += 1;
 
                             if let Some(record_to_sync) = record_to_sync {
-                                let record_size = record_to_sync.content_length();
+                                let record_size = record_to_sync.meta().content_length();
                                 total_size += record_size;
                                 batch.push((record_to_sync, transaction));
 

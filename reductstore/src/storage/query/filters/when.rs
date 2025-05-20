@@ -17,7 +17,7 @@ impl WhenFilter {
 }
 
 impl RecordFilter for WhenFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let context = Context::new(
             record.timestamp(),
             record

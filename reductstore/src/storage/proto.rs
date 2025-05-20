@@ -2,6 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use prost_wkt_types::Timestamp;
+use reduct_base::io::RecordMeta;
+
 include!(concat!(env!("OUT_DIR"), "/reduct.proto.storage.rs"));
 
 /// Converts a Timestamp to UNIX microseconds.
@@ -15,5 +17,11 @@ pub fn us_to_ts(ts: &u64) -> Timestamp {
         seconds: (ts / 1000000) as i64,
         nanos: ((ts % 1000000) * 1000) as i32,
         ..Default::default()
+    }
+}
+
+impl Into<RecordMeta> for Record {
+    fn into(self) -> RecordMeta {
+        todo!()
     }
 }

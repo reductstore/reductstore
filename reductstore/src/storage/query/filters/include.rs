@@ -27,7 +27,7 @@ impl IncludeLabelFilter {
 }
 
 impl RecordFilter for IncludeLabelFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let result = self
             .labels
             .iter()

@@ -24,7 +24,7 @@ impl EachSecondFilter {
 }
 
 impl RecordFilter for EachSecondFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let ret = record.timestamp() as i64 - self.last_time >= (self.s * 1_000_000.0) as i64;
         if ret {
             self.last_time = record.timestamp().clone() as i64;

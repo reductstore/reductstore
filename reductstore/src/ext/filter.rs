@@ -44,19 +44,20 @@ impl ExtWhenFilter {
     }
 
     fn filter_with_computed(&mut self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
-        let mut labels = reader
+        let meta = reader.meta();
+        let mut labels = meta
             .labels()
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect::<HashMap<_, _>>();
 
-        for (k, v) in reader.computed_labels() {
+        for (k, v) in meta.computed_labels() {
             if labels.insert(k, v).is_some() {
                 return Err(conflict!("Computed label '@{}' already exists", k));
             }
         }
 
-        let context = Context::new(reader.timestamp(), labels, EvaluationStage::Compute);
+        let context = Context::new(meta.timestamp(), labels, EvaluationStage::Compute);
         Ok(self
             .condition
             .as_mut()

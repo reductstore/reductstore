@@ -18,9 +18,6 @@ pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 pub type BoxedRecordStream =
     Box<dyn Stream<Item = Result<BoxedReadRecord, ReductError>> + Send + Sync>;
 
-pub type BoxedCondition =
-    Box<dyn Fn(BoxedReadRecord) -> Option<Result<BoxedReadRecord, ReductError>> + Send + Sync>;
-
 pub const EXTENSION_API_VERSION: &str = "0.2";
 
 /// The trait for the IO extension.
@@ -85,7 +82,6 @@ pub trait IoExtension {
         &mut self,
         query_id: u64,
         record: BoxedReadRecord,
-        condition_filter: BoxedCondition,
     ) -> Result<BoxedRecordStream, ReductError>;
 
     /// Commit record after processing and filtering.

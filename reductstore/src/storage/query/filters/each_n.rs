@@ -21,7 +21,7 @@ impl EachNFilter {
 }
 
 impl RecordFilter for EachNFilter {
-    fn filter(&mut self, _record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let ret = self.count % self.n == 0;
         self.count += 1;
         Ok(ret)

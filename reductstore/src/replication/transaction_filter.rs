@@ -19,32 +19,13 @@ pub(super) struct TransactionFilter {
     query_filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
 }
 
-impl RecordMeta for TransactionNotification {
-    fn timestamp(&self) -> u64 {
-        self.event.timestamp().clone()
-    }
-
-    fn labels(&self) -> &Labels {
-        &self.labels
-    }
-
-    fn last(&self) -> bool {
-        false
-    }
-    fn computed_labels(&self) -> &Labels {
-        &self.labels
-    }
-
-    fn computed_labels_mut(&mut self) -> &mut Labels {
-        &mut self.labels
-    }
-
-    fn content_length(&self) -> u64 {
-        0
-    }
-
-    fn content_type(&self) -> &str {
-        ""
+impl Into<RecordMeta> for TransactionNotification {
+    fn into(self) -> RecordMeta {
+        RecordMeta::builder()
+            .timestamp(self.event.into_timestamp())
+            .state(0)
+            .labels(self.labels)
+            .build()
     }
 }
 
@@ -129,7 +110,8 @@ impl TransactionFilter {
 
         // filter out notifications
         for filter in self.query_filters.iter_mut() {
-            match filter.filter(notification) {
+            let meta: RecordMeta = notification.clone().into();
+            match filter.filter(&meta) {
                 Ok(false) => return false,
                 Err(err) => {
                     warn!("Error filtering transaction notification: {}", err);
@@ -339,9 +321,10 @@ mod tests {
 
         #[rstest]
         fn test_filter_point(notification: TransactionNotification) {
-            assert_eq!(notification.timestamp(), 0);
-            assert_eq!(notification.labels(), &notification.labels);
-            assert_eq!(notification.state(), 0);
+            let meta: RecordMeta = notification.into();
+            assert_eq!(meta.timestamp(), 0);
+            assert_eq!(meta.labels(), &notification.labels);
+            assert_eq!(meta.state(), 0);
         }
     }
 

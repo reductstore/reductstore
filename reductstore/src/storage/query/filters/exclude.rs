@@ -28,7 +28,7 @@ impl ExcludeLabelFilter {
 }
 
 impl RecordFilter for ExcludeLabelFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let result = !self
             .labels
             .iter()

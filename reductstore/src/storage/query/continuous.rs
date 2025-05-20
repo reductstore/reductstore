@@ -2,12 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockManager;
+use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use reduct_base::error::{ErrorCode, ReductError};
-
-use crate::storage::entry::RecordReader;
-use reduct_base::io::RecordMeta;
+use reduct_base::io::ReadRecord;
 use std::sync::{Arc, RwLock};
 
 pub struct ContinuousQuery {
@@ -38,7 +37,7 @@ impl Query for ContinuousQuery {
     ) -> Result<RecordReader, ReductError> {
         match self.query.next(block_manager) {
             Ok(reader) => {
-                self.next_start = reader.timestamp() + 1;
+                self.next_start = reader.meta().timestamp() + 1;
                 self.count += 1;
                 Ok(reader)
             }

@@ -25,13 +25,7 @@ use tokio::sync::mpsc::{channel, Sender};
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
-    timestamp: u64,
-    content_type: String,
-    length: u64,
-    last: bool,
-    labels: Labels,
-    computed_labels: Labels,
-    state: i32,
+    meta: RecordMeta,
 }
 
 struct ReadContext {
@@ -131,17 +125,7 @@ impl RecordReader {
     pub fn form_record(record: Record, last: bool) -> Self {
         RecordReader {
             rx: None,
-            timestamp: ts_to_us(record.timestamp.as_ref().unwrap()),
-            length: record.end - record.begin,
-            content_type: record.content_type.clone(),
-            labels: record
-                .labels
-                .into_iter()
-                .map(|l| (l.name, l.value))
-                .collect(),
-            computed_labels: Labels::new(),
-            state: record.state,
-            last,
+            meta: record.into(),
         }
     }
 
@@ -152,7 +136,7 @@ impl RecordReader {
     }
 
     pub fn set_last(&mut self, last: bool) {
-        self.last = last;
+        self.meta.set_last(last);
     }
 
     fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
@@ -217,40 +201,6 @@ impl RecordReader {
     }
 }
 
-impl RecordMeta for RecordReader {
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-
-    fn labels(&self) -> &Labels {
-        &self.labels
-    }
-
-    fn state(&self) -> i32 {
-        self.state
-    }
-
-    fn last(&self) -> bool {
-        self.last
-    }
-
-    fn computed_labels(&self) -> &Labels {
-        &self.computed_labels
-    }
-
-    fn computed_labels_mut(&mut self) -> &mut Labels {
-        &mut self.computed_labels
-    }
-
-    fn content_length(&self) -> u64 {
-        self.length
-    }
-
-    fn content_type(&self) -> &str {
-        &self.content_type
-    }
-}
-
 #[async_trait]
 impl ReadRecord for RecordReader {
     async fn read(&mut self) -> ReadChunk {
@@ -277,6 +227,10 @@ impl ReadRecord for RecordReader {
         } else {
             None
         }
+    }
+
+    fn meta(&self) -> &RecordMeta {
+        &self.meta
     }
 }
 

@@ -76,10 +76,11 @@ pub(crate) async fn read_batched_records(
 }
 
 fn make_batch_header(reader: &BoxedReadRecord) -> (HeaderName, HeaderValue) {
-    let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
+    let meta = reader.meta();
+    let name = HeaderName::from_str(&format!("x-reduct-time-{}", meta.timestamp())).unwrap();
     let mut meta_data = vec![
-        reader.content_length().to_string(),
-        reader.content_type().to_string(),
+        meta.content_length().to_string(),
+        meta.content_type().to_string(),
     ];
 
     let format_labels = |(k, v): (&String, &String)| {
@@ -90,11 +91,10 @@ fn make_batch_header(reader: &BoxedReadRecord) -> (HeaderName, HeaderValue) {
         }
     };
 
-    let mut labels: Vec<String> = reader.labels().iter().map(format_labels).collect();
+    let mut labels: Vec<String> = meta.labels().iter().map(format_labels).collect();
 
     labels.extend(
-        reader
-            .computed_labels()
+        meta.computed_labels()
             .iter()
             .map(|(k, v)| format_labels((&format!("@{}", k), v))),
     );
@@ -150,7 +150,7 @@ async fn fetch_and_response_batched_records(
                 {
                     let (name, value) = make_batch_header(&reader);
                     header_size += name.as_str().len() + value.to_str().unwrap().len() + 2;
-                    body_size += reader.content_length();
+                    body_size += reader.meta().content_length();
                     headers.insert(name, value);
                 }
                 readers.push(reader);
@@ -547,25 +547,11 @@ mod tests {
     mock! {
         Record {}
 
-        impl RecordMeta for Record {
-            fn timestamp(&self) -> u64;
-
-            fn labels(&self) -> &Labels;
-        }
-
         #[async_trait]
         impl ReadRecord for Record {
             async fn read(&mut self) -> Option<Result<Bytes, ReductError>>;
 
-            fn content_length(&self) -> u64;
-
-            fn content_type(&self) -> &str;
-
-            fn last(&self) -> bool;
-
-            fn computed_labels(&self) -> &Labels;
-
-            fn computed_labels_mut(&mut self) -> &mut Labels;
+            fn meta(&self) -> &RecordMeta;
         }
     }
 }
