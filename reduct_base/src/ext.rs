@@ -31,9 +31,34 @@ pub trait Commiter {
         &mut self,
         record: BoxedReadRecord,
     ) -> Option<Result<BoxedReadRecord, ReductError>>;
+
+    /// Flush the rest of the records.
+    async fn flush(&mut self) -> Option<Result<BoxedReadRecord, ReductError>>;
+}
+
+#[async_trait]
+pub trait Processor {
+    /// Processes a record in the extension.
+    ///
+    /// This method is called for each record that is fetched from the storage engine.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The ID of the query.
+    /// * `record` - The record to process.
+    ///
+    /// # Returns
+    ////
+    ///  A stream of records that are processed by the extension. If the input represents data that has multiple entries,
+    ///  the extension can return a stream of records that are processed by the extension for each entry.
+    async fn process_record(
+        &mut self,
+        record: BoxedReadRecord,
+    ) -> Result<BoxedRecordStream, ReductError>;
 }
 
 pub type BoxedCommiter = Box<dyn Commiter + Send + Sync>;
+pub type BoxedProcessor = Box<dyn Processor + Send + Sync>;
 
 /// The trait for the IO extension.
 ///
@@ -80,22 +105,5 @@ pub trait IoExtension {
     /// The status of the unregistering of the query.
     fn unregister_query(&mut self, query_id: u64) -> Result<(), ReductError>;
 
-    /// Processes a record in the extension.
-    ///
-    /// This method is called for each record that is fetched from the storage engine.
-    ///
-    /// # Arguments
-    ///
-    /// * `query_id` - The ID of the query.
-    /// * `record` - The record to process.
-    ///
-    /// # Returns
-    ////
-    ///  A stream of records that are processed by the extension. If the input represents data that has multiple entries,
-    ///  the extension can return a stream of records that are processed by the extension for each entry.
-    async fn process_record(
-        &mut self,
-        query_id: u64,
-        record: BoxedReadRecord,
-    ) -> Result<(BoxedRecordStream, BoxedCommiter), ReductError>;
+    fn query(&mut self, query_id: u64) -> Result<(BoxedProcessor, BoxedCommiter), ReductError>;
 }

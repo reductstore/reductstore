@@ -13,7 +13,7 @@ use std::fmt::Debug;
 pub enum ProcessStatus {
     Ready(Result<BoxedReadRecord, ReductError>),
     NotReady,
-    Stop,
+    Stop(Option<Result<BoxedReadRecord, ReductError>>),
 }
 
 impl Debug for ProcessStatus {
@@ -21,7 +21,7 @@ impl Debug for ProcessStatus {
         match self {
             ProcessStatus::Ready(_) => write!(f, "Ready(?)"),
             ProcessStatus::NotReady => write!(f, "NotReady"),
-            ProcessStatus::Stop => write!(f, "Stop"),
+            ProcessStatus::Stop(_) => write!(f, "Stop(?)"),
         }
     }
 }

@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
-    BoxedCommiter, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
+    BoxedCommiter, BoxedProcessor, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
 };
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, unprocessable_entity};
@@ -58,7 +58,9 @@ pub(crate) struct QueryContext {
     last_access: Instant,
     ext: IoExtRef,
     current_stream: Option<Pin<BoxedRecordStream>>,
-    current_commiter: Option<BoxedCommiter>,
+
+    processor: BoxedProcessor,
+    commiter: BoxedCommiter,
 }
 
 struct ExtRepository {
@@ -217,16 +219,20 @@ impl ManageExtensions for ExtRepository {
         };
 
         let condition_filter = ExtWhenFilter::new(condition, query_options.strict);
+
         if let Some(ext) = ext {
+            let (processor, commiter) = ext.write().await.query(query_id)?;
+
             query_map.insert(query_id, {
                 QueryContext {
                     id: query_id,
                     query: query_options,
                     condition_filter,
-                    last_access: Instant::now(),
                     ext,
+                    last_access: Instant::now(),
                     current_stream: None,
-                    current_commiter: None,
+                    processor: processor,
+                    commiter: commiter,
                 }
             });
         }
@@ -242,7 +248,7 @@ impl ManageExtensions for ExtRepository {
         // if the query is not registered, just return the record
         if self.query_map.read().await.get(&query_id).is_none() {
             let Some(record) = query_rx.write().await.recv().await else {
-                return Stop;
+                return Stop(None);
             };
             return match record {
                 Ok(record) => Ready(Ok(Box::new(record))),
@@ -273,13 +279,7 @@ impl ManageExtensions for ExtRepository {
                             Err(e) => return Ready(Err(e)),
                         };
 
-                        return match query
-                            .current_commiter
-                            .as_mut()
-                            .unwrap()
-                            .commit_record(record)
-                            .await
-                        {
+                        return match query.commiter.commit_record(record).await {
                             Some(result) => Ready(result),
                             None => NotReady,
                         };
@@ -292,7 +292,7 @@ impl ManageExtensions for ExtRepository {
         }
 
         let Some(record) = query_rx.write().await.recv().await else {
-            return Stop;
+            return Stop(query.commiter.flush().await);
         };
 
         let record = match record {
@@ -302,19 +302,12 @@ impl ManageExtensions for ExtRepository {
 
         assert!(query.current_stream.is_none(), "Must be None");
 
-        let (stream, commiter) = match query
-            .ext
-            .write()
-            .await
-            .process_record(query_id, Box::new(record))
-            .await
-        {
+        let stream = match query.processor.process_record(Box::new(record)).await {
             Ok(stream) => stream,
             Err(e) => return Ready(Err(e)),
         };
 
         query.current_stream = Some(Box::into_pin(stream));
-        query.current_commiter = Some(commiter);
         NotReady
     }
 }
@@ -367,7 +360,7 @@ pub fn create_ext_repository(
                 match record {
                     Some(Ok(record)) => ProcessStatus::Ready(Ok(Box::new(record))),
                     Some(Err(e)) => ProcessStatus::Ready(Err(e)),
-                    None => ProcessStatus::Stop,
+                    None => ProcessStatus::Stop(None),
                 }
             }
         }

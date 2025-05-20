@@ -130,7 +130,8 @@ async fn fetch_and_response_batched_records(
         .get_query_receiver(query_id)?;
 
     let start_time = std::time::Instant::now();
-    loop {
+    let mut running = true;
+    while running {
         let reader = match next_record_reader(
             query_id,
             rx.upgrade()?,
@@ -142,7 +143,14 @@ async fn fetch_and_response_batched_records(
         {
             ProcessStatus::Ready(value) => value,
             ProcessStatus::NotReady => continue,
-            ProcessStatus::Stop => break,
+            ProcessStatus::Stop(value) => {
+                running = false;
+                if let Some(value) = value {
+                    value
+                } else {
+                    break;
+                }
+            }
         };
 
         match reader {
@@ -222,7 +230,7 @@ async fn next_record_reader(
         result
     } else {
         debug!("Timeout while waiting for record from query {}", query_path);
-        ProcessStatus::Stop
+        ProcessStatus::Stop(None)
     }
 }
 
