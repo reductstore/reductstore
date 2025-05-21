@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     #[cfg(feature = "web-console")]
-    download_web_console("v1.10.0");
+    download_web_console("v1.10.1");
 
     #[cfg(feature = "select-ext")]
     download_ext("select-ext", "v0.1.1");
