@@ -695,11 +695,11 @@ mod tests {
         }
 
         #[rstest]
-        fn test_recovery_without_index(entry_fix: (Entry, PathBuf)) {
+        fn test_recovery_with_orphan_block(entry_fix: (Entry, PathBuf)) {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
 
-            // Block #1 was appended
+            // Block #1 was appended without index
             wal.append(
                 1,
                 WalEntry::WriteRecord(Record {
@@ -724,7 +724,11 @@ mod tests {
             let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
             let block = block.read().unwrap();
 
-            assert_eq!(block.record_count(), 1);
+            assert_eq!(
+                block.record_count(),
+                2,
+                "should rebuild index and add the block"
+            );
         }
 
         #[fixture]
