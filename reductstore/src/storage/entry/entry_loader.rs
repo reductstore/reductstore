@@ -14,8 +14,6 @@ use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
 use prost::Message;
 
-use reduct_base::error::ReductError;
-
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -23,6 +21,8 @@ use crate::storage::block_manager::{
 };
 use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
+use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 
 pub(super) struct EntryLoader {}
 
@@ -34,7 +34,11 @@ impl EntryLoader {
         let mut entry = match Self::try_restore_entry_from_index(path.clone(), options.clone()) {
             Ok(entry) => Ok(entry),
             Err(err) => {
-                error!("{:}", err);
+                warn!(
+                    "Failed to restore from block index {:?}: {}",
+                    path, err.message
+                );
+                info!("Rebuilding the block index {:?} from blocks", path);
                 Self::restore_entry_from_blocks(path.clone(), options)
             }
         }?;
@@ -59,8 +63,6 @@ impl EntryLoader {
         path: PathBuf,
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
-        warn!("Failed to restore from block index. Trying to rebuild the entry from blocks");
-
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         for filein in fs::read_dir(path.clone())? {
             let file = filein?;
@@ -159,8 +161,17 @@ impl EntryLoader {
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))?;
-
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
+
+        let check_result = {
+            Self::check_if_block_files_exist(&path, &block_index)?;
+            Self::check_descriptor_count(&path, &block_index)
+        };
+
+        if check_result.is_err() {
+            return Err(internal_server_error!("Inconsistent data",));
+        }
+
         let bucket_name = path
             .parent()
             .unwrap()
@@ -169,6 +180,7 @@ impl EntryLoader {
             .to_str()
             .unwrap()
             .to_string();
+
         Ok(Entry {
             name,
             bucket_name,
@@ -177,6 +189,59 @@ impl EntryLoader {
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
         })
+    }
+
+    fn check_descriptor_count(path: &PathBuf, block_index: &BlockIndex) -> Result<(), ReductError> {
+        let number_of_descriptors = std::fs::read_dir(&path)?
+            .into_iter()
+            .filter(|entry| {
+                if let Err(err) = entry {
+                    error!("Failed to read directory: {}", err);
+                    return false;
+                }
+                let entry = entry.as_ref().unwrap().path();
+                entry.is_file()
+                    && DESCRIPTOR_FILE_EXT.contains(entry.extension().unwrap().to_str().unwrap())
+            })
+            .count();
+
+        if number_of_descriptors != block_index.tree().len() {
+            warn!(
+                "Number of descriptors {} does not match block index {} in entry {:?}",
+                number_of_descriptors,
+                block_index.tree().len(),
+                path
+            );
+
+            Err(internal_server_error!(""))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_if_block_files_exist(
+        path: &PathBuf,
+        block_index: &BlockIndex,
+    ) -> Result<(), ReductError> {
+        let mut inconsistent_data = false;
+        for block_id in block_index.tree().iter() {
+            let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
+            if !desc_path.exists() {
+                warn!("Block descriptor {:?} not found", path);
+                inconsistent_data = true;
+            }
+
+            let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
+            if !data_path.exists() {
+                warn!("Block descriptor {:?} not found. Removing it", path);
+            }
+        }
+
+        if inconsistent_data {
+            Err(internal_server_error!(""))
+        } else {
+            Ok(())
+        }
     }
 
     fn restore_uncommitted_changes(
