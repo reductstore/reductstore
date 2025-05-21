@@ -406,7 +406,7 @@ jobs:
 
       - name: Save docker logs
         if: always()
-        run: docker logs current | zip > /tmp/docker-log.zip
+        run: docker logs reductstore | zip > /tmp/docker-log.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
