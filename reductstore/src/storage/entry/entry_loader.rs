@@ -39,11 +39,27 @@ impl EntryLoader {
                     path, err.message
                 );
                 info!("Rebuilding the block index {:?} from blocks", path);
-                Self::restore_entry_from_blocks(path.clone(), options)
+                Self::restore_entry_from_blocks(path.clone(), options.clone())
             }
         }?;
 
-        Self::restore_uncommitted_changes(path, &mut entry)?;
+        Self::restore_uncommitted_changes(path.clone(), &mut entry)?;
+
+        let entry = {
+            // integrity check after restoring WAL
+            let check_result = || {
+                let bm = entry.block_manager.read()?;
+                Self::check_if_block_files_exist(&path, &bm.index())?;
+                Self::check_descriptor_count(&path, &bm.index())
+            };
+
+            if check_result().is_err() {
+                warn!("Block index is inconsistent. Rebuilding the block index from blocks");
+                Self::restore_entry_from_blocks(path.clone(), options)?
+            } else {
+                entry
+            }
+        };
 
         {
             let bm = entry.block_manager.read()?;
@@ -162,15 +178,6 @@ impl EntryLoader {
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
-
-        let check_result = {
-            Self::check_if_block_files_exist(&path, &block_index)?;
-            Self::check_descriptor_count(&path, &block_index)
-        };
-
-        if check_result.is_err() {
-            return Err(internal_server_error!("Inconsistent data",));
-        }
 
         let bucket_name = path
             .parent()
@@ -618,6 +625,7 @@ mod tests {
         bm.start_new_block(2, 100).unwrap();
         bm.save_cache_on_disk().unwrap();
         bm.index_mut().remove_block(2);
+        bm.index_mut().save().unwrap();
 
         // Restore the entry
         let entry =
@@ -770,7 +778,7 @@ mod tests {
             let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
             let block = block.read().unwrap();
 
-            assert_eq!(block.record_count(), 2);
+            assert_eq!(block.record_count(), 1);
         }
 
         #[fixture]
