@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Update Web Console up to v1.10.1, [PR-828](https://github.com/reductstore/reductstore/pull/828)
+
 ## [1.15.1] - 2025-05-15
 
 ### Fixed
