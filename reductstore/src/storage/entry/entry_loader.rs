@@ -195,10 +195,6 @@ impl EntryLoader {
         let number_of_descriptors = std::fs::read_dir(&path)?
             .into_iter()
             .filter(|entry| {
-                if let Err(err) = entry {
-                    error!("Failed to read directory: {}", err);
-                    return false;
-                }
                 let entry = entry.as_ref().unwrap().path();
                 entry.is_file()
                     && DESCRIPTOR_FILE_EXT.contains(entry.extension().unwrap().to_str().unwrap())
@@ -583,6 +579,56 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_missed_descriptor(path: PathBuf, entry_settings: EntrySettings) {
+        let mut entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&mut entry, 1);
+        let _ = entry.block_manager.write().unwrap().save_cache_on_disk();
+
+        let entry =
+            EntryLoader::restore_entry(path.join(entry.name.clone()), entry_settings.clone())
+                .unwrap();
+        assert!(
+            entry.block_manager.write().unwrap().load_block(1).is_ok(),
+            "should restore the block index from the blocks"
+        );
+
+        fs::remove_file(path.join("entry/1.meta")).unwrap();
+        fs::remove_file(path.join("entry/1.blk")).unwrap();
+
+        EntryLoader::restore_entry(path.join(entry.name), entry_settings).unwrap();
+
+        let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
+        let buf = fs::read(block_index_path).unwrap();
+        let block_index = BlockIndexProto::decode(Bytes::from(buf)).unwrap();
+        assert!(
+            block_index.blocks.is_empty(),
+            "should restore the block index from the blocks"
+        );
+    }
+
+    #[rstest]
+    fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
+        let mut entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&mut entry, 1);
+        entry.sync_fs().unwrap();
+
+        // Create a new block but don't add it to the index
+        let mut bm = entry.block_manager.write().unwrap();
+        bm.start_new_block(2, 100).unwrap();
+        bm.save_cache_on_disk().unwrap();
+        bm.index_mut().remove_block(2);
+
+        // Restore the entry
+        let entry =
+            EntryLoader::restore_entry(path.join(entry.name.clone()), entry.settings()).unwrap();
+        assert_eq!(
+            entry.block_manager.read().unwrap().index().tree().len(),
+            2,
+            "should rebuild index and add the block"
+        );
+    }
+
     mod wal_recovery {
         use crate::storage::proto::Record;
         use reduct_base::error::ErrorCode::InternalServerError;
@@ -695,11 +741,11 @@ mod tests {
         }
 
         #[rstest]
-        fn test_recovery_with_orphan_block(entry_fix: (Entry, PathBuf)) {
+        fn test_recovery_without_index(entry_fix: (Entry, PathBuf)) {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
 
-            // Block #1 was appended without index
+            // Block #1 was appended to the WAL
             wal.append(
                 1,
                 WalEntry::WriteRecord(Record {
@@ -724,11 +770,7 @@ mod tests {
             let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
             let block = block.read().unwrap();
 
-            assert_eq!(
-                block.record_count(),
-                2,
-                "should rebuild index and add the block"
-            );
+            assert_eq!(block.record_count(), 2);
         }
 
         #[fixture]
