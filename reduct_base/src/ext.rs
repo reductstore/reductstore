@@ -68,6 +68,14 @@ pub trait IoExtension {
     /// Returns details about the extension.
     fn info(&self) -> &IoExtensionInfo;
 
+    fn register_query(
+        &mut self,
+        query_id: u64,
+        bucket_name: &str,
+        entry_name: &str,
+        query: &QueryEntry,
+    ) -> Result<(), ReductError>;
+
     /// Registers a query in the extension.
     ///
     /// This method is called before fetching records from the storage engine.
@@ -84,26 +92,16 @@ pub trait IoExtension {
     /// * `bucket_name` - The name of the bucket.
     /// * `entry_name` - The name of the entry.
     /// * `query` - The query options
-    fn register_query(
+    ///
+    /// # Returns
+    ///
+    /// BoxedProcessor to process the data in the extension and return internal entries as temporary records.
+    /// BoxedCommiter to commit the records after processing and filtering into the final records.
+    fn query(
         &mut self,
         query_id: u64,
         bucket_name: &str,
         entry_name: &str,
         query: &QueryEntry,
-    ) -> Result<(), ReductError>;
-
-    /// Unregisters a query in the extension.
-    ///
-    /// This method is called after fetching records from the storage engine.
-    ///
-    /// # Arguments
-    ///
-    /// * `query_id` - The ID of the query.
-    ///
-    /// # Returns
-    ///
-    /// The status of the unregistering of the query.
-    fn unregister_query(&mut self, query_id: u64) -> Result<(), ReductError>;
-
-    fn query(&mut self, query_id: u64) -> Result<(BoxedProcessor, BoxedCommiter), ReductError>;
+    ) -> Result<(BoxedProcessor, BoxedCommiter), ReductError>;
 }

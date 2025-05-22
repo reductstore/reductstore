@@ -69,7 +69,6 @@ pub(crate) struct QueryContext {
     query: QueryOptions,
     condition_filter: ExtWhenFilter,
     last_access: Instant,
-    ext: IoExtRef,
     current_stream: Option<Pin<BoxedRecordStream>>,
 
     processor: BoxedProcessor,
@@ -166,7 +165,7 @@ impl ManageExtensions for ExtRepository {
     ) -> Result<(), ReductError> {
         let mut query_map = self.query_map.write().await;
         let ext_params = query_request.ext.as_ref();
-        let ext = if ext_params.is_some() && ext_params.unwrap().is_object() {
+        let controllers = if ext_params.is_some() && ext_params.unwrap().is_object() {
             let ext_query = ext_params.unwrap().as_object().unwrap();
             if ext_query.iter().count() > 1 {
                 return Err(unprocessable_entity!(
@@ -183,13 +182,11 @@ impl ManageExtensions for ExtRepository {
             };
 
             if let Some(ext) = self.extension_map.get(name) {
-                ext.write().await.register_query(
-                    query_id,
-                    bucket_name,
-                    entry_name,
-                    &query_request,
-                )?;
-                Some(Arc::clone(ext))
+                let (processor, commiter) =
+                    ext.write()
+                        .await
+                        .query(query_id, bucket_name, entry_name, &query_request)?;
+                Some((processor, commiter))
             } else {
                 return Err(unprocessable_entity!(
                     "Unknown extension '{}' in query id={}",
@@ -207,9 +204,6 @@ impl ManageExtensions for ExtRepository {
 
         for (key, query) in query_map.iter() {
             if query.last_access.elapsed() > query.query.ttl {
-                if let Err(e) = query.ext.write().await.unregister_query(query.id) {
-                    error!("Failed to unregister query {}: {:?}", query_id, e);
-                }
                 ids_to_remove.push(*key);
             }
         }
@@ -221,7 +215,7 @@ impl ManageExtensions for ExtRepository {
         // check if the query has references to computed labels and no extension is found
         let condition = if let Some(condition) = &query_options.when {
             let node = Parser::new().parse(condition)?;
-            if ext.is_none() && node.stage() == &EvaluationStage::Compute {
+            if controllers.is_none() && node.stage() == &EvaluationStage::Compute {
                 return Err(unprocessable_entity!(
                     "There is at least one reference to computed labels but no extension is found"
                 ));
@@ -233,19 +227,16 @@ impl ManageExtensions for ExtRepository {
 
         let condition_filter = ExtWhenFilter::new(condition, query_options.strict);
 
-        if let Some(ext) = ext {
-            let (processor, commiter) = ext.write().await.query(query_id)?;
-
+        if let Some((processor, commiter)) = controllers {
             query_map.insert(query_id, {
                 QueryContext {
                     id: query_id,
                     query: query_options,
                     condition_filter,
-                    ext,
                     last_access: Instant::now(),
                     current_stream: None,
-                    processor: processor,
-                    commiter: commiter,
+                    processor,
+                    commiter,
                 }
             });
         }
@@ -258,15 +249,6 @@ impl ManageExtensions for ExtRepository {
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
     ) -> Option<Result<BoxedReadRecord, ReductError>> {
-        // if the query is not registered, just return the record
-        if self.query_map.read().await.get(&query_id).is_none() {
-            let Some(record) = query_rx.write().await.recv().await else {
-                return Some(Err(no_content!("No content")));
-            };
-
-            return Some(record.map(|r| Box::new(r) as BoxedReadRecord));
-        }
-
         // TODO: The code is awkward, we need to refactor it
         // unfortunatly stream! macro does not work here and crashes compiler
         let mut lock = self.query_map.write().await;
