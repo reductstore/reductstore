@@ -16,7 +16,6 @@ use futures_util::Stream;
 
 use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::BoxedManageExtensions;
-use crate::ext::process_status::ProcessStatus;
 use crate::storage::query::QueryRx;
 use futures_util::Future;
 use log::debug;
@@ -141,16 +140,8 @@ async fn fetch_and_response_batched_records(
         )
         .await
         {
-            ProcessStatus::Ready(value) => value,
-            ProcessStatus::NotReady => continue,
-            ProcessStatus::Stop(value) => {
-                last = true;
-                if let Some(value) = value {
-                    value
-                } else {
-                    break;
-                }
-            }
+            Some(value) => value,
+            None => continue,
         };
 
         match reader {
@@ -219,7 +210,7 @@ async fn next_record_reader(
     query_path: &str,
     recv_timeout: Duration,
     ext_repository: &BoxedManageExtensions,
-) -> ProcessStatus {
+) -> Option<Result<BoxedReadRecord, ReductError>> {
     // we need to wait for the first record
     if let Ok(result) = timeout(
         recv_timeout,
@@ -230,7 +221,7 @@ async fn next_record_reader(
         result
     } else {
         debug!("Timeout while waiting for record from query {}", query_path);
-        ProcessStatus::Stop(None)
+        None
     }
 }
 

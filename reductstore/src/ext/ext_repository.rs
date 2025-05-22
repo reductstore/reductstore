@@ -3,8 +3,6 @@
 
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::ext::filter::ExtWhenFilter;
-use crate::ext::process_status::ProcessStatus;
-use crate::ext::process_status::ProcessStatus::{NotReady, Ready, Stop};
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{EvaluationStage, Parser};
 use crate::storage::query::QueryRx;
@@ -19,7 +17,7 @@ use reduct_base::ext::{
 };
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::{internal_server_error, unprocessable_entity};
+use reduct_base::{internal_server_error, no_content, unprocessable_entity};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -44,11 +42,24 @@ pub(crate) trait ManageExtensions {
         entry_name: &str,
         query: QueryEntry,
     ) -> Result<(), ReductError>;
+
+    /// Fetches and processes a record from the extension.
+    ///
+    /// This method is called for each record that is fetched from the storage engine.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The ID of the query.
+    /// * `query_rx` - The receiver for the query.
+    ///
+    /// # Returns
+    ///
+    ///  204 No Content if no records are available.
     async fn fetch_and_process_record(
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
-    ) -> ProcessStatus;
+    ) -> Option<Result<BoxedReadRecord, ReductError>>;
 }
 
 pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
@@ -246,16 +257,14 @@ impl ManageExtensions for ExtRepository {
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
-    ) -> ProcessStatus {
+    ) -> Option<Result<BoxedReadRecord, ReductError>> {
         // if the query is not registered, just return the record
         if self.query_map.read().await.get(&query_id).is_none() {
             let Some(record) = query_rx.write().await.recv().await else {
-                return Stop(None);
+                return Some(Err(no_content!("No content")));
             };
-            return match record {
-                Ok(record) => Ready(Ok(Box::new(record))),
-                Err(e) => Ready(Err(e)),
-            };
+
+            return Some(record.map(|r| Box::new(r) as BoxedReadRecord));
         }
 
         // TODO: The code is awkward, we need to refactor it
@@ -271,7 +280,7 @@ impl ManageExtensions for ExtRepository {
 
             if let Some(result) = item {
                 if let Err(e) = result {
-                    return Ready(Err(e));
+                    return Some(Err(e));
                 }
 
                 let record = result.unwrap();
@@ -280,15 +289,12 @@ impl ManageExtensions for ExtRepository {
                     Some(result) => {
                         let record = match result {
                             Ok(record) => record,
-                            Err(e) => return Ready(Err(e)),
+                            Err(e) => return Some(Err(e)),
                         };
 
-                        match query.commiter.commit_record(record).await {
-                            Some(result) => Ready(result),
-                            None => NotReady,
-                        }
+                        query.commiter.commit_record(record).await
                     }
-                    None => NotReady,
+                    None => None,
                 };
             } else {
                 // stream is empty, we need to process the next record
@@ -297,16 +303,20 @@ impl ManageExtensions for ExtRepository {
         }
 
         let Some(record) = query_rx.write().await.recv().await else {
-            return Stop(query.commiter.flush().await);
+            return Some(Err(no_content!("No content")));
         };
 
         let record = match record {
             Ok(record) => record,
             Err(e) => {
                 return if e.status == NoContent {
-                    Stop(query.commiter.flush().await)
+                    if let Some(last_record) = (query.commiter.flush().await) {
+                        Some(last_record)
+                    } else {
+                        Some(Err(e))
+                    }
                 } else {
-                    Ready(Err(e))
+                    Some(Err(e))
                 }
             }
         };
@@ -315,11 +325,11 @@ impl ManageExtensions for ExtRepository {
 
         let stream = match query.processor.process_record(Box::new(record)).await {
             Ok(stream) => stream,
-            Err(e) => return Ready(Err(e)),
+            Err(e) => return Some(Err(e)),
         };
 
         query.current_stream = Some(Box::into_pin(stream));
-        NotReady
+        None
     }
 }
 
@@ -366,13 +376,13 @@ pub fn create_ext_repository(
                 &self,
                 _query_id: u64,
                 query_rx: Arc<AsyncRwLock<QueryRx>>,
-            ) -> ProcessStatus {
-                let record = query_rx.write().await.recv().await;
-                match record {
-                    Some(Ok(record)) => ProcessStatus::Ready(Ok(Box::new(record))),
-                    Some(Err(e)) => ProcessStatus::Ready(Err(e)),
-                    None => ProcessStatus::Stop(None),
-                }
+            ) -> Option<Result<BoxedReadRecord, ReductError>> {
+                query_rx
+                    .write()
+                    .await
+                    .recv()
+                    .await
+                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord))
             }
         }
 
