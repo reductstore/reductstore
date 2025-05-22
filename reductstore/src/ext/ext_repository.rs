@@ -185,7 +185,7 @@ impl ManageExtensions for ExtRepository {
                 let (processor, commiter) =
                     ext.write()
                         .await
-                        .query(query_id, bucket_name, entry_name, &query_request)?;
+                        .query(bucket_name, entry_name, &query_request)?;
                 Some((processor, commiter))
             } else {
                 return Err(unprocessable_entity!(

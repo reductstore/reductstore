@@ -80,7 +80,6 @@ pub trait IoExtension {
     ///
     /// # Arguments
     ///
-    /// * `query_id` - The ID of the query.
     /// * `bucket_name` - The name of the bucket.
     /// * `entry_name` - The name of the entry.
     /// * `query` - The query options
@@ -91,7 +90,6 @@ pub trait IoExtension {
     /// BoxedCommiter to commit the records after processing and filtering into the final records.
     fn query(
         &mut self,
-        query_id: u64,
         bucket_name: &str,
         entry_name: &str,
         query: &QueryEntry,
