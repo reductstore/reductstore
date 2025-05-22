@@ -14,8 +14,6 @@ use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
 use prost::Message;
 
-use reduct_base::error::ReductError;
-
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -23,6 +21,8 @@ use crate::storage::block_manager::{
 };
 use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
+use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 
 pub(super) struct EntryLoader {}
 
@@ -34,12 +34,32 @@ impl EntryLoader {
         let mut entry = match Self::try_restore_entry_from_index(path.clone(), options.clone()) {
             Ok(entry) => Ok(entry),
             Err(err) => {
-                error!("{:}", err);
-                Self::restore_entry_from_blocks(path.clone(), options)
+                warn!(
+                    "Failed to restore from block index {:?}: {}",
+                    path, err.message
+                );
+                info!("Rebuilding the block index {:?} from blocks", path);
+                Self::restore_entry_from_blocks(path.clone(), options.clone())
             }
         }?;
 
-        Self::restore_uncommitted_changes(path, &mut entry)?;
+        Self::restore_uncommitted_changes(path.clone(), &mut entry)?;
+
+        let entry = {
+            // integrity check after restoring WAL
+            let check_result = || {
+                let bm = entry.block_manager.read()?;
+                Self::check_if_block_files_exist(&path, &bm.index())?;
+                Self::check_descriptor_count(&path, &bm.index())
+            };
+
+            if check_result().is_err() {
+                warn!("Block index is inconsistent. Rebuilding the block index from blocks");
+                Self::restore_entry_from_blocks(path.clone(), options)?
+            } else {
+                entry
+            }
+        };
 
         {
             let bm = entry.block_manager.read()?;
@@ -59,8 +79,6 @@ impl EntryLoader {
         path: PathBuf,
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
-        warn!("Failed to restore from block index. Trying to rebuild the entry from blocks");
-
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         for filein in fs::read_dir(path.clone())? {
             let file = filein?;
@@ -159,8 +177,8 @@ impl EntryLoader {
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))?;
-
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
+
         let bucket_name = path
             .parent()
             .unwrap()
@@ -169,6 +187,7 @@ impl EntryLoader {
             .to_str()
             .unwrap()
             .to_string();
+
         Ok(Entry {
             name,
             bucket_name,
@@ -177,6 +196,55 @@ impl EntryLoader {
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
         })
+    }
+
+    fn check_descriptor_count(path: &PathBuf, block_index: &BlockIndex) -> Result<(), ReductError> {
+        let number_of_descriptors = std::fs::read_dir(&path)?
+            .into_iter()
+            .filter(|entry| {
+                let entry = entry.as_ref().unwrap().path();
+                entry.is_file()
+                    && DESCRIPTOR_FILE_EXT.contains(entry.extension().unwrap().to_str().unwrap())
+            })
+            .count();
+
+        if number_of_descriptors != block_index.tree().len() {
+            warn!(
+                "Number of descriptors {} does not match block index {} in entry {:?}",
+                number_of_descriptors,
+                block_index.tree().len(),
+                path
+            );
+
+            Err(internal_server_error!(""))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_if_block_files_exist(
+        path: &PathBuf,
+        block_index: &BlockIndex,
+    ) -> Result<(), ReductError> {
+        let mut inconsistent_data = false;
+        for block_id in block_index.tree().iter() {
+            let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
+            if !desc_path.exists() {
+                warn!("Block descriptor {:?} not found", path);
+                inconsistent_data = true;
+            }
+
+            let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
+            if !data_path.exists() {
+                warn!("Block descriptor {:?} not found. Removing it", path);
+            }
+        }
+
+        if inconsistent_data {
+            Err(internal_server_error!(""))
+        } else {
+            Ok(())
+        }
     }
 
     fn restore_uncommitted_changes(
@@ -518,6 +586,57 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_missed_descriptor(path: PathBuf, entry_settings: EntrySettings) {
+        let mut entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&mut entry, 1);
+        let _ = entry.block_manager.write().unwrap().save_cache_on_disk();
+
+        let entry =
+            EntryLoader::restore_entry(path.join(entry.name.clone()), entry_settings.clone())
+                .unwrap();
+        assert!(
+            entry.block_manager.write().unwrap().load_block(1).is_ok(),
+            "should restore the block index from the blocks"
+        );
+
+        fs::remove_file(path.join("entry/1.meta")).unwrap();
+        fs::remove_file(path.join("entry/1.blk")).unwrap();
+
+        EntryLoader::restore_entry(path.join(entry.name), entry_settings).unwrap();
+
+        let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
+        let buf = fs::read(block_index_path).unwrap();
+        let block_index = BlockIndexProto::decode(Bytes::from(buf)).unwrap();
+        assert!(
+            block_index.blocks.is_empty(),
+            "should restore the block index from the blocks"
+        );
+    }
+
+    #[rstest]
+    fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
+        let mut entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&mut entry, 1);
+        entry.sync_fs().unwrap();
+
+        // Create a new block but don't add it to the index
+        let mut bm = entry.block_manager.write().unwrap();
+        bm.start_new_block(2, 100).unwrap();
+        bm.save_cache_on_disk().unwrap();
+        bm.index_mut().remove_block(2);
+        bm.index_mut().save().unwrap();
+
+        // Restore the entry
+        let entry =
+            EntryLoader::restore_entry(path.join(entry.name.clone()), entry.settings()).unwrap();
+        assert_eq!(
+            entry.block_manager.read().unwrap().index().tree().len(),
+            2,
+            "should rebuild index and add the block"
+        );
+    }
+
     mod wal_recovery {
         use crate::storage::proto::Record;
         use reduct_base::error::ErrorCode::InternalServerError;
@@ -634,7 +753,7 @@ mod tests {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
 
-            // Block #1 was appended
+            // Block #1 was appended to the WAL
             wal.append(
                 1,
                 WalEntry::WriteRecord(Record {
