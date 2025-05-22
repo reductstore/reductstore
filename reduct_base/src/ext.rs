@@ -68,14 +68,6 @@ pub trait IoExtension {
     /// Returns details about the extension.
     fn info(&self) -> &IoExtensionInfo;
 
-    fn register_query(
-        &mut self,
-        query_id: u64,
-        bucket_name: &str,
-        entry_name: &str,
-        query: &QueryEntry,
-    ) -> Result<(), ReductError>;
-
     /// Registers a query in the extension.
     ///
     /// This method is called before fetching records from the storage engine.
