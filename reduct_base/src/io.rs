@@ -64,6 +64,8 @@ impl BuilderRecordMeta {
         self.last = last;
         self
     }
+
+    /// Builds a `RecordMeta` instance from the builder.
     pub fn build(self) -> RecordMeta {
         RecordMeta {
             timestamp: self.timestamp,
@@ -78,6 +80,7 @@ impl BuilderRecordMeta {
 }
 
 impl RecordMeta {
+    /// Creates a builder for a new `RecordMeta` instance.
     pub fn builder() -> BuilderRecordMeta {
         BuilderRecordMeta {
             timestamp: 0,
@@ -90,6 +93,7 @@ impl RecordMeta {
         }
     }
 
+    /// Creates a builder from an existing `RecordMeta` instance.
     pub fn builder_from(meta: RecordMeta) -> BuilderRecordMeta {
         BuilderRecordMeta {
             timestamp: meta.timestamp,
@@ -238,6 +242,51 @@ pub(crate) mod tests {
             result.unwrap().err().unwrap(),
             internal_server_error!("Timeout reading record: deadline has elapsed")
         );
+    }
+
+    mod meta {
+        use super::*;
+
+        #[rstest]
+        fn test_builder() {
+            let meta = RecordMeta::builder()
+                .timestamp(1234567890)
+                .state(1)
+                .labels(Labels::new())
+                .content_type("application/json".to_string())
+                .content_length(1024)
+                .computed_labels(Labels::new())
+                .last(true)
+                .build();
+
+            assert_eq!(meta.timestamp(), 1234567890);
+            assert_eq!(meta.state(), 1);
+            assert_eq!(meta.content_type(), "application/json");
+            assert_eq!(meta.content_length(), 1024);
+            assert_eq!(meta.last(), true);
+        }
+
+        #[rstest]
+        fn test_builder_from() {
+            let meta = RecordMeta::builder()
+                .timestamp(1234567890)
+                .state(1)
+                .labels(Labels::new())
+                .content_type("application/json".to_string())
+                .content_length(1024)
+                .computed_labels(Labels::new())
+                .last(true)
+                .build();
+
+            let builder = RecordMeta::builder_from(meta.clone());
+            let new_meta = builder.build();
+
+            assert_eq!(new_meta.timestamp(), 1234567890);
+            assert_eq!(new_meta.state(), 1);
+            assert_eq!(new_meta.content_type(), "application/json");
+            assert_eq!(new_meta.content_length(), 1024);
+            assert_eq!(new_meta.last(), true);
+        }
     }
 
     pub struct MockRecord {
