@@ -457,6 +457,7 @@ pub(super) mod tests {
     mod next_processed_record {
         use super::*;
         use crate::storage::entry::RecordReader;
+        use async_stream::stream;
 
         use mockall::predicate;
         use reduct_base::internal_server_error;
@@ -551,6 +552,78 @@ pub(super) mod tests {
                 .fetch_and_process_record(1, query_rx)
                 .await
                 .is_none());
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_process_a_record_filtered(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+            mut processor: Box<MockProcessor>,
+            mut commiter: Box<MockCommiter>,
+        ) {
+            processor.expect_process_record().return_once(|_| {
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(MockRecord::boxed(
+                    "key", "val",
+                ))))))
+            });
+
+            commiter.expect_commit_record().return_once(|_| {
+                Some(Ok(
+                    Box::new(MockRecord::new("key", "val")) as BoxedReadRecord
+                ))
+            });
+            commiter.expect_flush().return_once(|| None).times(1);
+
+            mock_ext
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), predicate::always())
+                .return_once(|_, _, _| Ok((processor, commiter)));
+
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "test1": {},
+                })),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.send(Ok(record_reader)).await.unwrap();
+            tx.send(Err(no_content!(""))).await.unwrap();
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            assert!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx.clone())
+                    .await
+                    .is_none(),
+                "First run should be None (stupid implementation)"
+            );
+
+            let record = mocked_ext_repo
+                .fetch_and_process_record(1, query_rx.clone())
+                .await
+                .unwrap();
+
+            assert_eq!(record.unwrap().read().await, None);
+
+            assert_eq!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx)
+                    .await
+                    .unwrap()
+                    .err()
+                    .unwrap(),
+                no_content!("")
+            );
         }
     }
 
@@ -680,6 +753,10 @@ pub(super) mod tests {
 
         pub fn meta_mut(&mut self) -> &mut RecordMeta {
             &mut self.meta
+        }
+
+        pub fn boxed(key: &str, val: &str) -> BoxedReadRecord {
+            Box::new(MockRecord::new(key, val))
         }
     }
 
