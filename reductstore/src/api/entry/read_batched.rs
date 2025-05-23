@@ -286,7 +286,6 @@ mod tests {
     use reduct_base::Labels;
     use rstest::*;
     use tempfile::tempdir;
-    use tokio::time::sleep;
 
     #[rstest]
     #[case("GET", "Hey!!!")]
@@ -300,23 +299,23 @@ mod tests {
         #[case] _body: String,
     ) {
         let components = components.await;
-        let entry = components
-            .storage
-            .get_bucket("bucket-1")
-            .unwrap()
-            .upgrade_and_unwrap()
-            .get_entry("entry-1")
-            .unwrap()
-            .upgrade_and_unwrap();
-        for time in 10..100 {
-            let mut writer = entry
-                .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
-                .await
-                .unwrap();
-            writer.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
-            writer.send(Ok(None)).await.unwrap();
-            // let threads finish writing
-            sleep(Duration::from_millis(1)).await;
+        {
+            let entry = components
+                .storage
+                .get_bucket("bucket-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap();
+            for time in 10..100 {
+                let mut writer = entry
+                    .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
+                    .await
+                    .unwrap();
+                writer.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
+                writer.send(Ok(None)).await.unwrap();
+            }
         }
 
         let query_id = query(&path_to_entry_1, components.clone()).await;
@@ -388,8 +387,6 @@ mod tests {
 
         let response = read_batched_records!();
         let resp_headers = response.headers();
-        println!("{:?}", resp_headers);
-
         assert_eq!(
             resp_headers["x-reduct-error"],
             format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
