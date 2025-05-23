@@ -151,7 +151,7 @@ mod tests {
     use crate::storage::entry::tests::{entry, write_record_with_labels};
 
     use crate::storage::entry::EntrySettings;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use rstest::rstest;
 
     #[rstest]

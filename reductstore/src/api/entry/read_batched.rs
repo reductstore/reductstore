@@ -22,7 +22,6 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
-use ring::test::run;
 use std::collections::HashMap;
 use std::pin::pin;
 use std::pin::Pin;

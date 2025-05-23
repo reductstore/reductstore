@@ -10,7 +10,7 @@ use crate::storage::entry::RecordReader;
 use log::{debug, warn};
 use reduct_base::error::ErrorCode::MethodNotAllowed;
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::{ReadRecord, RecordMeta};
+use reduct_base::io::ReadRecord;
 use std::collections::BTreeMap;
 
 /// A state when the remote bucket is available.

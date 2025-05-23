@@ -387,7 +387,7 @@ mod tests {
         use super::*;
 
         use reduct_base::error::ErrorCode;
-        use reduct_base::io::{ReadRecord, RecordMeta};
+        use reduct_base::io::ReadRecord;
         use reduct_base::{no_content, not_found};
         use std::thread::sleep;
 

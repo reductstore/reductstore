@@ -356,7 +356,7 @@ mod tests {
 
     use super::*;
     use crate::core::file_cache::FILE_CACHE;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
     #[rstest]

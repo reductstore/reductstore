@@ -2,7 +2,6 @@ use crate::error::ReductError;
 use crate::{internal_server_error, Labels};
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::Metadata;
 use std::time::Duration;
 use tokio::runtime::Handle;
 
@@ -209,7 +208,7 @@ pub trait WriteRecord {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use log::Metadata;
+
     use rstest::rstest;
 
     use tokio::task::spawn_blocking;

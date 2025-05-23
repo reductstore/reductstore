@@ -179,7 +179,7 @@ mod tests {
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use rstest::*;
     use test_log::test as log_test;
     use tokio::time::timeout;

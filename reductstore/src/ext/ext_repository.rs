@@ -15,13 +15,12 @@ use reduct_base::error::ReductError;
 use reduct_base::ext::{
     BoxedCommiter, BoxedProcessor, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
 };
-use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{internal_server_error, no_content, unprocessable_entity};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -65,7 +64,6 @@ pub(crate) trait ManageExtensions {
 pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 
 pub(crate) struct QueryContext {
-    id: u64,
     query: QueryOptions,
     condition_filter: ExtWhenFilter,
     last_access: Instant,
@@ -230,7 +228,6 @@ impl ManageExtensions for ExtRepository {
         if let Some((processor, commiter)) = controllers {
             query_map.insert(query_id, {
                 QueryContext {
-                    id: query_id,
                     query: query_options,
                     condition_filter,
                     last_access: Instant::now(),
@@ -302,7 +299,7 @@ impl ManageExtensions for ExtRepository {
             Ok(record) => record,
             Err(e) => {
                 return if e.status == NoContent {
-                    if let Some(last_record) = (query.commiter.flush().await) {
+                    if let Some(last_record) = query.commiter.flush().await {
                         Some(last_record)
                     } else {
                         Some(Err(e))
@@ -499,7 +496,7 @@ pub(super) mod tests {
     }
     mod register_query {
         use super::*;
-        use mockall::predicate::ge;
+
         use std::time::Duration;
 
         #[rstest]
@@ -656,7 +653,6 @@ pub(super) mod tests {
     mod next_processed_record {
         use super::*;
         use crate::storage::entry::RecordReader;
-        use assert_matches::assert_matches;
 
         use mockall::predicate;
         use reduct_base::internal_server_error;

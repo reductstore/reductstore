@@ -40,8 +40,7 @@ impl RecordFilter for IncludeLabelFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::record::Label;
-    use crate::storage::proto::Record;
+
     use rstest::*;
 
     #[rstest]

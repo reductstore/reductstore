@@ -21,7 +21,7 @@ impl EachNFilter {
 }
 
 impl RecordFilter for EachNFilter {
-    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, _record: &RecordMeta) -> Result<bool, ReductError> {
         let ret = self.count % self.n == 0;
         self.count += 1;
         Ok(ret)
@@ -31,7 +31,7 @@ impl RecordFilter for EachNFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::Record;
+
     use rstest::*;
 
     #[rstest]

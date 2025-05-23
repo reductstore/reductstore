@@ -4,7 +4,6 @@
 use log::warn;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::ReplicationSettings;
-use reduct_base::Labels;
 
 use crate::replication::TransactionNotification;
 use crate::storage::query::condition::Parser;

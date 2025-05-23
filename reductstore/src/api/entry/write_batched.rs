@@ -277,7 +277,7 @@ mod tests {
 
     use axum_extra::headers::HeaderValue;
     use reduct_base::error::ErrorCode;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
     #[rstest]

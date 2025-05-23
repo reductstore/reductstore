@@ -37,7 +37,7 @@ impl RecordFilter for RecordStateFilter {
 mod tests {
     use super::*;
     use crate::storage::proto::record::State;
-    use crate::storage::proto::Record;
+
     use rstest::*;
 
     #[rstest]

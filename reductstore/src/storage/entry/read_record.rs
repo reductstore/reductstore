@@ -62,7 +62,7 @@ mod tests {
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use bytes::Bytes;
     use reduct_base::error::ReductError;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;

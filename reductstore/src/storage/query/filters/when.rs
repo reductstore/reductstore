@@ -34,8 +34,7 @@ impl RecordFilter for WhenFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::record::Label;
-    use crate::storage::proto::Record;
+
     use crate::storage::query::condition::Parser;
     use reduct_base::Labels;
     use rstest::rstest;

@@ -22,7 +22,7 @@ use crate::storage::query::QueryRx;
 use futures_util::Future;
 use hyper::http::HeaderValue;
 use reduct_base::bad_request;
-use reduct_base::io::{ReadRecord, RecordMeta};
+use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
 use std::i64;
 use std::pin::{pin, Pin};

@@ -42,7 +42,7 @@ impl RecordFilter for TimeRangeFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::{us_to_ts, Record};
+
     use rstest::*;
 
     #[rstest]

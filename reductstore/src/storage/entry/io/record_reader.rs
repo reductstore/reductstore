@@ -4,14 +4,14 @@
 use crate::core::file_cache::FileWeak;
 use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
-use crate::storage::proto::{ts_to_us, Record};
+use crate::storage::proto::Record;
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
-use reduct_base::{internal_server_error, timeout, Labels};
+use reduct_base::{internal_server_error, timeout};
 use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
@@ -123,10 +123,9 @@ impl RecordReader {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks
     pub fn form_record(record: Record, last: bool) -> Self {
-        RecordReader {
-            rx: None,
-            meta: record.into(),
-        }
+        let mut meta: RecordMeta = record.into();
+        meta.set_last(last);
+        RecordReader { rx: None, meta }
     }
 
     pub fn form_record_with_rx(rx: RecordRx, record: Record, last: bool) -> Self {
@@ -337,7 +336,7 @@ mod tests {
 
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
-        use base64::engine::DecodePaddingMode::RequireCanonical;
+
         use prost_wkt_types::Timestamp;
         use std::time::Duration;
 
