@@ -315,10 +315,9 @@ mod tests {
                 .unwrap();
             writer.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
             writer.send(Ok(None)).await.unwrap();
+            // let threads finish writing
+            sleep(Duration::from_millis(1)).await;
         }
-
-        // let threads finish writing
-        sleep(Duration::from_millis(100)).await;
 
         let query_id = query(&path_to_entry_1, components.clone()).await;
         let query = Query(HashMap::from_iter(vec![(
