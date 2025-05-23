@@ -250,9 +250,19 @@ impl ManageExtensions for ExtRepository {
         query_rx: Arc<AsyncRwLock<QueryRx>>,
     ) -> Option<Result<BoxedReadRecord, ReductError>> {
         // TODO: The code is awkward, we need to refactor it
-        // unfortunatly stream! macro does not work here and crashes compiler
+        // unfortunately stream! macro does not work here and crashes compiler
         let mut lock = self.query_map.write().await;
-        let query = lock.get_mut(&query_id).unwrap();
+        let query = match lock.get_mut(&query_id) {
+            Some(query) => query,
+            None => {
+                return query_rx
+                    .write()
+                    .await
+                    .recv()
+                    .await
+                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord))
+            }
+        };
 
         query.last_access = Instant::now();
 
@@ -580,12 +590,13 @@ pub(super) mod tests {
             mock_ext
                 .expect_query()
                 .with(eq("bucket"), eq("entry"), eq(query.clone()))
-                .return_once(|_, _, _| {
+                .returning(|_, _, _| {
                     Ok((
                         Box::new(MockProcessor::new()),
                         Box::new(MockCommiter::new()),
                     ))
-                });
+                })
+                .times(3);
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
             assert!(mocked_ext_repo
@@ -705,9 +716,14 @@ pub(super) mod tests {
         async fn test_process_not_ready(
             record_reader: RecordReader,
             mut mock_ext: MockIoExtension,
-            processor: BoxedProcessor,
-            commiter: BoxedCommiter,
+            mut processor: Box<MockProcessor>,
+            mut commiter: Box<MockCommiter>,
         ) {
+            processor
+                .expect_process_record()
+                .return_once(|_| Ok(MockStream::boxed(Poll::Pending) as BoxedRecordStream));
+            commiter.expect_commit_record().never();
+
             mock_ext
                 .expect_query()
                 .with(eq("bucket"), eq("entry"), predicate::always())
@@ -744,13 +760,13 @@ pub(super) mod tests {
     }
 
     #[fixture]
-    fn commiter() -> BoxedCommiter {
-        Box::new(MockCommiter::new())
+    fn processor() -> Box<MockProcessor> {
+        Box::new(MockProcessor::new())
     }
 
     #[fixture]
-    fn processor() -> BoxedProcessor {
-        Box::new(MockProcessor::new())
+    fn commiter() -> Box<MockCommiter> {
+        Box::new(MockCommiter::new())
     }
 
     #[fixture]

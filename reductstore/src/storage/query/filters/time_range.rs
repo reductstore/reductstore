@@ -48,7 +48,7 @@ mod tests {
     #[rstest]
     fn test_time_range_filter() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let meta = RecordMeta::builder().timestamp(5000_000).build();
+        let meta = RecordMeta::builder().timestamp(5).build();
         assert!(filter.filter(&meta).unwrap(), "First time should pass");
         assert!(
             !filter.filter(&meta).unwrap(),
@@ -59,7 +59,7 @@ mod tests {
     #[rstest]
     fn test_time_range_filter_no_records() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let meta = RecordMeta::builder().timestamp(15000_000).build();
+        let meta = RecordMeta::builder().timestamp(15).build();
         assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
     }
 
