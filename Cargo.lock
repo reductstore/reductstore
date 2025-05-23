@@ -2016,6 +2016,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "futures",
  "http",
  "int-enum",
  "log",

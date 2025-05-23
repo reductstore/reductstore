@@ -151,7 +151,7 @@ mod tests {
     use crate::storage::entry::tests::{entry, write_record_with_labels};
 
     use crate::storage::entry::EntrySettings;
-    use reduct_base::io::RecordMeta;
+    use reduct_base::io::ReadRecord;
     use rstest::rstest;
 
     #[rstest]
@@ -200,13 +200,13 @@ mod tests {
         assert_eq!(updated_labels, &expected_labels_3);
 
         // check if the records were updated
-        let labels = entry.begin_read(1).wait().unwrap().labels().clone();
+        let labels = entry.begin_read(1).wait().unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_1);
 
-        let labels = entry.begin_read(2).wait().unwrap().labels().clone();
+        let labels = entry.begin_read(2).wait().unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_2);
 
-        let labels = entry.begin_read(3).wait().unwrap().labels().clone();
+        let labels = entry.begin_read(3).wait().unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_3);
     }
 

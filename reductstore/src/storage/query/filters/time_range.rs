@@ -27,7 +27,7 @@ impl TimeRangeFilter {
 }
 
 impl RecordFilter for TimeRangeFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let ts = record.timestamp() as u64;
         let ret = ts >= self.start && ts < self.stop;
         if ret {
@@ -42,22 +42,16 @@ impl RecordFilter for TimeRangeFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::{us_to_ts, Record};
-    use crate::storage::query::filters::tests::RecordWrapper;
+
     use rstest::*;
 
     #[rstest]
     fn test_time_range_filter() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let record = Record {
-            timestamp: Some(us_to_ts(&5)),
-            ..Default::default()
-        };
-
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(filter.filter(&wrapper).unwrap(), "First time should pass");
+        let meta = RecordMeta::builder().timestamp(5).build();
+        assert!(filter.filter(&meta).unwrap(), "First time should pass");
         assert!(
-            !filter.filter(&wrapper).unwrap(),
+            !filter.filter(&meta).unwrap(),
             "Second time should not pass, as we have already returned the record"
         );
     }
@@ -65,36 +59,23 @@ mod tests {
     #[rstest]
     fn test_time_range_filter_no_records() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let record = Record {
-            timestamp: Some(us_to_ts(&15)),
-            ..Default::default()
-        };
-
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
+        let meta = RecordMeta::builder().timestamp(15).build();
+        assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
     }
 
     #[rstest]
     fn test_time_include_start() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let record = Record {
-            timestamp: Some(us_to_ts(&0)),
-            ..Default::default()
-        };
 
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(filter.filter(&wrapper).unwrap(), "Record should pass");
+        let meta = RecordMeta::builder().timestamp(0).build();
+        assert!(filter.filter(&meta).unwrap(), "Record should pass");
     }
 
     #[rstest]
     fn test_time_exclude_end() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let record = Record {
-            timestamp: Some(us_to_ts(&10)),
-            ..Default::default()
-        };
 
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
+        let meta = RecordMeta::builder().timestamp(10).build();
+        assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
     }
 }

@@ -356,7 +356,7 @@ mod tests {
 
     use super::*;
     use crate::core::file_cache::FILE_CACHE;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -408,9 +408,9 @@ mod tests {
         assert_eq!(info.size, 88);
 
         let mut rec = entry.begin_read(1).wait().unwrap();
-        assert_eq!(rec.timestamp(), 1);
-        assert_eq!(rec.content_length(), 10);
-        assert_eq!(rec.content_type(), "text/plain");
+        assert_eq!(rec.meta().timestamp(), 1);
+        assert_eq!(rec.meta().content_length(), 10);
+        assert_eq!(rec.meta().content_type(), "text/plain");
 
         assert_eq!(
             rec.blocking_read().unwrap().unwrap(),
@@ -418,9 +418,9 @@ mod tests {
         );
 
         let mut rec = entry.begin_read(2000010).wait().unwrap();
-        assert_eq!(rec.timestamp(), 2000010);
-        assert_eq!(rec.content_length(), 10);
-        assert_eq!(rec.content_type(), "text/plain");
+        assert_eq!(rec.meta().timestamp(), 2000010);
+        assert_eq!(rec.meta().content_length(), 10);
+        assert_eq!(rec.meta().content_type(), "text/plain");
 
         assert_eq!(
             rec.blocking_read().unwrap().unwrap(),

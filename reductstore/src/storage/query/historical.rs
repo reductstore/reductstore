@@ -14,8 +14,6 @@ use crate::storage::query::filters::{
     RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::RecordMeta;
-use reduct_base::Labels;
 
 pub struct HistoricalQuery {
     /// The start time of the query.
@@ -147,51 +145,14 @@ impl Query for HistoricalQuery {
     }
 }
 
-// Wrapper for RecordMeta to implement RecordMeta for Record
-// This is needed because we need different layout for labels in RecordMeta and Record
-struct RecordMetaWrapper {
-    time: u64,
-    labels: Labels,
-    state: i32,
-}
-
-impl RecordMeta for RecordMetaWrapper {
-    fn timestamp(&self) -> u64 {
-        self.time
-    }
-
-    fn labels(&self) -> &Labels {
-        &self.labels
-    }
-
-    fn state(&self) -> i32 {
-        self.state
-    }
-}
-
-impl From<Record> for RecordMetaWrapper {
-    fn from(record: Record) -> Self {
-        RecordMetaWrapper {
-            time: ts_to_us(record.timestamp.as_ref().unwrap()),
-            labels: record
-                .labels
-                .iter()
-                .map(|label| (label.name.clone(), label.value.clone()))
-                .collect(),
-            state: record.state,
-        }
-    }
-}
-
 impl HistoricalQuery {
     fn filter_records_from_current_block(&mut self) -> Result<(Vec<Record>, bool), ReductError> {
         let block = self.current_block.as_ref().unwrap().read()?;
         let mut filtered_records = Vec::new();
         for record in block.record_index().values() {
-            let wrapper = RecordMetaWrapper::from(record.clone());
             let mut include_record = true;
             for filter in self.filters.iter_mut() {
-                match filter.filter(&wrapper) {
+                match filter.filter(&record.clone().into()) {
                     Ok(false) => {
                         include_record = false;
                         break;
@@ -246,7 +207,7 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.timestamp(), 0);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[0].1, "0123456789");
     }
 
@@ -256,9 +217,9 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp(), 0);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[0].1, "0123456789");
-        assert_eq!(records[1].0.timestamp(), 5);
+        assert_eq!(records[1].0.meta().timestamp(), 5);
         assert_eq!(records[1].1, "0123456789");
     }
 
@@ -268,11 +229,11 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 3);
-        assert_eq!(records[0].0.timestamp(), 0);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[0].1, "0123456789");
-        assert_eq!(records[1].0.timestamp(), 5);
+        assert_eq!(records[1].0.meta().timestamp(), 5);
         assert_eq!(records[1].1, "0123456789");
-        assert_eq!(records[2].0.timestamp(), 1000);
+        assert_eq!(records[2].0.meta().timestamp(), 1000);
         assert_eq!(records[2].1, "0123456789");
     }
 
@@ -293,9 +254,9 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.timestamp(), 1000);
+        assert_eq!(records[0].0.meta().timestamp(), 1000);
         assert_eq!(
-            records[0].0.labels(),
+            records[0].0.meta().labels(),
             &HashMap::from([
                 ("block".to_string(), "2".to_string()),
                 ("record".to_string(), "1".to_string()),
@@ -322,9 +283,9 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp(), 5);
+        assert_eq!(records[0].0.meta().timestamp(), 5);
         assert_eq!(
-            records[0].0.labels(),
+            records[0].0.meta().labels(),
             &HashMap::from([
                 ("block".to_string(), "1".to_string()),
                 ("record".to_string(), "2".to_string()),
@@ -372,8 +333,8 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp(), 0);
-        assert_eq!(records[1].0.timestamp(), 1000);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
+        assert_eq!(records[1].0.meta().timestamp(), 1000);
     }
 
     #[rstest]
@@ -390,8 +351,8 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.timestamp(), 0);
-        assert_eq!(records[1].0.timestamp(), 1000);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
+        assert_eq!(records[1].0.meta().timestamp(), 1000);
     }
 
     #[rstest]
@@ -408,7 +369,7 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.timestamp(), 0);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
     }
 
     #[rstest]
@@ -445,7 +406,7 @@ mod tests {
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.timestamp(), 0);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
     }
 
     #[rstest]

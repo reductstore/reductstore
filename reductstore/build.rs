@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     download_web_console("v1.10.1");
 
     #[cfg(feature = "select-ext")]
-    download_ext("select-ext", "v0.1.1");
+    download_ext("select-ext", "v0.2.0");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())

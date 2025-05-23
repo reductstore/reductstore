@@ -17,7 +17,7 @@ impl WhenFilter {
 }
 
 impl RecordFilter for WhenFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let context = Context::new(
             record.timestamp(),
             record
@@ -34,10 +34,9 @@ impl RecordFilter for WhenFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::record::Label;
-    use crate::storage::proto::Record;
+
     use crate::storage::query::condition::Parser;
-    use crate::storage::query::filters::tests::RecordWrapper;
+    use reduct_base::Labels;
     use rstest::rstest;
 
     #[rstest]
@@ -47,16 +46,15 @@ mod tests {
         let condition = parser.parse(&json).unwrap();
 
         let mut filter = WhenFilter::new(condition);
-        let record = Record {
-            labels: vec![Label {
-                name: "label".to_string(),
-                value: "true".to_string(),
-            }],
-            ..Default::default()
-        };
 
-        let wrapper = RecordWrapper::from(record.clone());
-        let result = filter.filter(&wrapper).unwrap();
+        let meta = RecordMeta::builder()
+            .timestamp(0)
+            .labels(Labels::from_iter(vec![(
+                "label".to_string(),
+                "true".to_string(),
+            )]))
+            .build();
+        let result = filter.filter(&meta).unwrap();
         assert_eq!(result, true);
     }
 }

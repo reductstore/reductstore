@@ -20,7 +20,7 @@ use crate::storage::query::QueryRx;
 use futures_util::Future;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, ProcessStatus};
+use reduct_base::ext::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::pin::pin;
@@ -75,10 +75,11 @@ pub(crate) async fn read_batched_records(
 }
 
 fn make_batch_header(reader: &BoxedReadRecord) -> (HeaderName, HeaderValue) {
-    let name = HeaderName::from_str(&format!("x-reduct-time-{}", reader.timestamp())).unwrap();
+    let meta = reader.meta();
+    let name = HeaderName::from_str(&format!("x-reduct-time-{}", meta.timestamp())).unwrap();
     let mut meta_data = vec![
-        reader.content_length().to_string(),
-        reader.content_type().to_string(),
+        meta.content_length().to_string(),
+        meta.content_type().to_string(),
     ];
 
     let format_labels = |(k, v): (&String, &String)| {
@@ -89,11 +90,10 @@ fn make_batch_header(reader: &BoxedReadRecord) -> (HeaderName, HeaderValue) {
         }
     };
 
-    let mut labels: Vec<String> = reader.labels().iter().map(format_labels).collect();
+    let mut labels: Vec<String> = meta.labels().iter().map(format_labels).collect();
 
     labels.extend(
-        reader
-            .computed_labels()
+        meta.computed_labels()
             .iter()
             .map(|(k, v)| format_labels((&format!("@{}", k), v))),
     );
@@ -139,9 +139,8 @@ async fn fetch_and_response_batched_records(
         )
         .await
         {
-            ProcessStatus::Ready(value) => value,
-            ProcessStatus::NotReady => continue,
-            ProcessStatus::Stop => break,
+            Some(value) => value,
+            None => continue,
         };
 
         match reader {
@@ -149,7 +148,7 @@ async fn fetch_and_response_batched_records(
                 {
                     let (name, value) = make_batch_header(&reader);
                     header_size += name.as_str().len() + value.to_str().unwrap().len() + 2;
-                    body_size += reader.content_length();
+                    body_size += reader.meta().content_length();
                     headers.insert(name, value);
                 }
                 readers.push(reader);
@@ -210,18 +209,18 @@ async fn next_record_reader(
     query_path: &str,
     recv_timeout: Duration,
     ext_repository: &BoxedManageExtensions,
-) -> ProcessStatus {
+) -> Option<Result<BoxedReadRecord, ReductError>> {
     // we need to wait for the first record
     if let Ok(result) = timeout(
         recv_timeout,
-        ext_repository.next_processed_record(query_id, rx),
+        ext_repository.fetch_and_process_record(query_id, rx),
     )
     .await
     {
         result
     } else {
         debug!("Timeout while waiting for record from query {}", query_path);
-        ProcessStatus::Stop
+        None
     }
 }
 
@@ -450,21 +449,19 @@ mod tests {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             assert!(
-                matches!(
-                    timeout(
-                        Duration::from_secs(1),
-                        next_record_reader(
-                            1,
-                            rx.clone(),
-                            "",
-                            Duration::from_millis(10),
-                            &ext_repository
-                        )
+                timeout(
+                    Duration::from_secs(1),
+                    next_record_reader(
+                        1,
+                        rx.clone(),
+                        "",
+                        Duration::from_millis(10),
+                        &ext_repository
                     )
-                    .await
-                    .unwrap(),
-                    ProcessStatus::Stop,
-                ),
+                )
+                .await
+                .unwrap()
+                .is_none(),
                 "should return None if the query is closed"
             );
         }
@@ -476,21 +473,19 @@ mod tests {
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert!(
-                matches!(
-                    timeout(
-                        Duration::from_secs(1),
-                        next_record_reader(
-                            1,
-                            rx.clone(),
-                            "",
-                            Duration::from_millis(0),
-                            &ext_repository
-                        )
+                timeout(
+                    Duration::from_secs(1),
+                    next_record_reader(
+                        1,
+                        rx.clone(),
+                        "",
+                        Duration::from_millis(0),
+                        &ext_repository
                     )
-                    .await
-                    .unwrap(),
-                    ProcessStatus::Stop
-                ),
+                )
+                .await
+                .unwrap()
+                .is_none(),
                 "should return None if the query is closed"
             );
         }
@@ -499,17 +494,14 @@ mod tests {
     #[rstest]
     fn test_batch_compute_labels() {
         let mut record = MockRecord::new();
-        record.expect_timestamp().return_const(1000u64);
-        record.expect_content_length().return_const(100u64);
-        record
-            .expect_content_type()
-            .return_const("text/plain".to_string());
-        record
-            .expect_labels()
-            .return_const(Labels::from_iter(vec![("a".to_string(), "b".to_string())]));
-        record
-            .expect_computed_labels()
-            .return_const(Labels::from_iter(vec![("x".to_string(), "y".to_string())]));
+        let meta = RecordMeta::builder()
+            .timestamp(1000u64)
+            .labels(Labels::from_iter(vec![("a".to_string(), "b".to_string())]))
+            .computed_labels(Labels::from_iter(vec![("x".to_string(), "y".to_string())]))
+            .content_length(100u64)
+            .content_type("text/plain".to_string())
+            .build();
+        record.expect_meta().return_const(meta);
 
         let record: BoxedReadRecord = Box::new(record);
 
@@ -546,25 +538,11 @@ mod tests {
     mock! {
         Record {}
 
-        impl RecordMeta for Record {
-            fn timestamp(&self) -> u64;
-
-            fn labels(&self) -> &Labels;
-        }
-
         #[async_trait]
         impl ReadRecord for Record {
             async fn read(&mut self) -> Option<Result<Bytes, ReductError>>;
 
-            fn content_length(&self) -> u64;
-
-            fn content_type(&self) -> &str;
-
-            fn last(&self) -> bool;
-
-            fn computed_labels(&self) -> &Labels;
-
-            fn computed_labels_mut(&mut self) -> &mut Labels;
+            fn meta(&self) -> &RecordMeta;
         }
     }
 }

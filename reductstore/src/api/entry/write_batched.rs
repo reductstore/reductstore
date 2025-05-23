@@ -277,7 +277,7 @@ mod tests {
 
     use axum_extra::headers::HeaderValue;
     use reduct_base::error::ErrorCode;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -379,9 +379,9 @@ mod tests {
                 .begin_read(1)
                 .await
                 .unwrap();
-            assert_eq!(&reader.labels()["a"], "b");
-            assert_eq!(reader.content_type(), "text/plain");
-            assert_eq!(reader.content_length(), 10);
+            assert_eq!(&reader.meta().labels()["a"], "b");
+            assert_eq!(reader.meta().content_type(), "text/plain");
+            assert_eq!(reader.meta().content_length(), 10);
             assert_eq!(reader.read().await.unwrap(), Ok(Bytes::from("1234567890")));
         }
         {
@@ -392,9 +392,9 @@ mod tests {
                 .begin_read(2)
                 .await
                 .unwrap();
-            assert_eq!(&reader.labels()["c"], "d,f");
-            assert_eq!(reader.content_type(), "text/plain");
-            assert_eq!(reader.content_length(), 20);
+            assert_eq!(&reader.meta().labels()["c"], "d,f");
+            assert_eq!(reader.meta().content_type(), "text/plain");
+            assert_eq!(reader.meta().content_length(), 20);
             assert_eq!(
                 reader.read().await.unwrap(),
                 Ok(Bytes::from("abcdef1234567890abcd"))
@@ -408,9 +408,9 @@ mod tests {
                 .begin_read(10)
                 .await
                 .unwrap();
-            assert!(reader.labels().is_empty());
-            assert_eq!(reader.content_type(), "text/plain");
-            assert_eq!(reader.content_length(), 18);
+            assert!(reader.meta().labels().is_empty());
+            assert_eq!(reader.meta().content_type(), "text/plain");
+            assert_eq!(reader.meta().content_length(), 18);
             assert_eq!(
                 reader.read().await.unwrap(),
                 Ok(Bytes::from("ef1234567890abcdef"))
@@ -482,12 +482,12 @@ mod tests {
             .upgrade_and_unwrap();
         {
             let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
-            assert_eq!(reader.content_length(), 10);
+            assert_eq!(reader.meta().content_length(), 10);
             assert_eq!(reader.read().await.unwrap(), Ok(Bytes::from("1234567890")));
         }
         {
             let mut reader = bucket.begin_read("entry-1", 3).await.unwrap();
-            assert_eq!(reader.content_length(), 18);
+            assert_eq!(reader.meta().content_length(), 18);
             assert_eq!(
                 reader.read().await.unwrap(),
                 Ok(Bytes::from("ef1234567890abcdef"))

@@ -93,7 +93,7 @@ mod tests {
     use crate::api::tests::{components, empty_body, path_to_entry_1};
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
-    use reduct_base::io::RecordMeta;
+    use reduct_base::io::ReadRecord;
     use rstest::*;
 
     use super::*;
@@ -133,9 +133,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(record.labels().len(), 2);
-        assert_eq!(&record.labels()["x"], "z",);
-        assert_eq!(&record.labels()["1"], "2",);
+        assert_eq!(record.meta().labels().len(), 2);
+        assert_eq!(&record.meta().labels()["x"], "z",);
+        assert_eq!(&record.meta().labels()["1"], "2",);
 
         let info = components
             .replication_repo

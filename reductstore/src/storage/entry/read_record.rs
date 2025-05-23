@@ -62,7 +62,7 @@ mod tests {
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use bytes::Bytes;
     use reduct_base::error::ReductError;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;
@@ -206,6 +206,6 @@ mod tests {
         }
 
         let reader = entry.begin_read(30 * step).wait().unwrap();
-        assert_eq!(reader.timestamp(), 3000000);
+        assert_eq!(reader.meta().timestamp(), 3000000);
     }
 }

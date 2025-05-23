@@ -387,7 +387,7 @@ mod tests {
         use super::*;
 
         use reduct_base::error::ErrorCode;
-        use reduct_base::io::RecordMeta;
+        use reduct_base::io::ReadRecord;
         use reduct_base::{no_content, not_found};
         use std::thread::sleep;
 
@@ -412,15 +412,15 @@ mod tests {
 
                 {
                     let reader = rx.blocking_recv().unwrap().unwrap();
-                    assert_eq!(reader.timestamp(), 1000000);
+                    assert_eq!(reader.meta().timestamp(), 1000000);
                 }
                 {
                     let reader = rx.blocking_recv().unwrap().unwrap();
-                    assert_eq!(reader.timestamp(), 2000000);
+                    assert_eq!(reader.meta().timestamp(), 2000000);
                 }
                 {
                     let reader = rx.blocking_recv().unwrap().unwrap();
-                    assert_eq!(reader.timestamp(), 3000000);
+                    assert_eq!(reader.meta().timestamp(), 3000000);
                 }
 
                 assert_eq!(
@@ -454,7 +454,7 @@ mod tests {
                 let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
                 let mut rx = rx.blocking_write();
                 let reader = rx.blocking_recv().unwrap().unwrap();
-                assert_eq!(reader.timestamp(), 1000000);
+                assert_eq!(reader.meta().timestamp(), 1000000);
                 assert_eq!(
                     rx.blocking_recv().unwrap().err(),
                     Some(no_content!("No content"))
@@ -476,7 +476,7 @@ mod tests {
                         Err(e) => panic!("Unexpected error: {:?}", e),
                     }
                 };
-                assert_eq!(reader.timestamp(), 2000000);
+                assert_eq!(reader.meta().timestamp(), 2000000);
             }
 
             sleep(Duration::from_millis(1700));

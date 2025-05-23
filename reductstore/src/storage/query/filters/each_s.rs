@@ -24,7 +24,7 @@ impl EachSecondFilter {
 }
 
 impl RecordFilter for EachSecondFilter {
-    fn filter(&mut self, record: &dyn RecordMeta) -> Result<bool, ReductError> {
+    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
         let ret = record.timestamp() as i64 - self.last_time >= (self.s * 1_000_000.0) as i64;
         if ret {
             self.last_time = record.timestamp().clone() as i64;
@@ -37,39 +37,22 @@ impl RecordFilter for EachSecondFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::proto::Record;
-    use crate::storage::query::filters::tests::RecordWrapper;
-    use prost_wkt_types::Timestamp;
+
     use rstest::*;
 
     #[rstest]
     fn test_each_s_filter() {
         let mut filter = EachSecondFilter::new(2.0);
-        let mut record = Record::default();
-        record.timestamp = Some(Timestamp {
-            seconds: 1,
-            nanos: 0,
-        });
+        let meta = RecordMeta::builder().timestamp(1000_000).build();
 
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(filter.filter(&wrapper).unwrap());
-        assert!(!filter.filter(&wrapper).unwrap());
+        assert!(filter.filter(&meta).unwrap());
+        assert!(!filter.filter(&meta).unwrap());
 
-        record.timestamp = Some(Timestamp {
-            seconds: 2,
-            nanos: 0,
-        });
+        let meta = RecordMeta::builder().timestamp(2000_000).build();
+        assert!(!filter.filter(&meta).unwrap());
 
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(!filter.filter(&wrapper).unwrap());
-
-        record.timestamp = Some(Timestamp {
-            seconds: 3,
-            nanos: 0,
-        });
-
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(filter.filter(&wrapper).unwrap());
-        assert!(!filter.filter(&wrapper).unwrap());
+        let meta = RecordMeta::builder().timestamp(3000_000).build();
+        assert!(filter.filter(&meta).unwrap());
+        assert!(!filter.filter(&meta).unwrap());
     }
 }

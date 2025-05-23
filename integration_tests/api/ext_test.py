@@ -25,4 +25,4 @@ def test__select_ext(base_url, bucket, session):
     resp = session.get(f"{base_url}/b/{bucket}/entry/batch?q={query_id}")
     assert resp.status_code == 200
 
-    assert resp.headers["x-reduct-time-1"] == "2,application/octet-stream,@a=1"
+    assert resp.headers["x-reduct-time-1"] == "2,text/csv,@a=1"

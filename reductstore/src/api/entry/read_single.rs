@@ -22,7 +22,7 @@ use crate::storage::query::QueryRx;
 use futures_util::Future;
 use hyper::http::HeaderValue;
 use reduct_base::bad_request;
-use reduct_base::io::{ReadRecord, RecordMeta};
+use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
 use std::i64;
 use std::pin::{pin, Pin};
@@ -70,7 +70,8 @@ async fn fetch_and_response_single_record(
     let make_headers = |record_reader: &RecordReader| {
         let mut headers = HeaderMap::new();
 
-        for (k, v) in record_reader.labels() {
+        let meta = record_reader.meta();
+        for (k, v) in meta.labels() {
             headers.insert(
                 format!("x-reduct-label-{}", k)
                     .parse::<HeaderName>()
@@ -81,20 +82,11 @@ async fn fetch_and_response_single_record(
 
         headers.insert(
             "content-type",
-            HeaderValue::from_str(record_reader.content_type()).unwrap(),
+            HeaderValue::from_str(meta.content_type()).unwrap(),
         );
-        headers.insert(
-            "content-length",
-            HeaderValue::from(record_reader.content_length()),
-        );
-        headers.insert(
-            "x-reduct-time",
-            HeaderValue::from(record_reader.timestamp()),
-        );
-        headers.insert(
-            "x-reduct-last",
-            HeaderValue::from(i64::from(record_reader.last())),
-        );
+        headers.insert("content-length", HeaderValue::from(meta.content_length()));
+        headers.insert("x-reduct-time", HeaderValue::from(meta.timestamp()));
+        headers.insert("x-reduct-last", HeaderValue::from(i64::from(meta.last())));
         headers
     };
 

@@ -8,22 +8,156 @@ use tokio::runtime::Handle;
 pub type WriteChunk = Result<Option<Bytes>, ReductError>;
 pub type ReadChunk = Option<Result<Bytes, ReductError>>;
 
-pub trait RecordMeta {
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordMeta {
+    timestamp: u64,
+    state: i32,
+    labels: Labels,
+    content_type: String,
+    content_length: u64,
+    computed_labels: Labels,
+    last: bool,
+}
+
+pub struct BuilderRecordMeta {
+    timestamp: u64,
+    state: i32,
+    labels: Labels,
+    content_type: String,
+    content_length: u64,
+    computed_labels: Labels,
+    last: bool,
+}
+
+impl BuilderRecordMeta {
+    pub fn timestamp(mut self, timestamp: u64) -> Self {
+        self.timestamp = timestamp;
+        self
+    }
+
+    pub fn state(mut self, state: i32) -> Self {
+        self.state = state;
+        self
+    }
+
+    pub fn labels(mut self, labels: Labels) -> Self {
+        self.labels = labels;
+        self
+    }
+
+    pub fn content_type(mut self, content_type: String) -> Self {
+        self.content_type = content_type;
+        self
+    }
+
+    pub fn content_length(mut self, content_length: u64) -> Self {
+        self.content_length = content_length;
+        self
+    }
+
+    pub fn computed_labels(mut self, computed_labels: Labels) -> Self {
+        self.computed_labels = computed_labels;
+        self
+    }
+
+    pub fn last(mut self, last: bool) -> Self {
+        self.last = last;
+        self
+    }
+
+    /// Builds a `RecordMeta` instance from the builder.
+    pub fn build(self) -> RecordMeta {
+        RecordMeta {
+            timestamp: self.timestamp,
+            state: self.state,
+            labels: self.labels,
+            content_type: self.content_type,
+            content_length: self.content_length,
+            computed_labels: self.computed_labels,
+            last: self.last,
+        }
+    }
+}
+
+impl RecordMeta {
+    /// Creates a builder for a new `RecordMeta` instance.
+    pub fn builder() -> BuilderRecordMeta {
+        BuilderRecordMeta {
+            timestamp: 0,
+            state: 0,
+            labels: Labels::new(),
+            content_type: "application/octet-stream".to_string(),
+            content_length: 0,
+            computed_labels: Labels::new(),
+            last: false,
+        }
+    }
+
+    /// Creates a builder from an existing `RecordMeta` instance.
+    pub fn builder_from(meta: RecordMeta) -> BuilderRecordMeta {
+        BuilderRecordMeta {
+            timestamp: meta.timestamp,
+            state: meta.state,
+            labels: meta.labels,
+            content_type: meta.content_type,
+            content_length: meta.content_length,
+            computed_labels: meta.computed_labels,
+            last: meta.last,
+        }
+    }
+
     /// Returns the timestamp of the record as Unix time in microseconds.
-    fn timestamp(&self) -> u64;
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
 
     /// Returns the labels associated with the record.
-    fn labels(&self) -> &Labels;
+    pub fn labels(&self) -> &Labels {
+        &self.labels
+    }
 
     /// For filtering unfinished records.
-    fn state(&self) -> i32 {
-        0
+    pub fn state(&self) -> i32 {
+        self.state
+    }
+
+    /// Returns true if this is the last record in the stream.
+    pub fn last(&self) -> bool {
+        self.last
+    }
+
+    /// Returns computed labels associated with the record.
+    ///
+    /// Computed labels are labels that are added by query processing and are not part of the original record.
+    pub fn computed_labels(&self) -> &Labels {
+        &self.computed_labels
+    }
+
+    /// Returns the labels associated with the record.
+    ///
+    /// Computed labels are labels that are added by query processing and are not part of the original record.
+    pub fn computed_labels_mut(&mut self) -> &mut Labels {
+        &mut self.computed_labels
+    }
+
+    /// Returns the length of the record content in bytes.
+    pub fn content_length(&self) -> u64 {
+        self.content_length
+    }
+
+    /// Returns the content type of the record as a MIME type.
+    pub fn content_type(&self) -> &str {
+        &self.content_type
+    }
+
+    pub fn set_last(&mut self, last: bool) {
+        self.last = last;
     }
 }
 
 /// Represents a record in the storage engine that can be read as a stream of bytes.
 #[async_trait]
-pub trait ReadRecord: RecordMeta {
+pub trait ReadRecord {
     /// Reads a chunk of the record content.
     ///
     /// # Returns
@@ -55,24 +189,8 @@ pub trait ReadRecord: RecordMeta {
         Handle::current().block_on(self.read())
     }
 
-    /// Returns true if this is the last record in the stream.
-    fn last(&self) -> bool;
-
-    /// Returns computed labels associated with the record.
-    ///
-    /// Computed labels are labels that are added by query processing and are not part of the original record.
-    fn computed_labels(&self) -> &Labels;
-
-    /// Returns the labels associated with the record.
-    ///
-    /// Computed labels are labels that are added by query processing and are not part of the original record.
-    fn computed_labels_mut(&mut self) -> &mut Labels;
-
-    /// Returns the length of the record content in bytes.
-    fn content_length(&self) -> u64;
-
-    /// Returns the content type of the record as a MIME type.
-    fn content_type(&self) -> &str;
+    /// Returns meta information about the record.
+    fn meta(&self) -> &RecordMeta;
 }
 
 #[async_trait]
@@ -94,6 +212,7 @@ pub trait WriteRecord {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
     use rstest::rstest;
 
     use tokio::task::spawn_blocking;
@@ -102,7 +221,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_blocking_read() {
         let result = spawn_blocking(move || {
-            let mut record = MockRecord {};
+            let mut record = MockRecord::new();
             record.blocking_read()
         });
         assert_eq!(
@@ -114,7 +233,7 @@ pub(crate) mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_default_read_timeout() {
-        let mut record = MockRecord {};
+        let mut record = MockRecord::new();
         let result = record.read_timeout(Duration::from_secs(1)).await;
         assert_eq!(result.unwrap(), Ok(Bytes::from_static(b"test")));
 
@@ -125,15 +244,68 @@ pub(crate) mod tests {
         );
     }
 
-    pub struct MockRecord {}
+    mod meta {
+        use super::*;
 
-    impl RecordMeta for MockRecord {
-        fn timestamp(&self) -> u64 {
-            todo!()
+        #[rstest]
+        fn test_builder() {
+            let meta = RecordMeta::builder()
+                .timestamp(1234567890)
+                .state(1)
+                .labels(Labels::new())
+                .content_type("application/json".to_string())
+                .content_length(1024)
+                .computed_labels(Labels::new())
+                .last(true)
+                .build();
+
+            assert_eq!(meta.timestamp(), 1234567890);
+            assert_eq!(meta.state(), 1);
+            assert_eq!(meta.content_type(), "application/json");
+            assert_eq!(meta.content_length(), 1024);
+            assert_eq!(meta.last(), true);
         }
 
-        fn labels(&self) -> &Labels {
-            todo!()
+        #[rstest]
+        fn test_builder_from() {
+            let meta = RecordMeta::builder()
+                .timestamp(1234567890)
+                .state(1)
+                .labels(Labels::new())
+                .content_type("application/json".to_string())
+                .content_length(1024)
+                .computed_labels(Labels::new())
+                .last(true)
+                .build();
+
+            let builder = RecordMeta::builder_from(meta.clone());
+            let new_meta = builder.build();
+
+            assert_eq!(new_meta.timestamp(), 1234567890);
+            assert_eq!(new_meta.state(), 1);
+            assert_eq!(new_meta.content_type(), "application/json");
+            assert_eq!(new_meta.content_length(), 1024);
+            assert_eq!(new_meta.last(), true);
+        }
+    }
+
+    pub struct MockRecord {
+        metadata: RecordMeta,
+    }
+
+    impl MockRecord {
+        pub fn new() -> Self {
+            Self {
+                metadata: RecordMeta::builder()
+                    .timestamp(0)
+                    .state(0)
+                    .labels(Labels::new())
+                    .content_type("application/octet-stream".to_string())
+                    .content_length(0)
+                    .computed_labels(Labels::new())
+                    .last(false)
+                    .build(),
+            }
         }
     }
 
@@ -144,24 +316,8 @@ pub(crate) mod tests {
             Some(Ok(Bytes::from("test")))
         }
 
-        fn last(&self) -> bool {
-            todo!()
-        }
-
-        fn computed_labels(&self) -> &Labels {
-            todo!()
-        }
-
-        fn computed_labels_mut(&mut self) -> &mut Labels {
-            todo!()
-        }
-
-        fn content_length(&self) -> u64 {
-            todo!()
-        }
-
-        fn content_type(&self) -> &str {
-            todo!()
+        fn meta(&self) -> &RecordMeta {
+            &self.metadata
         }
     }
 }

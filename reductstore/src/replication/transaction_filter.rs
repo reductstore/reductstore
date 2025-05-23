@@ -4,7 +4,6 @@
 use log::warn;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::ReplicationSettings;
-use reduct_base::Labels;
 
 use crate::replication::TransactionNotification;
 use crate::storage::query::condition::Parser;
@@ -19,13 +18,13 @@ pub(super) struct TransactionFilter {
     query_filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
 }
 
-impl RecordMeta for TransactionNotification {
-    fn timestamp(&self) -> u64 {
-        self.event.timestamp().clone()
-    }
-
-    fn labels(&self) -> &Labels {
-        &self.labels
+impl Into<RecordMeta> for TransactionNotification {
+    fn into(self) -> RecordMeta {
+        RecordMeta::builder()
+            .timestamp(self.event.into_timestamp())
+            .state(0)
+            .labels(self.labels)
+            .build()
     }
 }
 
@@ -110,7 +109,8 @@ impl TransactionFilter {
 
         // filter out notifications
         for filter in self.query_filters.iter_mut() {
-            match filter.filter(notification) {
+            let meta: RecordMeta = notification.clone().into();
+            match filter.filter(&meta) {
                 Ok(false) => return false,
                 Err(err) => {
                     warn!("Error filtering transaction notification: {}", err);
@@ -320,9 +320,10 @@ mod tests {
 
         #[rstest]
         fn test_filter_point(notification: TransactionNotification) {
-            assert_eq!(notification.timestamp(), 0);
-            assert_eq!(notification.labels(), &notification.labels);
-            assert_eq!(notification.state(), 0);
+            let meta: RecordMeta = notification.clone().into();
+            assert_eq!(meta.timestamp(), 0);
+            assert_eq!(meta.labels(), &notification.labels);
+            assert_eq!(meta.state(), 0);
         }
     }
 

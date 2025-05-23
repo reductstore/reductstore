@@ -52,7 +52,7 @@ mod tests {
     use super::*;
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::ReadRecord;
     use rstest::rstest;
 
     #[rstest]
@@ -68,8 +68,8 @@ mod tests {
         .unwrap();
 
         let reader = query.next(block_manager.clone()).unwrap();
-        assert_eq!(reader.timestamp(), 0);
-        assert!(reader.last());
+        assert_eq!(reader.meta().timestamp(), 0);
+        assert!(reader.meta().last());
 
         assert_eq!(
             query.next(block_manager).err(),

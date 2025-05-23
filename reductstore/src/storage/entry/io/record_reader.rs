@@ -4,14 +4,14 @@
 use crate::core::file_cache::FileWeak;
 use crate::core::thread_pool::shared_child_isolated;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
-use crate::storage::proto::{ts_to_us, Record};
+use crate::storage::proto::Record;
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
-use reduct_base::{internal_server_error, timeout, Labels};
+use reduct_base::{internal_server_error, timeout};
 use std::cmp::min;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
@@ -25,13 +25,7 @@ use tokio::sync::mpsc::{channel, Sender};
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     rx: Option<RecordRx>,
-    timestamp: u64,
-    content_type: String,
-    length: u64,
-    last: bool,
-    labels: Labels,
-    computed_labels: Labels,
-    state: i32,
+    meta: RecordMeta,
 }
 
 struct ReadContext {
@@ -129,20 +123,9 @@ impl RecordReader {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks
     pub fn form_record(record: Record, last: bool) -> Self {
-        RecordReader {
-            rx: None,
-            timestamp: ts_to_us(record.timestamp.as_ref().unwrap()),
-            length: record.end - record.begin,
-            content_type: record.content_type.clone(),
-            labels: record
-                .labels
-                .into_iter()
-                .map(|l| (l.name, l.value))
-                .collect(),
-            computed_labels: Labels::new(),
-            state: record.state,
-            last,
-        }
+        let mut meta: RecordMeta = record.into();
+        meta.set_last(last);
+        RecordReader { rx: None, meta }
     }
 
     pub fn form_record_with_rx(rx: RecordRx, record: Record, last: bool) -> Self {
@@ -152,7 +135,7 @@ impl RecordReader {
     }
 
     pub fn set_last(&mut self, last: bool) {
-        self.last = last;
+        self.meta.set_last(last);
     }
 
     fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
@@ -217,20 +200,6 @@ impl RecordReader {
     }
 }
 
-impl RecordMeta for RecordReader {
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-
-    fn labels(&self) -> &Labels {
-        &self.labels
-    }
-
-    fn state(&self) -> i32 {
-        self.state
-    }
-}
-
 #[async_trait]
 impl ReadRecord for RecordReader {
     async fn read(&mut self) -> ReadChunk {
@@ -259,24 +228,8 @@ impl ReadRecord for RecordReader {
         }
     }
 
-    fn last(&self) -> bool {
-        self.last
-    }
-
-    fn computed_labels(&self) -> &Labels {
-        &self.computed_labels
-    }
-
-    fn computed_labels_mut(&mut self) -> &mut Labels {
-        &mut self.computed_labels
-    }
-
-    fn content_length(&self) -> u64 {
-        self.length
-    }
-
-    fn content_type(&self) -> &str {
-        &self.content_type
+    fn meta(&self) -> &RecordMeta {
+        &self.meta
     }
 }
 
@@ -383,6 +336,7 @@ mod tests {
 
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
+
         use prost_wkt_types::Timestamp;
         use std::time::Duration;
 
@@ -446,19 +400,7 @@ mod tests {
         fn test_state(mut record: Record) {
             record.state = 1;
             let reader = RecordReader::form_record(record, false);
-            assert_eq!(reader.state(), 1);
-        }
-
-        #[rstest]
-        fn test_computed_labels(record: Record) {
-            let mut reader = RecordReader::form_record(record, false);
-            reader
-                .computed_labels_mut()
-                .insert("key".to_string(), "value".to_string());
-            assert_eq!(
-                reader.computed_labels(),
-                &Labels::from([("key".to_string(), "value".to_string())])
-            );
+            assert_eq!(reader.meta().state(), 1);
         }
 
         #[rstest]
