@@ -76,7 +76,7 @@ mod tests {
             .upgrade()
             .unwrap();
         let mut rx = rx.write().await;
-        assert!(rx.recv().await.unwrap().unwrap().last());
+        assert!(rx.recv().await.unwrap().unwrap().meta().last());
         assert_eq!(
             rx.recv().await.unwrap().err().unwrap().status,
             ErrorCode::NoContent

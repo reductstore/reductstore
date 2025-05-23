@@ -321,7 +321,7 @@ mod tests {
 
         #[rstest]
         fn test_filter_point(notification: TransactionNotification) {
-            let meta: RecordMeta = notification.into();
+            let meta: RecordMeta = notification.clone().into();
             assert_eq!(meta.timestamp(), 0);
             assert_eq!(meta.labels(), &notification.labels);
             assert_eq!(meta.state(), 0);

@@ -179,7 +179,7 @@ mod tests {
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
-    use reduct_base::io::RecordMeta;
+    use reduct_base::io::{ReadRecord, RecordMeta};
     use rstest::*;
     use test_log::test as log_test;
     use tokio::time::timeout;
@@ -241,8 +241,8 @@ mod tests {
             options,
             block_manager.clone(),
         );
-        assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 0);
-        assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 1);
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
         assert_eq!(timeout(Duration::from_millis(1000), handle).await, Ok(()));
     }
@@ -263,8 +263,8 @@ mod tests {
             options,
             block_manager.clone(),
         );
-        assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 0);
-        assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 1);
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
 
         block_manager
@@ -286,7 +286,7 @@ mod tests {
                 content_type: "".to_string(),
             });
 
-        assert_eq!(rx.recv().await.unwrap().unwrap().timestamp(), 2);
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 2);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
         assert!(
             timeout(Duration::from_millis(1000), handle).await.is_err(),

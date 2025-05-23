@@ -100,7 +100,7 @@ mod tests {
     use axum::response::IntoResponse;
     use axum_extra::headers::HeaderValue;
     use bytes::Bytes;
-    use reduct_base::io::RecordMeta;
+    use reduct_base::io::ReadRecord;
     use rstest::rstest;
 
     #[rstest]
@@ -192,9 +192,9 @@ mod tests {
                 .begin_read(0)
                 .await
                 .unwrap();
-            assert_eq!(reader.labels().len(), 2);
-            assert_eq!(&reader.labels()["x"], "z");
-            assert_eq!(&reader.labels()["1"], "2");
+            assert_eq!(reader.meta().labels().len(), 2);
+            assert_eq!(&reader.meta().labels()["x"], "z");
+            assert_eq!(&reader.meta().labels()["1"], "2");
         }
 
         assert_eq!(err_map.len(), 0);

@@ -2,6 +2,7 @@ use crate::error::ReductError;
 use crate::{internal_server_error, Labels};
 use async_trait::async_trait;
 use bytes::Bytes;
+use log::Metadata;
 use std::time::Duration;
 use tokio::runtime::Handle;
 
@@ -87,6 +88,18 @@ impl RecordMeta {
             content_length: 0,
             computed_labels: Labels::new(),
             last: false,
+        }
+    }
+
+    pub fn builder_from(meta: RecordMeta) -> BuilderRecordMeta {
+        BuilderRecordMeta {
+            timestamp: meta.timestamp,
+            state: meta.state,
+            labels: meta.labels,
+            content_type: meta.content_type,
+            content_length: meta.content_length,
+            computed_labels: meta.computed_labels,
+            last: meta.last,
         }
     }
 

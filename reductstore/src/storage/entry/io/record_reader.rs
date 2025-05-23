@@ -337,6 +337,7 @@ mod tests {
 
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
+        use base64::engine::DecodePaddingMode::RequireCanonical;
         use prost_wkt_types::Timestamp;
         use std::time::Duration;
 
@@ -400,19 +401,7 @@ mod tests {
         fn test_state(mut record: Record) {
             record.state = 1;
             let reader = RecordReader::form_record(record, false);
-            assert_eq!(reader.state(), 1);
-        }
-
-        #[rstest]
-        fn test_computed_labels(record: Record) {
-            let mut reader = RecordReader::form_record(record, false);
-            reader
-                .computed_labels_mut()
-                .insert("key".to_string(), "value".to_string());
-            assert_eq!(
-                reader.computed_labels(),
-                &Labels::from([("key".to_string(), "value".to_string())])
-            );
+            assert_eq!(reader.meta().state(), 1);
         }
 
         #[rstest]

@@ -68,8 +68,8 @@ mod tests {
         .unwrap();
 
         let reader = query.next(block_manager.clone()).unwrap();
-        assert_eq!(reader.timestamp(), 0);
-        assert!(reader.last());
+        assert_eq!(reader.meta().timestamp(), 0);
+        assert!(reader.meta().last());
 
         assert_eq!(
             query.next(block_manager).err(),

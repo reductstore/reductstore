@@ -206,6 +206,6 @@ mod tests {
         }
 
         let reader = entry.begin_read(30 * step).wait().unwrap();
-        assert_eq!(reader.timestamp(), 3000000);
+        assert_eq!(reader.meta().timestamp(), 3000000);
     }
 }

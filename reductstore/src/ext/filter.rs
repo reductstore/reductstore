@@ -73,76 +73,95 @@ mod tests {
     use crate::ext::ext_repository::tests::{mocked_record, MockRecord};
     use crate::storage::query::condition::Parser;
 
+    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::Labels;
     use rstest::rstest;
     use serde_json::json;
 
     #[rstest]
     fn pass_status_if_condition_none(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(None);
-        assert!(filter.filter_record(mocked_record, false).unwrap().is_ok())
+        let mut filter = ExtWhenFilter::new(None, false);
+        assert!(filter.filter_record(mocked_record).unwrap().is_ok())
     }
 
     #[rstest]
     fn not_ready_if_condition_false(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(Some(
-            Parser::new()
-                .parse(&json!({"$and": [false, "@key1"]}))
-                .unwrap(),
-        ));
-        assert!(filter.filter_record(mocked_record, true).is_none())
+        let mut filter = ExtWhenFilter::new(
+            Some(
+                Parser::new()
+                    .parse(&json!({"$and": [false, "@key1"]}))
+                    .unwrap(),
+            ),
+            true,
+        );
+        assert!(filter.filter_record(mocked_record).is_none())
     }
 
     #[rstest]
     fn ready_if_condition_true(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(Some(
-            Parser::new()
-                .parse(&json!({"$and": [true, "@key1"]}))
-                .unwrap(),
-        ));
-        assert!(filter.filter_record(mocked_record, true).unwrap().is_ok())
+        let mut filter = ExtWhenFilter::new(
+            Some(
+                Parser::new()
+                    .parse(&json!({"$and": [true, "@key1"]}))
+                    .unwrap(),
+            ),
+            true,
+        );
+        assert!(filter.filter_record(mocked_record).unwrap().is_ok())
     }
 
     #[rstest]
     fn ready_with_error_strict(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(Some(
-            Parser::new()
-                .parse(&json!({"$and": [true, "@not-exit"]}))
-                .unwrap(),
-        ));
-        assert!(filter.filter_record(mocked_record, true).unwrap().is_err())
+        let mut filter = ExtWhenFilter::new(
+            Some(
+                Parser::new()
+                    .parse(&json!({"$and": [true, "@not-exit"]}))
+                    .unwrap(),
+            ),
+            true,
+        );
+        assert!(filter.filter_record(mocked_record).unwrap().is_err())
     }
 
     #[rstest]
     fn ready_without_error(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(Some(
-            Parser::new()
-                .parse(&json!({"$and": [true, "@not-exit"]}))
-                .unwrap(),
-        ));
+        let mut filter = ExtWhenFilter::new(
+            Some(
+                Parser::new()
+                    .parse(&json!({"$and": [true, "@not-exit"]}))
+                    .unwrap(),
+            ),
+            false,
+        );
         assert!(
-            filter.filter_record(mocked_record, false).is_none(),
+            filter.filter_record(mocked_record).is_none(),
             "ignore bad condition"
         )
     }
 
     #[rstest]
     fn conflict(mut mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(Some(
-            Parser::new()
-                .parse(&json!({"$and": [true, "@key1"]}))
-                .unwrap(),
-        ));
+        let mut filter = ExtWhenFilter::new(
+            Some(
+                Parser::new()
+                    .parse(&json!({"$and": [true, "@key1"]}))
+                    .unwrap(),
+            ),
+            true,
+        );
 
-        mocked_record
-            .labels_mut()
-            .insert("key1".to_string(), "value1".to_string()); // conflicts with computed key1
+        let meta = RecordMeta::builder()
+            .labels(Labels::from_iter(vec![(
+                "key1".to_string(),
+                "value1".to_string(),
+            )]))
+            .computed_labels(mocked_record.meta().computed_labels().clone())
+            .build();
+
+        *mocked_record.meta_mut() = meta;
 
         assert_eq!(
-            filter
-                .filter_record(mocked_record, true)
-                .unwrap()
-                .err()
-                .unwrap(),
+            filter.filter_record(mocked_record).unwrap().err().unwrap(),
             conflict!("Computed label '@key1' already exists")
         )
     }

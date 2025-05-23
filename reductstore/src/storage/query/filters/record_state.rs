@@ -38,30 +38,20 @@ mod tests {
     use super::*;
     use crate::storage::proto::record::State;
     use crate::storage::proto::Record;
-    use crate::storage::query::filters::tests::RecordWrapper;
     use rstest::*;
 
     #[rstest]
     fn test_record_state_filter() {
         let mut filter = RecordStateFilter::new(State::Finished);
-        let record = Record {
-            state: State::Finished as i32,
-            ..Default::default()
-        };
 
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(filter.filter(&wrapper).unwrap(), "Record should pass");
+        let meta = RecordMeta::builder().state(State::Finished as i32).build();
+        assert!(filter.filter(&meta).unwrap(), "Record should pass");
     }
 
     #[rstest]
     fn test_record_state_filter_no_records() {
         let mut filter = RecordStateFilter::new(State::Finished);
-        let record = Record {
-            state: State::Started as i32,
-            ..Default::default()
-        };
-
-        let wrapper = RecordWrapper::from(record.clone());
-        assert!(!filter.filter(&wrapper).unwrap(), "Record should not pass");
+        let meta = RecordMeta::builder().state(State::Started as i32).build();
+        assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
     }
 }

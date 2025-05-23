@@ -34,19 +34,3 @@ use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 pub(crate) use time_range::TimeRangeFilter;
 pub(crate) use when::WhenFilter;
-
-#[cfg(test)]
-mod tests {
-    use crate::storage::proto::ts_to_us;
-    use prost_wkt_types::Timestamp;
-    use reduct_base::io::RecordMeta;
-    use reduct_base::Labels;
-
-    // Wrapper for Record to implement RecordMeta
-    // and use it in filter tests
-    pub(super) struct RecordWrapper {
-        timestamp: u64,
-        labels: Labels,
-        state: i32,
-    }
-}

@@ -79,7 +79,7 @@ mod tests {
         .unwrap();
         {
             let reader = query.next(block_manager.clone()).unwrap();
-            assert_eq!(reader.timestamp(), 1000);
+            assert_eq!(reader.meta().timestamp(), 1000);
         }
         assert_eq!(
             query.next(block_manager.clone()).err(),

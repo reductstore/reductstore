@@ -450,21 +450,19 @@ mod tests {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             assert!(
-                matches!(
-                    timeout(
-                        Duration::from_secs(1),
-                        next_record_reader(
-                            1,
-                            rx.clone(),
-                            "",
-                            Duration::from_millis(10),
-                            &ext_repository
-                        )
+                timeout(
+                    Duration::from_secs(1),
+                    next_record_reader(
+                        1,
+                        rx.clone(),
+                        "",
+                        Duration::from_millis(10),
+                        &ext_repository
                     )
-                    .await
-                    .unwrap(),
-                    ProcessStatus::Stop,
-                ),
+                )
+                .await
+                .unwrap()
+                .is_none(),
                 "should return None if the query is closed"
             );
         }
@@ -476,21 +474,19 @@ mod tests {
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
             assert!(
-                matches!(
-                    timeout(
-                        Duration::from_secs(1),
-                        next_record_reader(
-                            1,
-                            rx.clone(),
-                            "",
-                            Duration::from_millis(0),
-                            &ext_repository
-                        )
+                timeout(
+                    Duration::from_secs(1),
+                    next_record_reader(
+                        1,
+                        rx.clone(),
+                        "",
+                        Duration::from_millis(0),
+                        &ext_repository
                     )
-                    .await
-                    .unwrap(),
-                    ProcessStatus::Stop
-                ),
+                )
+                .await
+                .unwrap()
+                .is_none(),
                 "should return None if the query is closed"
             );
         }
@@ -499,17 +495,14 @@ mod tests {
     #[rstest]
     fn test_batch_compute_labels() {
         let mut record = MockRecord::new();
-        record.expect_timestamp().return_const(1000u64);
-        record.expect_content_length().return_const(100u64);
-        record
-            .expect_content_type()
-            .return_const("text/plain".to_string());
-        record
-            .expect_labels()
-            .return_const(Labels::from_iter(vec![("a".to_string(), "b".to_string())]));
-        record
-            .expect_computed_labels()
-            .return_const(Labels::from_iter(vec![("x".to_string(), "y".to_string())]));
+        let meta = RecordMeta::builder()
+            .timestamp(1000u64)
+            .labels(Labels::from_iter(vec![("a".to_string(), "b".to_string())]))
+            .computed_labels(Labels::from_iter(vec![("x".to_string(), "y".to_string())]))
+            .content_length(100u64)
+            .content_type("text/plain".to_string())
+            .build();
+        record.expect_meta().return_const(meta);
 
         let record: BoxedReadRecord = Box::new(record);
 

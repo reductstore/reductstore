@@ -376,7 +376,7 @@ pub fn create_ext_repository(
 pub(super) mod tests {
     use super::*;
     use futures_util::Stream;
-    use reduct_base::ext::IoExtensionInfo;
+    use reduct_base::ext::{Commiter, IoExtensionInfo, Processor};
     use reqwest::blocking::get;
     use reqwest::StatusCode;
     use rstest::{fixture, rstest};
@@ -511,7 +511,11 @@ pub(super) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_with_ext_part(mut mock_ext: MockIoExtension) {
+        async fn test_with_ext_part(
+            mut mock_ext: MockIoExtension,
+            processor: BoxedProcessor,
+            commiter: BoxedCommiter,
+        ) {
             let query = QueryEntry {
                 ext: Some(json!({
                     "test-ext": {},
@@ -520,9 +524,9 @@ pub(super) mod tests {
             };
 
             mock_ext
-                .expect_register_query()
-                .with(eq(1), eq("bucket"), eq("entry"), eq(query.clone()))
-                .return_const(Ok(()));
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), eq(query.clone()))
+                .return_once(|_, _, _| Ok((processor, commiter)));
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
 
@@ -546,7 +550,7 @@ pub(super) mod tests {
                 when: Some(json!({"@label": { "$eq": "value" }})),
                 ..Default::default()
             };
-            mock_ext.expect_register_query().never();
+            mock_ext.expect_query().never();
 
             let mocked_ext_repo = mocked_ext_repo("test", mock_ext);
 
@@ -574,17 +578,14 @@ pub(super) mod tests {
             };
 
             mock_ext
-                .expect_register_query()
-                .with(ge(1), eq("bucket"), eq("entry"), eq(query.clone()))
-                .return_const(Ok(()));
-            mock_ext
-                .expect_unregister_query()
-                .with(eq(1))
-                .return_const(Ok(()));
-            mock_ext
-                .expect_unregister_query()
-                .with(eq(2))
-                .return_const(Ok(()));
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), eq(query.clone()))
+                .return_once(|_, _, _| {
+                    Ok((
+                        Box::new(MockProcessor::new()),
+                        Box::new(MockCommiter::new()),
+                    ))
+                });
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
             assert!(mocked_ext_repo
@@ -627,7 +628,7 @@ pub(super) mod tests {
                 ..Default::default()
             };
 
-            mock_ext.expect_register_query().never();
+            mock_ext.expect_query().never();
 
             let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
             assert_eq!(
@@ -657,10 +658,10 @@ pub(super) mod tests {
             drop(tx);
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
-            assert_matches!(
-                mocked_ext_repo.fetch_and_process_record(1, query_rx).await,
-                ProcessStatus::Stop
-            );
+            assert!(mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .is_none(),);
         }
 
         #[rstest]
@@ -672,9 +673,14 @@ pub(super) mod tests {
             tx.send(Err(err.clone())).await.unwrap();
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
-            assert_matches!(
-                mocked_ext_repo.fetch_and_process_record(1, query_rx).await,
-                ProcessStatus::Ready(Err(_))
+            assert_eq!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx)
+                    .await
+                    .unwrap()
+                    .err()
+                    .unwrap(),
+                err
             );
         }
 
@@ -687,10 +693,11 @@ pub(super) mod tests {
             tx.send(Ok(record_reader)).await.unwrap();
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
-            assert_matches!(
-                mocked_ext_repo.fetch_and_process_record(1, query_rx).await,
-                ProcessStatus::Ready(Ok(_))
-            );
+            assert!(mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .unwrap()
+                .is_ok(),);
         }
 
         #[rstest]
@@ -698,12 +705,13 @@ pub(super) mod tests {
         async fn test_process_not_ready(
             record_reader: RecordReader,
             mut mock_ext: MockIoExtension,
+            processor: BoxedProcessor,
+            commiter: BoxedCommiter,
         ) {
-            mock_ext.expect_register_query().return_const(Ok(()));
             mock_ext
-                .expect_process_record()
-                .with(eq(1), predicate::always())
-                .return_once(|_, _| Ok(MockStream::boxed(Poll::Pending)));
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), predicate::always())
+                .return_once(|_, _, _| Ok((processor, commiter)));
 
             let query = QueryEntry {
                 ext: Some(json!({
@@ -723,16 +731,26 @@ pub(super) mod tests {
             tx.send(Ok(record_reader)).await.unwrap();
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
-            let status = mocked_ext_repo.fetch_and_process_record(1, query_rx).await;
-            let NotReady = status else {
-                panic!("Expected ProcessStatus::NotReady");
-            };
+            assert!(mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .is_none());
         }
     }
 
     #[fixture]
     fn mock_ext() -> MockIoExtension {
         MockIoExtension::new()
+    }
+
+    #[fixture]
+    fn commiter() -> BoxedCommiter {
+        Box::new(MockCommiter::new())
+    }
+
+    #[fixture]
+    fn processor() -> BoxedProcessor {
+        Box::new(MockProcessor::new())
     }
 
     #[fixture]
@@ -772,23 +790,37 @@ pub(super) mod tests {
         impl IoExtension for IoExtension {
             fn info(&self) -> &IoExtensionInfo;
 
-            fn register_query(
+
+            fn query(
                 &mut self,
-                query_id: u64,
                 bucket_name: &str,
                 entry_name: &str,
                 query: &QueryEntry,
-            ) -> Result<(), ReductError>;
+            ) -> Result<(BoxedProcessor, BoxedCommiter), ReductError>;
+        }
 
-            fn unregister_query(&mut self, query_id: u64) -> Result<(), ReductError>;
+    }
 
+    mock! {
+        Processor {}
+
+        #[async_trait]
+        impl Processor for Processor {
             async fn process_record(
                 &mut self,
-                query_id: u64,
                 record: BoxedReadRecord,
             ) -> Result<BoxedRecordStream, ReductError>;
         }
+    }
 
+    mock! {
+        Commiter {}
+
+        #[async_trait]
+        impl Commiter for Commiter {
+            async fn commit_record(&mut self, record: BoxedReadRecord) -> Option<Result<BoxedReadRecord, ReductError>>;
+            async fn flush(&mut self) -> Option<Result<BoxedReadRecord, ReductError>>;
+        }
     }
 
     struct MockStream {
@@ -828,6 +860,10 @@ pub(super) mod tests {
                 ))
                 .build();
             MockRecord { meta }
+        }
+
+        pub fn meta_mut(&mut self) -> &mut RecordMeta {
+            &mut self.meta
         }
     }
 
