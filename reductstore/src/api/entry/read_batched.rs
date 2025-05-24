@@ -275,6 +275,7 @@ mod tests {
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
+    use log::info;
     use mockall::mock;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
@@ -286,8 +287,9 @@ mod tests {
     use reduct_base::Labels;
     use rstest::*;
     use tempfile::tempdir;
+    use test_log::test as test_log;
 
-    #[rstest]
+    #[test_log(rstest)]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
     #[tokio::test]
