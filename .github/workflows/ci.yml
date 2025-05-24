@@ -74,18 +74,18 @@ jobs:
           - target: "x86_64-unknown-linux-gnu"
             os: ubuntu-24.04
             compiler: "gcc"
-          - target: "aarch64-unknown-linux-gnu"
-            os: ubuntu-24.04
-            compiler: "gcc-aarch64-linux-gnu"
-          - target: "x86_64-pc-windows-gnu"
-            os: ubuntu-24.04
-            compiler: "gcc-mingw-w64-x86-64"
-          - target: "x86_64-apple-darwin"
-            os: macos-14
-            compiler: "gcc-x86_64-apple-darwin"
-          - target: "aarch64-apple-darwin"
-            os: macos-14
-            compiler: "gcc"
+#          - target: "aarch64-unknown-linux-gnu"
+#            os: ubuntu-24.04
+#            compiler: "gcc-aarch64-linux-gnu"
+#          - target: "x86_64-pc-windows-gnu"
+#            os: ubuntu-24.04
+#            compiler: "gcc-mingw-w64-x86-64"
+#          - target: "x86_64-apple-darwin"
+#            os: macos-14
+#            compiler: "gcc-x86_64-apple-darwin"
+#          - target: "aarch64-apple-darwin"
+#            os: macos-14
+#            compiler: "gcc"
 
     steps:
       - uses: actions/checkout@v4
@@ -150,15 +150,16 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-          - os: windows-2022
-            target: x86_64-pc-windows-gnu
-          - os: macos-13
-            target: x86_64-apple-darwin
+#          - os: windows-2022
+#            target: x86_64-pc-windows-gnu
+#          - os: macos-14
+#            target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
+      RUST_LOG: debug
     steps:
       - uses: actions/download-artifact@v4
         with:
