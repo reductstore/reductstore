@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix hanging test in batch read module, [PR-830](https://github.com/reductstore/reductstore/pull/830)
 
+## [1.15.3] - 2025-05-26
+
+## Fixed
+
+- Fix lock of write channel for small chunks, [PR-834](https://github.com/reductstore/reductstore/pull/834)
+
+
 ## [1.15.2] - 2025-05-21
 
 ### Changed
@@ -1033,7 +1040,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.2...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.3...HEAD
+
+[1.15.3]: https://github.com/reductstore/reductstore/compare/v1.15.2...v1.15.3
 
 [1.15.2]: https://github.com/reductstore/reductstore/compare/v1.15.1...v1.15.2
 

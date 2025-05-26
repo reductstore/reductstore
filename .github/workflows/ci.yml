@@ -20,32 +20,8 @@ env:
   REGISTRY_IMAGE: reduct/store
 
 jobs:
-  run_test:
-    runs-on: macos-14
-    name: Run tests
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - uses: arduino/setup-protoc@v3
-        with:
-          version: "26.x"
-          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-
-      - name: Run tests
-        env:
-          ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
-          RUST_LOG: trace
-        run: cargo test --package reductstore  --release --all-features
-
-
   rust_fmt:
-
     runs-on: ubuntu-latest
-    if: false
     name: Rust Linter
     steps:
       - uses: actions/checkout@v4
