@@ -111,8 +111,8 @@ impl RecordWriter {
         } else {
             // for small records we write the content in the same thread
             // to avoid the overhead of creating a new task
-            // the channel buffer the whole record content, so we need to limit the buffer size for the smallest chunks (8KB)
-            let (tx, rx) = channel(MAX_IO_BUFFER_SIZE / 8_000);
+            // the channel buffers the whole record content, so we need to limit the buffer size for the possible smallest chunks (1 byte)
+            let (tx, rx) = channel(MAX_IO_BUFFER_SIZE);
             RecordWriter {
                 tx,
                 lazy_write: Some((rx, ctx)),
@@ -404,7 +404,7 @@ mod tests {
 
             let result = async {
                 // we overload the channel buffer
-                for _ in 0..100 {
+                for _ in 0..MAX_IO_BUFFER_SIZE + 1 {
                     writer
                         .send_timeout(Ok(Some(Bytes::from("x"))), Duration::from_millis(10))
                         .await?;
