@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fix hanging test in batch read module, [PR-830](https://github.com/reductstore/reductstore/pull/830)
+- Fix hanging query request if no extension registered, [PR-830](https://github.com/reductstore/reductstore/pull/830)
 
 ## [1.15.3] - 2025-05-26
 
