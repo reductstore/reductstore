@@ -142,7 +142,7 @@ impl Storage {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
-        let buckets = self.buckets.read().unwrap();
+        let buckets = self.buckets.read()?;
         match buckets.get(name) {
             Some(bucket) => Ok(Arc::clone(bucket).into()),
             None => Err(ReductError::not_found(

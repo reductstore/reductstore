@@ -320,8 +320,6 @@ mod tests {
             }
         }
 
-        sleep(Duration::from_millis(250)).await; // wait for the writes to complete
-
         let query_id = query(&path_to_entry_1, components.clone()).await;
         let query = Query(HashMap::from_iter(vec![(
             "q".to_string(),
