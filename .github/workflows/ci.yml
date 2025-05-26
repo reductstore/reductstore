@@ -21,7 +21,7 @@ env:
 
 jobs:
   run_test:
-    runs-on: ubuntu-22.04
+    runs-on: macos-14
     name: Run tests
     steps:
       - uses: actions/checkout@v4
