@@ -128,7 +128,7 @@ mod tests {
     #[fixture]
     fn ext_repo(ext_settings: ExtSettings) -> ExtRepository {
         // This is the path to the build directory of the extension from ext_stub crate
-        const EXTENSION_VERSION: &str = "0.2.2";
+        const EXTENSION_VERSION: &str = "0.2.3";
 
         let file_name = if cfg!(target_os = "linux") {
             // This is the path to the build directory of the extension from ext_stub crate
@@ -141,7 +141,7 @@ mod tests {
             }
         } else if cfg!(target_os = "macos") {
             if cfg!(target_arch = "aarch64") {
-                "libtest_ext-arch64-apple-darwin.dylib"
+                "libtest_ext-aarch64-apple-darwin.dylib"
             } else if cfg!(target_arch = "x86_64") {
                 "libtest_ext-x86_64-apple-darwin.dylib"
             } else {
