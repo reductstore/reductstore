@@ -158,7 +158,7 @@ jobs:
     timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
-      RUST_LOG: trace
+      RUST_LOG: debug
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -187,7 +187,7 @@ jobs:
       - rust_fmt
     env:
       CARGO_TERM_COLOR: always
-      RUST_LOG: trace # expand logging
+      RUST_LOG: debug # expand logging
     steps:
       - uses: actions/checkout@v4
 

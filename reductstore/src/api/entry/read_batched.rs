@@ -386,13 +386,13 @@ mod tests {
                 0
             );
         }
-        //
-        // let response = read_batched_records!();
-        // let resp_headers = response.headers();
-        // assert_eq!(
-        //     resp_headers["x-reduct-error"],
-        //     format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
-        // );
+
+        let response = read_batched_records!();
+        let resp_headers = response.headers();
+        assert_eq!(
+            resp_headers["x-reduct-error"],
+            format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
+        );
     }
 
     #[rstest]

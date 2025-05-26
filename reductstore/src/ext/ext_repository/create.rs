@@ -8,9 +8,11 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, ExtSettings};
 use reduct_base::msg::entry_api::QueryEntry;
+use reduct_base::no_content;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
+
 pub fn create_ext_repository(
     external_path: Option<PathBuf>,
     embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
@@ -55,12 +57,19 @@ pub fn create_ext_repository(
                 _query_id: u64,
                 query_rx: Arc<AsyncRwLock<QueryRx>>,
             ) -> Option<Result<BoxedReadRecord, ReductError>> {
-                query_rx
+                let result = query_rx
                     .write()
                     .await
                     .recv()
                     .await
-                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord))
+                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord));
+
+                if result.is_none() {
+                    // If no record is available, return a no content error to finish the query.
+                    return Some(Err(no_content!("")));
+                }
+
+                result
             }
         }
 
