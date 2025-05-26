@@ -37,8 +37,8 @@ jobs:
 
       - name: Run tests
         env:
-            ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
-            RUST_LOG: trace
+          ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
+          RUST_LOG: trace
         run: cargo test --package reductstore  --release --all-features
 
 
