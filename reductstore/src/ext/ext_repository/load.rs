@@ -94,7 +94,7 @@ mod tests {
             info,
             IoExtensionInfo::builder()
                 .name("test-ext")
-                .version("0.1.1")
+                .version("0.2.2")
                 .build()
         );
     }
@@ -128,7 +128,7 @@ mod tests {
     #[fixture]
     fn ext_repo(ext_settings: ExtSettings) -> ExtRepository {
         // This is the path to the build directory of the extension from ext_stub crate
-        const EXTENSION_VERSION: &str = "0.1.1";
+        const EXTENSION_VERSION: &str = "0.2.2";
 
         if !cfg!(target_arch = "x86_64") {
             panic!("Unsupported architecture");
@@ -138,7 +138,7 @@ mod tests {
             // This is the path to the build directory of the extension from ext_stub crate
             "libtest_ext-x86_64-unknown-linux-gnu.so"
         } else if cfg!(target_os = "macos") {
-            "libtest_ext-x86_64-apple-darwin.dylib"
+            "libtest_ext-aarch64-apple-darwin.dylib"
         } else if cfg!(target_os = "windows") {
             "libtest_ext-x86_64-pc-windows-gnu.dll"
         } else {
