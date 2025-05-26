@@ -111,8 +111,8 @@ impl RecordWriter {
         } else {
             // for small records we write the content in the same thread
             // to avoid the overhead of creating a new task
-            // the channel buffer the whole record content, so we need to limit the buffer size for the smallest chunks (8KB)
-            let (tx, rx) = channel(MAX_IO_BUFFER_SIZE / 8_000);
+            // the channel buffer the whole record content, so we need to limit the buffer size for the possible smallest chunks (1byte)
+            let (tx, rx) = channel(MAX_IO_BUFFER_SIZE);
             RecordWriter {
                 tx,
                 lazy_write: Some((rx, ctx)),
