@@ -13,6 +13,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 
+const EXTENSION_VERSION: &str = "0.2.3";
+
 impl ExtRepository {
     pub(super) fn try_load(
         paths: Vec<PathBuf>,
@@ -94,7 +96,7 @@ mod tests {
             info,
             IoExtensionInfo::builder()
                 .name("test-ext")
-                .version("0.2.2")
+                .version(EXTENSION_VERSION)
                 .build()
         );
     }
@@ -128,7 +130,6 @@ mod tests {
     #[fixture]
     fn ext_repo(ext_settings: ExtSettings) -> ExtRepository {
         // This is the path to the build directory of the extension from ext_stub crate
-        const EXTENSION_VERSION: &str = "0.2.3";
 
         let file_name = if cfg!(target_os = "linux") {
             // This is the path to the build directory of the extension from ext_stub crate
