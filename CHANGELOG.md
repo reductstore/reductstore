@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add "@" prefix to computed labels, [PR-815](https://github.com/reductstore/reductstore/pull/815)
 - Refactor Extension API for multi-line CSV processing, ReductSelect v0.2.0, [PR-823](https://github.com/reductstore/reductstore/pull/823)
 
+### Fixed
+
+- Fix hanging test in batch read module, [PR-830](https://github.com/reductstore/reductstore/pull/830)
+
 ## [1.15.2] - 2025-05-21
 
 ### Changed
