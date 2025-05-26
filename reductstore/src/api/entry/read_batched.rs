@@ -288,6 +288,7 @@ mod tests {
     use rstest::*;
     use tempfile::tempdir;
     use test_log::test as test_log;
+    use tokio::time::sleep;
 
     #[test_log(rstest)]
     #[case("GET", "Hey!!!")]
@@ -319,6 +320,8 @@ mod tests {
                 writer.send(Ok(None)).await.unwrap();
             }
         }
+
+        sleep(Duration::from_millis(250)).await; // wait for the writes to complete
 
         let query_id = query(&path_to_entry_1, components.clone()).await;
         let query = Query(HashMap::from_iter(vec![(
