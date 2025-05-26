@@ -141,7 +141,7 @@ mod tests {
             }
         } else if cfg!(target_os = "macos") {
             if cfg!(target_arch = "aarch64") {
-                "libtest_ext-aarch64-apple-darwin.dylib"
+                "ibtest_ext-arch64-apple-darwin.dylib"
             } else if cfg!(target_arch = "x86_64") {
                 "libtest_ext-x86_64-apple-darwin.dylib"
             } else {
