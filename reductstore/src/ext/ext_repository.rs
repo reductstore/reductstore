@@ -197,12 +197,19 @@ impl ManageExtensions for ExtRepository {
         let query = match lock.get_mut(&query_id) {
             Some(query) => query,
             None => {
-                return query_rx
+                let result = query_rx
                     .write()
                     .await
                     .recv()
                     .await
-                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord))
+                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord));
+
+                if result.is_none() {
+                    // If no record is available, return a no content error to finish the query.
+                    return Some(Err(no_content!("No content")));
+                }
+
+                return result;
             }
         };
 
@@ -460,19 +467,26 @@ pub(super) mod tests {
 
         use mockall::predicate;
         use reduct_base::internal_server_error;
+        use tokio::sync::mpsc;
 
         #[rstest]
         #[tokio::test]
         async fn test_empty_query() {
             let mocked_ext_repo = mocked_ext_repo("test-ext", MockIoExtension::new());
-            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let (tx, rx) = mpsc::channel(1);
             drop(tx);
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
-            assert!(mocked_ext_repo
-                .fetch_and_process_record(1, query_rx)
-                .await
-                .is_none(),);
+            assert_eq!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx)
+                    .await
+                    .unwrap()
+                    .err()
+                    .unwrap(),
+                no_content!("No content"),
+                "Should return no content error when no records are available"
+            );
         }
 
         #[rstest]

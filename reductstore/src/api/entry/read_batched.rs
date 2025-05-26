@@ -471,7 +471,7 @@ mod tests {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
-            assert!(
+            assert_eq!(
                 timeout(
                     Duration::from_secs(1),
                     next_record_reader(
@@ -484,7 +484,11 @@ mod tests {
                 )
                 .await
                 .unwrap()
-                .is_none(),
+                .unwrap()
+                .err()
+                .unwrap()
+                .status(),
+                ErrorCode::NoContent,
                 "should return None if the query is closed"
             );
         }

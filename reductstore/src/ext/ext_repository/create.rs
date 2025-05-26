@@ -76,3 +76,40 @@ pub fn create_ext_repository(
         Ok(Box::new(NoExtRepository))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ext::ext_repository::create_ext_repository;
+    use reduct_base::error::ErrorCode::NoContent;
+    use reduct_base::ext::ExtSettings;
+    use reduct_base::msg::server_api::ServerInfo;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio::sync::RwLock as AsyncRwLock;
+
+    #[tokio::test]
+    async fn test_no_content_error_returned() {
+        // Create the dummy extension repository
+        let ext_repo = create_ext_repository(
+            None,
+            vec![],
+            ExtSettings::builder()
+                .server_info(ServerInfo::default())
+                .build(),
+        )
+        .unwrap();
+
+        let (tx, rx) = mpsc::channel(1);
+        let rx = Arc::new(AsyncRwLock::new(rx));
+        drop(tx); // Close the sender to simulate no records being available
+
+        // Call fetch_and_process_record, which should return None
+        let result = ext_repo.fetch_and_process_record(1, rx.clone()).await;
+        assert!(
+            result.is_some(),
+            "Should return Some if no record is available"
+        );
+        let err = result.unwrap().err().unwrap();
+        assert_eq!(err.status(), NoContent);
+    }
+}
