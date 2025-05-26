@@ -22,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed
 
 - Fix lock of write channel for small chunks, [PR-834](https://github.com/reductstore/reductstore/pull/834)
->>>>>>> stable
 
 ## [1.15.2] - 2025-05-21
 
