@@ -404,7 +404,7 @@ mod tests {
 
             let result = async {
                 // we overload the channel buffer
-                for _ in 0..100 {
+                for _ in 0..MAX_IO_BUFFER_SIZE + 1 {
                     writer
                         .send_timeout(Ok(Some(Bytes::from("x"))), Duration::from_millis(10))
                         .await?;
