@@ -275,7 +275,6 @@ mod tests {
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
-    use log::info;
     use mockall::mock;
 
     use crate::api::tests::{components, headers, path_to_entry_1};

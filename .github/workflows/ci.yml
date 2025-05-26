@@ -65,27 +65,27 @@ jobs:
         target:
           [
             "x86_64-unknown-linux-gnu",
-#            "aarch64-unknown-linux-gnu",
-#            "x86_64-pc-windows-gnu",
-#            "x86_64-apple-darwin",
-#            "aarch64-apple-darwin",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-pc-windows-gnu",
+            "x86_64-apple-darwin",
+            "aarch64-apple-darwin",
           ]
         include:
           - target: "x86_64-unknown-linux-gnu"
             os: ubuntu-24.04
             compiler: "gcc"
-#          - target: "aarch64-unknown-linux-gnu"
-#            os: ubuntu-24.04
-#            compiler: "gcc-aarch64-linux-gnu"
-#          - target: "x86_64-pc-windows-gnu"
-#            os: ubuntu-24.04
-#            compiler: "gcc-mingw-w64-x86-64"
-#          - target: "x86_64-apple-darwin"
-#            os: macos-14
-#            compiler: "gcc-x86_64-apple-darwin"
-#          - target: "aarch64-apple-darwin"
-#            os: macos-14
-#            compiler: "gcc"
+          - target: "aarch64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc-aarch64-linux-gnu"
+          - target: "x86_64-pc-windows-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc-mingw-w64-x86-64"
+          - target: "x86_64-apple-darwin"
+            os: macos-14
+            compiler: "gcc-x86_64-apple-darwin"
+          - target: "aarch64-apple-darwin"
+            os: macos-14
+            compiler: "gcc"
 
     steps:
       - uses: actions/checkout@v4
@@ -146,14 +146,14 @@ jobs:
       - build_binaries
     strategy:
       matrix:
-#        os: [ubuntu-24.04, windows-2022, macos-13]
+        os: [ubuntu-24.04, windows-2022, macos-14]
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-#          - os: windows-2022
-#            target: x86_64-pc-windows-gnu
-#          - os: macos-14
-#            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
@@ -180,724 +180,724 @@ jobs:
             $f --nocapture
           done
 
-#  coverage:
-#    name: Generate Code Coverage
-#    runs-on: ubuntu-latest
-#    timeout-minutes: 30
-#    needs:
-#      - rust_fmt
-#    env:
-#      CARGO_TERM_COLOR: always
-#      RUST_LOG: trace # expand logging
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - name: Install Rust
-#        run: rustup update stable
-#
-#      - name: Install cargo-llvm-cov
-#        uses: taiki-e/install-action@cargo-llvm-cov
-#
-#      - uses: arduino/setup-protoc@v3
-#        with:
-#          version: "26.x"
-#          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-#
-#      - name: Generate code coverage
-#        env:
-#          ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
-#        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
-#
-#      - name: Upload coverage to Codecov
-#        continue-on-error: true
-#        uses: codecov/codecov-action@v4
-#        with:
-#          files: lcov.info
-#          fail_ci_if_error: true
-#          token: ${{ secrets.CODECOV_TOKEN }}
-#
-#  api_tests:
-#    name: API Tests
-#    runs-on: ubuntu-latest
-#    needs:
-#      - unit_tests
-#      - build
-#    strategy:
-#      matrix:
-#        token: ["", "XXXX"]
-#        cert_path: ["", "/misc/certificate.crt"]
-#        license_path: ["", "/misc/license.lic"]
-#        include:
-#          - cert_path: "/misc/certificate.crt"
-#            url: https://127.0.0.1:8383
-#          - cert_path: ""
-#            url: http://127.0.0.1:8383
-#    timeout-minutes: 5
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - name: Download artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: image
-#          path: /tmp/
-#
-#      - name: Load image
-#        run: |
-#          docker load --input /tmp/image.tar
-#          docker image ls -a
-#
-#      - name: Create license
-#        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
-#
-#      - name: Run Database
-#        run: |
-#          docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}  \
-#            --name reduct                                     \
-#            --env RS_CERT_PATH=${{matrix.cert_path}}          \
-#            --env RS_LICENSE_PATH=${{matrix.license_path}}    \
-#            --env RS_CERT_KEY_PATH=/misc/privateKey.key       \
-#            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"  \
-#            -d ${{github.repository}}
-#          sleep 5
-#
-#      - name: Build API tests
-#        run: |
-#          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
-#          docker build -t api ./integration_tests/api
-#
-#      - name: Run API tests
-#        run: docker run --network=host
-#          --env API_TOKEN=${{matrix.token}}
-#          --env LICENSE_PATH=${{matrix.license_path}}
-#          --env STORAGE_URL=${{matrix.url}} api
-#
-#      - name: Print docker logs
-#        if: always()
-#        run: docker logs reduct
-#
-#  migration_test:
-#    name: Migration Tests
-#    runs-on: ubuntu-latest
-#    needs:
-#      - unit_tests
-#      - build
-#    strategy:
-#      matrix:
-#        version:
-#          [
-#            "latest",
-#            "v1.14.8",
-#            "v1.13.5",
-#            "v1.12.4",
-#            "v1.11.2",
-#            "v1.10.1",
-#            "v1.9.5",
-#            "v1.8.2",
-#            "v1.7.3",
-#          ]
-#    env:
-#      RS_API_TOKEN: XXXX
-#    timeout-minutes: 5
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-python@v5
-#        with:
-#          python-version: 3.12
-#
-#      - name: Run latest stable ReductStore
-#        run: |
-#          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
-#          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:${{matrix.version}}
-#          sleep 5
-#          docker logs latest
-#
-#      - name: Upload data
-#        run: |
-#          pip install -r ./integration_tests/data_check/requirements.txt
-#          python3 ./integration_tests/data_check/uploader.py
-#
-#      - name: Stop latest stable ReductStore
-#        run: docker stop latest
-#
-#      - name: Download artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: image
-#          path: /tmp/
-#
-#      - name: Load image
-#        run: |
-#          docker load --input /tmp/image.tar
-#          docker image ls -a
-#
-#      - name: Run current ReductStore
-#        run: |
-#          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
-#          sleep 5
-#          docker logs current
-#
-#      - name: Check data after migration
-#        run: python3 ./integration_tests/data_check/checker.py
-#
-#      - name: Restart current ReductStore
-#        run: |
-#          docker restart current
-#          sleep 5
-#          docker logs current
-#
-#      - name: Check data after restart
-#        run: python3 ./integration_tests/data_check/checker.py
-#
-#      - name: Save docker logs
-#        if: always()
-#        run: docker logs current | zip > /tmp/docker-log.zip
-#      - uses: actions/upload-artifact@v4
-#        if: always()
-#        with:
-#          name: docker-log-migration-${{matrix.version}}
-#          path: /tmp/docker-log.zip
-#
-#      - name: Show replication report
-#        if: always()
-#        run: cat ./report.json
-#
-#  recovery_test:
-#    name: Recovery Tests
-#    runs-on: ubuntu-latest
-#    strategy:
-#      matrix:
-#        cmd: ["stop", "kill"]
-#    needs:
-#      - unit_tests
-#      - build
-#    env:
-#      RS_API_TOKEN: XXXX
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-python@v5
-#        with:
-#          python-version: 3.12
-#
-#      - name: Download artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: image
-#          path: /tmp/
-#
-#      - name: Load image
-#        run: |
-#          docker load --input /tmp/image.tar
-#          docker image ls -a
-#
-#      - name: Run ReductStore
-#        run: |
-#          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name reductstore -d ${{github.repository}}
-#          sleep 5
-#          docker logs reductstore
-#
-#      - name: Upload data
-#        run: |
-#          pip install -r ./integration_tests/data_check/requirements.txt
-#          python3 ./integration_tests/data_check/uploader.py
-#
-#      - name: Restart ReductStore
-#        run: |
-#          docker ${{matrix.cmd}} reductstore
-#          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name reductstore-1 -d ${{github.repository}}
-#          sleep 5
-#          docker logs reductstore-1
-#
-#      - name: Check data after migraiton
-#        run: python3 ./integration_tests/data_check/checker.py
-#
-#      - name: Save docker logs
-#        if: always()
-#        run: docker logs reductstore | zip > /tmp/docker-log.zip
-#      - uses: actions/upload-artifact@v4
-#        if: always()
-#        with:
-#          name: docker-log-recovery-${{matrix.cmd}}
-#          path: /tmp/docker-log.zip
-#
-#      - name: Show replication report
-#        if: always()
-#        run: cat ./report.json
-#
-#  replication_test:
-#    name: Replication Tests
-#    runs-on: ubuntu-latest
-#    needs:
-#      - build
-#      - unit_tests
-#    strategy:
-#      matrix:
-#        include:
-#          # 10Kb blobs max records in a batch
-#          - max_blob_size: 0.01
-#            entries: 4
-#            records: 1536
-#          # 1MB blobs
-#          - max_blob_size: 1
-#            entries: 4
-#            records: 1536
-#          # Few big blobs (bigger than batch size)
-#          - max_blob_size: 18
-#            entries: 2
-#            records: 128
-#    env:
-#      RS_API_TOKEN: XXXX
-#    timeout-minutes: 5
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-python@v5
-#        with:
-#          python-version: 3.12
-#
-#      - name: Download artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: image
-#          path: /tmp/
-#
-#      - name: Load image
-#        run: |
-#          docker load --input /tmp/image.tar
-#          docker image ls -a
-#
-#      - name: Download artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: image
-#          path: /tmp/
-#
-#      - name: Run current ReductStore
-#        run: |
-#          docker run --network=host -v ./data:/data \
-#            --env RS_LOG_LEVEL=DEBUG \
-#            --env RS_API_TOKEN=${RS_API_TOKEN} \
-#            --env RS_BUCKET_1_NAME=src \
-#            --env RS_BUCKET_2_NAME=dest \
-#            --env RS_REPLICATION_1_NAME=replication \
-#            --env RS_REPLICATION_1_SRC_BUCKET=src \
-#            --env RS_REPLICATION_1_DST_BUCKET=dest \
-#            --env RS_REPLICATION_1_DST_HOST=http://127.0.0.1:8383 \
-#            --env RS_REPLICATION_1_DST_TOKEN=${RS_API_TOKEN} \
-#            --name current -d ${{github.repository}}
-#          sleep 5
-#          docker logs current
-#
-#      - name: Upload data
-#        env:
-#          BUCKET_NAME: src
-#          NUMBER_OF_ENTRIES: ${{matrix.entries}}
-#          NUMBER_OF_RECORDS: ${{matrix.records}}
-#          MAX_BLOB_SIZE: ${{matrix.max_blob_size}}
-#        run: |
-#          pip install -r ./integration_tests/data_check/requirements.txt
-#          python3 ./integration_tests/data_check/uploader.py
-#          sleep 30 # Wait for replication
-#
-#      - name: Check replicated data
-#        env:
-#          BUCKET_NAME: dest
-#        run: python3 ./integration_tests/data_check/checker.py
-#
-#      - name: Save docker logs
-#        if: always()
-#        run: docker logs current | zip > /tmp/docker-log.zip
-#      - uses: actions/upload-artifact@v4
-#        if: always()
-#        with:
-#          name: docker-log-repl-${{matrix.max_blob_size}}
-#          path: /tmp/docker-log.zip
-#
-#      - name: Show replication report
-#        if: always()
-#        run: cat ./report.json
-#
-#      - name: Show replication status
-#        if: always()
-#        run: |
-#          curl -H "Authorization: Bearer ${RS_API_TOKEN}" http://127.0.0.1:8383/api/v1/replications/replication | jq
-#
-#
-#  benchmark:
-#    name: Run benchmarks
-#    runs-on: ubuntu-latest
-#    needs:
-#      - build # for docker image
-#      - unit_tests
-#    strategy:
-#      matrix:
-#        branch: ["main", "latest"]
-#    timeout-minutes: 5
-#
-#    steps:
-#      - uses: actions/checkout@v4
-#      - name: Download image artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: image
-#          path: /tmp/
-#
-#      - name: Load Docker image
-#        run: docker load --input /tmp/image.tar
-#
-#      - name: Run current ReductStore
-#        run: |
-#          docker run -d \
-#            --name reductstore \
-#            --env RS_DATA_PATH=/data \
-#            --env RS_API_TOKEN=token \
-#            --env RS_LOG_LEVEL=DEBUG \
-#            -p 8383:8383 \
-#            -v ./data:/data \
-#            ${{ github.repository }}:latest
-#          sleep 5
-#          docker logs reductstore
-#
-#      - name: Install reduct-py
-#        run: |
-#          pip install reduct-py>=1.14
-#
-#      - name: Run python benchmark
-#        run: |
-#          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 current.csv
-#
-#      - name: Stop and remove current container
-#        run: |
-#          docker stop reductstore
-#          docker rm reductstore
-#
-#      - name: Run ${{matrix.branch}} ReductStore
-#        run: |
-#          docker run -d \
-#            --name reductstore \
-#            --env RS_DATA_PATH=/data \
-#            --env RS_API_TOKEN=token \
-#            --env RS_LOG_LEVEL=INFO \
-#            -p 8383:8383 \
-#            -v ./data:/data \
-#            reduct/store:${{matrix.branch}}
-#          sleep 5
-#          docker logs reductstore
-#
-#      - name: Install reduct-py
-#        run: |
-#          pip install reduct-py>=1.14
-#
-#      - name: Run python benchmark
-#        run: |
-#          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 ${{matrix.branch}}.csv
-#
-#      - name: Check result
-#        run: |
-#          python3 integration_tests/benchmarks/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv
-#
-#      - name: Save docker logs
-#        if: always()
-#        run: docker logs reductstore | zip > /tmp/docker-log.zip
-#
-#      - uses: actions/upload-artifact@v4
-#        if: always()
-#        with:
-#          name: docker-log-benchmark-${{matrix.branch}}
-#          path: /tmp/docker-log.zip
-#
-#  build_snap:
-#    runs-on: ubuntu-latest
-#    name: Build snap package
-#    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-#    needs:
-#      - rust_fmt
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: snapcore/action-build@v1
-#        id: build-snap
-#        with:
-#          snapcraft-args: "--enable-experimental-extensions --verbose"
-#
-#      # Make sure the snap is installable
-#      - run: |
-#          sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
-#      # Do some testing with the snap
-#      - run: |
-#          snap services reductstore
-#      - uses: actions/upload-artifact@v4
-#        with:
-#          name: reductstore
-#          path: "*.snap"
-#
-#  check_tag:
-#    runs-on: ubuntu-latest
-#    name: Check tag
-#    steps:
-#      - uses: actions/checkout@v4
-#      - name: Check tag
-#        if: startsWith(github.ref, 'refs/tags/')
-#        run: |
-#          cargo install cargo-get
-#          for PKG_NAME in reduct_base reduct_macros reductstore; do
-#            version=$(cargo get package.version --entry $PKG_NAME)
-#            echo "Version in $PKG_NAME/Cargo.toml: $version"
-#            if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
-#              echo "Tag ${GITHUB_REF_NAME} does not match version in $PKG_NAME/Cargo.toml"
-#              exit 1
-#            fi
-#          done
-#
-#  publish_snap:
-#    name: Publish snap package
-#    runs-on: ubuntu-latest
-#    strategy:
-#      matrix:
-#        arch: [amd64, arm64]
-#    needs:
-#      - build_snap
-#      - api_tests
-#      - migration_test
-#      - replication_test
-#      - check_tag
-#    steps:
-#      - uses: actions/download-artifact@v4
-#        with:
-#          name: reductstore
-#          path: .
-#      - name: Save snap name in environment variable
-#        run: |
-#          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
-#      - uses: snapcore/action-publish@master
-#        env:
-#          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
-#        with:
-#          snap: ${{env.SNAP_NAME}}
-#          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
-#
-#  push_image_dockerhub:
-#    runs-on: ubuntu-latest
-#    name: Push to DockerHub Registry
-#    needs:
-#      - api_tests
-#      - migration_test
-#      - replication_test
-#      - check_tag
-#    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-#    strategy:
-#      matrix:
-#        platform: [linux/amd64, linux/arm64]
-#        include:
-#          - platform: linux/amd64
-#            cargo_target: x86_64-unknown-linux-gnu
-#            gcc_compiler: gcc-11
-#            digest: linux-amd64
-#          - platform: linux/arm64
-#            cargo_target: aarch64-unknown-linux-gnu
-#            gcc_compiler: gcc-aarch64-linux-gnu
-#            digest: linux-arm64
-#          - platform: linux/arm/v7
-#            cargo_target: armv7-unknown-linux-gnueabihf
-#            gcc_compiler: gcc-arm-linux-gnueabihf
-#            digest: linux-armv7
-#
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - name: Set up Docker Buildx
-#        uses: docker/setup-buildx-action@v3
-#
-#      - name: Take build commit
-#        run: |
-#          echo "GITHUB_SHA=$(git rev-parse --short "$GITHUB_SHA")" >> $GITHUB_ENV
-#
-#      - name: Log in to the Container registry
-#        uses: docker/login-action@v2
-#        with:
-#          username: ${{ secrets.DOCKER_USER }}
-#          password: ${{ secrets.DOCKER_TOKEN }}
-#
-#      - name: Extract metadata (tags, labels) for Docker
-#        id: meta
-#        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-#        with:
-#          images: ${{ env.REGISTRY_IMAGE }}
-#
-#      - name: Build and push Docker image to GitHub repo
-#        uses: docker/build-push-action@v4
-#        id: build
-#        with:
-#          context: .
-#          file: buildx.Dockerfile
-#          labels: ${{ steps.meta.outputs.labels }}
-#          platforms: ${{ matrix.platform }}
-#          build-args: |
-#            GIT_COMMIT=${{env.GITHUB_SHA}}
-#            CARGO_TARGET=${{matrix.cargo_target}}
-#            GCC_COMPILER=${{matrix.gcc_compiler}}
-#            ARTIFACT_SAS_URL=${{ secrets.ARTIFACT_SAS_URL }}
-#            RUST_VERSION=${{ vars.MINIMAL_RUST_VERSION }}
-#
-#          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-#
-#      - name: Export digest
-#        run: |
-#          mkdir -p /tmp/digests
-#          digest="${{ steps.build.outputs.digest }}"
-#          touch "/tmp/digests/${digest#sha256:}"
-#      - name: Upload digest
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: digests-${{ matrix.digest }}
-#          path: /tmp/digests/
-#          if-no-files-found: error
-#          retention-days: 1
-#
-#  merge_digests:
-#    runs-on: ubuntu-latest
-#    needs:
-#      - push_image_dockerhub
-#    steps:
-#      - name: Download digests
-#        uses: actions/download-artifact@v4
-#        with:
-#          pattern: digests-*
-#          path: /tmp/digests
-#
-#      - name: Merge digests
-#        run: |
-#          mkdir -p /tmp/merged_digests
-#          find /tmp/digests -type f -print0 | xargs -0 mv -t /tmp/merged_digests
-#          ls /tmp/merged_digests
-#
-#      - name: Set up Docker Buildx
-#        uses: docker/setup-buildx-action@v3
-#      - name: Docker meta
-#        id: meta
-#        uses: docker/metadata-action@v4
-#        with:
-#          images: ${{ env.REGISTRY_IMAGE }}
-#      - name: Log in to the Container registry
-#        uses: docker/login-action@v2
-#        with:
-#          username: ${{ secrets.DOCKER_USER }}
-#          password: ${{ secrets.DOCKER_TOKEN }}
-#
-#      - name: Create manifest list and push
-#        working-directory: /tmp/merged_digests
-#        run: |
-#          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-#            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
-#      - name: Inspect image
-#        run: |
-#          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
-#
-#  publish_crate:
-#    runs-on: ubuntu-latest
-#    name: Publish crate
-#    needs:
-#      - api_tests
-#      - migration_test
-#      - replication_test
-#      - check_tag # Only publish on tags
-#    if: startsWith(github.ref, 'refs/tags/')
-#    steps:
-#      - uses: actions/checkout@v2
-#      - name: Set up Rust
-#        uses: dtolnay/rust-toolchain@stable
-#        with:
-#          toolchain: ${{ vars.MINIMAL_RUST_VERSION }}
-#      - uses: arduino/setup-protoc@v1
-#        with:
-#          version: "3.x"
-#          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-#      - name: Login
-#        run: |
-#          cargo login ${{ secrets.CRATES_IO_TOKEN }}
-#      - name: Publish reduct-base
-#        run: cargo publish -p reduct-base
-#      - name: Publish reduct-macros
-#        run: cargo publish -p reduct-macros
-#      - name: Publish reductstore
-#        run: cargo publish -p reductstore
-#
-#  make_release:
-#    runs-on: ubuntu-latest
-#    needs:
-#      - api_tests
-#      - migration_test
-#      - replication_test
-#      - check_tag # Only publish on tags
-#    outputs:
-#      upload_url: ${{ steps.create_release.outputs.upload_url }}
-#    name: Make release
-#    if: startsWith(github.ref, 'refs/tags/')
-#    steps:
-#      - uses: softprops/action-gh-release@v2
-#        id: create_release
-#        with:
-#          draft: true
-#          prerelease: false
-#          name: Release ${{ github.ref_name }}
-#          tag_name: ${{ github.ref_name }}
-#          body: Copy changes from CHANGELOG.md
-#        env:
-#          GITHUB_TOKEN: ${{ github.token }}
-#
-#  upload_release:
-#    runs-on: ubuntu-latest
-#    needs:
-#      - make_release
-#    name: Upload artifacts
-#    if: startsWith(github.ref, 'refs/tags/')
-#    strategy:
-#      matrix:
-#        target: [
-#          "x86_64-unknown-linux-gnu",
-#          "aarch64-unknown-linux-gnu",
-#          "x86_64-pc-windows-gnu",
-#          "x86_64-apple-darwin",
-#          "aarch64-apple-darwin",
-#        ]
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#
-#      - name: Download ${{ matrix.target }} artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: reductstore-${{ matrix.target }}
-#          path: /tmp/
-#      - name: Archive binary for UNIX
-#        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
-#        run: |
-#          cd /tmp
-#          tar -czvf reductstore.${{ matrix.target }}.tar.gz reductstore
-#
-#      - name: Archive binary for Windows
-#        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
-#        run: |
-#          cd /tmp
-#          zip -o reductstore.${{ matrix.target }}.zip reductstore.exe
-#
-#
-#      - name: Upload Linux Unix artifact
-#        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
-#        uses: actions/upload-release-asset@v1
-#        env:
-#          GITHUB_TOKEN: ${{ github.token }}
-#        with:
-#          upload_url: ${{ needs.make_release.outputs.upload_url }}
-#          asset_path: /tmp/reductstore.${{ matrix.target }}.tar.gz
-#          asset_name: reductstore.${{ matrix.target }}.tar.gz
-#          asset_content_type: application/gzip
-#
-#      - name: Upload Windows artifact
-#        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
-#        uses: actions/upload-release-asset@v1
-#        env:
-#          GITHUB_TOKEN: ${{ github.token }}
-#        with:
-#          upload_url: ${{ needs.make_release.outputs.upload_url }}
-#          asset_path: /tmp/reductstore.${{ matrix.target }}.zip
-#          asset_name: reductstore.${{ matrix.target }}.zip
-#          asset_content_type: application/zip
+  coverage:
+    name: Generate Code Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs:
+      - rust_fmt
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_LOG: trace # expand logging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: "26.x"
+          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+
+      - name: Generate code coverage
+        env:
+          ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  api_tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+    needs:
+      - unit_tests
+      - build
+    strategy:
+      matrix:
+        token: ["", "XXXX"]
+        cert_path: ["", "/misc/certificate.crt"]
+        license_path: ["", "/misc/license.lic"]
+        include:
+          - cert_path: "/misc/certificate.crt"
+            url: https://127.0.0.1:8383
+          - cert_path: ""
+            url: http://127.0.0.1:8383
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load image
+        run: |
+          docker load --input /tmp/image.tar
+          docker image ls -a
+
+      - name: Create license
+        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
+
+      - name: Run Database
+        run: |
+          docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}  \
+            --name reduct                                     \
+            --env RS_CERT_PATH=${{matrix.cert_path}}          \
+            --env RS_LICENSE_PATH=${{matrix.license_path}}    \
+            --env RS_CERT_KEY_PATH=/misc/privateKey.key       \
+            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"  \
+            -d ${{github.repository}}
+          sleep 5
+
+      - name: Build API tests
+        run: |
+          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+          docker build -t api ./integration_tests/api
+
+      - name: Run API tests
+        run: docker run --network=host
+          --env API_TOKEN=${{matrix.token}}
+          --env LICENSE_PATH=${{matrix.license_path}}
+          --env STORAGE_URL=${{matrix.url}} api
+
+      - name: Print docker logs
+        if: always()
+        run: docker logs reduct
+
+  migration_test:
+    name: Migration Tests
+    runs-on: ubuntu-latest
+    needs:
+      - unit_tests
+      - build
+    strategy:
+      matrix:
+        version:
+          [
+            "latest",
+            "v1.14.8",
+            "v1.13.5",
+            "v1.12.4",
+            "v1.11.2",
+            "v1.10.1",
+            "v1.9.5",
+            "v1.8.2",
+            "v1.7.3",
+          ]
+    env:
+      RS_API_TOKEN: XXXX
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Run latest stable ReductStore
+        run: |
+          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:${{matrix.version}}
+          sleep 5
+          docker logs latest
+
+      - name: Upload data
+        run: |
+          pip install -r ./integration_tests/data_check/requirements.txt
+          python3 ./integration_tests/data_check/uploader.py
+
+      - name: Stop latest stable ReductStore
+        run: docker stop latest
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load image
+        run: |
+          docker load --input /tmp/image.tar
+          docker image ls -a
+
+      - name: Run current ReductStore
+        run: |
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
+          sleep 5
+          docker logs current
+
+      - name: Check data after migration
+        run: python3 ./integration_tests/data_check/checker.py
+
+      - name: Restart current ReductStore
+        run: |
+          docker restart current
+          sleep 5
+          docker logs current
+
+      - name: Check data after restart
+        run: python3 ./integration_tests/data_check/checker.py
+
+      - name: Save docker logs
+        if: always()
+        run: docker logs current | zip > /tmp/docker-log.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-log-migration-${{matrix.version}}
+          path: /tmp/docker-log.zip
+
+      - name: Show replication report
+        if: always()
+        run: cat ./report.json
+
+  recovery_test:
+    name: Recovery Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cmd: ["stop", "kill"]
+    needs:
+      - unit_tests
+      - build
+    env:
+      RS_API_TOKEN: XXXX
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load image
+        run: |
+          docker load --input /tmp/image.tar
+          docker image ls -a
+
+      - name: Run ReductStore
+        run: |
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name reductstore -d ${{github.repository}}
+          sleep 5
+          docker logs reductstore
+
+      - name: Upload data
+        run: |
+          pip install -r ./integration_tests/data_check/requirements.txt
+          python3 ./integration_tests/data_check/uploader.py
+
+      - name: Restart ReductStore
+        run: |
+          docker ${{matrix.cmd}} reductstore
+          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name reductstore-1 -d ${{github.repository}}
+          sleep 5
+          docker logs reductstore-1
+
+      - name: Check data after migraiton
+        run: python3 ./integration_tests/data_check/checker.py
+
+      - name: Save docker logs
+        if: always()
+        run: docker logs reductstore | zip > /tmp/docker-log.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-log-recovery-${{matrix.cmd}}
+          path: /tmp/docker-log.zip
+
+      - name: Show replication report
+        if: always()
+        run: cat ./report.json
+
+  replication_test:
+    name: Replication Tests
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - unit_tests
+    strategy:
+      matrix:
+        include:
+          # 10Kb blobs max records in a batch
+          - max_blob_size: 0.01
+            entries: 4
+            records: 1536
+          # 1MB blobs
+          - max_blob_size: 1
+            entries: 4
+            records: 1536
+          # Few big blobs (bigger than batch size)
+          - max_blob_size: 18
+            entries: 2
+            records: 128
+    env:
+      RS_API_TOKEN: XXXX
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load image
+        run: |
+          docker load --input /tmp/image.tar
+          docker image ls -a
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Run current ReductStore
+        run: |
+          docker run --network=host -v ./data:/data \
+            --env RS_LOG_LEVEL=DEBUG \
+            --env RS_API_TOKEN=${RS_API_TOKEN} \
+            --env RS_BUCKET_1_NAME=src \
+            --env RS_BUCKET_2_NAME=dest \
+            --env RS_REPLICATION_1_NAME=replication \
+            --env RS_REPLICATION_1_SRC_BUCKET=src \
+            --env RS_REPLICATION_1_DST_BUCKET=dest \
+            --env RS_REPLICATION_1_DST_HOST=http://127.0.0.1:8383 \
+            --env RS_REPLICATION_1_DST_TOKEN=${RS_API_TOKEN} \
+            --name current -d ${{github.repository}}
+          sleep 5
+          docker logs current
+
+      - name: Upload data
+        env:
+          BUCKET_NAME: src
+          NUMBER_OF_ENTRIES: ${{matrix.entries}}
+          NUMBER_OF_RECORDS: ${{matrix.records}}
+          MAX_BLOB_SIZE: ${{matrix.max_blob_size}}
+        run: |
+          pip install -r ./integration_tests/data_check/requirements.txt
+          python3 ./integration_tests/data_check/uploader.py
+          sleep 30 # Wait for replication
+
+      - name: Check replicated data
+        env:
+          BUCKET_NAME: dest
+        run: python3 ./integration_tests/data_check/checker.py
+
+      - name: Save docker logs
+        if: always()
+        run: docker logs current | zip > /tmp/docker-log.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-log-repl-${{matrix.max_blob_size}}
+          path: /tmp/docker-log.zip
+
+      - name: Show replication report
+        if: always()
+        run: cat ./report.json
+
+      - name: Show replication status
+        if: always()
+        run: |
+          curl -H "Authorization: Bearer ${RS_API_TOKEN}" http://127.0.0.1:8383/api/v1/replications/replication | jq
+
+
+  benchmark:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    needs:
+      - build # for docker image
+      - unit_tests
+    strategy:
+      matrix:
+        branch: ["main", "latest"]
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load Docker image
+        run: docker load --input /tmp/image.tar
+
+      - name: Run current ReductStore
+        run: |
+          docker run -d \
+            --name reductstore \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            --env RS_LOG_LEVEL=DEBUG \
+            -p 8383:8383 \
+            -v ./data:/data \
+            ${{ github.repository }}:latest
+          sleep 5
+          docker logs reductstore
+
+      - name: Install reduct-py
+        run: |
+          pip install reduct-py>=1.14
+
+      - name: Run python benchmark
+        run: |
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 current.csv
+
+      - name: Stop and remove current container
+        run: |
+          docker stop reductstore
+          docker rm reductstore
+
+      - name: Run ${{matrix.branch}} ReductStore
+        run: |
+          docker run -d \
+            --name reductstore \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            --env RS_LOG_LEVEL=INFO \
+            -p 8383:8383 \
+            -v ./data:/data \
+            reduct/store:${{matrix.branch}}
+          sleep 5
+          docker logs reductstore
+
+      - name: Install reduct-py
+        run: |
+          pip install reduct-py>=1.14
+
+      - name: Run python benchmark
+        run: |
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 ${{matrix.branch}}.csv
+
+      - name: Check result
+        run: |
+          python3 integration_tests/benchmarks/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv
+
+      - name: Save docker logs
+        if: always()
+        run: docker logs reductstore | zip > /tmp/docker-log.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-log-benchmark-${{matrix.branch}}
+          path: /tmp/docker-log.zip
+
+  build_snap:
+    runs-on: ubuntu-latest
+    name: Build snap package
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    needs:
+      - rust_fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: snapcore/action-build@v1
+        id: build-snap
+        with:
+          snapcraft-args: "--enable-experimental-extensions --verbose"
+
+      # Make sure the snap is installable
+      - run: |
+          sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
+      # Do some testing with the snap
+      - run: |
+          snap services reductstore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reductstore
+          path: "*.snap"
+
+  check_tag:
+    runs-on: ubuntu-latest
+    name: Check tag
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cargo install cargo-get
+          for PKG_NAME in reduct_base reduct_macros reductstore; do
+            version=$(cargo get package.version --entry $PKG_NAME)
+            echo "Version in $PKG_NAME/Cargo.toml: $version"
+            if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+              echo "Tag ${GITHUB_REF_NAME} does not match version in $PKG_NAME/Cargo.toml"
+              exit 1
+            fi
+          done
+
+  publish_snap:
+    name: Publish snap package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    needs:
+      - build_snap
+      - api_tests
+      - migration_test
+      - replication_test
+      - check_tag
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reductstore
+          path: .
+      - name: Save snap name in environment variable
+        run: |
+          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
+      - uses: snapcore/action-publish@master
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
+        with:
+          snap: ${{env.SNAP_NAME}}
+          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
+
+  push_image_dockerhub:
+    runs-on: ubuntu-latest
+    name: Push to DockerHub Registry
+    needs:
+      - api_tests
+      - migration_test
+      - replication_test
+      - check_tag
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            cargo_target: x86_64-unknown-linux-gnu
+            gcc_compiler: gcc-11
+            digest: linux-amd64
+          - platform: linux/arm64
+            cargo_target: aarch64-unknown-linux-gnu
+            gcc_compiler: gcc-aarch64-linux-gnu
+            digest: linux-arm64
+          - platform: linux/arm/v7
+            cargo_target: armv7-unknown-linux-gnueabihf
+            gcc_compiler: gcc-arm-linux-gnueabihf
+            digest: linux-armv7
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Take build commit
+        run: |
+          echo "GITHUB_SHA=$(git rev-parse --short "$GITHUB_SHA")" >> $GITHUB_ENV
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+
+      - name: Build and push Docker image to GitHub repo
+        uses: docker/build-push-action@v4
+        id: build
+        with:
+          context: .
+          file: buildx.Dockerfile
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            GIT_COMMIT=${{env.GITHUB_SHA}}
+            CARGO_TARGET=${{matrix.cargo_target}}
+            GCC_COMPILER=${{matrix.gcc_compiler}}
+            ARTIFACT_SAS_URL=${{ secrets.ARTIFACT_SAS_URL }}
+            RUST_VERSION=${{ vars.MINIMAL_RUST_VERSION }}
+
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.digest }}
+          path: /tmp/digests/
+          if-no-files-found: error
+          retention-days: 1
+
+  merge_digests:
+    runs-on: ubuntu-latest
+    needs:
+      - push_image_dockerhub
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: /tmp/digests
+
+      - name: Merge digests
+        run: |
+          mkdir -p /tmp/merged_digests
+          find /tmp/digests -type f -print0 | xargs -0 mv -t /tmp/merged_digests
+          ls /tmp/merged_digests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/merged_digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+
+  publish_crate:
+    runs-on: ubuntu-latest
+    name: Publish crate
+    needs:
+      - api_tests
+      - migration_test
+      - replication_test
+      - check_tag # Only publish on tags
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ vars.MINIMAL_RUST_VERSION }}
+      - uses: arduino/setup-protoc@v1
+        with:
+          version: "3.x"
+          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+      - name: Login
+        run: |
+          cargo login ${{ secrets.CRATES_IO_TOKEN }}
+      - name: Publish reduct-base
+        run: cargo publish -p reduct-base
+      - name: Publish reduct-macros
+        run: cargo publish -p reduct-macros
+      - name: Publish reductstore
+        run: cargo publish -p reductstore
+
+  make_release:
+    runs-on: ubuntu-latest
+    needs:
+      - api_tests
+      - migration_test
+      - replication_test
+      - check_tag # Only publish on tags
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    name: Make release
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: softprops/action-gh-release@v2
+        id: create_release
+        with:
+          draft: true
+          prerelease: false
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body: Copy changes from CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  upload_release:
+    runs-on: ubuntu-latest
+    needs:
+      - make_release
+    name: Upload artifacts
+    if: startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        target: [
+          "x86_64-unknown-linux-gnu",
+          "aarch64-unknown-linux-gnu",
+          "x86_64-pc-windows-gnu",
+          "x86_64-apple-darwin",
+          "aarch64-apple-darwin",
+        ]
+    steps:
+      - uses: actions/checkout@v4
+
+
+      - name: Download ${{ matrix.target }} artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: reductstore-${{ matrix.target }}
+          path: /tmp/
+      - name: Archive binary for UNIX
+        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
+        run: |
+          cd /tmp
+          tar -czvf reductstore.${{ matrix.target }}.tar.gz reductstore
+
+      - name: Archive binary for Windows
+        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
+        run: |
+          cd /tmp
+          zip -o reductstore.${{ matrix.target }}.zip reductstore.exe
+
+
+      - name: Upload Linux Unix artifact
+        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ needs.make_release.outputs.upload_url }}
+          asset_path: /tmp/reductstore.${{ matrix.target }}.tar.gz
+          asset_name: reductstore.${{ matrix.target }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Windows artifact
+        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ needs.make_release.outputs.upload_url }}
+          asset_path: /tmp/reductstore.${{ matrix.target }}.zip
+          asset_name: reductstore.${{ matrix.target }}.zip
+          asset_content_type: application/zip
