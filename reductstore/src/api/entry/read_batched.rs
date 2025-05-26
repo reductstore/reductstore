@@ -286,8 +286,10 @@ mod tests {
     use reduct_base::Labels;
     use rstest::*;
     use tempfile::tempdir;
+    use test_log::test as test_log;
+    use tokio::time::sleep;
 
-    #[rstest]
+    #[test_log(rstest)]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
     #[tokio::test]
@@ -385,6 +387,7 @@ mod tests {
             );
         }
 
+        sleep(Duration::from_millis(200)).await;
         let response = read_batched_records!();
         let resp_headers = response.headers();
         assert_eq!(
@@ -468,7 +471,7 @@ mod tests {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             let rx = Arc::new(AsyncRwLock::new(rx));
             drop(tx);
-            assert!(
+            assert_eq!(
                 timeout(
                     Duration::from_secs(1),
                     next_record_reader(
@@ -481,7 +484,11 @@ mod tests {
                 )
                 .await
                 .unwrap()
-                .is_none(),
+                .unwrap()
+                .err()
+                .unwrap()
+                .status(),
+                ErrorCode::NoContent,
                 "should return None if the query is closed"
             );
         }

@@ -8,9 +8,11 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{BoxedReadRecord, ExtSettings};
 use reduct_base::msg::entry_api::QueryEntry;
+use reduct_base::no_content;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
+
 pub fn create_ext_repository(
     external_path: Option<PathBuf>,
     embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
@@ -55,15 +57,59 @@ pub fn create_ext_repository(
                 _query_id: u64,
                 query_rx: Arc<AsyncRwLock<QueryRx>>,
             ) -> Option<Result<BoxedReadRecord, ReductError>> {
-                query_rx
+                let result = query_rx
                     .write()
                     .await
                     .recv()
                     .await
-                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord))
+                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord));
+
+                if result.is_none() {
+                    // If no record is available, return a no content error to finish the query.
+                    return Some(Err(no_content!("")));
+                }
+
+                result
             }
         }
 
         Ok(Box::new(NoExtRepository))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ext::ext_repository::create_ext_repository;
+    use reduct_base::error::ErrorCode::NoContent;
+    use reduct_base::ext::ExtSettings;
+    use reduct_base::msg::server_api::ServerInfo;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio::sync::RwLock as AsyncRwLock;
+
+    #[tokio::test]
+    async fn test_no_content_error_returned() {
+        // Create the dummy extension repository
+        let ext_repo = create_ext_repository(
+            None,
+            vec![],
+            ExtSettings::builder()
+                .server_info(ServerInfo::default())
+                .build(),
+        )
+        .unwrap();
+
+        let (tx, rx) = mpsc::channel(1);
+        let rx = Arc::new(AsyncRwLock::new(rx));
+        drop(tx); // Close the sender to simulate no records being available
+
+        // Call fetch_and_process_record, which should return None
+        let result = ext_repo.fetch_and_process_record(1, rx.clone()).await;
+        assert!(
+            result.is_some(),
+            "Should return Some if no record is available"
+        );
+        let err = result.unwrap().err().unwrap();
+        assert_eq!(err.status(), NoContent);
     }
 }

@@ -21,7 +21,6 @@ env:
 
 jobs:
   rust_fmt:
-
     runs-on: ubuntu-latest
     name: Rust Linter
     steps:
@@ -146,19 +145,20 @@ jobs:
       - build_binaries
     strategy:
       matrix:
-        os: [ubuntu-24.04, windows-2022, macos-13]
+        os: [ubuntu-24.04, windows-2022, macos-14]
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: windows-2022
             target: x86_64-pc-windows-gnu
-          - os: macos-13
-            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
+      RUST_LOG: debug
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -187,7 +187,7 @@ jobs:
       - rust_fmt
     env:
       CARGO_TERM_COLOR: always
-      RUST_LOG: trace # expand logging
+      RUST_LOG: debug # expand logging
     steps:
       - uses: actions/checkout@v4
 
