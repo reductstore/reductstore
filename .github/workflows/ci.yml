@@ -39,7 +39,7 @@ jobs:
         env:
             ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
             RUST_LOG: trace
-        run: cargo test --package reductstore --lib api::entry::read_batched::tests --release --all-features
+        run: cargo test --package reductstore  --release --all-features
 
 
   rust_fmt:
