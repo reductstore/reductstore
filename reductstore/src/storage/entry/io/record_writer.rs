@@ -111,7 +111,7 @@ impl RecordWriter {
         } else {
             // for small records we write the content in the same thread
             // to avoid the overhead of creating a new task
-            // the channel buffer the whole record content, so we need to limit the buffer size for the possible smallest chunks (1byte)
+            // the channel buffers the whole record content, so we need to limit the buffer size for the possible smallest chunks (1 byte)
             let (tx, rx) = channel(MAX_IO_BUFFER_SIZE);
             RecordWriter {
                 tx,
