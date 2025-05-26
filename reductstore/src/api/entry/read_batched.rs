@@ -387,6 +387,7 @@ mod tests {
             );
         }
 
+        sleep(Duration::from_millis(200)).await;
         let response = read_batched_records!();
         let resp_headers = response.headers();
         assert_eq!(
