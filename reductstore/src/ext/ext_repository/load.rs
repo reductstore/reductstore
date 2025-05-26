@@ -130,17 +130,29 @@ mod tests {
         // This is the path to the build directory of the extension from ext_stub crate
         const EXTENSION_VERSION: &str = "0.2.2";
 
-        if !cfg!(target_arch = "x86_64") {
-            panic!("Unsupported architecture");
-        }
-
         let file_name = if cfg!(target_os = "linux") {
             // This is the path to the build directory of the extension from ext_stub crate
-            "libtest_ext-x86_64-unknown-linux-gnu.so"
+            if cfg!(target_arch = "aarch64") {
+                "libtest_ext-aarch64-unknown-linux-gnu.so"
+            } else if cfg!(target_arch = "x86_64") {
+                "libtest_ext-x86_64-unknown-linux-gnu.so"
+            } else {
+                panic!("Unsupported architecture")
+            }
         } else if cfg!(target_os = "macos") {
-            "libtest_ext-aarch64-apple-darwin.dylib"
+            if cfg!(target_arch = "aarch64") {
+                "libtest_ext-aarch64-apple-darwin.dylib"
+            } else if cfg!(target_arch = "x86_64") {
+                "libtest_ext-x86_64-apple-darwin.dylib"
+            } else {
+                panic!("Unsupported architecture")
+            }
         } else if cfg!(target_os = "windows") {
-            "libtest_ext-x86_64-pc-windows-gnu.dll"
+            if cfg!(target_arch = "x86_64") {
+                "libtest_ext-x86_64-pc-windows-gnu.dll"
+            } else {
+                panic!("Unsupported architecture")
+            }
         } else {
             panic!("Unsupported platform")
         };
