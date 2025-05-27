@@ -166,7 +166,7 @@ impl Parser {
             // operator without operands (nullary)
             Ok(vec![Self::parse_operator(value, vec![])?])
         } else {
-            Ok(vec![Constant::boxed(Value::String(value.clone()))])
+            Ok(vec![Constant::boxed(Value::String(value.to_string()))])
         }
     }
 
