@@ -15,7 +15,7 @@ use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, EvaluationStage, Node};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
-use serde_json::{Map, Value as JsonValue};
+use serde_json::{Map, Number, Value as JsonValue};
 
 /// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
@@ -23,11 +23,11 @@ pub(crate) struct Parser {}
 /// A node in a condition tree.
 ///
 /// It evaluates the node in the given context on different stages.
-struct StagedAllOff {
+struct StagedAllOf {
     operands: Vec<BoxedNode>,
 }
 
-impl Node for StagedAllOff {
+impl Node for StagedAllOf {
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         for operand in self.operands.iter_mut() {
             // Filter out operands that are not in the current stage
@@ -51,69 +51,34 @@ impl Node for StagedAllOff {
     }
 }
 
-impl Boxed for StagedAllOff {
+impl Boxed for StagedAllOf {
     fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         Ok(Box::new(Self { operands }))
     }
 }
 
 impl Parser {
+    /// Parses a JSON object into a condition tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `json` - A JSON value representing the condition.
+    ///
+    /// # Returns
+    ///
+    /// A boxed node representing the condition tree.
+    /// The root node is a `StagedAllOf` that aggregates all expressions
     pub fn parse(&self, json: &JsonValue) -> Result<BoxedNode, ReductError> {
-        let expressions = self.parse_intern(json)?;
-        Ok(StagedAllOff::boxed(expressions)?)
+        let expressions = Self::parse_recursively(json)?;
+        Ok(StagedAllOf::boxed(expressions)?)
     }
 
-    fn parse_intern(&self, json: &JsonValue) -> Result<Vec<BoxedNode>, ReductError> {
+    fn parse_recursively(json: &JsonValue) -> Result<Vec<BoxedNode>, ReductError> {
         match json {
-            JsonValue::Object(map) => {
-                let mut expressions = vec![];
-                for (key, value) in map.iter() {
-                    if let JsonValue::Array(operand_list) = value {
-                        // Parse array notation e.g. {"$and": [true, true]}
-                        expressions.push(self.parse_array_syntax(key, operand_list)?);
-                    } else if let JsonValue::Object(operator_right_operand) = value {
-                        // Parse object notation e.g. {"&label": {"$and": true}}
-                        expressions.push(self.parse_object_syntax(key, operator_right_operand)?);
-                    } else {
-                        // For unary operators, we need to parse the value
-                        let operands = self.parse_intern(value)?;
-                        let operator = Self::parse_operator(key, operands)?;
-                        expressions.push(operator);
-                    }
-                }
-
-                // We use AND operator to aggregate results from all expressions
-                Ok(expressions)
-            }
-
-            JsonValue::Bool(value) => Ok(vec![Constant::boxed(Value::Bool(*value))]),
-
-            JsonValue::Number(value) => {
-                if value.is_i64() || value.is_u64() {
-                    Ok(vec![Constant::boxed(Value::Int(value.as_i64().unwrap()))])
-                } else {
-                    Ok(vec![Constant::boxed(Value::Float(value.as_f64().unwrap()))])
-                }
-            }
-            JsonValue::String(value) => {
-                if value.starts_with("&") {
-                    Ok(vec![Reference::boxed(
-                        value[1..].to_string(),
-                        EvaluationStage::Retrieve,
-                    )])
-                } else if value.starts_with("@") {
-                    Ok(vec![Reference::boxed(
-                        value[1..].to_string(),
-                        EvaluationStage::Compute,
-                    )])
-                } else if value.starts_with("$") {
-                    // operator without operands (nullary)
-                    Ok(vec![Self::parse_operator(value, vec![])?])
-                } else {
-                    Ok(vec![Constant::boxed(Value::String(value.clone()))])
-                }
-            }
-
+            JsonValue::Object(map) => Self::parse_object(map),
+            JsonValue::Bool(value) => Self::parse_bool(value),
+            JsonValue::Number(value) => Self::parse_number(value),
+            JsonValue::String(value) => Self::parse_string(value),
             JsonValue::Array(_) => Err(unprocessable_entity!(
                 "Array type is not supported: {}",
                 json
@@ -125,24 +90,75 @@ impl Parser {
         }
     }
 
+    fn parse_object(map: &Map<String, serde_json::Value>) -> Result<Vec<BoxedNode>, ReductError> {
+        let mut expressions = vec![];
+        for (key, value) in map.iter() {
+            if let JsonValue::Array(operand_list) = value {
+                // Parse array notation e.g. {"$and": [true, true]}
+                expressions.push(Self::parse_array_syntax(key, operand_list)?);
+            } else if let JsonValue::Object(operator_right_operand) = value {
+                // Parse object notation e.g. {"&label": {"$and": true}}
+                expressions.push(Self::parse_object_syntax(key, operator_right_operand)?);
+            } else {
+                // For unary operators, we need to parse the value
+                let operands = Self::parse_recursively(value)?;
+                let operator = Self::parse_operator(key, operands)?;
+                expressions.push(operator);
+            }
+        }
+
+        // We use AND operator to aggregate results from all expressions
+        Ok(expressions)
+    }
+
+    fn parse_bool(value: &bool) -> Result<Vec<BoxedNode>, ReductError> {
+        Ok(vec![Constant::boxed(Value::Bool(*value))])
+    }
+
+    fn parse_number(value: &Number) -> Result<Vec<BoxedNode>, ReductError> {
+        if value.is_i64() || value.is_u64() {
+            Ok(vec![Constant::boxed(Value::Int(value.as_i64().unwrap()))])
+        } else {
+            Ok(vec![Constant::boxed(Value::Float(value.as_f64().unwrap()))])
+        }
+    }
+
+    fn parse_string(value: &String) -> Result<Vec<BoxedNode>, ReductError> {
+        if value.starts_with("&") {
+            Ok(vec![Reference::boxed(
+                value[1..].to_string(),
+                EvaluationStage::Retrieve,
+            )])
+        } else if value.starts_with("@") {
+            Ok(vec![Reference::boxed(
+                value[1..].to_string(),
+                EvaluationStage::Compute,
+            )])
+        } else if value.starts_with("$") {
+            // operator without operands (nullary)
+            Ok(vec![Self::parse_operator(value, vec![])?])
+        } else {
+            Ok(vec![Constant::boxed(Value::String(value.clone()))])
+        }
+    }
+
     fn parse_array_syntax(
-        &self,
         operator: &str,
         json_operands: &Vec<JsonValue>,
     ) -> Result<BoxedNode, ReductError> {
         let mut operands = vec![];
         for operand in json_operands {
-            operands.extend(self.parse_intern(operand)?);
+            operands.extend(Self::parse_recursively(operand)?);
         }
         Self::parse_operator(operator, operands)
     }
 
     fn parse_object_syntax(
-        &self,
         left_operand: &str,
         op_right_operand: &Map<String, JsonValue>,
     ) -> Result<BoxedNode, ReductError> {
-        let mut left_operand = self.parse_intern(&JsonValue::String(left_operand.to_string()))?;
+        let mut left_operand =
+            Self::parse_recursively(&JsonValue::String(left_operand.to_string()))?;
         if op_right_operand.len() != 1 {
             return Err(unprocessable_entity!(
                 "Object notation must have exactly one operator"
@@ -150,7 +166,7 @@ impl Parser {
         }
 
         let (operator, operand) = op_right_operand.iter().next().unwrap();
-        let right_operand = self.parse_intern(operand)?;
+        let right_operand = Self::parse_recursively(operand)?;
         left_operand.extend(right_operand);
         Self::parse_operator(operator, left_operand)
     }
@@ -440,7 +456,7 @@ mod tests {
                 Constant::boxed(Value::Bool(true)),
                 Constant::boxed(Value::Bool(false)),
             ];
-            let staged_all_of = StagedAllOff::boxed(operands);
+            let staged_all_of = StagedAllOf::boxed(operands);
             assert_eq!(
                 staged_all_of.unwrap().print(),
                 "AllOf([Bool(true), Bool(false)])"
@@ -453,7 +469,7 @@ mod tests {
                 Constant::boxed(Value::Bool(false)), // ignored because not in stage
             ];
 
-            let mut staged_all_of = StagedAllOff::boxed(operands).unwrap();
+            let mut staged_all_of = StagedAllOf::boxed(operands).unwrap();
             let context = Context::new(0, HashMap::new(), EvaluationStage::Compute);
             assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(true));
         }
