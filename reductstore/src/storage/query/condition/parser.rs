@@ -177,6 +177,13 @@ impl Parser {
     }
 
     fn parse_operator(operator: &str, operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
+        if !operator.starts_with("$") {
+            return Err(unprocessable_entity!(
+                "Operator '{}' must start with '$'",
+                operator
+            ));
+        }
+
         match operator {
             // Aggregation operators
             "$each_n" => EachN::boxed(operands),
@@ -381,6 +388,18 @@ mod tests {
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Null type is not supported: null"
+        );
+    }
+
+    #[rstest]
+    fn test_parser_invalid_operator_without_dollar(parser: Parser) {
+        let json = json!({
+            "and": [true, true]
+        });
+        let result = parser.parse(&json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Operator 'and' must start with '$'"
         );
     }
 
