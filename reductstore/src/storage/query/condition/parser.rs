@@ -29,22 +29,10 @@ struct StagedAllOf {
 
 impl Node for StagedAllOf {
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
-        let mut computed_stage_detected = false;
-        for operand in self.operands.iter_mut() {
-            // Filter out operands that are not in the current stage
-            if operand.stage() == &context.stage || computed_stage_detected {
-                if operand.stage() == &EvaluationStage::Compute {
-                    computed_stage_detected = true;
-                }
-
-                let value = operand.apply(context)?;
-                if !value.as_bool()? {
-                    return Ok(Value::Bool(false));
-                }
-            }
+        match context.stage {
+            EvaluationStage::Retrieve => self.apply_retrieve_stage(context),
+            EvaluationStage::Compute => self.apply_compute_stage(context),
         }
-
-        Ok(Value::Bool(true))
     }
 
     fn operands(&self) -> &Vec<BoxedNode> {
@@ -59,6 +47,41 @@ impl Node for StagedAllOf {
 impl Boxed for StagedAllOf {
     fn boxed(operands: Vec<BoxedNode>) -> Result<BoxedNode, ReductError> {
         Ok(Box::new(Self { operands }))
+    }
+}
+
+impl StagedAllOf {
+    fn apply_retrieve_stage(&mut self, context: &Context) -> Result<Value, ReductError> {
+        // In the retrieve stage, we evaluate all operands before the first compute-staged one
+        for operand in &mut self.operands {
+            if operand.stage() == &EvaluationStage::Compute {
+                break;
+            }
+
+            let value = operand.apply(context)?;
+            if !value.as_bool()? {
+                return Ok(Value::Bool(false));
+            }
+        }
+
+        Ok(Value::Bool(true))
+    }
+
+    fn apply_compute_stage(&mut self, context: &Context) -> Result<Value, ReductError> {
+        // In the compute stage, we evaluate all operands after the first compute-staged one
+        let mut compute_operand_detected = false;
+        for operand in &mut self.operands {
+            if operand.stage() == &EvaluationStage::Compute || compute_operand_detected {
+                compute_operand_detected = true;
+
+                let value = operand.apply(context)?;
+                if !value.as_bool()? {
+                    return Ok(Value::Bool(false));
+                }
+            }
+        }
+
+        Ok(Value::Bool(true))
     }
 }
 
@@ -473,7 +496,6 @@ mod tests {
     mod staged_all_of {
         use super::*;
         use rstest::rstest;
-        use serde::de::Unexpected::Str;
 
         #[rstest]
         fn test_staged_all_of() {
@@ -500,7 +522,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_all_condition_after_compute_stage_on_same_stage() {
+        fn test_all_condition_after_compute_operand() {
             let operands: Vec<BoxedNode> = vec![
                 Reference::boxed("label".to_string(), EvaluationStage::Compute),
                 Constant::boxed(Value::Bool(false)),
@@ -513,7 +535,24 @@ mod tests {
                 EvaluationStage::Compute,
             );
             assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(false),
-            "Must be false because the last retrived value is false and it is used on the Compute stage");
+            "Must be false because the last retrieved value is false and it is used on the Compute stage");
+        }
+
+        #[rstest]
+        fn test_all_condition_before_compute_operand() {
+            let operands: Vec<BoxedNode> = vec![
+                Constant::boxed(Value::Bool(true)),
+                Reference::boxed("label".to_string(), EvaluationStage::Compute),
+            ];
+
+            let mut staged_all_of = StagedAllOf::boxed(operands).unwrap();
+            let context = Context::new(
+                0,
+                HashMap::from_iter(vec![("label", "false")]),
+                EvaluationStage::Retrieve,
+            );
+            assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(true),
+            "Must be true because the last retrieved value, and compute-staged label is ignored");
         }
     }
 

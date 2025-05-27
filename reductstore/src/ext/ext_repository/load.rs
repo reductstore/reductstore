@@ -13,8 +13,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 
-const EXTENSION_VERSION: &str = "0.2.3";
-
 impl ExtRepository {
     pub(super) fn try_load(
         paths: Vec<PathBuf>,
@@ -82,6 +80,8 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
     use test_log::test as log_test;
+
+    const EXTENSION_VERSION: &str = "0.2.3";
 
     #[log_test(rstest)]
     fn test_load_extension(ext_repo: ExtRepository) {
