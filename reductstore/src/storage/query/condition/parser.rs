@@ -29,9 +29,14 @@ struct StagedAllOf {
 
 impl Node for StagedAllOf {
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
+        let mut computed_stage_detected = false;
         for operand in self.operands.iter_mut() {
             // Filter out operands that are not in the current stage
-            if operand.stage() == &context.stage {
+            if operand.stage() == &context.stage || computed_stage_detected {
+                if operand.stage() == &EvaluationStage::Compute {
+                    computed_stage_detected = true;
+                }
+
                 let value = operand.apply(context)?;
                 if !value.as_bool()? {
                     return Ok(Value::Bool(false));
@@ -449,6 +454,7 @@ mod tests {
     mod staged_all_of {
         use super::*;
         use rstest::rstest;
+        use serde::de::Unexpected::Str;
 
         #[rstest]
         fn test_staged_all_of() {
@@ -472,6 +478,23 @@ mod tests {
             let mut staged_all_of = StagedAllOf::boxed(operands).unwrap();
             let context = Context::new(0, HashMap::new(), EvaluationStage::Compute);
             assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(true));
+        }
+
+        #[rstest]
+        fn test_all_condition_after_compute_stage_on_same_stage() {
+            let operands: Vec<BoxedNode> = vec![
+                Reference::boxed("label".to_string(), EvaluationStage::Compute),
+                Constant::boxed(Value::Bool(false)),
+            ];
+
+            let mut staged_all_of = StagedAllOf::boxed(operands).unwrap();
+            let context = Context::new(
+                0,
+                HashMap::from_iter(vec![("label", "true")]),
+                EvaluationStage::Compute,
+            );
+            assert_eq!(staged_all_of.apply(&context).unwrap(), Value::Bool(false),
+            "Must be false because the last retrived value is false and it is used on the Compute stage");
         }
     }
 
