@@ -151,7 +151,7 @@ impl Parser {
         }
     }
 
-    fn parse_string(value: &String) -> Result<Vec<BoxedNode>, ReductError> {
+    fn parse_string(value: &str) -> Result<Vec<BoxedNode>, ReductError> {
         if value.starts_with("&") {
             Ok(vec![Reference::boxed(
                 value[1..].to_string(),
