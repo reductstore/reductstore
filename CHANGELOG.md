@@ -22,9 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix hanging query request if no extension registered, [PR-830](https://github.com/reductstore/reductstore/pull/830)
 
+## [1.15.4] - 2025-05-28
+
+### Fixed
+
+- Update yanked zip dependency to 4.0.0, [PR-837](https://github.com/reductstore/reductstore/pull/837)
+
 ## [1.15.3] - 2025-05-26
 
-## Fixed
+### Fixed
 
 - Fix lock of write channel for small chunks, [PR-834](https://github.com/reductstore/reductstore/pull/834)
 
@@ -1041,7 +1047,9 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.4...HEAD
+
+[1.15.4]: https://github.com/reductstore/reductstore/compare/v1.15.3...v1.15.4
 
 [1.15.3]: https://github.com/reductstore/reductstore/compare/v1.15.2...v1.15.3
 
