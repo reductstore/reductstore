@@ -1995,7 +1995,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.15.3"
+version = "1.15.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2013,7 +2013,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.15.3"
+version = "1.15.4"
 dependencies = [
  "quote",
  "syn 2.0.101",
@@ -2021,7 +2021,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.15.3"
+version = "1.15.4"
 dependencies = [
  "assert_matches",
  "async-stream",
