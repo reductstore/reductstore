@@ -18,10 +18,6 @@ impl Node for Lt {
         Ok(Value::Bool(value_1 < value_2))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Lt({:?}, {:?})", self.operands[0], self.operands[1])
     }

@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
+use crate::storage::query::condition::{BoxedNode, Context};
 use crate::storage::query::filters::{RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
 
@@ -25,7 +25,11 @@ impl RecordFilter for WhenFilter {
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
-            EvaluationStage::Retrieve,
+            record
+                .computed_labels()
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect(),
         );
         Ok(self.condition.apply(&context)?.as_bool()?)
     }

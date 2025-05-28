@@ -19,10 +19,6 @@ impl Node for Div {
         value_1.divide(value_2)
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Div({:?}, {:?})", self.operands[0], self.operands[1])
     }

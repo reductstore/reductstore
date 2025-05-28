@@ -7,7 +7,7 @@ mod load;
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::ext::filter::ExtWhenFilter;
 use crate::storage::query::base::QueryOptions;
-use crate::storage::query::condition::{EvaluationStage, Parser};
+use crate::storage::query::condition::Parser;
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
@@ -104,12 +104,21 @@ impl ManageExtensions for ExtRepository {
         query_id: u64,
         bucket_name: &str,
         entry_name: &str,
-        query_request: QueryEntry,
+        mut query_request: QueryEntry,
     ) -> Result<(), ReductError> {
         let mut query_map = self.query_map.write().await;
-        let ext_params = query_request.ext.as_ref();
-        let controllers = if ext_params.is_some() && ext_params.unwrap().is_object() {
-            let ext_query = ext_params.unwrap().as_object().unwrap();
+        let ext_params = query_request.ext.as_mut();
+        let controllers = if ext_params.is_some() && ext_params.as_ref().unwrap().is_object() {
+            let ext_query = ext_params.unwrap().as_object_mut().unwrap();
+
+            // check if the query has references to computed labels and no extension is found
+            let condition = if let Some(condition) = ext_query.remove("when") {
+                let node = Parser::new().parse(&condition)?;
+                Some(node)
+            } else {
+                None
+            };
+
             if ext_query.iter().count() > 1 {
                 return Err(unprocessable_entity!(
                     "Multiple extensions are not supported in query id={}",
@@ -129,7 +138,7 @@ impl ManageExtensions for ExtRepository {
                     ext.write()
                         .await
                         .query(bucket_name, entry_name, &query_request)?;
-                Some((processor, commiter))
+                Some((processor, commiter, condition))
             } else {
                 return Err(unprocessable_entity!(
                     "Unknown extension '{}' in query id={}",
@@ -155,22 +164,9 @@ impl ManageExtensions for ExtRepository {
             query_map.remove(&key);
         }
 
-        // check if the query has references to computed labels and no extension is found
-        let condition = if let Some(condition) = &query_options.when {
-            let node = Parser::new().parse(condition)?;
-            if controllers.is_none() && node.stage() == &EvaluationStage::Compute {
-                return Err(unprocessable_entity!(
-                    "There is at least one reference to computed labels but no extension is found"
-                ));
-            }
-            Some(node)
-        } else {
-            None
-        };
+        if let Some((processor, commiter, condition)) = controllers {
+            let condition_filter = ExtWhenFilter::new(condition, true);
 
-        let condition_filter = ExtWhenFilter::new(condition, query_options.strict);
-
-        if let Some((processor, commiter)) = controllers {
             query_map.insert(query_id, {
                 QueryContext {
                     query: query_options,
@@ -297,7 +293,9 @@ pub(super) mod tests {
 
     mod register_query {
         use super::*;
+        use mockall::predicate::always;
 
+        use reduct_base::not_found;
         use std::time::Duration;
 
         #[rstest]
@@ -353,24 +351,43 @@ pub(super) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_without_ext_but_computed_labels(mut mock_ext: MockIoExtension) {
+        async fn test_when_parsing(
+            mut mock_ext: MockIoExtension,
+            processor: BoxedProcessor,
+            commiter: BoxedCommiter,
+        ) {
             let query = QueryEntry {
-                when: Some(json!({"@label": { "$eq": "value" }})),
+                ext: Some(json!({
+                    "test-ext": {},
+                    "when": {"@label": {"$eq": "value"}},
+                })),
                 ..Default::default()
             };
-            mock_ext.expect_query().never();
+            mock_ext
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), always())
+                .return_once(|_, _, _| Ok((processor, commiter)));
 
-            let mocked_ext_repo = mocked_ext_repo("test", mock_ext);
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
 
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .is_ok(),);
+
+            // make sure we parsed condition correctly
+            let mut query_map = mocked_ext_repo.query_map.write().await;
+            assert_eq!(query_map.len(), 1, "Query should be registered");
+            let query_context = query_map.get_mut(&1).unwrap();
             assert_eq!(
-                mocked_ext_repo
-                    .register_query(1, "bucket", "entry", query)
-                    .await
+                query_context
+                    .condition_filter
+                    .filter_record(Box::new(MockRecord::new("not-in-when", "val")))
+                    .unwrap()
                     .err()
                     .unwrap(),
-                unprocessable_entity!(
-                    "There is at least one reference to computed labels but no extension is found"
-                )
+                not_found!("Reference '@label' not found"),
+                "Condition should be parsed and applied"
             );
         }
 
@@ -848,10 +865,6 @@ pub(super) mod tests {
                 ))
                 .build();
             MockRecord { meta }
-        }
-
-        pub fn meta_mut(&mut self) -> &mut RecordMeta {
-            &mut self.meta
         }
 
         pub fn boxed(key: &str, val: &str) -> BoxedReadRecord {

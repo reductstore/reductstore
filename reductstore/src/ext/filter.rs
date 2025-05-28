@@ -1,8 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage};
-use reduct_base::conflict;
+use crate::storage::query::condition::{BoxedNode, Context};
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
 use std::collections::HashMap;
@@ -45,19 +44,19 @@ impl ExtWhenFilter {
 
     fn filter_with_computed(&mut self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
         let meta = reader.meta();
-        let mut labels = meta
+        let labels = meta
             .labels()
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect::<HashMap<_, _>>();
 
-        for (k, v) in meta.computed_labels() {
-            if labels.insert(k, v).is_some() {
-                return Err(conflict!("Computed label '@{}' already exists", k));
-            }
-        }
+        let computed_labels = meta
+            .computed_labels()
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect::<HashMap<_, _>>();
 
-        let context = Context::new(meta.timestamp(), labels, EvaluationStage::Compute);
+        let context = Context::new(meta.timestamp(), labels, computed_labels);
         Ok(self
             .condition
             .as_mut()
@@ -73,8 +72,6 @@ mod tests {
     use crate::ext::ext_repository::tests::{mocked_record, MockRecord};
     use crate::storage::query::condition::Parser;
 
-    use reduct_base::io::{ReadRecord, RecordMeta};
-    use reduct_base::Labels;
     use rstest::rstest;
     use serde_json::json;
 
@@ -136,33 +133,6 @@ mod tests {
         assert!(
             filter.filter_record(mocked_record).is_none(),
             "ignore bad condition"
-        )
-    }
-
-    #[rstest]
-    fn conflict(mut mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(
-            Some(
-                Parser::new()
-                    .parse(&json!({"$and": [true, "@key1"]}))
-                    .unwrap(),
-            ),
-            true,
-        );
-
-        let meta = RecordMeta::builder()
-            .labels(Labels::from_iter(vec![(
-                "key1".to_string(),
-                "value1".to_string(),
-            )]))
-            .computed_labels(mocked_record.meta().computed_labels().clone())
-            .build();
-
-        *mocked_record.meta_mut() = meta;
-
-        assert_eq!(
-            filter.filter_record(mocked_record).unwrap().err().unwrap(),
-            conflict!("Computed label '@key1' already exists")
         )
     }
 }

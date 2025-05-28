@@ -22,10 +22,6 @@ impl Node for AllOf {
         Ok(Value::Bool(true))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("AllOf({:?})", self.operands)
     }

@@ -20,10 +20,6 @@ impl Node for Ref {
         )
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Ref({:?})", self.operands[0])
     }

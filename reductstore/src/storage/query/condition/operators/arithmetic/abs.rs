@@ -21,10 +21,6 @@ impl Node for Abs {
     fn print(&self) -> String {
         format!("Abs({:?})", self.operands[0])
     }
-
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
 }
 
 impl Boxed for Abs {

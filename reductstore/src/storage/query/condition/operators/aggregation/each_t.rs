@@ -49,10 +49,6 @@ impl Node for EachT {
         Ok(Value::Bool(ret))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("EachT({:?})", self.operands[0])
     }

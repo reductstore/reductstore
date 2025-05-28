@@ -18,10 +18,6 @@ impl Node for StartsWith {
         Ok(Value::Bool(value_1.starts_with(value_2)?))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("StartsWith({:?}, {:?})", self.operands[0], self.operands[1])
     }

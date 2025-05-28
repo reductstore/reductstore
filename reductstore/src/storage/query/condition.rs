@@ -6,6 +6,7 @@ use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+mod computed_reference;
 mod constant;
 mod operators;
 mod parser;
@@ -19,22 +20,18 @@ mod value;
 pub(crate) struct Context<'a> {
     timestamp: u64,
     labels: HashMap<&'a str, &'a str>,
-    stage: EvaluationStage,
+    computed_labels: HashMap<&'a str, &'a str>,
 }
-
-#[derive(PartialEq, Debug, Default, Clone)]
-pub(crate) enum EvaluationStage {
-    #[default]
-    Retrieve,
-    Compute,
-}
-
 impl<'a> Context<'a> {
-    pub fn new(timestamp: u64, labels: HashMap<&'a str, &'a str>, stage: EvaluationStage) -> Self {
+    pub fn new(
+        timestamp: u64,
+        labels: HashMap<&'a str, &'a str>,
+        computed_labels: HashMap<&'a str, &'a str>,
+    ) -> Self {
         Context {
             timestamp,
             labels,
-            stage,
+            computed_labels,
         }
     }
 }
@@ -46,22 +43,8 @@ pub(crate) trait Node {
     /// Evaluates the node in the given context.
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError>;
 
-    fn operands(&self) -> &Vec<BoxedNode>;
-
     /// Returns a string representation of the node.
     fn print(&self) -> String;
-
-    fn stage(&self) -> &EvaluationStage {
-        if self
-            .operands()
-            .iter()
-            .any(|o| o.stage() == &EvaluationStage::Compute)
-        {
-            &EvaluationStage::Compute
-        } else {
-            &EvaluationStage::Retrieve
-        }
-    }
 }
 
 pub(crate) trait Boxed: Node {

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add "@" prefix to computed labels, [PR-815](https://github.com/reductstore/reductstore/pull/815)
 - Refactor Extension API for multi-line CSV processing, ReductSelect v0.2.0, [PR-823](https://github.com/reductstore/reductstore/pull/823)
 - Run all operands after a compute-staged one on the compute stage, [PR-835](https://github.com/reductstore/reductstore/pull/835)
+- Replace auto-staging for extension filtering with when condition in ext parameter, [PR-838](https://github.com/reductstore/reductstore/pull/838)
 
 ### Fixed
 

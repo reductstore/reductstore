@@ -7,17 +7,11 @@ use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
 /// A node representing the timestamp of a current record in a query.
-pub(crate) struct Timestamp {
-    operands: Vec<BoxedNode>,
-}
+pub(crate) struct Timestamp {}
 
 impl Node for Timestamp {
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         Ok(Value::Int(context.timestamp as i64))
-    }
-
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
     }
 
     fn print(&self) -> String {
@@ -31,13 +25,13 @@ impl Boxed for Timestamp {
             return Err(unprocessable_entity!("$timestamp requires no operands"));
         }
 
-        Ok(Box::new(Timestamp::new(operands)))
+        Ok(Box::new(Timestamp::new()))
     }
 }
 
 impl Timestamp {
-    pub fn new(operands: Vec<BoxedNode>) -> Self {
-        Self { operands }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -51,7 +45,7 @@ mod tests {
 
     #[rstest]
     fn apply_ok() {
-        let mut op = Timestamp::new(vec![]);
+        let mut op = Timestamp::new();
 
         let mut context = Context::default();
         context.timestamp = 1234567890;
@@ -69,7 +63,7 @@ mod tests {
 
     #[rstest]
     fn print() {
-        let and = Timestamp::new(vec![]);
+        let and = Timestamp::new();
         assert_eq!(and.print(), "Timestamp()".to_string());
     }
 }

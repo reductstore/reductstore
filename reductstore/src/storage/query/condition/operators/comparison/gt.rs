@@ -18,10 +18,6 @@ impl Node for Gt {
         Ok(Value::Bool(value_1 > value_2))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Gt({:?}, {:?})", self.operands[0], self.operands[1])
     }

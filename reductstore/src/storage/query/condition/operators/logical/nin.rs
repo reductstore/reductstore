@@ -22,9 +22,6 @@ impl Node for Nin {
 
         Ok(Value::Bool(true))
     }
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
 
     fn print(&self) -> String {
         format!(

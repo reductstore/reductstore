@@ -22,10 +22,6 @@ impl Node for AnyOf {
         Ok(Value::Bool(false))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("AnyOf({:?})", self.operands)
     }
