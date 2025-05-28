@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::{BoxedNode, Context, EvaluationStage, Node};
+use crate::storage::query::condition::{BoxedNode, Context, Node};
 use reduct_base::error::ReductError;
 
 /// A node representing a constant value.
@@ -22,10 +22,6 @@ impl Node for Constant {
 
     fn print(&self) -> String {
         format!("{:?}", self.value)
-    }
-
-    fn stage(&self) -> &EvaluationStage {
-        &EvaluationStage::Retrieve
     }
 }
 
