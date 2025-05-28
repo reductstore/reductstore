@@ -23,10 +23,6 @@ impl Node for In {
         Ok(Value::Bool(false))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!(
             "In({:?}, [{:}])",

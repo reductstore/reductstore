@@ -9,7 +9,6 @@ use reduct_base::not_found;
 /// A node representing a reference to a label in the context.
 pub(super) struct Reference {
     name: String,
-    operands: Vec<BoxedNode>,
 }
 
 impl Node for Reference {
@@ -23,9 +22,6 @@ impl Node for Reference {
         Ok(value)
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
     fn print(&self) -> String {
         format!("Ref({})", self.name)
     }
@@ -33,10 +29,7 @@ impl Node for Reference {
 
 impl Reference {
     pub fn new(name: String) -> Self {
-        Reference {
-            name,
-            operands: vec![],
-        }
+        Reference { name }
     }
 
     pub fn boxed(name: String) -> BoxedNode {
@@ -48,7 +41,6 @@ impl Reference {
 mod tests {
     use super::*;
     use crate::storage::query::condition::value::Value;
-    use rstest::rstest;
 
     #[test]
     fn apply() {
@@ -76,12 +68,5 @@ mod tests {
         let reference = Reference::new("label".to_string());
         let result = reference.print();
         assert_eq!(result, "Ref(label)");
-    }
-
-    #[test]
-    fn operands() {
-        let reference = Reference::new("label".to_string());
-        let result = reference.operands();
-        assert_eq!(result.len(), 0);
     }
 }

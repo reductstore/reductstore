@@ -18,10 +18,6 @@ impl Node for Cast {
         op.cast(type_name.as_str())
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Cast({:?}, {:?})", self.operands[0], self.operands[1])
     }

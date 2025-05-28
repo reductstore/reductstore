@@ -19,10 +19,6 @@ impl Node for Sub {
         value_1.subtract(value_2)
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Sub({:?}, {:?})", self.operands[0], self.operands[1])
     }

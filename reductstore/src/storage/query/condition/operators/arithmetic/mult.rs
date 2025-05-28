@@ -26,10 +26,6 @@ impl Node for Mult {
         Ok(prod.unwrap_or(Value::Int(0)))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Mult({:?})", self.operands)
     }

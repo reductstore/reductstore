@@ -26,10 +26,6 @@ impl Node for Add {
         Ok(sum.unwrap_or(Value::Int(0)))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Add({:?})", self.operands)
     }

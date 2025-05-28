@@ -19,10 +19,6 @@ impl Node for Rem {
         value_1.remainder(value_2)
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Rem({:?}, {:?})", self.operands[0], self.operands[1])
     }

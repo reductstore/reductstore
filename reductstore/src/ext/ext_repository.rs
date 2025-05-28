@@ -378,7 +378,7 @@ pub(super) mod tests {
             // make sure we parsed condition correctly
             let mut query_map = mocked_ext_repo.query_map.write().await;
             assert_eq!(query_map.len(), 1, "Query should be registered");
-            let mut query_context = query_map.get_mut(&1).unwrap();
+            let query_context = query_map.get_mut(&1).unwrap();
             assert_eq!(
                 query_context
                     .condition_filter
@@ -865,10 +865,6 @@ pub(super) mod tests {
                 ))
                 .build();
             MockRecord { meta }
-        }
-
-        pub fn meta_mut(&mut self) -> &mut RecordMeta {
-            &mut self.meta
         }
 
         pub fn boxed(key: &str, val: &str) -> BoxedReadRecord {

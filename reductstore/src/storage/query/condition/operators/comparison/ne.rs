@@ -18,10 +18,6 @@ impl Node for Ne {
         Ok(Value::Bool(value_1 != value_2))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        self.operands.as_ref()
-    }
-
     fn print(&self) -> String {
         format!("Ne({:?}, {:?})", self.operands[0], self.operands[1])
     }

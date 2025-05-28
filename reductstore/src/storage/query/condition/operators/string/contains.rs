@@ -18,10 +18,6 @@ impl Node for Contains {
         Ok(Value::Bool(value_1.contains(value_2)?))
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
-
     fn print(&self) -> String {
         format!("Contains({:?}, {:?})", self.operands[0], self.operands[1])
     }

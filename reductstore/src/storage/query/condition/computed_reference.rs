@@ -9,7 +9,6 @@ use reduct_base::not_found;
 /// A node representing a reference to a label in the context.
 pub(super) struct ComputedReference {
     name: String,
-    operands: Vec<BoxedNode>,
 }
 
 impl Node for ComputedReference {
@@ -23,9 +22,6 @@ impl Node for ComputedReference {
         Ok(value)
     }
 
-    fn operands(&self) -> &Vec<BoxedNode> {
-        &self.operands
-    }
     fn print(&self) -> String {
         format!("CompRef({})", self.name)
     }
@@ -33,10 +29,7 @@ impl Node for ComputedReference {
 
 impl ComputedReference {
     pub fn new(name: String) -> Self {
-        ComputedReference {
-            name,
-            operands: vec![],
-        }
+        ComputedReference { name }
     }
 
     pub fn boxed(name: String) -> BoxedNode {
@@ -48,7 +41,6 @@ impl ComputedReference {
 mod tests {
     use super::*;
     use crate::storage::query::condition::value::Value;
-    use rstest::rstest;
 
     #[test]
     fn apply() {
@@ -76,12 +68,5 @@ mod tests {
         let reference = ComputedReference::new("label".to_string());
         let result = reference.print();
         assert_eq!(result, "CompRef(label)");
-    }
-
-    #[test]
-    fn operands() {
-        let reference = ComputedReference::new("label".to_string());
-        let result = reference.operands();
-        assert_eq!(result.len(), 0);
     }
 }

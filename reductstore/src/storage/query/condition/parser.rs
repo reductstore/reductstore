@@ -13,7 +13,7 @@ use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref, Times
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
 use crate::storage::query::condition::value::Value;
-use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
+use crate::storage::query::condition::{Boxed, BoxedNode};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Number, Value as JsonValue};

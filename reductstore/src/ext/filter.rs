@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::{BoxedNode, Context};
-use reduct_base::conflict;
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
 use std::collections::HashMap;
@@ -73,8 +72,6 @@ mod tests {
     use crate::ext::ext_repository::tests::{mocked_record, MockRecord};
     use crate::storage::query::condition::Parser;
 
-    use reduct_base::io::{ReadRecord, RecordMeta};
-    use reduct_base::Labels;
     use rstest::rstest;
     use serde_json::json;
 

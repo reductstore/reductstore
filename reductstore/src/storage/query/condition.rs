@@ -43,8 +43,6 @@ pub(crate) trait Node {
     /// Evaluates the node in the given context.
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError>;
 
-    fn operands(&self) -> &Vec<BoxedNode>;
-
     /// Returns a string representation of the node.
     fn print(&self) -> String;
 }
