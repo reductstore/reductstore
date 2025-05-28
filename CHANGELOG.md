@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Fixed
+
+- Update yanked zip dependency to 4.0.0, [PR-837](https://github.com/reductstore/reductstore/pull/837)
+
 ## [1.15.3] - 2025-05-26
 
 ## Fixed
