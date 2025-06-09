@@ -53,11 +53,15 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub fn from_env(env_getter: EnvGetter) -> Self {
         let mut env = Env::new(env_getter);
         let port: u16 = env.get("RS_PORT", DEFAULT_PORT);
+
+        let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
+        Self::normalize_url_path(&mut api_base_path);
+
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host: env.get("RS_HOST", DEFAULT_HOST.to_string()),
             port: port.clone(),
-            api_base_path: env.get("RS_API_BASE_PATH", "/".to_string()),
+            api_base_path,
             data_path: env.get("RS_DATA_PATH", "/data".to_string()),
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
             cert_path: env.get_masked("RS_CERT_PATH", "".to_string()),
@@ -74,6 +78,16 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         };
 
         cfg
+    }
+
+    fn normalize_url_path(api_base_path: &mut String) {
+        if !api_base_path.starts_with('/') {
+            api_base_path.insert(0, '/');
+        }
+
+        if !api_base_path.ends_with('/') {
+            api_base_path.push('/');
+        }
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
@@ -217,17 +231,21 @@ mod tests {
     }
 
     #[rstest]
-    fn test_api_base_path(mut env_getter: MockEnvGetter) {
+    #[case("/api")]
+    #[case("/api/")]
+    #[case("api/")]
+    #[case("api")]
+    fn test_api_base_path(mut env_getter: MockEnvGetter, #[case] path: &str) {
         env_getter
             .expect_get()
             .with(eq("RS_API_BASE_PATH"))
             .times(1)
-            .return_const(Ok("/api".to_string()));
+            .return_const(Ok(path.to_string()));
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let cfg = Cfg::from_env(env_getter);
-        assert_eq!(cfg.api_base_path, "/api");
+        assert_eq!(cfg.api_base_path, "/api/");
     }
 
     #[rstest]
