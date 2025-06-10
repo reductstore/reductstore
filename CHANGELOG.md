@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix hanging query request if no extension registered, [PR-830](https://github.com/reductstore/reductstore/pull/830)
 
+## [1.15.5] - 2025-06-10
+
+### Fixed
+
+- Fix crash if RS_API_PATH has wrong format, [PR-846](https://github.com/reductstore/reductstore/pull/846)
+
+### Changed
+
+- Update Web Console up to 1.10.2, [PR-847](https://github.com/reductstore/reductstore/pull/847)
+
 ## [1.15.4] - 2025-05-28
 
 ### Fixed
