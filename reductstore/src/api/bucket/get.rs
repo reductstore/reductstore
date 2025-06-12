@@ -5,7 +5,7 @@ use crate::api::bucket::FullBucketInfoAxum;
 use crate::api::middleware::check_permissions;
 use crate::api::Components;
 use crate::api::HttpError;
-use crate::auth::policy::AuthenticatedPolicy;
+use crate::auth::policy::ReadAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
@@ -17,7 +17,14 @@ pub(crate) async fn get_bucket(
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullBucketInfoAxum, HttpError> {
-    check_permissions(&components, &headers, AuthenticatedPolicy {}).await?;
+    check_permissions(
+        &components,
+        &headers,
+        ReadAccessPolicy {
+            bucket: bucket_name.clone(),
+        },
+    )
+    .await?;
     let bucket_info = components.storage.get_bucket(&bucket_name)?.upgrade()?;
     Ok(bucket_info.info()?.into())
 }
@@ -32,7 +39,9 @@ mod tests {
 
     use rstest::rstest;
 
+    use axum::http::HeaderValue;
     use reduct_base::error::ErrorCode;
+    use reduct_base::msg::token_api::Permissions;
     use std::sync::Arc;
 
     #[rstest]
@@ -63,5 +72,37 @@ mod tests {
             err,
             HttpError::new(ErrorCode::NotFound, "Bucket 'not-found' is not found")
         )
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_bucket_unauthorized(
+        #[future] components: Arc<Components>,
+        mut headers: HeaderMap,
+    ) {
+        let components = components.await;
+        let token = components
+            .token_repo
+            .write()
+            .await
+            .generate_token(
+                "test-token",
+                Permissions {
+                    full_access: false,
+                    read: vec!["bucket-1".to_string()],
+                    write: vec![],
+                },
+            )
+            .unwrap();
+
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {}", token.value)).unwrap(),
+        );
+        let err = get_bucket(State(components), Path("bucket-2".to_string()), headers)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err.0.status(), ErrorCode::Forbidden);
     }
 }
