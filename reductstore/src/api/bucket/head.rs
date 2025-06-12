@@ -15,7 +15,7 @@ pub(crate) async fn head_bucket(
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    check_permissions(&components, &headers, AuthenticatedPolicy {}).await?;
     components.storage.get_bucket(&bucket_name)?;
     Ok(())
 }

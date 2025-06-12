@@ -15,7 +15,7 @@ pub(crate) async fn remove_replication(
     Path(replication_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     components
         .replication_repo

@@ -16,7 +16,7 @@ pub(crate) async fn update_replication(
     headers: HeaderMap,
     settings: ReplicationSettingsAxum,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     components
         .replication_repo

@@ -63,7 +63,7 @@ pub async fn print_statuses(
 
 pub(crate) async fn check_permissions<P>(
     components: &Components,
-    headers: HeaderMap,
+    headers: &HeaderMap,
     policy: P,
 ) -> Result<(), HttpError>
 where

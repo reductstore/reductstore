@@ -17,7 +17,7 @@ pub(crate) async fn rename_bucket(
     headers: HeaderMap,
     request: Json<RenameBucket>,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
     components
         .storage
         .rename_bucket(&bucket_name, &request.new_name)

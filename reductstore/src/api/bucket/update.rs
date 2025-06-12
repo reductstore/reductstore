@@ -16,7 +16,7 @@ pub(crate) async fn update_bucket(
     headers: HeaderMap,
     settings: BucketSettingsAxum,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     Ok(components
         .storage

@@ -15,7 +15,7 @@ pub(crate) async fn me(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<TokenAxum, HttpError> {
-    check_permissions(&components, headers.clone(), AuthenticatedPolicy {}).await?;
+    check_permissions(&components, &headers.clone(), AuthenticatedPolicy {}).await?;
     let header = match headers.get("Authorization") {
         Some(header) => header.to_str().ok(),
         None => None,

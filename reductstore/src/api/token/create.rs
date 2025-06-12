@@ -16,7 +16,7 @@ pub(crate) async fn create_token(
     headers: HeaderMap,
     permissions: PermissionsAxum,
 ) -> Result<TokenCreateResponseAxum, HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     Ok(TokenCreateResponseAxum(
         components

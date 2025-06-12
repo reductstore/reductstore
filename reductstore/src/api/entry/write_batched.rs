@@ -45,7 +45,7 @@ pub(crate) async fn write_batched_records(
     let bucket_name = path.get("bucket_name").unwrap().clone();
     check_permissions(
         &components,
-        headers.clone(),
+        &headers,
         WriteAccessPolicy {
             bucket: bucket_name.clone(),
         },

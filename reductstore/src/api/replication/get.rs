@@ -15,7 +15,7 @@ pub(crate) async fn get_replication(
     Path(replication_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<ReplicationFullInfoAxum, HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     let info = components
         .replication_repo

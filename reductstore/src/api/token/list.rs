@@ -15,7 +15,7 @@ pub(crate) async fn list_tokens(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<TokenListAxum, HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
     let token_repo = components.token_repo.read().await;
 
     let mut list = TokenListAxum::default();

@@ -16,7 +16,7 @@ pub(crate) async fn list_replications(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<ReplicationListAxum, HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     let mut list = ReplicationListAxum::default();
 
