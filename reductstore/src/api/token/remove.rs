@@ -14,7 +14,7 @@ pub(crate) async fn remove_token(
     Path(token_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     Ok(components
         .token_repo

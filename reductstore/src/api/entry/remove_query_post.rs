@@ -32,7 +32,7 @@ pub(crate) async fn remove_query_json(
 
     check_permissions(
         &components,
-        headers,
+        &headers,
         WriteAccessPolicy {
             bucket: bucket_name.clone(),
         },

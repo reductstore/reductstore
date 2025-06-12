@@ -17,7 +17,7 @@ pub(crate) async fn get_bucket(
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullBucketInfoAxum, HttpError> {
-    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    check_permissions(&components, &headers, AuthenticatedPolicy {}).await?;
     let bucket_info = components.storage.get_bucket(&bucket_name)?.upgrade()?;
     Ok(bucket_info.info()?.into())
 }

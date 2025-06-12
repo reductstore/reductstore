@@ -15,7 +15,7 @@ pub(crate) async fn get_token(
     Path(token_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<TokenAxum, HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
 
     let mut token = components
         .token_repo

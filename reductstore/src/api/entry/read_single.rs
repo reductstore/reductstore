@@ -42,7 +42,7 @@ pub(crate) async fn read_record(
     let entry_name = path.get("entry_name").unwrap();
     check_permissions(
         &components,
-        headers,
+        &headers,
         ReadAccessPolicy {
             bucket: bucket_name.clone(),
         },

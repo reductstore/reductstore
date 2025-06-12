@@ -17,7 +17,7 @@ pub(crate) async fn create_bucket(
     headers: HeaderMap,
     settings: BucketSettingsAxum,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, headers, FullAccessPolicy {}).await?;
+    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
     components
         .storage
         .create_bucket(&bucket_name, settings.into())?;

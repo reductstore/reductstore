@@ -25,7 +25,7 @@ pub(crate) async fn read_query(
 
     check_permissions(
         &components,
-        headers,
+        &headers,
         ReadAccessPolicy {
             bucket: bucket_name.clone(),
         },

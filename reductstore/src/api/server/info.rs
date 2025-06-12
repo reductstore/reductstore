@@ -15,7 +15,7 @@ pub(crate) async fn info(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<ServerInfoAxum, HttpError> {
-    check_permissions(&components, headers, AuthenticatedPolicy {}).await?;
+    check_permissions(&components, &headers, AuthenticatedPolicy {}).await?;
 
     Ok(components.storage.info()?.into())
 }

@@ -22,7 +22,7 @@ pub(crate) async fn remove_entry(
 
     check_permissions(
         &components,
-        headers,
+        &headers,
         WriteAccessPolicy {
             bucket: bucket_name.clone(),
         },

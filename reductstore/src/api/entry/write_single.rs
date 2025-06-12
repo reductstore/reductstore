@@ -31,7 +31,7 @@ pub(crate) async fn write_record(
     let bucket = path.get("bucket_name").unwrap();
     check_permissions(
         &components,
-        headers.clone(),
+        &headers.clone(),
         WriteAccessPolicy {
             bucket: bucket.clone(),
         },

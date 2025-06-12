@@ -23,7 +23,7 @@ pub(crate) async fn rename_entry(
 
     check_permissions(
         &components,
-        headers,
+        &headers,
         WriteAccessPolicy {
             bucket: bucket_name.clone(),
         },
