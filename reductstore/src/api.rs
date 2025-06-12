@@ -213,6 +213,25 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_no_http_error() {
+            let error = HttpError::new(ErrorCode::Interrupt, "Test error");
+            let resp = error.into_response();
+            assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                HeaderValue::from_static("application/json")
+            );
+            assert_eq!(
+                resp.headers().get("x-reduct-error").unwrap(),
+                HeaderValue::from_static("Test error")
+            );
+
+            let body: Bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+            assert_eq!(body, Bytes::from(r#"{"detail": "Test error"}"#))
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_http_json_format() {
             let error = HttpError::new(ErrorCode::BadRequest, "Test \"error\"");
             let resp = error.into_response();
