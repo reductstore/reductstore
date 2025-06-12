@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix hanging query request if no extension registered, [PR-830](https://github.com/reductstore/reductstore/pull/830)
+- Fix `$limit` operator in extension context, [PR-848](https://github.com/reductstore/reductstore/pull/848)
 
 ## [1.15.5] - 2025-06-10
 
