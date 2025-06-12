@@ -79,7 +79,12 @@ def test__create_bucket_custom(base_url, session, bucket_name):
 
 @requires_env("API_TOKEN")
 def test__get_bucket_with_authenticated_token(
-    base_url, session, bucket_name, token_without_permissions
+    base_url,
+    session,
+    bucket_name,
+    token_without_permissions,
+    token_read_bucket,
+    token_write_bucket,
 ):
     """Needs an authenticated token"""
     session.post(f"{base_url}/b/{bucket_name}")
@@ -90,7 +95,17 @@ def test__get_bucket_with_authenticated_token(
     resp = session.get(
         f"{base_url}/b/{bucket_name}", headers=auth_headers(token_without_permissions)
     )
+    assert resp.status_code == 403
+
+    resp = session.get(
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_read_bucket)
+    )
     assert resp.status_code == 200
+
+    resp = session.get(
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_write_bucket)
+    )
+    assert resp.status_code == 403
 
 
 def test__get_bucket_stats(base_url, session, bucket_name):
