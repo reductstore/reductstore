@@ -26,6 +26,7 @@ use axum::{middleware::from_fn, Router};
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
+use log::warn;
 use middleware::{default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError as BaseHttpError;
@@ -84,7 +85,14 @@ impl IntoResponse for HttpError {
         let body = format!("{{\"detail\": \"{}\"}}", converted_quotes);
 
         // its often easiest to implement `IntoResponse` by calling other implementations
-        let mut resp = (StatusCode::from_u16(err.status as u16).unwrap(), body).into_response();
+        let http_code = if (err.status as i16) < 0 {
+            warn!("Invalid status code: {}", err.status);
+            StatusCode::INTERNAL_SERVER_ERROR
+        } else {
+            StatusCode::from_u16(err.status as u16).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+        };
+
+        let mut resp = (http_code, body).into_response();
         resp.headers_mut()
             .insert("content-type", "application/json".parse().unwrap());
         resp.headers_mut()
@@ -190,6 +198,25 @@ mod tests {
             let error = HttpError::new(ErrorCode::BadRequest, "Test error");
             let resp = error.into_response();
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                HeaderValue::from_static("application/json")
+            );
+            assert_eq!(
+                resp.headers().get("x-reduct-error").unwrap(),
+                HeaderValue::from_static("Test error")
+            );
+
+            let body: Bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+            assert_eq!(body, Bytes::from(r#"{"detail": "Test error"}"#))
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_http_error() {
+            let error = HttpError::new(ErrorCode::Interrupt, "Test error");
+            let resp = error.into_response();
+            assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(
                 resp.headers().get("content-type").unwrap(),
                 HeaderValue::from_static("application/json")

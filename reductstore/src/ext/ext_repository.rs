@@ -12,7 +12,7 @@ use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
-use reduct_base::error::ErrorCode::NoContent;
+use reduct_base::error::ErrorCode::{Interrupt, NoContent};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
     BoxedCommiter, BoxedProcessor, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
@@ -223,14 +223,17 @@ impl ManageExtensions for ExtRepository {
                 let record = result.unwrap();
 
                 return match query.condition_filter.filter_record(record) {
-                    Some(result) => {
-                        let record = match result {
-                            Ok(record) => record,
-                            Err(e) => return Some(Err(e)),
-                        };
-
-                        query.commiter.commit_record(record).await
-                    }
+                    Some(result) => match result {
+                        Ok(record) => query.commiter.commit_record(record).await,
+                        Err(e) => {
+                            if e.status == Interrupt {
+                                query.current_stream = None;
+                                None
+                            } else {
+                                Some(Err(e))
+                            }
+                        }
+                    },
                     None => None,
                 };
             } else {
@@ -281,8 +284,9 @@ pub(super) mod tests {
 
     use crate::storage::entry::RecordReader;
     use crate::storage::proto::Record;
-    use mockall::mock;
+    use async_stream::stream;
     use mockall::predicate::eq;
+    use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use reduct_base::msg::server_api::ServerInfo;
@@ -741,6 +745,85 @@ pub(super) mod tests {
                 "and we are done"
             );
         }
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_process_a_record_limit(
+        record_reader: RecordReader,
+        mut mock_ext: MockIoExtension,
+        mut processor: Box<MockProcessor>,
+        mut commiter: Box<MockCommiter>,
+    ) {
+        processor.expect_process_record().return_once(|_| {
+            let stream = stream! {
+                yield Ok(MockRecord::boxed("key", "val"));
+                yield Ok(MockRecord::boxed("key", "val"));
+            };
+            Ok(Box::new(stream) as BoxedRecordStream)
+        });
+
+        commiter.expect_commit_record().return_once(|_| {
+            Some(Ok(
+                Box::new(MockRecord::new("key", "val")) as BoxedReadRecord
+            ))
+        });
+        commiter.expect_flush().return_once(|| None).times(1);
+
+        mock_ext
+            .expect_query()
+            .with(eq("bucket"), eq("entry"), predicate::always())
+            .return_once(|_, _, _| Ok((processor, commiter)));
+
+        let query = QueryEntry {
+            ext: Some(json!({
+                "test1": {},
+                "when": {"$limit": 1},
+            })),
+            ..Default::default()
+        };
+
+        let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+
+        mocked_ext_repo
+            .register_query(1, "bucket", "entry", query)
+            .await
+            .unwrap();
+
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        tx.send(Ok(record_reader)).await.unwrap();
+        tx.send(Err(no_content!(""))).await.unwrap();
+
+        let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+        assert!(mocked_ext_repo
+            .fetch_and_process_record(1, query_rx.clone())
+            .await
+            .is_none());
+
+        mocked_ext_repo
+            .fetch_and_process_record(1, query_rx.clone())
+            .await
+            .unwrap()
+            .expect("Should return a record");
+
+        assert!(
+            mocked_ext_repo
+                .fetch_and_process_record(1, query_rx.clone())
+                .await
+                .is_none(),
+            "Flush should not return any records"
+        );
+
+        assert_eq!(
+            mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .unwrap()
+                .err()
+                .unwrap(),
+            no_content!("")
+        );
     }
 
     #[fixture]
