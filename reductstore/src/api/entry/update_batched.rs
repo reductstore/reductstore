@@ -29,7 +29,7 @@ pub(crate) async fn update_batched_records(
     let bucket_name = path.get("bucket_name").unwrap();
     check_permissions(
         &components,
-        &headers.clone(),
+        &headers,
         WriteAccessPolicy {
             bucket: bucket_name.clone(),
         },
