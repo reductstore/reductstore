@@ -12,7 +12,7 @@ use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
-use reduct_base::error::ErrorCode::NoContent;
+use reduct_base::error::ErrorCode::{Interrupt, NoContent};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
     BoxedCommiter, BoxedProcessor, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
@@ -223,14 +223,17 @@ impl ManageExtensions for ExtRepository {
                 let record = result.unwrap();
 
                 return match query.condition_filter.filter_record(record) {
-                    Some(result) => {
-                        let record = match result {
-                            Ok(record) => record,
-                            Err(e) => return Some(Err(e)),
-                        };
-
-                        query.commiter.commit_record(record).await
-                    }
+                    Some(result) => match result {
+                        Ok(record) => query.commiter.commit_record(record).await,
+                        Err(e) => {
+                            if e.status == Interrupt {
+                                query.current_stream = None;
+                                query.commiter.flush().await
+                            } else {
+                                Some(Err(e))
+                            }
+                        }
+                    },
                     None => None,
                 };
             } else {
