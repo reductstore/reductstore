@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     download_web_console("v1.10.2");
 
     #[cfg(feature = "select-ext")]
-    download_ext("select-ext", "v0.2.0");
+    download_ext("select-ext", "v0.3.0");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
@@ -74,12 +74,8 @@ fn download_web_console(version: &str) {
 
 #[cfg(feature = "select-ext")]
 fn download_ext(name: &str, version: &str) {
-    let sas_url = env::var("ARTIFACT_SAS_URL").unwrap_or_default();
-    if sas_url.is_empty() {
-        panic!("ARTIFACT_SAS_URL is not set, disable the extensions feature");
-    }
-
-    let sas_url = Url::parse(&sas_url).expect("Failed to parse ARTIFACT_SAS_URL");
+    let artifacts_host_url =
+        Url::parse("https://reductsoft.z6.web.core.windows.net/").expect("Failed to parse SAS URL");
 
     let target = env::var("TARGET").unwrap();
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -90,13 +86,13 @@ fn download_ext(name: &str, version: &str) {
     }
 
     println!("Downloading {}...", name);
-    let mut ext_url = sas_url
+    let mut ext_url = artifacts_host_url
         .join(&format!(
-            "/artifacts/{}/{}/{}.zip/{}.zip",
+            "/{}/{}/{}.zip/{}.zip",
             name, version, target, target
         ))
         .expect("Failed to create URL");
-    ext_url.set_query(sas_url.query());
+    ext_url.set_query(artifacts_host_url.query());
 
     let client = Client::builder().user_agent("ReductStore").build().unwrap();
     let resp = client
