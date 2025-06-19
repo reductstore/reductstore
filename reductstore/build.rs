@@ -32,6 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "select-ext")]
     download_ext("select-ext", "v0.3.0");
 
+    #[cfg(feature = "ros-ext")]
+    download_ext("ros-ext", "v0.1.0");
+
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -72,7 +75,6 @@ fn download_web_console(version: &str) {
     fs::copy(console_path, format!("{}/console.zip", out_dir)).expect("Failed to copy console.zip");
 }
 
-#[cfg(feature = "select-ext")]
 fn download_ext(name: &str, version: &str) {
     let artifacts_host_url =
         Url::parse("https://reductsoft.z6.web.core.windows.net/").expect("Failed to parse SAS URL");

@@ -95,6 +95,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
+        let ros_ext = create_asset_manager(load_ros_ext());
         let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
 
         let ext_path = if let Some(ext_path) = &self.ext_path {
@@ -115,7 +116,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             replication_repo: tokio::sync::RwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
-                vec![select_ext],
+                vec![select_ext, ros_ext],
                 ExtSettings::builder()
                     .log_level(&self.log_level)
                     .server_info(server_info)
@@ -159,6 +160,18 @@ fn load_select_ext() -> &'static [u8] {
 #[cfg(not(feature = "select-ext"))]
 fn load_select_ext() -> &'static [u8] {
     info!("Reduct Select Extension is disabled");
+    b""
+}
+
+#[cfg(feature = "ros-ext")]
+fn load_ros_ext() -> &'static [u8] {
+    info!("Load Reduct ROS Extension");
+    include_bytes!(concat!(env!("OUT_DIR"), "/ros-ext.zip"))
+}
+
+#[cfg(not(feature = "ros-ext"))]
+fn load_ros_ext() -> &'static [u8] {
+    info!("Reduct ROS Extension is disabled");
     b""
 }
 
