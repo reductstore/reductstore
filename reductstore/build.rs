@@ -75,6 +75,7 @@ fn download_web_console(version: &str) {
     fs::copy(console_path, format!("{}/console.zip", out_dir)).expect("Failed to copy console.zip");
 }
 
+#[allow(dead_code)]
 fn download_ext(name: &str, version: &str) {
     let artifacts_host_url =
         Url::parse("https://reductsoft.z6.web.core.windows.net/").expect("Failed to parse SAS URL");

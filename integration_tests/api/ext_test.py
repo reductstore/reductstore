@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from .conftest import requires_env
 
@@ -31,7 +32,7 @@ def test__select_ext(base_url, bucket, session):
 @requires_env("LICENSE_PATH")
 def test__ros_ext(base_url, bucket, session):
     data = b""
-    with open("api/data/file.mcap", "rb") as f:
+    with open(f"{Path(__file__).parent}/data/file.mcap", "rb") as f:
         data = f.read()
 
     resp = session.post(
