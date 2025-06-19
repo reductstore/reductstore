@@ -248,6 +248,20 @@ mod tests {
             let body: Bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
             assert_eq!(body, Bytes::from(r#"{"detail": "Test 'error'"}"#))
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_unparsable_message() {
+            let error = HttpError::new(
+                ErrorCode::BadRequest,
+                &String::from_utf8_lossy(b"Test \x7f"),
+            );
+            let resp = error.into_response();
+            assert_eq!(
+                resp.headers().get("x-reduct-error").unwrap(),
+                HeaderValue::from_static("Unparsable message")
+            );
+        }
     }
 
     #[fixture]
