@@ -26,7 +26,7 @@ use axum::{middleware::from_fn, Router};
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
-use log::warn;
+use log::{error, warn};
 use middleware::{default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError as BaseHttpError;
@@ -92,11 +92,16 @@ impl IntoResponse for HttpError {
             StatusCode::from_u16(err.status as u16).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
         };
 
+        let err_msg = if let Ok(header_value) = HeaderValue::from_str(&err.message) {
+            header_value
+        } else {
+            error!("Invalid error message: {}", err.message);
+            HeaderValue::from_str("Unparsable message").unwrap()
+        };
         let mut resp = (http_code, body).into_response();
         resp.headers_mut()
             .insert("content-type", "application/json".parse().unwrap());
-        resp.headers_mut()
-            .insert("x-reduct-error", err.message.parse().unwrap());
+        resp.headers_mut().insert("x-reduct-error", err_msg);
         resp
     }
 }
@@ -242,6 +247,20 @@ mod tests {
 
             let body: Bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
             assert_eq!(body, Bytes::from(r#"{"detail": "Test 'error'"}"#))
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_unparsable_message() {
+            let error = HttpError::new(
+                ErrorCode::BadRequest,
+                &String::from_utf8_lossy(b"Test \x7f"),
+            );
+            let resp = error.into_response();
+            assert_eq!(
+                resp.headers().get("x-reduct-error").unwrap(),
+                HeaderValue::from_static("Unparsable message")
+            );
         }
     }
 

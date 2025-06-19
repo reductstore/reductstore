@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Pass server information to extensions, [PR-816](https://github.com/reductstore/reductstore/pull/816)
 - Integrate ReductSelect v0.1.0, [PR-821](https://github.com/reductstore/reductstore/pull/821)
+- Integrate ReductRos v0.1.0, [PR-856](https://github.com/reductstore/reductstore/pull/856)
 - Filter buckets by read permission in server information, [PR-849](https://github.com/reductstore/reductstore/pull/849)
 
 ### Changed
