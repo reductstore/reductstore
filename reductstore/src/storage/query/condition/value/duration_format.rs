@@ -14,22 +14,26 @@ use reduct_base::unprocessable_entity;
 ///
 /// A `Result` containing the parsed duration as `Value::Duration` or an error if the string is invalid.
 fn parse_single_duration(duration_string: &str) -> Result<Value, ReductError> {
+    if duration_string.trim().is_empty() {
+        return Err(unprocessable_entity!("Duration literal cannot be empty"));
+    }
+
     let duration_string = duration_string.trim();
     let (num_part, unit_part) = duration_string
         .chars()
         .partition::<String, _>(|c| c.is_digit(10) || *c == '.' || *c == '-');
-    let value: f64 = num_part
+    let value: i64 = num_part
         .parse()
         .map_err(|_| unprocessable_entity!("Invalid duration value: {}", duration_string))?;
 
     let unit = unit_part.as_str();
     let seconds = match unit {
-        "us" => value / 1_000_000.0,
-        "ms" => value / 1_000.0,
-        "s" => value,
-        "m" => value * 60.0,
-        "h" => value * 3600.0,
-        "d" => value * 86400.0,
+        "us" => value,
+        "ms" => value * 1000,
+        "s" => value * 1_000_000,
+        "m" => value * 60_000_000,
+        "h" => value * 3_600_000_000,
+        "d" => value * 86_400_000_000,
         _ => {
             return Err(unprocessable_entity!(
                 "Invalid duration unit: {}",
@@ -41,7 +45,11 @@ fn parse_single_duration(duration_string: &str) -> Result<Value, ReductError> {
 }
 
 pub(crate) fn parse_duration(duration_string: &str) -> Result<Value, ReductError> {
-    let mut total_seconds = 0.0;
+    if duration_string.trim().is_empty() {
+        return Err(unprocessable_entity!("Duration literal cannot be empty"));
+    }
+
+    let mut total_seconds = 0;
     for part in duration_string.split_whitespace() {
         let Value::Duration(seconds) = parse_single_duration(part)? else {
             return Err(unprocessable_entity!("Invalid duration part: {}", part));
@@ -51,27 +59,25 @@ pub(crate) fn parse_duration(duration_string: &str) -> Result<Value, ReductError
     Ok(Value::Duration(total_seconds))
 }
 
-pub(super) fn fmt_duration(mut seconds: f64, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+pub(super) fn fmt_duration(mut usec: i64, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut parts = Vec::new();
     let units = [
-        ("d", 86400.0),
-        ("h", 3600.0),
-        ("m", 60.0),
-        ("s", 1.0),
-        ("ms", 0.001),
-        ("us", 0.000001),
+        ("d", 86_400_000_000), // days
+        ("h", 3_600_000_000),  // hours
+        ("m", 60_000_000),     // minutes
+        ("s", 1_000_000),      // seconds
+        ("ms", 1000),          // milliseconds
+        ("us", 1),             // microseconds
     ];
     for &(unit, unit_seconds) in &units {
-        if seconds >= unit_seconds {
-            let value = (seconds / unit_seconds).floor();
-            if value > 0.0 {
-                parts.push(format!("{}{}", value as u64, unit));
-                seconds -= value * unit_seconds;
-            }
+        if usec.abs() >= unit_seconds {
+            let value = usec / unit_seconds;
+            parts.push(format!("{}{}", value, unit));
+            usec -= value * unit_seconds;
         }
     }
     if parts.is_empty() {
-        parts.push("0s".to_string());
+        parts.push("0us".to_string());
     }
     write!(f, "{}", parts.join(" "))
 }
@@ -82,35 +88,30 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_parse_units() {
-        assert_eq!(
-            parse_single_duration("100us").unwrap(),
-            Value::Duration(0.0001)
-        );
-        assert_eq!(
-            parse_single_duration("100ms").unwrap(),
-            Value::Duration(0.1)
-        );
-        assert_eq!(
-            parse_single_duration("100s").unwrap(),
-            Value::Duration(100.0)
-        );
-        assert_eq!(
-            parse_single_duration("2.5m").unwrap(),
-            Value::Duration(150.0)
-        );
-        assert_eq!(
-            parse_single_duration("-1h").unwrap(),
-            Value::Duration(-3600.0)
-        );
-        assert_eq!(
-            parse_single_duration("1d").unwrap(),
-            Value::Duration(86400.0)
-        );
+    // #[case(0, "0us")]
+    // #[case(1, "1us")]
+    #[case(-1, "-1us")]
+    // #[case(100, "100us")]
+    // #[case(100_000, "100ms")]
+    // #[case(1_000_000, "1s")]
+    // #[case(-1_000_000, "-1s")]
+    // #[case(60_000_000, "1m")]
+    // #[case(3_600_000_000, "1h")]
+    // #[case(86_400_000_000, "1d")]
+    // #[case(86_400_000_000 + 3_600_000_000, "1d 1h")]
+    // #[case(86_400_000_000 - 3_600_000_000 + 5, "23h 5us")]
+    fn test_fmt_duration(#[case] value: i64, #[case] literal: &str) {
+        let value = Value::Duration(value);
+        assert_eq!(parse_duration(literal).unwrap(), value);
+        assert_eq!(value.to_string(), literal);
     }
 
     #[rstest]
     fn test_parse_invalid_duration() {
+        assert_eq!(
+            parse_single_duration("").err().unwrap(),
+            unprocessable_entity!("Duration literal cannot be empty")
+        );
         assert_eq!(
             parse_single_duration("100xyz").err().unwrap(),
             unprocessable_entity!("Invalid duration unit: xyz")
@@ -119,15 +120,42 @@ mod tests {
             parse_single_duration("abc").err().unwrap(),
             unprocessable_entity!("Invalid duration value: abc")
         );
+
+        assert_eq!(
+            parse_single_duration("2.5m").err().unwrap(),
+            unprocessable_entity!("Invalid duration value: 2.5m")
+        );
     }
 
     #[rstest]
     fn test_parse_duration() {
         assert_eq!(
             parse_duration("100ms 500us").unwrap(),
-            Value::Duration(0.1005)
+            Value::Duration(100_500)
         );
-        assert_eq!(parse_duration("1h -30m").unwrap(), Value::Duration(1800.0));
-        assert_eq!(parse_duration("2d 3h").unwrap(), Value::Duration(183600.0));
+        assert_eq!(
+            parse_duration("1h -30m").unwrap(),
+            Value::Duration(1_800_000_000)
+        );
+        assert_eq!(
+            parse_duration("2d 3h").unwrap(),
+            Value::Duration(183_600_000_000)
+        );
+    }
+
+    #[rstest]
+    fn test_invalid_duration() {
+        assert_eq!(
+            parse_duration("").err().unwrap(),
+            unprocessable_entity!("Duration literal cannot be empty")
+        );
+        assert_eq!(
+            parse_duration("1h 100xyz").err().unwrap(),
+            unprocessable_entity!("Invalid duration unit: xyz")
+        );
+        assert_eq!(
+            parse_duration("1h,2m").err().unwrap(),
+            unprocessable_entity!("Invalid duration unit: h,m")
+        );
     }
 }

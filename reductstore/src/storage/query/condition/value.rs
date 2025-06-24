@@ -24,6 +24,7 @@ pub(super) use string::contains::Contains;
 pub(super) use string::ends_with::EndsWith;
 pub(super) use string::starts_with::StartsWith;
 
+use crate::storage::query::condition::value::duration_format::fmt_duration;
 pub(super) use crate::storage::query::condition::value::duration_format::parse_duration;
 pub(super) use misc::cast::Cast;
 
@@ -34,7 +35,7 @@ pub(crate) enum Value {
     Int(i64),
     Float(f64),
     String(String),
-    Duration(f64),
+    Duration(i64),
 }
 
 impl Value {
@@ -65,10 +66,9 @@ impl Value {
     pub fn as_bool(&self) -> Result<bool, ReductError> {
         match self {
             Value::Bool(value) => Ok(*value),
-            Value::Int(value) => Ok(value != &0),
+            Value::Int(value) | Value::Duration(value) => Ok(value != &0),
             Value::Float(value) => Ok(value != &0.0),
             Value::String(value) => Ok(!value.is_empty()),
-            Value::Duration(value) => Ok(*value != 0.0),
         }
     }
 
@@ -77,7 +77,7 @@ impl Value {
     pub fn as_int(&self) -> Result<i64, ReductError> {
         match self {
             Value::Bool(value) => Ok(*value as i64),
-            Value::Int(value) => Ok(*value),
+            Value::Int(value) | Value::Duration(value) => Ok(*value),
             Value::Float(value) => Ok(*value as i64),
             Value::String(value) => {
                 if let Ok(value) = value.parse::<i64>() {
@@ -89,7 +89,6 @@ impl Value {
                     ))
                 }
             }
-            Value::Duration(value) => Ok(*value as i64),
         }
     }
 
@@ -97,7 +96,7 @@ impl Value {
     pub fn as_float(&self) -> Result<f64, ReductError> {
         match self {
             Value::Bool(value) => Ok(*value as i64 as f64),
-            Value::Int(value) => Ok(*value as f64),
+            Value::Int(value) | Value::Duration(value) => Ok(*value as f64),
             Value::Float(value) => Ok(*value),
             Value::String(value) => {
                 if let Ok(value) = value.parse::<f64>() {
@@ -109,7 +108,6 @@ impl Value {
                     ))
                 }
             }
-            Value::Duration(value) => Ok(*value),
         }
     }
 
@@ -117,6 +115,14 @@ impl Value {
     pub fn is_string(&self) -> bool {
         match self {
             Value::String(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if it is a duration
+    pub fn is_duration(&self) -> bool {
+        match self {
+            Value::Duration(_) => true,
             _ => false,
         }
     }
@@ -129,7 +135,7 @@ impl Display for Value {
             Value::Int(value) => write!(f, "{}", value),
             Value::Float(value) => write!(f, "{}", value),
             Value::String(value) => write!(f, "{}", value),
-            Value::Duration(value) => duration_format::fmt_duration(value.clone(), f),
+            Value::Duration(value) => fmt_duration(*value, f),
         }
     }
 }

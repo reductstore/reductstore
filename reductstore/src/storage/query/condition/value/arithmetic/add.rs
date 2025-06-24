@@ -28,30 +28,30 @@ impl Add for Value {
         match result {
             Value::Bool(s) => match other {
                 Value::Bool(v) => result = Value::Int(s as i64 + v as i64),
-                Value::Int(v) => result = Value::Int(s as i64 + v),
-                Value::Float(v) | Value::Duration(v) => result = Value::Float(s as i8 as f64 + v),
+                Value::Int(v) | Value::Duration(v) => result = Value::Int(s as i64 + v),
+                Value::Float(v) => result = Value::Float(s as i8 as f64 + v),
                 Value::String(_) => {
                     return Err(unprocessable_entity!("Cannot add boolean to string"));
                 }
             },
 
-            Value::Int(s) => match other {
+            Value::Int(s) | Value::Duration(s) => match other {
                 Value::Bool(v) => result = Value::Int(s + v as i64),
-                Value::Int(v) => result = Value::Int(s + v),
-                Value::Float(v) | Value::Duration(v) => result = Value::Float(s as f64 + v),
-                Value::String(_) => {
-                    return Err(unprocessable_entity!("Cannot add integer to string"));
-                }
-            },
-
-            Value::Float(s) | Value::Duration(s) => match other {
-                Value::Bool(v) => result = Value::Float(s + v as i8 as f64),
-                Value::Int(v) => result = Value::Float(s + v as f64),
-                Value::Float(v) | Value::Duration(v) => result = Value::Float(s + v),
+                Value::Int(v) | Value::Duration(v) => result = Value::Int(s + v),
+                Value::Float(v) => result = Value::Float(s as f64 + v),
                 Value::String(_) => {
                     if let Value::Duration(_) = result {
                         return Err(unprocessable_entity!("Cannot add duration to string"));
                     }
+                    return Err(unprocessable_entity!("Cannot add integer to string"));
+                }
+            },
+
+            Value::Float(s) => match other {
+                Value::Bool(v) => result = Value::Float(s + v as i8 as f64),
+                Value::Int(v) | Value::Duration(v) => result = Value::Float(s + v as f64),
+                Value::Float(v) => result = Value::Float(s + v),
+                Value::String(_) => {
                     return Err(unprocessable_entity!("Cannot add float to string"));
                 }
             },
@@ -86,7 +86,7 @@ mod tests {
     #[case(Value::Bool(true), Value::Bool(false), Value::Int(1))]
     #[case(Value::Bool(true), Value::Int(2), Value::Int(3))]
     #[case(Value::Bool(true), Value::Float(2.0), Value::Float(3.0))]
-    #[case(Value::Bool(true), Value::Duration(2.0), Value::Duration(3.0))]
+    #[case(Value::Bool(true), Value::Duration(2), Value::Duration(3))]
     #[case(Value::Int(2), Value::Bool(true), Value::Int(3))]
     #[case(Value::Int(2), Value::Int(3), Value::Int(5))]
     #[case(Value::Int(2), Value::Float(3.0), Value::Float(5.0))]
@@ -102,11 +102,11 @@ mod tests {
     #[case(Value::Bool(true), Value::String("world".to_string()), unprocessable_entity!("Cannot add boolean to string"))]
     #[case(Value::Int(2), Value::String("world".to_string()), unprocessable_entity!("Cannot add integer to string"))]
     #[case(Value::Float(2.0), Value::String("world".to_string()), unprocessable_entity!("Cannot add float to string"))]
-    #[case(Value::Duration(2.0), Value::String("world".to_string()), unprocessable_entity!("Cannot add duration to string"))]
+    #[case(Value::Duration(2), Value::String("world".to_string()), unprocessable_entity!("Cannot add duration to string"))]
     #[case(Value::String("hello".to_string()), Value::Bool(true), unprocessable_entity!("Cannot add string to boolean"))]
     #[case(Value::String("hello".to_string()), Value::Int(2), unprocessable_entity!("Cannot add string to integer"))]
     #[case(Value::String("hello".to_string()), Value::Float(2.0), unprocessable_entity!("Cannot add string to float"))]
-    #[case(Value::String("hello".to_string()), Value::Duration(2.0), unprocessable_entity!("Cannot add string to duration"))]
+    #[case(Value::String("hello".to_string()), Value::Duration(2), unprocessable_entity!("Cannot add string to duration"))]
     fn test_add_err(#[case] a: Value, #[case] b: Value, #[case] expected: ReductError) {
         assert_eq!(a.add(b), Err(expected));
     }

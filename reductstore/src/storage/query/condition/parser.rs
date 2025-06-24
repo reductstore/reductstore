@@ -250,7 +250,7 @@ mod tests {
     #[rstest]
     fn test_parse_duration(parser: Parser, context: Context) {
         let json = json!({
-            "$eq": ["1h", 3600]
+            "$eq": ["1h", 3600_000_000u64]
         });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
