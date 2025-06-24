@@ -19,7 +19,7 @@ impl Abs for Value {
         match result {
             Value::Bool(s) => result = Value::Int(s as i64),
             Value::Int(s) => result = Value::Int(s.abs()),
-            Value::Float(s) => result = Value::Float(s.abs()),
+            Value::Float(s) | Value::Duration(s) => result = Value::Float(s.abs()),
             Value::String(_) => {
                 return Err(unprocessable_entity!(
                     "Cannot calculate absolute value of a string"
@@ -43,6 +43,7 @@ mod tests {
     #[case(Value::Float(-1.0), Value::Float(1.0))]
     #[case(Value::Float(0.0), Value::Float(0.0))]
     #[case(Value::Float(1.0), Value::Float(1.0))]
+    #[case(Value::Duration(1.0), Value::Duration(1.0))]
     fn test_abs(#[case] value: Value, #[case] expected: Value) {
         let result = value.abs().unwrap();
         assert_eq!(result, expected);

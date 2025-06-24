@@ -12,7 +12,7 @@ use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, Nin
 use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref, Timestamp};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
 use crate::storage::query::condition::reference::Reference;
-use crate::storage::query::condition::value::Value;
+use crate::storage::query::condition::value::{parse_duration, Value};
 use crate::storage::query::condition::{Boxed, BoxedNode};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
@@ -93,8 +93,9 @@ impl Parser {
         } else if value.starts_with("@") {
             Ok(vec![ComputedReference::boxed(value[1..].to_string())])
         } else if value.starts_with("$") {
-            // operator without operands (nullary)
             Ok(vec![Self::parse_operator(value, vec![])?])
+        } else if let Ok(duration) = parse_duration(value) {
+            Ok(vec![Constant::boxed(duration)])
         } else {
             Ok(vec![Constant::boxed(Value::String(value.to_string()))])
         }
@@ -240,7 +241,16 @@ mod tests {
     #[rstest]
     fn test_parse_string(parser: Parser, context: Context) {
         let json = json!({
-            "$and": [                "a","b"]
+            "$and": ["a","b"]
+        });
+        let mut node = parser.parse(&json).unwrap();
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_duration(parser: Parser, context: Context) {
+        let json = json!({
+            "$eq": ["1h", 3600]
         });
         let mut node = parser.parse(&json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
@@ -405,7 +415,7 @@ mod tests {
         ) {
             let json = serde_json::from_str(&format!(
                 r#"{{"$eq":[{}, {{"{}": {} }}] }}"#,
-                expected.as_string().unwrap(),
+                expected.to_string(),
                 operator,
                 operands
             ))

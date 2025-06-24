@@ -4,25 +4,28 @@
 mod cmp;
 
 mod arithmetic;
+mod duration_format;
 mod misc;
 mod string;
 
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
+use std::fmt::Display;
 
-pub(crate) use arithmetic::abs::Abs;
-pub(crate) use arithmetic::add::Add;
-pub(crate) use arithmetic::div::Div;
-pub(crate) use arithmetic::div_num::DivNum;
-pub(crate) use arithmetic::mult::Mult;
-pub(crate) use arithmetic::rem::Rem;
-pub(crate) use arithmetic::sub::Sub;
+pub(super) use arithmetic::abs::Abs;
+pub(super) use arithmetic::add::Add;
+pub(super) use arithmetic::div::Div;
+pub(super) use arithmetic::div_num::DivNum;
+pub(super) use arithmetic::mult::Mult;
+pub(super) use arithmetic::rem::Rem;
+pub(super) use arithmetic::sub::Sub;
 
-pub(crate) use string::contains::Contains;
-pub(crate) use string::ends_with::EndsWith;
-pub(crate) use string::starts_with::StartsWith;
+pub(super) use string::contains::Contains;
+pub(super) use string::ends_with::EndsWith;
+pub(super) use string::starts_with::StartsWith;
 
-pub(crate) use misc::cast::Cast;
+pub(super) use crate::storage::query::condition::value::duration_format::parse_duration;
+pub(super) use misc::cast::Cast;
 
 /// A value that can be used in a condition.
 #[derive(Debug, Clone)]
@@ -31,6 +34,7 @@ pub(crate) enum Value {
     Int(i64),
     Float(f64),
     String(String),
+    Duration(f64),
 }
 
 impl Value {
@@ -64,6 +68,7 @@ impl Value {
             Value::Int(value) => Ok(value != &0),
             Value::Float(value) => Ok(value != &0.0),
             Value::String(value) => Ok(!value.is_empty()),
+            Value::Duration(value) => Ok(*value != 0.0),
         }
     }
 
@@ -84,6 +89,7 @@ impl Value {
                     ))
                 }
             }
+            Value::Duration(value) => Ok(*value as i64),
         }
     }
 
@@ -103,17 +109,7 @@ impl Value {
                     ))
                 }
             }
-        }
-    }
-
-    /// Converts the value to a string.
-    #[allow(dead_code)]
-    pub fn as_string(&self) -> Result<String, ReductError> {
-        match self {
-            Value::Bool(value) => Ok(value.to_string()),
-            Value::Int(value) => Ok(value.to_string()),
-            Value::Float(value) => Ok(value.to_string()),
-            Value::String(value) => Ok(value.clone()),
+            Value::Duration(value) => Ok(*value),
         }
     }
 
@@ -122,6 +118,18 @@ impl Value {
         match self {
             Value::String(_) => true,
             _ => false,
+        }
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Bool(value) => write!(f, "{}", value),
+            Value::Int(value) => write!(f, "{}", value),
+            Value::Float(value) => write!(f, "{}", value),
+            Value::String(value) => write!(f, "{}", value),
+            Value::Duration(value) => duration_format::fmt_duration(value.clone(), f),
         }
     }
 }
@@ -218,13 +226,13 @@ mod tests {
         }
 
         #[rstest]
-        #[case(Value::Bool(true), Ok("true".to_string()))]
-        #[case(Value::Bool(false), Ok("false".to_string()))]
-        #[case(Value::Int(42), Ok("42".to_string()))]
-        #[case(Value::Float(42.0), Ok("42".to_string()))]
-        #[case(Value::String("string".to_string()), Ok("string".to_string()))]
-        fn as_string(#[case] value: Value, #[case] expected: Result<String, ReductError>) {
-            let result = value.as_string();
+        #[case(Value::Bool(true), "true".to_string())]
+        #[case(Value::Bool(false), "false".to_string())]
+        #[case(Value::Int(42), "42".to_string())]
+        #[case(Value::Float(42.0), "42".to_string())]
+        #[case(Value::String("string".to_string()), "string".to_string())]
+        fn to_string(#[case] value: Value, #[case] expected: String) {
+            let result = value.to_string();
             assert_eq!(result, expected);
         }
     }

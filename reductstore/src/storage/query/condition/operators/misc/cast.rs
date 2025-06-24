@@ -14,7 +14,7 @@ pub(crate) struct Cast {
 impl Node for Cast {
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         let op = self.operands[0].apply(context)?;
-        let type_name = self.operands[1].apply(context)?.as_string()?;
+        let type_name = self.operands[1].apply(context)?.to_string();
         op.cast(type_name.as_str())
     }
 
