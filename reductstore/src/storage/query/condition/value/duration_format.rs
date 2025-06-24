@@ -12,7 +12,7 @@ use reduct_base::unprocessable_entity;
 ///
 /// # Returns
 ///
-/// A `Result` containing the parsed duration as `Value::Duration` or an error if the string is invalid.
+/// A `Result` containing the parsed duration as i64 (in microseconds) or an error if the string is invalid.
 fn parse_single_duration(duration_string: &str) -> Result<i64, ReductError> {
     if duration_string.trim().is_empty() {
         return Err(unprocessable_entity!("Duration literal cannot be empty"));
@@ -44,6 +44,14 @@ fn parse_single_duration(duration_string: &str) -> Result<i64, ReductError> {
     Ok(seconds)
 }
 
+/// Parses a duration string containing multiple parts (e.g., "100ms 500us") into a `Value::Duration`.
+/// # Arguments
+///
+/// * `duration_string` - The string representing the duration, which can contain multiple parts separated by whitespace.
+///
+/// # Returns
+///
+/// A `Result` containing the total duration as `Value::Duration` or an error if the string is invalid.
 pub(crate) fn parse_duration(duration_string: &str) -> Result<Value, ReductError> {
     if duration_string.trim().is_empty() {
         return Err(unprocessable_entity!("Duration literal cannot be empty"));
@@ -57,6 +65,16 @@ pub(crate) fn parse_duration(duration_string: &str) -> Result<Value, ReductError
     Ok(Value::Duration(total_seconds))
 }
 
+/// Formats a duration in microseconds into a human-readable string.
+///
+/// # Arguments
+///
+/// * `usec` - The duration in microseconds.
+/// * `f` - The formatter to write the output to.
+///
+/// # Returns
+///
+/// A `Result` indicating success or failure of the formatting operation.
 pub(super) fn fmt_duration(mut usec: i64, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut parts = Vec::new();
     let units = [
