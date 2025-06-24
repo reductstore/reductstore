@@ -39,7 +39,12 @@ impl Node for EachT {
         }
 
         let last_time = self.last_timestamp.unwrap();
-        let s = self.operands[0].apply(context)?.as_float()?;
+        let value = self.operands[0].apply(context)?;
+        let s = if value.is_duration() {
+            value.as_float()? / 1_000_000.0
+        } else {
+            value.as_float()?
+        };
 
         let ret = context.timestamp - last_time >= (s * 1_000_000.0) as u64;
         if ret {
@@ -63,8 +68,10 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn apply_ok() {
-        let mut op = EachT::new(vec![Constant::boxed(Value::Float(0.1))]);
+    #[case(Value::Float(0.1))]
+    #[case(Value::Duration(100_000))]
+    fn apply_ok(#[case] value: Value) {
+        let mut op = EachT::new(vec![Constant::boxed(value)]);
 
         let mut context = Context::default();
         assert_eq!(op.apply(&context).unwrap(), Value::Bool(false));

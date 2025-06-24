@@ -20,8 +20,8 @@ pub(crate) trait StartsWith {
 
 impl StartsWith for Value {
     fn starts_with(self, other: Self) -> Result<bool, ReductError> {
-        let other = other.as_string()?;
-        let self_string = self.as_string()?;
+        let other = other.to_string();
+        let self_string = self.to_string();
         Ok(self_string.starts_with(&other))
     }
 }

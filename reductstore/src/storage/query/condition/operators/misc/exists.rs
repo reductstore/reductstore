@@ -15,7 +15,7 @@ impl Node for Exists {
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
         for operand in &mut self.operands {
             let value = operand.apply(context)?;
-            if !context.labels.contains_key(value.as_string()?.as_str()) {
+            if !context.labels.contains_key(value.to_string().as_str()) {
                 return Ok(Value::Bool(false));
             }
         }

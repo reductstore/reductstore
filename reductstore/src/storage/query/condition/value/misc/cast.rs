@@ -27,7 +27,8 @@ impl Cast for Value {
             "bool" => self.as_bool().map(Value::Bool),
             "int" => self.as_int().map(Value::Int),
             "float" => self.as_float().map(Value::Float),
-            "string" => self.as_string().map(Value::String),
+            "string" => Ok(Value::String(self.to_string())),
+            "duration" => self.as_int().map(Value::Duration),
             _ => Err(unprocessable_entity!("Unknown type '{}'", type_name)),
         }
     }
@@ -44,20 +45,29 @@ mod tests {
     #[case("bool", Value::Int(1), Ok(Value::Bool(true)))]
     #[case("bool", Value::Float(1.0), Ok(Value::Bool(true)))]
     #[case("bool", Value::String("true".to_string()), Ok(Value::Bool(true)))]
+    #[case("bool", Value::Duration(1), Ok(Value::Bool(true)))]
     #[case("int", Value::Bool(true), Ok(Value::Int(1)))]
     #[case("int", Value::Int(1), Ok(Value::Int(1)))]
     #[case("int", Value::Float(1.0), Ok(Value::Int(1)))]
     #[case("int", Value::String("1".to_string()), Ok(Value::Int(1)))]
     #[case("int", Value::String("xx".to_string()), Err(unprocessable_entity!("Value 'xx' could not be parsed as integer")))]
+    #[case("int", Value::Duration(1), Ok(Value::Int(1)))]
     #[case("float", Value::Bool(true), Ok(Value::Float(1.0)))]
     #[case("float", Value::Int(1), Ok(Value::Float(1.0)))]
     #[case("float", Value::Float(1.0), Ok(Value::Float(1.0)))]
     #[case("float", Value::String("1.0".to_string()), Ok(Value::Float(1.0)))]
     #[case("float", Value::String("xx".to_string()), Err(unprocessable_entity!("Value 'xx' could not be parsed as float")))]
+    #[case("float", Value::Duration(1), Ok(Value::Float(1.0)))]
     #[case("string", Value::Bool(true), Ok(Value::String("true".to_string())))]
     #[case("string", Value::Int(1), Ok(Value::String("1".to_string())))]
     #[case("string", Value::Float(1.0), Ok(Value::String("1".to_string())))]
     #[case("string", Value::String("1".to_string()), Ok(Value::String("1".to_string())))]
+    #[case("string", Value::Duration(1), Ok(Value::String("1us".to_string())))]
+    #[case("duration", Value::Bool(true), Ok(Value::Duration(1)))]
+    #[case("duration", Value::Int(1), Ok(Value::Duration(1)))]
+    #[case("duration", Value::Float(1.0), Ok(Value::Duration(1)))]
+    #[case("duration", Value::String("1".to_string()), Ok(Value::Duration(1)))]
+    #[case("duration", Value::String("xx".to_string()), Err(unprocessable_entity!("Value 'xx' could not be parsed as integer")))]
     #[case("unknown", Value::Bool(true), Err(unprocessable_entity!("Unknown type 'unknown'")))]
     fn test_cast(
         #[case] type_name: &str,

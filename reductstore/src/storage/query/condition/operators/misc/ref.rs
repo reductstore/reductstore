@@ -13,7 +13,7 @@ pub(crate) struct Ref {
 
 impl Node for Ref {
     fn apply(&mut self, context: &Context) -> Result<Value, ReductError> {
-        let label = self.operands[0].apply(context)?.as_string()?;
+        let label = self.operands[0].apply(context)?.to_string();
         context.labels.get(label.as_str()).map_or_else(
             || Err(not_found!("Label '{:?}' not found", label)),
             |v| Ok(Value::parse(v)),

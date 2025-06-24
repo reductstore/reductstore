@@ -20,8 +20,8 @@ pub(crate) trait Contains {
 
 impl Contains for Value {
     fn contains(self, other: Self) -> Result<bool, ReductError> {
-        let other = other.as_string()?;
-        let self_string = self.as_string()?;
+        let other = other.to_string();
+        let self_string = self.to_string();
         Ok(self_string.contains(&other))
     }
 }

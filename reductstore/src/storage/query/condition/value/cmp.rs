@@ -7,15 +7,26 @@ impl PartialEq<Self> for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::Bool(left), Value::Bool(right)) => left == right,
-            (Value::Bool(left), Value::Int(right)) => *left as i64 == *right,
+            (Value::Bool(left), Value::Int(right) | Value::Duration(right)) => {
+                *left as i64 == *right
+            }
             (Value::Bool(left), Value::Float(right)) => *left as i64 as f64 == *right,
 
-            (Value::Int(left), Value::Int(right)) => left == right,
-            (Value::Int(left), Value::Bool(right)) => *left == *right as i64,
-            (Value::Int(left), Value::Float(right)) => *left as f64 == *right,
+            (
+                Value::Int(left) | Value::Duration(left),
+                Value::Int(right) | Value::Duration(right),
+            ) => left == right,
+            (Value::Int(left) | Value::Duration(left), Value::Bool(right)) => {
+                *left == *right as i64
+            }
+            (Value::Int(left) | Value::Duration(left), Value::Float(right)) => {
+                *left as f64 == *right
+            }
 
             (Value::Float(left), Value::Float(right)) => left == right,
-            (Value::Float(left), Value::Int(right)) => *left == *right as f64,
+            (Value::Float(left), Value::Int(right) | Value::Duration(right)) => {
+                *left == *right as f64
+            }
             (Value::Float(left), Value::Bool(right)) => *left == *right as i64 as f64,
 
             (Value::String(left), Value::String(right)) => left == right,
@@ -29,15 +40,26 @@ impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
             (Value::Bool(left), Value::Bool(right)) => left.partial_cmp(right),
-            (Value::Bool(left), Value::Int(right)) => (*left as i64).partial_cmp(right),
+            (Value::Bool(left), Value::Int(right) | Value::Duration(right)) => {
+                (*left as i64).partial_cmp(right)
+            }
             (Value::Bool(left), Value::Float(right)) => (*left as i64 as f64).partial_cmp(right),
 
-            (Value::Int(left), Value::Int(right)) => left.partial_cmp(right),
-            (Value::Int(left), Value::Bool(right)) => left.partial_cmp(&(*right as i64)),
-            (Value::Int(left), Value::Float(right)) => (*left as f64).partial_cmp(right),
+            (
+                Value::Int(left) | Value::Duration(left),
+                Value::Int(right) | Value::Duration(right),
+            ) => left.partial_cmp(right),
+            (Value::Int(left) | Value::Duration(left), Value::Bool(right)) => {
+                left.partial_cmp(&(*right as i64))
+            }
+            (Value::Int(left) | Value::Duration(left), Value::Float(right)) => {
+                (*left as f64).partial_cmp(right)
+            }
 
             (Value::Float(left), Value::Float(right)) => left.partial_cmp(right),
-            (Value::Float(left), Value::Int(right)) => left.partial_cmp(&(*right as f64)),
+            (Value::Float(left), Value::Int(right) | Value::Duration(right)) => {
+                left.partial_cmp(&(*right as f64))
+            }
             (Value::Float(left), Value::Bool(right)) => left.partial_cmp(&(*right as i64 as f64)),
 
             (Value::String(left), Value::String(right)) => left.partial_cmp(right),
@@ -67,6 +89,7 @@ mod tests {
         #[case(Value::Bool(true), Value::String("string".to_string()), false)]
         #[case(Value::Bool(false), Value::String("string".to_string()), false)]
         #[case(Value::Bool(true), Value::String("true".to_string()), false)]
+        #[case(Value::Bool(true), Value::Duration(1), true)]
         fn partial_eq_bool(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
             let result = left == right;
             assert_eq!(result, expected);
@@ -88,6 +111,8 @@ mod tests {
         #[case(Value::Int(1), Value::Float(-1.0), false)]
         #[case(Value::Int(1), Value::String("string".to_string()), false)]
         #[case(Value::Int(-1), Value::String("string".to_string()), false)]
+        #[case(Value::Int(1), Value::Duration(1), true)]
+        #[case(Value::Int(-1), Value::Duration(1), false)]
         fn partial_eq_int(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
             let result = left == right;
             assert_eq!(result, expected);
@@ -109,6 +134,8 @@ mod tests {
         #[case(Value::Float(1.0), Value::Int(-1), false)]
         #[case(Value::Float(1.0), Value::String("string".to_string()), false)]
         #[case(Value::Float(-1.0), Value::String("string".to_string()), false)]
+        #[case(Value::Float(1.0), Value::Duration(1), true)]
+        #[case(Value::Float(-1.0), Value::Duration(1), false)]
         fn partial_eq_float(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
             let result = left == right;
             assert_eq!(result, expected);
@@ -122,6 +149,7 @@ mod tests {
         #[case(Value::String("a".to_string()), Value::Bool(false), false)]
         #[case(Value::String("a".to_string()), Value::Int(1), false)]
         #[case(Value::String("a".to_string()), Value::Float(1.0), false)]
+        #[case(Value::String("a".to_string()), Value::Duration(1), false)]
         fn partial_eq_string(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
             let result = left == right;
             assert_eq!(result, expected);
@@ -154,6 +182,9 @@ mod tests {
         #[case(Value::Bool(false), Value::String("string".to_string()), None)]
         #[case(Value::Bool(true), Value::String("true".to_string()), None)]
         #[case(Value::Bool(false), Value::String("true".to_string()), None)]
+        #[case(Value::Bool(true), Value::Duration(1), Some(Ordering::Equal))]
+        #[case(Value::Bool(false), Value::Duration(1), Some(Ordering::Less))]
+        #[case(Value::Bool(true), Value::Duration(0), Some(Ordering::Greater))]
         fn partial_cmp_bool(
             #[case] left: Value,
             #[case] right: Value,
@@ -180,6 +211,9 @@ mod tests {
         #[case(Value::Int(1), Value::Float(-1.0), Some(Ordering::Greater))]
         #[case(Value::Int(1), Value::String("string".to_string()), None)]
         #[case(Value::Int(-1), Value::String("string".to_string()), None)]
+        #[case(Value::Int(1), Value::Duration(1), Some(Ordering::Equal))]
+        #[case(Value::Int(-1), Value::Duration(1), Some(Ordering::Less))]
+        #[case(Value::Int(1), Value::Duration(0), Some(Ordering::Greater))]
         fn partial_cmp_int(
             #[case] left: Value,
             #[case] right: Value,
@@ -206,6 +240,8 @@ mod tests {
         #[case(Value::Float(1.0), Value::Int(-1), Some(Ordering::Greater))]
         #[case(Value::Float(1.0), Value::String("string".to_string()), None)]
         #[case(Value::Float(-1.0), Value::String("string".to_string()), None)]
+        #[case(Value::Float(1.0), Value::Duration(1), Some(Ordering::Equal))]
+        #[case(Value::Float(-1.0), Value::Duration(1), Some(Ordering::Less))]
         fn partial_cmp_float(
             #[case] left: Value,
             #[case] right: Value,
@@ -223,6 +259,7 @@ mod tests {
         #[case(Value::String("a".to_string()), Value::Bool(false), None)]
         #[case(Value::String("a".to_string()), Value::Int(1), None)]
         #[case(Value::String("a".to_string()), Value::Float(1.0), None)]
+        #[case(Value::String("a".to_string()), Value::Duration(1), None)]
         fn partial_cmp_string(
             #[case] left: Value,
             #[case] right: Value,
