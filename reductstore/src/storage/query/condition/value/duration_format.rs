@@ -13,7 +13,7 @@ use reduct_base::unprocessable_entity;
 /// # Returns
 ///
 /// A `Result` containing the parsed duration as `Value::Duration` or an error if the string is invalid.
-fn parse_single_duration(duration_string: &str) -> Result<Value, ReductError> {
+fn parse_single_duration(duration_string: &str) -> Result<i64, ReductError> {
     if duration_string.trim().is_empty() {
         return Err(unprocessable_entity!("Duration literal cannot be empty"));
     }
@@ -41,7 +41,7 @@ fn parse_single_duration(duration_string: &str) -> Result<Value, ReductError> {
             ))
         }
     };
-    Ok(Value::Duration(seconds))
+    Ok(seconds)
 }
 
 pub(crate) fn parse_duration(duration_string: &str) -> Result<Value, ReductError> {
@@ -51,9 +51,7 @@ pub(crate) fn parse_duration(duration_string: &str) -> Result<Value, ReductError
 
     let mut total_seconds = 0;
     for part in duration_string.split_whitespace() {
-        let Value::Duration(seconds) = parse_single_duration(part)? else {
-            return Err(unprocessable_entity!("Invalid duration part: {}", part));
-        };
+        let seconds = parse_single_duration(part)?;
         total_seconds += seconds;
     }
     Ok(Value::Duration(total_seconds))
@@ -88,18 +86,18 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    // #[case(0, "0us")]
-    // #[case(1, "1us")]
+    #[case(0, "0us")]
+    #[case(1, "1us")]
     #[case(-1, "-1us")]
-    // #[case(100, "100us")]
-    // #[case(100_000, "100ms")]
-    // #[case(1_000_000, "1s")]
-    // #[case(-1_000_000, "-1s")]
-    // #[case(60_000_000, "1m")]
-    // #[case(3_600_000_000, "1h")]
-    // #[case(86_400_000_000, "1d")]
-    // #[case(86_400_000_000 + 3_600_000_000, "1d 1h")]
-    // #[case(86_400_000_000 - 3_600_000_000 + 5, "23h 5us")]
+    #[case(100, "100us")]
+    #[case(100_000, "100ms")]
+    #[case(1_000_000, "1s")]
+    #[case(-1_000_000, "-1s")]
+    #[case(60_000_000, "1m")]
+    #[case(3_600_000_000, "1h")]
+    #[case(86_400_000_000, "1d")]
+    #[case(86_400_000_000 + 3_600_000_000, "1d 1h")]
+    #[case(86_400_000_000 - 3_600_000_000 + 5, "23h 5us")]
     fn test_fmt_duration(#[case] value: i64, #[case] literal: &str) {
         let value = Value::Duration(value);
         assert_eq!(parse_duration(literal).unwrap(), value);
