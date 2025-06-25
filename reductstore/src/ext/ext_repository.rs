@@ -5,7 +5,6 @@ mod create;
 mod load;
 
 use crate::asset::asset_manager::ManageStaticAsset;
-use crate::ext::filter::ExtWhenFilter;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::QueryRx;
@@ -20,6 +19,8 @@ use reduct_base::ext::{
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, unprocessable_entity};
 use std::collections::HashMap;
+use std::env::var;
+use std::iter::Filter;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -59,14 +60,14 @@ pub(crate) trait ManageExtensions {
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
-    ) -> Option<Result<BoxedReadRecord, ReductError>>;
+    ) -> Option<Result<Vec<BoxedReadRecord>, ReductError>>;
 }
 
 pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 
 pub(crate) struct QueryContext {
     query: QueryOptions,
-    condition_filter: ExtWhenFilter,
+    condition_filter: Box<dyn RecordFilter<BoxedReadRecord> + Send + Sync>,
     last_access: Instant,
     current_stream: Option<Pin<BoxedRecordStream>>,
 
@@ -165,7 +166,12 @@ impl ManageExtensions for ExtRepository {
         }
 
         if let Some((processor, commiter, condition)) = controllers {
-            let condition_filter = ExtWhenFilter::new(condition, true);
+            let condition_filter = if let Some(condition) = condition {
+                let (node, directives) = condition;
+                Box::new(WhenFilter::try_new(node, directives, true)?)
+            } else {
+                DummyFilter::boxed()
+            };
 
             query_map.insert(query_id, {
                 QueryContext {
@@ -186,7 +192,7 @@ impl ManageExtensions for ExtRepository {
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
-    ) -> Option<Result<BoxedReadRecord, ReductError>> {
+    ) -> Option<Result<Vec<BoxedReadRecord>, ReductError>> {
         // TODO: The code is awkward, we need to refactor it
         // unfortunately stream! macro does not work here and crashes compiler
         let mut lock = self.query_map.write().await;
@@ -198,7 +204,7 @@ impl ManageExtensions for ExtRepository {
                     .await
                     .recv()
                     .await
-                    .map(|record| record.map(|r| Box::new(r) as BoxedReadRecord));
+                    .map(|record| record.map(|r| vec![Box::new(r) as BoxedReadRecord]));
 
                 if result.is_none() {
                     // If no record is available, return a no content error to finish the query.
@@ -222,19 +228,29 @@ impl ManageExtensions for ExtRepository {
 
                 let record = result.unwrap();
 
-                return match query.condition_filter.filter_record(record) {
-                    Some(result) => match result {
-                        Ok(record) => query.commiter.commit_record(record).await,
-                        Err(e) => {
-                            if e.status == Interrupt {
-                                query.current_stream = None;
-                                None
-                            } else {
-                                Some(Err(e))
+                return match query.condition_filter.filter(record) {
+                    Ok(Some(records)) => {
+                        let mut commited_records = vec![];
+                        for record in records {
+                            if let Some(rec) = query.commiter.commit_record(record).await {
+                                match rec {
+                                    Ok(rec) => commited_records.push(rec),
+                                    Err(e) => return Some(Err(e)),
+                                }
                             }
                         }
-                    },
-                    None => None,
+
+                        if commited_records.is_empty() {
+                            None
+                        } else {
+                            Some(Ok(commited_records))
+                        }
+                    }
+                    Ok(None) => {
+                        query.current_stream = None;
+                        None
+                    }
+                    Err(e) => Some(Err(e)),
                 };
             } else {
                 // stream is empty, we need to process the next record
@@ -251,13 +267,18 @@ impl ManageExtensions for ExtRepository {
             Err(e) => {
                 return if e.status == NoContent {
                     if let Some(last_record) = query.commiter.flush().await {
-                        Some(last_record)
+                        match last_record {
+                            Ok(rec) => {
+                                Some(Ok(vec![rec])) // return the last record if available
+                            }
+                            Err(e) => Some(Err(e)),
+                        }
                     } else {
-                        Some(Err(e))
+                        Some(Err(e)) // return no content error if no last record
                     }
                 } else {
                     Some(Err(e))
-                }
+                };
             }
         };
 
@@ -273,7 +294,10 @@ impl ManageExtensions for ExtRepository {
     }
 }
 
+use crate::ext::filter::DummyFilter;
+use crate::storage::query::filters::{GetMeta, RecordFilter, WhenFilter};
 pub(crate) use create::create_ext_repository;
+use reduct_base::io::ReadRecord;
 
 #[cfg(test)]
 pub(super) mod tests {

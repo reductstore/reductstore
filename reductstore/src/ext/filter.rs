@@ -1,69 +1,44 @@
-// Copyright 2025 ReductSoftware UG
-// Licensed under the Business Source License 1.1
-
-use crate::storage::query::condition::{BoxedNode, Context, Directives};
+use crate::storage::proto::record::State::Finished;
+use crate::storage::query::filters::{GetMeta, RecordFilter};
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
 use std::collections::HashMap;
 
-pub(super) struct ExtWhenFilter {
-    condition: Option<(BoxedNode, Directives)>,
-    strict: bool,
+// Copyright 2025 ReductSoftware UG
+// Licensed under the Business Source License 1.1
+pub(super) struct DummyFilter {}
+
+impl<R: GetMeta> RecordFilter<R> for DummyFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
+        Ok(Some(vec![record]))
+    }
 }
 
-/// This filter is used to filter records based on a condition.
-///
-/// It is used in the `ext` module to filter records after they processed by extension,
-/// and it puts computed labels into the context.
-impl ExtWhenFilter {
-    pub fn new(condition: Option<(BoxedNode, Directives)>, strict: bool) -> Self {
-        ExtWhenFilter { condition, strict }
+impl DummyFilter {
+    pub fn boxed() -> Box<dyn RecordFilter<BoxedReadRecord> + Send + Sync> {
+        Box::new(DummyFilter {})
+    }
+}
+
+impl GetMeta for BoxedReadRecord {
+    fn state(&self) -> i32 {
+        Finished as i32
     }
 
-    pub fn filter_record(
-        &mut self,
-        record: BoxedReadRecord,
-    ) -> Option<Result<BoxedReadRecord, ReductError>> {
-        if self.condition.is_none() {
-            return Some(Ok(record));
-        }
-
-        // filter with computed labels
-        match self.filter_with_computed(&record) {
-            Ok(true) => Some(Ok(record)),
-            Ok(false) => None,
-            Err(e) => {
-                if self.strict {
-                    Some(Err(e))
-                } else {
-                    None
-                }
-            }
-        }
+    fn timestamp(&self) -> u64 {
+        self.meta().timestamp()
     }
 
-    fn filter_with_computed(&mut self, reader: &BoxedReadRecord) -> Result<bool, ReductError> {
-        let meta = reader.meta();
-        let labels = meta
-            .labels()
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect::<HashMap<_, _>>();
+    fn labels(&self) -> HashMap<&String, &String> {
+        self.meta().labels().iter().map(|(k, v)| (k, v)).collect()
+    }
 
-        let computed_labels = meta
+    fn computed_labels(&self) -> HashMap<&String, &String> {
+        self.meta()
             .computed_labels()
             .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect::<HashMap<_, _>>();
-
-        let context = Context::new(meta.timestamp(), labels, computed_labels);
-        Ok(self
-            .condition
-            .as_mut()
-            .unwrap()
-            .0
-            .apply(&context)?
-            .as_bool()?)
+            .map(|(k, v)| (k, v))
+            .collect()
     }
 }
 

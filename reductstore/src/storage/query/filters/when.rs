@@ -4,6 +4,7 @@
 use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::Padding::Records;
 use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
+use log::debug;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::internal_server_error;
 use std::collections::VecDeque;
@@ -33,7 +34,7 @@ impl<R> WhenFilter<R> {
                     "Padding before must be non-negative",
                 ));
             }
-            Records(before as usize)
+            Records(before as usize + 1)
         } else {
             Records(1) // Default to 0 records before
         };
@@ -74,6 +75,8 @@ impl<R: GetMeta> RecordFilter<R> for WhenFilter<R> {
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
         );
+
+        debug!("Context: {:?}", context);
 
         let result = match self.condition.apply(&context) {
             Ok(value) => value.as_bool()?,
