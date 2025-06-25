@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix hanging query request if no extension registered, [PR-830](https://github.com/reductstore/reductstore/pull/830)
 - Fix `$limit` operator in extension context, [PR-848](https://github.com/reductstore/reductstore/pull/848)
 
+## [1.15.6] - 2025-06-25
+
+### Fixed
+
+- Fix replication of update transaction to empty bucket, [PR-867](https://github.com/reductstore/reductstore/pull/867)
+
 ## [1.15.5] - 2025-06-10
 
 ### Fixed
@@ -1063,7 +1069,11 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 - Initial release with basic HTTP API and FIFO bucket quota
 
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.4...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.6...HEAD
+
+[1.15.6]: https://github.com/reductstore/reductstore/compare/v1.15.5...v1.15.6
+
+[1.15.5]: https://github.com/reductstore/reductstore/compare/v1.15.4...v1.15.5
 
 [1.15.4]: https://github.com/reductstore/reductstore/compare/v1.15.3...v1.15.4
 
