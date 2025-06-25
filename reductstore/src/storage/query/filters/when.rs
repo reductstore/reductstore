@@ -3,8 +3,9 @@
 
 use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::Padding::Records;
-use crate::storage::query::filters::{RecordFilter, RecordMeta};
+use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::internal_server_error;
 use std::collections::VecDeque;
 
 enum Padding {
@@ -46,9 +47,8 @@ impl<R> WhenFilter<R> {
     }
 }
 
-impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for WhenFilter<R> {
+impl<R: GetMeta> RecordFilter<R> for WhenFilter<R> {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
-        let meta = record.clone().into();
         self.buffer.push_back(record);
         match self.before {
             Padding::Records(n) => {
@@ -58,13 +58,18 @@ impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for WhenFilter<R> {
             }
         }
 
+        let record = self.buffer.back().ok_or(internal_server_error!(
+            "Buffer is empty, but we expected at least one record to be present."
+        ))?;
         let context = Context::new(
-            meta.timestamp(),
-            meta.labels()
+            record.timestamp(),
+            record
+                .labels()
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
-            meta.computed_labels()
+            record
+                .computed_labels()
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),

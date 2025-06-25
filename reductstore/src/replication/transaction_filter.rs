@@ -5,11 +5,13 @@ use log::warn;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::Labels;
+use std::collections::HashMap;
 
 use crate::replication::TransactionNotification;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter,
+    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, GetMeta,
     IncludeLabelFilter, RecordFilter, WhenFilter,
 };
 
@@ -21,13 +23,25 @@ pub(super) struct TransactionFilter {
     query_filters: Vec<Filter>,
 }
 
-impl Into<RecordMeta> for TransactionNotification {
-    fn into(self) -> RecordMeta {
-        RecordMeta::builder()
-            .timestamp(self.event.into_timestamp())
-            .state(0)
-            .labels(self.labels)
-            .build()
+impl GetMeta for TransactionNotification {
+    fn timestamp(&self) -> u64 {
+        self.meta.timestamp()
+    }
+
+    fn labels(&self) -> HashMap<&String, &String> {
+        self.meta.labels().iter().map(|(k, v)| (k, v)).collect()
+    }
+
+    fn computed_labels(&self) -> HashMap<&String, &String> {
+        self.meta
+            .computed_labels()
+            .iter()
+            .map(|(k, v)| (k, v))
+            .collect()
+    }
+
+    fn state(&self) -> i32 {
+        self.meta.state()
     }
 }
 

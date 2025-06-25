@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::{RecordFilter, RecordMeta};
+use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
 
 /// Filter that passes records with a timestamp within a specific range
@@ -26,9 +26,9 @@ impl TimeRangeFilter {
     }
 }
 
-impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for TimeRangeFilter {
+impl<R: GetMeta> RecordFilter<R> for TimeRangeFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
-        let ts = record.clone().into().timestamp() as u64;
+        let ts = record.timestamp();
         let ret = ts >= self.start && ts < self.stop;
         if ret {
             // Ensure that we don't return the same record twice

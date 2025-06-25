@@ -9,8 +9,29 @@ pub(crate) mod record_state;
 pub(crate) mod time_range;
 pub(crate) mod when;
 
+pub(crate) use each_n::EachNFilter;
+pub(crate) use each_s::EachSecondFilter;
+pub(crate) use exclude::ExcludeLabelFilter;
+pub(crate) use include::IncludeLabelFilter;
+pub(crate) use record_state::RecordStateFilter;
+use reduct_base::error::ReductError;
+use reduct_base::io::RecordMeta;
+use std::collections::HashMap;
+pub(crate) use time_range::TimeRangeFilter;
+pub(crate) use when::WhenFilter;
+
+pub(crate) trait GetMeta {
+    fn state(&self) -> i32;
+
+    fn timestamp(&self) -> u64;
+
+    fn labels(&self) -> HashMap<&String, &String>;
+
+    fn computed_labels(&self) -> HashMap<&String, &String>;
+}
+
 /// Trait for record filters in queries.
-pub trait RecordFilter<R: Into<RecordMeta>> {
+pub(crate) trait RecordFilter<R: GetMeta> {
     /// Filter the record by condition.
     ///
     /// # Arguments
@@ -26,7 +47,7 @@ pub trait RecordFilter<R: Into<RecordMeta>> {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError>;
 }
 
-pub(crate) fn apply_filters_recursively<R: Into<RecordMeta>>(
+pub(crate) fn apply_filters_recursively<R: GetMeta>(
     filters: &mut [Box<dyn RecordFilter<R> + Send + Sync>],
     notifications: Vec<R>,
     index: usize,
@@ -49,15 +70,3 @@ pub(crate) fn apply_filters_recursively<R: Into<RecordMeta>>(
 
     Ok(Some(vec![]))
 }
-
-use crate::replication::TransactionNotification;
-pub(crate) use each_n::EachNFilter;
-pub(crate) use each_s::EachSecondFilter;
-pub(crate) use exclude::ExcludeLabelFilter;
-pub(crate) use include::IncludeLabelFilter;
-use log::warn;
-pub(crate) use record_state::RecordStateFilter;
-use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
-pub(crate) use time_range::TimeRangeFilter;
-pub(crate) use when::WhenFilter;

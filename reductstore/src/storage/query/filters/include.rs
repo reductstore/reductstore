@@ -4,7 +4,7 @@
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
-use crate::storage::query::filters::{RecordFilter, RecordMeta};
+use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
 
 /// Filter that excludes records with specific labels
 pub struct IncludeLabelFilter {
@@ -26,13 +26,14 @@ impl IncludeLabelFilter {
     }
 }
 
-impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for IncludeLabelFilter {
+impl<R: GetMeta> RecordFilter<R> for IncludeLabelFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
-        let meta = record.clone().into();
-        let result = self
-            .labels
-            .iter()
-            .all(|(key, value)| meta.labels().iter().any(|(k, v)| k == key && v == value));
+        let result = self.labels.iter().all(|(key, value)| {
+            record
+                .labels()
+                .iter()
+                .any(|(k, v)| *k == key && *v == value)
+        });
 
         if result {
             Ok(Some(vec![record]))

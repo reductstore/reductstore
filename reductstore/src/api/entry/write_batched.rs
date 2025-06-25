@@ -19,7 +19,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
-use reduct_base::io::WriteRecord;
+use reduct_base::io::{RecordMeta, WriteRecord};
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -107,7 +107,10 @@ pub(crate) async fn write_batched_records(
                             TransactionNotification {
                                 bucket: bucket_name.clone(),
                                 entry: entry_name.clone(),
-                                labels: ctx.header.labels.clone(),
+                                meta: RecordMeta::builder()
+                                    .timestamp(ctx.time)
+                                    .labels(ctx.header.labels.clone())
+                                    .build(),
                                 event: Transaction::WriteRecord(ctx.time),
                             },
                         )?;

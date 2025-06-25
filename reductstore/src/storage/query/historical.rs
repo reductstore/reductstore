@@ -1,19 +1,36 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
-
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter,
+    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, GetMeta,
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 use reduct_base::error::{ErrorCode, ReductError};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, RwLock};
+
+impl GetMeta for Record {
+    fn state(&self) -> i32 {
+        self.state
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp.as_ref().map_or(0, |ts| ts_to_us(ts))
+    }
+
+    fn labels(&self) -> HashMap<&String, &String> {
+        HashMap::from_iter(self.labels.iter().map(|label| (&label.name, &label.value)))
+    }
+
+    fn computed_labels(&self) -> HashMap<&String, &String> {
+        HashMap::new()
+    }
+}
 
 type Filter = Box<dyn RecordFilter<Record> + Send + Sync>;
 
@@ -30,8 +47,6 @@ pub struct HistoricalQuery {
     filters: Vec<Filter>,
     /// Request only metadata without the content.
     only_metadata: bool,
-    /// Strict mode
-    strict: bool,
     /// Interrupted query
     is_interrupted: bool,
 }
@@ -80,7 +95,6 @@ impl HistoricalQuery {
             current_block: None,
             filters,
             only_metadata: options.only_metadata,
-            strict: options.strict,
             is_interrupted: false,
         })
     }

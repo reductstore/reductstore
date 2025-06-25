@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{GetMeta, RecordFilter};
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 
@@ -20,7 +20,7 @@ impl EachNFilter {
     }
 }
 
-impl<R: Into<RecordMeta>> RecordFilter<R> for EachNFilter {
+impl<R: GetMeta> RecordFilter<R> for EachNFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         let ret = self.count % self.n == 0;
         self.count += 1;

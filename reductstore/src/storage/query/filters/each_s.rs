@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{GetMeta, RecordFilter};
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 
@@ -23,12 +23,11 @@ impl EachSecondFilter {
     }
 }
 
-impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for EachSecondFilter {
+impl<R: GetMeta> RecordFilter<R> for EachSecondFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
-        let meta: RecordMeta = record.clone().into();
-        let ret = meta.timestamp() as i64 - self.last_time >= (self.s * 1_000_000.0) as i64;
+        let ret = record.timestamp() as i64 - self.last_time >= (self.s * 1_000_000.0) as i64;
         if ret {
-            self.last_time = meta.timestamp().clone() as i64;
+            self.last_time = record.timestamp().clone() as i64;
         }
 
         if ret {

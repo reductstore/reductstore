@@ -4,7 +4,7 @@
 use crate::storage::proto::record::State;
 use reduct_base::error::ReductError;
 
-use crate::storage::query::filters::{RecordFilter, RecordMeta};
+use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
 
 /// Filter that passes records with a specific state
 pub struct RecordStateFilter {
@@ -26,10 +26,9 @@ impl RecordStateFilter {
     }
 }
 
-impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for RecordStateFilter {
+impl<R: GetMeta> RecordFilter<R> for RecordStateFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
-        let meta = record.clone().into();
-        let result = meta.state() == self.state as i32;
+        let result = record.state() == self.state as i32;
         if result {
             Ok(Some(vec![record]))
         } else {
