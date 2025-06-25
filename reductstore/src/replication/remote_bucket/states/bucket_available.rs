@@ -379,7 +379,7 @@ mod tests {
         ));
 
         let state = state.write_batch("test", vec![record_to_update]);
-        assert!(state.last_result().is_ok(),);
+        assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
 

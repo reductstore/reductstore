@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Fixed
+
+- Fix replication of update transaction to empty bucket, [PR-867](https://github.com/reductstore/reductstore/pull/867)
+
 ## [1.15.5] - 2025-06-10
 
 ### Fixed
