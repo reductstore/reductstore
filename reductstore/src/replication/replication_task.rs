@@ -219,7 +219,8 @@ impl ReplicationTask {
 
     pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         // We need to have a filter for each entry
-        {
+        let entry_name = notification.entry.clone();
+        let notifications = {
             let mut lock = self.filter_map.write()?;
             if !lock.contains_key(&notification.entry) {
                 lock.insert(
@@ -228,23 +229,21 @@ impl ReplicationTask {
                 );
             }
 
-            let filter = lock.get_mut(&notification.entry).unwrap();
-            if !filter.filter(&notification) {
-                return Ok(());
-            }
-        }
+            let filter = lock.get_mut(&entry_name).unwrap();
+            filter.filter(notification)
+        };
 
         // NOTE: very important not to lock the log_map for too long
         // because it is used by the replication thread
-        if !self.log_map.read()?.contains_key(&notification.entry) {
+        if !self.log_map.read()?.contains_key(&entry_name) {
             let mut map = self.log_map.write()?;
             map.insert(
-                notification.entry.clone(),
+                entry_name.clone(),
                 RwLock::new(TransactionLog::try_load_or_create(
                     Self::build_path_to_transaction_log(
                         self.storage.data_path(),
                         &self.settings.src_bucket,
-                        &notification.entry,
+                        &entry_name,
                         &self.name,
                     ),
                     self.system_options.transaction_log_size,
@@ -253,12 +252,15 @@ impl ReplicationTask {
         };
 
         let log_map = self.log_map.read()?;
-        let log = log_map.get(&notification.entry).unwrap();
+        let log = log_map.get(&entry_name).unwrap();
 
-        if let Some(_) = log.write()?.push_back(notification.event.clone())? {
-            error!("Transaction log is full, dropping the oldest transaction without replication");
+        for notification in notifications.into_iter() {
+            if let Some(_) = log.write()?.push_back(notification.event)? {
+                error!(
+                    "Transaction log is full, dropping the oldest transaction without replication"
+                );
+            }
         }
-
         Ok(())
     }
 

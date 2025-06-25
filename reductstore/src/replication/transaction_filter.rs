@@ -2,20 +2,23 @@
 // Licensed under the Business Source License 1.1
 
 use log::warn;
+use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::ReplicationSettings;
 
 use crate::replication::TransactionNotification;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter, WhenFilter,
+    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter,
+    IncludeLabelFilter, RecordFilter, WhenFilter,
 };
 
+type Filter = Box<dyn RecordFilter<TransactionNotification> + Send + Sync>;
 /// Filter for transaction notifications.
 pub(super) struct TransactionFilter {
     bucket: String,
     entries: Vec<String>,
-    query_filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
+    query_filters: Vec<Filter>,
 }
 
 impl Into<RecordMeta> for TransactionNotification {
@@ -38,7 +41,7 @@ impl TransactionFilter {
     /// * `include` - Labels to include. All must match. If empty, all labels are matched.
     /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
     pub(super) fn new(name: &str, settings: ReplicationSettings) -> Self {
-        let mut query_filters: Vec<Box<dyn RecordFilter + Send + Sync>> = vec![];
+        let mut query_filters: Vec<Filter> = vec![];
         if !settings.include.is_empty() {
             query_filters.push(Box::new(IncludeLabelFilter::new(settings.include)));
         }
@@ -58,7 +61,7 @@ impl TransactionFilter {
         if let Some(when) = settings.when {
             match Parser::new().parse(&when) {
                 Ok(condition) => {
-                    query_filters.push(Box::new(WhenFilter::new(condition)));
+                    query_filters.push(Box::new(WhenFilter::new(condition, true)));
                 }
                 Err(err) => warn!(
                     "Error parsing when condition in {} replication task: {}",
@@ -83,9 +86,12 @@ impl TransactionFilter {
     /// # Returns
     ///
     /// `true` if the notification matches the filter, `false` otherwise.
-    pub(super) fn filter(&mut self, notification: &TransactionNotification) -> bool {
+    pub(super) fn filter(
+        &mut self,
+        notification: TransactionNotification,
+    ) -> Vec<TransactionNotification> {
         if notification.bucket != self.bucket {
-            return false;
+            return vec![];
         }
 
         if !self.entries.is_empty() {
@@ -103,24 +109,31 @@ impl TransactionFilter {
                 }
             }
             if !found {
-                return false;
+                return vec![];
             }
         }
 
-        // filter out notifications
-        for filter in self.query_filters.iter_mut() {
-            let meta: RecordMeta = notification.clone().into();
-            match filter.filter(&meta) {
-                Ok(false) => return false,
-                Err(err) => {
-                    warn!("Error filtering transaction notification: {}", err);
-                    return false;
-                }
-                _ => {}
+        match apply_filters_recursively(
+            self.query_filters.as_mut_slice(),
+            vec![notification.clone()],
+            0,
+        ) {
+            Ok(Some(notifications)) => notifications,
+            Ok(None) => {
+                warn!(
+                    "Filtering interrupted in replication task '{}'",
+                    self.bucket
+                );
+                vec![]
+            }
+            Err(err) => {
+                warn!(
+                    "Error applying filters in replication task '{}': {}",
+                    self.bucket, err
+                );
+                vec![]
             }
         }
-
-        true
     }
 }
 

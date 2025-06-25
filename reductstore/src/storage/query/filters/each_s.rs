@@ -23,14 +23,19 @@ impl EachSecondFilter {
     }
 }
 
-impl RecordFilter for EachSecondFilter {
-    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
-        let ret = record.timestamp() as i64 - self.last_time >= (self.s * 1_000_000.0) as i64;
+impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for EachSecondFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
+        let meta: RecordMeta = record.clone().into();
+        let ret = meta.timestamp() as i64 - self.last_time >= (self.s * 1_000_000.0) as i64;
         if ret {
-            self.last_time = record.timestamp().clone() as i64;
+            self.last_time = meta.timestamp().clone() as i64;
         }
 
-        Ok(ret)
+        if ret {
+            Ok(Some(vec![record]))
+        } else {
+            Ok(Some(vec![]))
+        }
     }
 }
 

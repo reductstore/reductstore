@@ -26,16 +26,20 @@ impl TimeRangeFilter {
     }
 }
 
-impl RecordFilter for TimeRangeFilter {
-    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
-        let ts = record.timestamp() as u64;
+impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for TimeRangeFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
+        let ts = record.clone().into().timestamp() as u64;
         let ret = ts >= self.start && ts < self.stop;
         if ret {
             // Ensure that we don't return the same record twice
             self.start = ts + 1;
         }
 
-        Ok(ret)
+        if ret {
+            Ok(Some(vec![record]))
+        } else {
+            Ok(Some(vec![]))
+        }
     }
 }
 

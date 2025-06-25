@@ -3,35 +3,55 @@
 
 use crate::storage::query::condition::{BoxedNode, Context};
 use crate::storage::query::filters::{RecordFilter, RecordMeta};
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 
 /// A node representing a when filter with a condition.
 pub struct WhenFilter {
     condition: BoxedNode,
+    strict: bool,
 }
 
 impl WhenFilter {
-    pub fn new(condition: BoxedNode) -> Self {
-        WhenFilter { condition }
+    pub fn new(condition: BoxedNode, strict: bool) -> Self {
+        WhenFilter { condition, strict }
     }
 }
 
-impl RecordFilter for WhenFilter {
-    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
+impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for WhenFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
+        let meta = record.clone().into();
         let context = Context::new(
-            record.timestamp(),
-            record
-                .labels()
+            meta.timestamp(),
+            meta.labels()
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
-            record
-                .computed_labels()
+            meta.computed_labels()
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
         );
-        Ok(self.condition.apply(&context)?.as_bool()?)
+        let result = match self.condition.apply(&context) {
+            Ok(value) => value.as_bool()?,
+            Err(err) => {
+                if err.status == ErrorCode::Interrupt {
+                    return Ok(None);
+                }
+
+                if self.strict {
+                    // in strict mode, we return an error if a filter fails
+                    return Err(err);
+                }
+
+                false
+            }
+        };
+
+        if result {
+            Ok(Some(vec![record]))
+        } else {
+            Ok(Some(vec![]))
+        }
     }
 }
 

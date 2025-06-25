@@ -26,10 +26,15 @@ impl RecordStateFilter {
     }
 }
 
-impl RecordFilter for RecordStateFilter {
-    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
-        let result = record.state() == self.state as i32;
-        Ok(result)
+impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for RecordStateFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
+        let meta = record.clone().into();
+        let result = meta.state() == self.state as i32;
+        if result {
+            Ok(Some(vec![record]))
+        } else {
+            Ok(Some(vec![]))
+        }
     }
 }
 

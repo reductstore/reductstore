@@ -27,14 +27,18 @@ impl ExcludeLabelFilter {
     }
 }
 
-impl RecordFilter for ExcludeLabelFilter {
-    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
+impl<R: Into<RecordMeta> + Clone> RecordFilter<R> for ExcludeLabelFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
+        let meta = record.clone().into();
         let result = !self
             .labels
             .iter()
-            .all(|(key, value)| record.labels().iter().any(|(k, v)| k == key && v == value));
-
-        Ok(result)
+            .all(|(key, value)| meta.labels().iter().any(|(k, v)| k == key && v == value));
+        if result {
+            Ok(Some(vec![record]))
+        } else {
+            Ok(Some(vec![]))
+        }
     }
 }
 

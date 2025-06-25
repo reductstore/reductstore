@@ -20,11 +20,15 @@ impl EachNFilter {
     }
 }
 
-impl RecordFilter for EachNFilter {
-    fn filter(&mut self, _record: &RecordMeta) -> Result<bool, ReductError> {
+impl<R: Into<RecordMeta>> RecordFilter<R> for EachNFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         let ret = self.count % self.n == 0;
         self.count += 1;
-        Ok(ret)
+        if ret {
+            Ok(Some(vec![record]))
+        } else {
+            Ok(Some(vec![]))
+        }
     }
 }
 
