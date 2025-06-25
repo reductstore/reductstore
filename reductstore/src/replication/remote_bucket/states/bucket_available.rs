@@ -91,9 +91,6 @@ impl RemoteBucketState for BucketAvailableState {
                     );
 
                     match err.status {
-                        ErrorCode::MethodNotAllowed => {
-                            warn!("Please update the remote instance up to 1.11: {}", err);
-                        }
                         ErrorCode::NotFound => {
                             warn!(
                                 "Entry {} not found on remote bucket {}/{}: {}",
