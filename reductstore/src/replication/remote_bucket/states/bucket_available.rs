@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
@@ -8,7 +8,6 @@ use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
 use log::{debug, warn};
-use reduct_base::error::ErrorCode::MethodNotAllowed;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::RecordMeta;
 use std::collections::BTreeMap;
@@ -91,11 +90,18 @@ impl RemoteBucketState for BucketAvailableState {
                         err
                     );
 
-                    if err.status != MethodNotAllowed {
-                        return self.check_error_and_change_state(err);
+                    match err.status {
+                        ErrorCode::NotFound => {
+                            warn!(
+                                "Entry {} not found on remote bucket {}/{}: {}",
+                                entry_name,
+                                self.bucket.server_url(),
+                                self.bucket.name(),
+                                err
+                            );
+                        }
+                        _ => return self.check_error_and_change_state(err),
                     }
-
-                    warn!("Please update the remote instance up to 1.11: {}", err);
 
                     let mut error_map = BTreeMap::new();
                     for record in &records_to_update {
@@ -343,8 +349,34 @@ mod tests {
         let state = state.write_batch("test", vec![record_to_update, record_to_write()]);
         assert!(
             state.last_result().is_ok(),
-            "we should not have any errors because wrote error records"
+            "we should not have any errors because wrote errored records"
         );
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_record_entry_not_found(
+        client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+        record_to_update: (RecordReader, Transaction),
+    ) {
+        bucket
+            .expect_update_batch()
+            .returning(|_, _| Err(ReductError::new(ErrorCode::NotFound, "Entry not found")));
+
+        bucket.expect_write_batch().returning(|_, records| {
+            assert_eq!(records.len(), 1, "we create an entry and write the records");
+            Ok(ErrorRecordMap::new())
+        });
+
+        let state = Box::new(BucketAvailableState::new(
+            Box::new(client),
+            Box::new(bucket),
+        ));
+
+        let state = state.write_batch("test", vec![record_to_update]);
+        assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
 
