@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::storage::entry::RecordReader;
+use log::warn;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::io::{ReadRecord, RecordMeta};
 use reduct_base::unprocessable_entity;
@@ -174,33 +175,30 @@ impl BucketWrapper {
         response: Result<Response, Error>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut failed_records = BTreeMap::new();
-        if response.is_err() {
-            check_response(response)?;
-        } else {
-            let response = response.unwrap();
-            let headers = response
-                .headers()
-                .iter()
-                .filter(|(key, _)| key.as_str().starts_with("x-reduct-error"))
-                .collect::<Vec<_>>();
+        let response = check_response(response)?;
+        let headers = response
+            .headers()
+            .iter()
+            .filter(|(key, _)| key.as_str().starts_with("x-reduct-error-"))
+            .collect::<Vec<_>>();
 
-            for (key, value) in headers {
-                let record_ts = key
-                    .as_str()
-                    .trim_start_matches("x-reduct-error-")
-                    .parse::<u64>()
-                    .map_err(|err| unprocessable_entity!("Invalid timestamp {}: {}", key, err))?;
+        for (key, value) in headers {
+            let record_ts = key
+                .as_str()
+                .trim_start_matches("x-reduct-error-")
+                .parse::<u64>()
+                .map_err(|err| unprocessable_entity!("Invalid timestamp {}: {}", key, err))?;
 
-                let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
-                failed_records.insert(
-                    record_ts,
-                    ReductError::new(
-                        ErrorCode::from_int(status.parse().unwrap()).unwrap(),
-                        message,
-                    ),
-                );
-            }
+            let (status, message) = value.to_str().unwrap().split_once(',').unwrap();
+            failed_records.insert(
+                record_ts,
+                ReductError::new(
+                    ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                    message,
+                ),
+            );
         }
+
         Ok(failed_records)
     }
 
@@ -209,7 +207,7 @@ impl BucketWrapper {
     }
 }
 
-fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> {
+fn check_response(response: Result<Response, Error>) -> Result<Response, ReductError> {
     let map_error = |error: reqwest::Error| -> ReductError {
         let status = if error.is_connect() {
             ErrorCode::ConnectionError
@@ -226,7 +224,7 @@ fn check_response(response: Result<Response, Error>) -> Result<(), ReductError> 
 
     let response = response.map_err(map_error)?;
     if response.status().is_success() {
-        return Ok(());
+        return Ok(response);
     }
 
     let status =
@@ -296,8 +294,7 @@ impl ReductBucketApi for BucketWrapper {
             tx.send(response).await.unwrap();
         });
 
-        let failed_records = Self::parse_record_errors(rx.blocking_recv().unwrap())?;
-        Ok(failed_records)
+        Self::parse_record_errors(rx.blocking_recv().unwrap())
     }
 
     fn update_batch(
@@ -319,9 +316,7 @@ impl ReductBucketApi for BucketWrapper {
             tx.send(response).await.unwrap();
         });
 
-        let failed_records = Self::parse_record_errors(rx.blocking_recv().unwrap())?;
-
-        Ok(failed_records)
+        Self::parse_record_errors(rx.blocking_recv().unwrap())
     }
 
     fn server_url(&self) -> &str {
@@ -450,7 +445,7 @@ mod tests {
                 .body(Bytes::new())
                 .unwrap();
             let response = Ok(response).map(|r| r.into());
-            assert!(check_response(response).is_ok());
+            assert_eq!(check_response(response).unwrap().status(), 200);
         }
 
         #[rstest]
@@ -461,7 +456,10 @@ mod tests {
                 .body(Bytes::new())
                 .unwrap();
             let response = Ok(response).map(|r| r.into());
-            assert!(check_response(response).is_err());
+            assert_eq!(
+                check_response(response).unwrap_err().status(),
+                ErrorCode::NotFound
+            );
         }
     }
 
