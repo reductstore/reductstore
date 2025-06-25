@@ -1,13 +1,13 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::condition::{BoxedNode, Context};
+use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
 use std::collections::HashMap;
 
 pub(super) struct ExtWhenFilter {
-    condition: Option<BoxedNode>,
+    condition: Option<(BoxedNode, Directives)>,
     strict: bool,
 }
 
@@ -16,7 +16,7 @@ pub(super) struct ExtWhenFilter {
 /// It is used in the `ext` module to filter records after they processed by extension,
 /// and it puts computed labels into the context.
 impl ExtWhenFilter {
-    pub fn new(condition: Option<BoxedNode>, strict: bool) -> Self {
+    pub fn new(condition: Option<(BoxedNode, Directives)>, strict: bool) -> Self {
         ExtWhenFilter { condition, strict }
     }
 
@@ -61,6 +61,7 @@ impl ExtWhenFilter {
             .condition
             .as_mut()
             .unwrap()
+            .0
             .apply(&context)?
             .as_bool()?)
     }

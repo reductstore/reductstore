@@ -225,7 +225,7 @@ impl ReplicationTask {
             if !lock.contains_key(&notification.entry) {
                 lock.insert(
                     notification.entry.clone(),
-                    TransactionFilter::new(self.name(), self.settings.clone()),
+                    TransactionFilter::try_new(self.name(), self.settings.clone())?,
                 );
             }
 

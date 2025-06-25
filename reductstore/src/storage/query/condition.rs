@@ -65,4 +65,5 @@ impl Debug for BoxedNode {
     }
 }
 
+pub(crate) use parser::Directives;
 pub(crate) use parser::Parser;

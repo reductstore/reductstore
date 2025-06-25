@@ -113,7 +113,7 @@ impl ManageExtensions for ExtRepository {
 
             // check if the query has references to computed labels and no extension is found
             let condition = if let Some(condition) = ext_query.remove("when") {
-                let node = Parser::new().parse(&condition)?;
+                let node = Parser::new().parse(condition)?;
                 Some(node)
             } else {
                 None

@@ -17,9 +17,13 @@ use crate::storage::query::condition::{Boxed, BoxedNode};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Number, Value as JsonValue};
+use std::collections::HashMap;
 
 /// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
+
+pub(crate) type Directives = HashMap<String, Value>;
+static DIRECTIVES: [&str; 1] = ["#before"];
 
 impl Parser {
     /// Parses a JSON object into a condition tree.
@@ -32,9 +36,59 @@ impl Parser {
     ///
     /// A boxed node representing the condition tree.
     /// The root node is a `StagedAllOf` that aggregates all expressions
-    pub fn parse(&self, json: &JsonValue) -> Result<BoxedNode, ReductError> {
-        let expressions = Self::parse_recursively(json)?;
-        Ok(AllOf::boxed(expressions)?)
+    pub fn parse(&self, mut json: JsonValue) -> Result<(BoxedNode, Directives), ReductError> {
+        // parse directives if any
+        let directives = Self::parse_directives(&mut json)?;
+        let expressions = Self::parse_recursively(&json)?;
+        Ok((AllOf::boxed(expressions)?, directives))
+    }
+
+    fn parse_directives(json: &mut JsonValue) -> Result<Directives, ReductError> {
+        let mut directives = Directives::new();
+        let mut keys_to_remove = vec![];
+        for (key, value) in json.as_object().unwrap_or(&Map::new()).iter() {
+            if key.starts_with("#") {
+                if !DIRECTIVES.contains(&key.as_str()) {
+                    return Err(unprocessable_entity!(
+                        "Directive '{}' is not supported",
+                        key
+                    ));
+                }
+
+                let value = match value {
+                    JsonValue::Bool(value) => Value::Bool(*value),
+                    JsonValue::Number(value) => {
+                        if value.is_i64() || value.is_u64() {
+                            Value::Int(value.as_i64().unwrap())
+                        } else {
+                            Value::Float(value.as_f64().unwrap())
+                        }
+                    }
+                    JsonValue::String(value) => {
+                        if let Ok(duration) = parse_duration(value) {
+                            duration
+                        } else {
+                            Value::String(value.to_string())
+                        }
+                    }
+                    _ => {
+                        return Err(unprocessable_entity!(
+                            "Directive '{}' must be a primitive value",
+                            key
+                        ));
+                    }
+                };
+
+                directives.insert(key.to_string(), value);
+                keys_to_remove.push(key.to_string());
+            }
+        }
+
+        // Remove directives from the original JSON object
+        for key in keys_to_remove {
+            json.as_object_mut().unwrap().remove(&key);
+        }
+        Ok(directives)
     }
 
     fn parse_recursively(json: &JsonValue) -> Result<Vec<BoxedNode>, ReductError> {

@@ -40,7 +40,7 @@ impl TransactionFilter {
     /// * `entries` - Entries to filter. Supports wildcards. If empty, all entries are matched.
     /// * `include` - Labels to include. All must match. If empty, all labels are matched.
     /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
-    pub(super) fn new(name: &str, settings: ReplicationSettings) -> Self {
+    pub(super) fn try_new(name: &str, settings: ReplicationSettings) -> Result<Self, ReductError> {
         let mut query_filters: Vec<Filter> = vec![];
         if !settings.include.is_empty() {
             query_filters.push(Box::new(IncludeLabelFilter::new(settings.include)));
@@ -59,9 +59,9 @@ impl TransactionFilter {
         }
 
         if let Some(when) = settings.when {
-            match Parser::new().parse(&when) {
-                Ok(condition) => {
-                    query_filters.push(Box::new(WhenFilter::new(condition, true)));
+            match Parser::new().parse(when.clone()) {
+                Ok((condition, directives)) => {
+                    query_filters.push(Box::new(WhenFilter::try_new(condition, directives, true)?));
                 }
                 Err(err) => warn!(
                     "Error parsing when condition in {} replication task: {}",
@@ -70,11 +70,11 @@ impl TransactionFilter {
             }
         }
 
-        Self {
+        Ok(Self {
             bucket: settings.src_bucket,
             entries: settings.entries,
             query_filters,
-        }
+        })
     }
 
     /// Filter a transaction notification.
@@ -148,7 +148,7 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -160,7 +160,7 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter_bucket(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "other".to_string(),
@@ -181,7 +181,7 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -204,7 +204,7 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -226,7 +226,7 @@ mod tests {
         #[case] expected: bool,
         notification: TransactionNotification,
     ) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -239,7 +239,7 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter_each_n(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -255,7 +255,7 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter_each_s(mut notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -275,7 +275,7 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter_when(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -285,7 +285,7 @@ mod tests {
         );
 
         assert!(filter.filter(&notification));
-        filter = TransactionFilter::new(
+        filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -298,7 +298,7 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter_when_non_strict(notification: TransactionNotification) {
-        let mut filter = TransactionFilter::new(
+        let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
@@ -315,7 +315,7 @@ mod tests {
 
     #[rstest]
     fn test_transaction_filter_invalid_when() {
-        let filter = TransactionFilter::new(
+        let filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),

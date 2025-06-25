@@ -304,7 +304,7 @@ impl ReplicationRepository {
 
         // check syntax of when condition
         if let Some(when) = &settings.when {
-            if let Err(e) = Parser::new().parse(when) {
+            if let Err(e) = Parser::new().parse(when.clone()) {
                 return Err(unprocessable_entity!(
                     "Invalid replication condition: {}",
                     e

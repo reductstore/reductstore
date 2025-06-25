@@ -65,8 +65,12 @@ impl HistoricalQuery {
 
         if let Some(when) = options.when {
             let parser = Parser::new();
-            let condition = parser.parse(&when)?;
-            filters.push(Box::new(WhenFilter::new(condition, options.strict)));
+            let (condition, directives) = parser.parse(when)?;
+            filters.push(Box::new(WhenFilter::try_new(
+                condition,
+                directives,
+                options.strict,
+            )?));
         }
 
         Ok(HistoricalQuery {
