@@ -670,7 +670,7 @@ pub(super) mod tests {
 
             assert_eq!(records.len(), 1, "Should return one record");
 
-            let mut record = records.first_mut().unwrap();
+            let record = records.first_mut().unwrap();
             assert_eq!(record.read().await, None);
 
             assert_eq!(

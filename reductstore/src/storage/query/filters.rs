@@ -19,7 +19,7 @@ use std::collections::HashMap;
 pub(crate) use time_range::TimeRangeFilter;
 pub(crate) use when::WhenFilter;
 
-///
+/// A trait to access record metadata for filtering purposes with minimal overhead.
 pub(crate) trait FilterRecord {
     fn state(&self) -> i32;
 
@@ -75,6 +75,7 @@ pub(crate) fn apply_filters_recursively<R: FilterRecord>(
 
 mod tests {
     use super::*;
+    use reduct_base::io::RecordMeta;
 
     #[derive(Debug, Clone, PartialEq)]
     pub(super) struct TestFilterRecord {

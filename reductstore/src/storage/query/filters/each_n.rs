@@ -34,8 +34,8 @@ impl<R: FilterRecord> RecordFilter<R> for EachNFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::storage::query::filters::tests::TestFilterRecord;
+    use reduct_base::io::RecordMeta;
     use rstest::*;
 
     #[rstest]

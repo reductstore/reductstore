@@ -45,11 +45,9 @@ impl FilterRecord for BoxedReadRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ext::ext_repository::tests::{mocked_record, MockRecord};
-    use crate::storage::query::condition::Parser;
+    use crate::ext::ext_repository::tests::mocked_record;
 
     use rstest::rstest;
-    use serde_json::json;
 
     #[rstest]
     fn test_dummy_filter(mocked_record: BoxedReadRecord) {

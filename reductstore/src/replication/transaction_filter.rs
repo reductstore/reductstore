@@ -151,10 +151,10 @@ impl TransactionFilter {
 
 #[cfg(test)]
 mod tests {
+    use crate::replication::Transaction;
+    use reduct_base::io::RecordMeta;
     use reduct_base::Labels;
     use rstest::*;
-
-    use crate::replication::Transaction;
 
     use super::*;
 

@@ -105,6 +105,7 @@ mod tests {
 
     use crate::storage::query::condition::Parser;
     use crate::storage::query::filters::tests::TestFilterRecord;
+    use reduct_base::io::RecordMeta;
     use reduct_base::Labels;
     use rstest::rstest;
 
