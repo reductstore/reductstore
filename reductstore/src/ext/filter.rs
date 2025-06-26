@@ -1,5 +1,5 @@
 use crate::storage::proto::record::State::Finished;
-use crate::storage::query::filters::{GetMeta, RecordFilter};
+use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 // Licensed under the Business Source License 1.1
 pub(super) struct DummyFilter {}
 
-impl<R: GetMeta> RecordFilter<R> for DummyFilter {
+impl<R: FilterRecord> RecordFilter<R> for DummyFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         Ok(Some(vec![record]))
     }
@@ -20,7 +20,7 @@ impl DummyFilter {
     }
 }
 
-impl GetMeta for BoxedReadRecord {
+impl FilterRecord for BoxedReadRecord {
     fn state(&self) -> i32 {
         Finished as i32
     }
@@ -52,63 +52,13 @@ mod tests {
     use serde_json::json;
 
     #[rstest]
-    fn pass_status_if_condition_none(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(None, false);
-        assert!(filter.filter_record(mocked_record).unwrap().is_ok())
-    }
-
-    #[rstest]
-    fn not_ready_if_condition_false(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(
-            Some(
-                Parser::new()
-                    .parse(&json!({"$and": [false, "@key1"]}))
-                    .unwrap(),
-            ),
-            true,
+    fn test_dummy_filter(mocked_record: BoxedReadRecord) {
+        let mut filter = DummyFilter::boxed();
+        let result = filter.filter(mocked_record).unwrap();
+        assert_eq!(
+            result.unwrap().len(),
+            1,
+            "Dummy filter should pass all records"
         );
-        assert!(filter.filter_record(mocked_record).is_none())
-    }
-
-    #[rstest]
-    fn ready_if_condition_true(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(
-            Some(
-                Parser::new()
-                    .parse(&json!({"$and": [true, "@key1"]}))
-                    .unwrap(),
-            ),
-            true,
-        );
-        assert!(filter.filter_record(mocked_record).unwrap().is_ok())
-    }
-
-    #[rstest]
-    fn ready_with_error_strict(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(
-            Some(
-                Parser::new()
-                    .parse(&json!({"$and": [true, "@not-exit"]}))
-                    .unwrap(),
-            ),
-            true,
-        );
-        assert!(filter.filter_record(mocked_record).unwrap().is_err())
-    }
-
-    #[rstest]
-    fn ready_without_error(mocked_record: Box<MockRecord>) {
-        let mut filter = ExtWhenFilter::new(
-            Some(
-                Parser::new()
-                    .parse(&json!({"$and": [true, "@not-exit"]}))
-                    .unwrap(),
-            ),
-            false,
-        );
-        assert!(
-            filter.filter_record(mocked_record).is_none(),
-            "ignore bad condition"
-        )
     }
 }

@@ -626,6 +626,7 @@ mod tests {
 
     mod get {
         use super::*;
+        use reduct_base::io::RecordMeta;
 
         #[rstest]
         fn test_get_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
@@ -635,7 +636,7 @@ mod tests {
                 repl.notify(TransactionNotification {
                     bucket: "bucket-1".to_string(),
                     entry: "entry-1".to_string(),
-                    labels: Labels::default(),
+                    meta: RecordMeta::builder().build(),
                     event: WriteRecord(0),
                 })
                 .unwrap();

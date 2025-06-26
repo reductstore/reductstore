@@ -295,7 +295,7 @@ impl ManageExtensions for ExtRepository {
 }
 
 use crate::ext::filter::DummyFilter;
-use crate::storage::query::filters::{GetMeta, RecordFilter, WhenFilter};
+use crate::storage::query::filters::{FilterRecord, RecordFilter, WhenFilter};
 pub(crate) use create::create_ext_repository;
 use reduct_base::io::ReadRecord;
 
@@ -410,8 +410,7 @@ pub(super) mod tests {
             assert_eq!(
                 query_context
                     .condition_filter
-                    .filter_record(Box::new(MockRecord::new("not-in-when", "val")))
-                    .unwrap()
+                    .filter(Box::new(MockRecord::new("not-in-when", "val")))
                     .err()
                     .unwrap(),
                 not_found!("Reference '@label' not found"),
@@ -666,12 +665,16 @@ pub(super) mod tests {
                 "First run should be None (stupid implementation)"
             );
 
-            let record = mocked_ext_repo
+            let mut records = mocked_ext_repo
                 .fetch_and_process_record(1, query_rx.clone())
                 .await
+                .unwrap()
                 .unwrap();
 
-            assert_eq!(record.unwrap().read().await, None);
+            assert_eq!(records.len(), 1, "Should return one record");
+
+            let mut record = records.first_mut().unwrap();
+            assert_eq!(record.read().await, None);
 
             assert_eq!(
                 mocked_ext_repo

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use crate::replication::TransactionNotification;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, GetMeta,
+    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, WhenFilter,
 };
 
@@ -23,9 +23,9 @@ pub(super) struct TransactionFilter {
     query_filters: Vec<Filter>,
 }
 
-impl GetMeta for TransactionNotification {
+impl FilterRecord for TransactionNotification {
     fn timestamp(&self) -> u64 {
-        self.meta.timestamp()
+        *self.event.timestamp()
     }
 
     fn labels(&self) -> HashMap<&String, &String> {
@@ -168,8 +168,9 @@ mod tests {
                 src_bucket: "bucket".to_string(),
                 ..ReplicationSettings::default()
             },
-        );
-        assert!(filter.filter(&notification));
+        )
+        .unwrap();
+        assert_eq!(filter.filter(notification).len(), 1);
     }
 
     #[rstest]
@@ -180,8 +181,9 @@ mod tests {
                 src_bucket: "other".to_string(),
                 ..ReplicationSettings::default()
             },
-        );
-        assert!(!filter.filter(&notification));
+        )
+        .unwrap();
+        assert_eq!(filter.filter(notification).len(), 0);
     }
 
     #[rstest]
@@ -202,8 +204,11 @@ mod tests {
                 entries,
                 ..ReplicationSettings::default()
             },
-        );
-        assert_eq!(filter.filter(&notification), expected);
+        )
+        .unwrap();
+
+        let filtered = filter.filter(notification);
+        assert_eq!(filtered.is_empty(), !expected);
     }
 
     #[rstest]
@@ -225,8 +230,11 @@ mod tests {
                 include: Labels::from_iter(include),
                 ..ReplicationSettings::default()
             },
-        );
-        assert_eq!(filter.filter(&notification), expected);
+        )
+        .unwrap();
+
+        let filtered = filter.filter(notification);
+        assert_eq!(filtered.is_empty(), !expected);
     }
 
     #[rstest]
@@ -247,8 +255,11 @@ mod tests {
                 exclude: Labels::from_iter(exclude),
                 ..ReplicationSettings::default()
             },
-        );
-        assert_eq!(filter.filter(&notification), expected);
+        )
+        .unwrap();
+
+        let filtered = filter.filter(notification);
+        assert_eq!(filtered.is_empty(), !expected);
     }
 
     #[rstest]
@@ -260,11 +271,12 @@ mod tests {
                 each_n: Some(2),
                 ..ReplicationSettings::default()
             },
-        );
+        )
+        .unwrap();
 
-        assert!(filter.filter(&notification));
-        assert!(!filter.filter(&notification));
-        assert!(filter.filter(&notification));
+        assert_eq!(filter.filter(notification.clone()).len(), 1);
+        assert_eq!(filter.filter(notification.clone()).len(), 0);
+        assert_eq!(filter.filter(notification).len(), 1);
     }
 
     #[rstest]
@@ -276,15 +288,16 @@ mod tests {
                 each_s: Some(1.0),
                 ..ReplicationSettings::default()
             },
-        );
+        )
+        .unwrap();
 
-        assert!(filter.filter(&notification));
+        assert_eq!(filter.filter(notification.clone()).len(), 1);
         notification.event = Transaction::WriteRecord(1);
-        assert!(!filter.filter(&notification));
+        assert_eq!(filter.filter(notification.clone()).len(), 0);
         notification.event = Transaction::WriteRecord(2);
-        assert!(!filter.filter(&notification));
+        assert_eq!(filter.filter(notification.clone()).len(), 0);
         notification.event = Transaction::WriteRecord(1000_002);
-        assert!(filter.filter(&notification));
+        assert_eq!(filter.filter(notification.clone()).len(), 1);
     }
 
     #[rstest]
@@ -296,9 +309,11 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&x", "y"]})),
                 ..ReplicationSettings::default()
             },
-        );
+        )
+        .unwrap();
 
-        assert!(filter.filter(&notification));
+        assert_eq!(filter.filter(notification.clone()).len(), 1);
+
         filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
@@ -306,8 +321,10 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&x", "z"]})),
                 ..ReplicationSettings::default()
             },
-        );
-        assert!(!filter.filter(&notification));
+        )
+        .unwrap();
+
+        assert_eq!(filter.filter(notification).len(), 0);
     }
 
     #[rstest]
@@ -319,10 +336,11 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
                 ..ReplicationSettings::default()
             },
-        );
+        )
+        .unwrap();
 
         assert!(
-            !filter.filter(&notification),
+            filter.filter(notification).is_empty(),
             "label doesn't exist but we consider it as false"
         );
     }
@@ -336,22 +354,10 @@ mod tests {
                 when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y", "z"]})),
                 ..ReplicationSettings::default()
             },
-        );
+        )
+        .unwrap();
 
         assert!(filter.query_filters.is_empty());
-    }
-
-    mod filter_point {
-
-        use super::*;
-
-        #[rstest]
-        fn test_filter_point(notification: TransactionNotification) {
-            let meta: RecordMeta = notification.clone().into();
-            assert_eq!(meta.timestamp(), 0);
-            assert_eq!(meta.labels(), &notification.labels);
-            assert_eq!(meta.state(), 0);
-        }
     }
 
     #[fixture]
@@ -363,7 +369,12 @@ mod tests {
         TransactionNotification {
             bucket: "bucket".to_string(),
             entry: "entry".to_string(),
-            labels,
+            meta: RecordMeta::builder()
+                .timestamp(0)
+                .labels(labels)
+                .computed_labels(Labels::default())
+                .state(0)
+                .build(),
             event: Transaction::WriteRecord(0),
         }
     }

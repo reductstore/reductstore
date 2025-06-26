@@ -7,14 +7,14 @@ use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, GetMeta,
+    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 
-impl GetMeta for Record {
+impl FilterRecord for Record {
     fn state(&self) -> i32 {
         self.state
     }
@@ -176,7 +176,7 @@ impl HistoricalQuery {
                 None => {
                     // If the filtering is interrupted, we stop processing further records.
                     self.is_interrupted = true;
-                    return Ok(vec![]);
+                    break;
                 }
             }
         }

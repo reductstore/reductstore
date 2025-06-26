@@ -333,10 +333,10 @@ mod tests {
 
     use bytes::Bytes;
 
-    use mockall::mock;
-    use rstest::*;
-
     use crate::core::file_cache::FILE_CACHE;
+    use mockall::mock;
+    use reduct_base::io::RecordMeta;
+    use rstest::*;
 
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
@@ -610,7 +610,7 @@ mod tests {
         TransactionNotification {
             bucket: "src".to_string(),
             entry: "test1".to_string(),
-            labels: Labels::new(),
+            meta: RecordMeta::builder().timestamp(10).build(),
             event: Transaction::WriteRecord(10),
         }
     }

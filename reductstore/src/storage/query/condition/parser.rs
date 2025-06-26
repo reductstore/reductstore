@@ -260,7 +260,7 @@ mod tests {
         let json = json!({
         "$and": [true, {"$gt": [20, 10]}]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -269,7 +269,7 @@ mod tests {
         let json = json!({
             "&label": {"$gt": 10}
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         let context = Context::new(0, HashMap::from_iter(vec![("label", "20")]), HashMap::new());
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
@@ -279,7 +279,7 @@ mod tests {
         let json = json!({
             "$and": [1, -2]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -288,7 +288,7 @@ mod tests {
         let json = json!({
             "$and": [1.1, -2.2]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -297,7 +297,7 @@ mod tests {
         let json = json!({
             "$and": ["a","b"]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -306,7 +306,7 @@ mod tests {
         let json = json!({
             "$eq": ["1h", 3600_000_000u64]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -319,7 +319,7 @@ mod tests {
             ]
         }        );
 
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         let context = Context::new(
             0,
             HashMap::from_iter(vec![("label", "true")]),
@@ -336,7 +336,7 @@ mod tests {
                 1
             ]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
     }
 
@@ -345,7 +345,7 @@ mod tests {
         let json = json!({
         "$limit": 100
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
     }
 
@@ -354,7 +354,7 @@ mod tests {
         let json = json!( {
             "$xx": [true, true]
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Operator '$xx' not supported"
@@ -369,7 +369,7 @@ mod tests {
                     "x": "y"
                 }
             }        );
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Object notation must have exactly one operator"
@@ -383,7 +383,7 @@ mod tests {
                 "$in": [10, 20]
             }
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Array type is not supported: [10,20]"
@@ -397,7 +397,7 @@ mod tests {
                 "$and": null
             }
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Null type is not supported: null"
@@ -409,7 +409,7 @@ mod tests {
         let json = json!({
             "and": [true, true]
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Operator 'and' must start with '$'"
@@ -474,7 +474,7 @@ mod tests {
                 operands
             ))
             .unwrap();
-            let mut node = parser.parse(&json).unwrap();
+            let (mut node, _) = parser.parse(json).unwrap();
             assert!(
                 node.apply(&context).unwrap().as_bool().unwrap(),
                 "{}",

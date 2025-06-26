@@ -4,7 +4,7 @@
 use crate::storage::proto::record::State;
 use reduct_base::error::ReductError;
 
-use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
+use crate::storage::query::filters::{FilterRecord, RecordFilter, RecordMeta};
 
 /// Filter that passes records with a specific state
 pub struct RecordStateFilter {
@@ -26,7 +26,7 @@ impl RecordStateFilter {
     }
 }
 
-impl<R: GetMeta> RecordFilter<R> for RecordStateFilter {
+impl<R: FilterRecord> RecordFilter<R> for RecordStateFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         let result = record.state() == self.state as i32;
         if result {
@@ -42,20 +42,35 @@ mod tests {
     use super::*;
     use crate::storage::proto::record::State;
 
+    use crate::storage::query::filters::tests::TestFilterRecord;
     use rstest::*;
 
     #[rstest]
     fn test_record_state_filter() {
         let mut filter = RecordStateFilter::new(State::Finished);
 
-        let meta = RecordMeta::builder().state(State::Finished as i32).build();
-        assert!(filter.filter(&meta).unwrap(), "Record should pass");
+        let record: TestFilterRecord = RecordMeta::builder()
+            .state(State::Finished as i32)
+            .build()
+            .into();
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![record]),
+            "Record should pass"
+        );
     }
 
     #[rstest]
     fn test_record_state_filter_no_records() {
         let mut filter = RecordStateFilter::new(State::Finished);
-        let meta = RecordMeta::builder().state(State::Started as i32).build();
-        assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
+        let record: TestFilterRecord = RecordMeta::builder()
+            .state(State::Started as i32)
+            .build()
+            .into();
+        assert_eq!(
+            filter.filter(record).unwrap(),
+            Some(vec![]),
+            "Record should not pass"
+        );
     }
 }

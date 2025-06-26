@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::{GetMeta, RecordFilter};
+use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 
@@ -23,7 +23,7 @@ impl EachSecondFilter {
     }
 }
 
-impl<R: GetMeta> RecordFilter<R> for EachSecondFilter {
+impl<R: FilterRecord> RecordFilter<R> for EachSecondFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         let ret = record.timestamp() as i64 - self.last_time >= (self.s * 1_000_000.0) as i64;
         if ret {
@@ -42,21 +42,28 @@ impl<R: GetMeta> RecordFilter<R> for EachSecondFilter {
 mod tests {
     use super::*;
 
+    use crate::storage::query::filters::tests::TestFilterRecord;
     use rstest::*;
 
     #[rstest]
     fn test_each_s_filter() {
         let mut filter = EachSecondFilter::new(2.0);
-        let meta = RecordMeta::builder().timestamp(1000_000).build();
+        let record: TestFilterRecord = RecordMeta::builder().timestamp(1000_000).build().into();
 
-        assert!(filter.filter(&meta).unwrap());
-        assert!(!filter.filter(&meta).unwrap());
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![record.clone()]),
+        );
+        assert_eq!(filter.filter(record.clone()).unwrap(), Some(vec![]),);
 
-        let meta = RecordMeta::builder().timestamp(2000_000).build();
-        assert!(!filter.filter(&meta).unwrap());
+        let record: TestFilterRecord = RecordMeta::builder().timestamp(2000_000).build().into();
+        assert_eq!(filter.filter(record).unwrap(), Some(vec![]),);
 
-        let meta = RecordMeta::builder().timestamp(3000_000).build();
-        assert!(filter.filter(&meta).unwrap());
-        assert!(!filter.filter(&meta).unwrap());
+        let record: TestFilterRecord = RecordMeta::builder().timestamp(3000_000).build().into();
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![record.clone()]),
+        );
+        assert_eq!(filter.filter(record.clone()).unwrap(), Some(vec![]),);
     }
 }

@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
+use crate::storage::query::filters::{FilterRecord, RecordFilter, RecordMeta};
 use reduct_base::error::ReductError;
 
 /// Filter that passes records with a timestamp within a specific range
@@ -26,7 +26,7 @@ impl TimeRangeFilter {
     }
 }
 
-impl<R: GetMeta> RecordFilter<R> for TimeRangeFilter {
+impl<R: FilterRecord> RecordFilter<R> for TimeRangeFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         let ts = record.timestamp();
         let ret = ts >= self.start && ts < self.stop;
@@ -47,15 +47,21 @@ impl<R: GetMeta> RecordFilter<R> for TimeRangeFilter {
 mod tests {
     use super::*;
 
+    use crate::storage::query::filters::tests::TestFilterRecord;
     use rstest::*;
 
     #[rstest]
     fn test_time_range_filter() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let meta = RecordMeta::builder().timestamp(5).build();
-        assert!(filter.filter(&meta).unwrap(), "First time should pass");
-        assert!(
-            !filter.filter(&meta).unwrap(),
+        let record: TestFilterRecord = RecordMeta::builder().timestamp(5).build().into();
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![record.clone()]),
+            "First time should pass"
+        );
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![]),
             "Second time should not pass, as we have already returned the record"
         );
     }
@@ -63,23 +69,35 @@ mod tests {
     #[rstest]
     fn test_time_range_filter_no_records() {
         let mut filter = TimeRangeFilter::new(0, 10);
-        let meta = RecordMeta::builder().timestamp(15).build();
-        assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
+        let record: TestFilterRecord = RecordMeta::builder().timestamp(15).build().into();
+        assert_eq!(
+            filter.filter(record).unwrap(),
+            Some(vec![]),
+            "Record should not pass"
+        );
     }
 
     #[rstest]
     fn test_time_include_start() {
         let mut filter = TimeRangeFilter::new(0, 10);
 
-        let meta = RecordMeta::builder().timestamp(0).build();
-        assert!(filter.filter(&meta).unwrap(), "Record should pass");
+        let record: TestFilterRecord = RecordMeta::builder().timestamp(0).build().into();
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![record]),
+            "Record should pass"
+        );
     }
 
     #[rstest]
     fn test_time_exclude_end() {
         let mut filter = TimeRangeFilter::new(0, 10);
 
-        let meta = RecordMeta::builder().timestamp(10).build();
-        assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
+        let record: TestFilterRecord = RecordMeta::builder().timestamp(10).build().into();
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![]),
+            "Record should not pass"
+        );
     }
 }

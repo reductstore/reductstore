@@ -20,7 +20,8 @@ use std::collections::HashMap;
 pub(crate) use time_range::TimeRangeFilter;
 pub(crate) use when::WhenFilter;
 
-pub(crate) trait GetMeta {
+///
+pub(crate) trait FilterRecord {
     fn state(&self) -> i32;
 
     fn timestamp(&self) -> u64;
@@ -31,7 +32,7 @@ pub(crate) trait GetMeta {
 }
 
 /// Trait for record filters in queries.
-pub(crate) trait RecordFilter<R: GetMeta> {
+pub(crate) trait RecordFilter<R: FilterRecord> {
     /// Filter the record by condition.
     ///
     /// # Arguments
@@ -47,7 +48,7 @@ pub(crate) trait RecordFilter<R: GetMeta> {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError>;
 }
 
-pub(crate) fn apply_filters_recursively<R: GetMeta>(
+pub(crate) fn apply_filters_recursively<R: FilterRecord>(
     filters: &mut [Box<dyn RecordFilter<R> + Send + Sync>],
     notifications: Vec<R>,
     index: usize,
@@ -69,4 +70,39 @@ pub(crate) fn apply_filters_recursively<R: GetMeta>(
     }
 
     Ok(Some(vec![]))
+}
+
+#[cfg(test)]
+
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub(super) struct TestFilterRecord {
+        meta: RecordMeta,
+    }
+
+    impl From<RecordMeta> for TestFilterRecord {
+        fn from(meta: RecordMeta) -> Self {
+            TestFilterRecord { meta }
+        }
+    }
+
+    impl FilterRecord for TestFilterRecord {
+        fn state(&self) -> i32 {
+            self.meta.state()
+        }
+
+        fn timestamp(&self) -> u64 {
+            self.meta.timestamp()
+        }
+
+        fn labels(&self) -> HashMap<&String, &String> {
+            self.meta.labels().iter().collect()
+        }
+
+        fn computed_labels(&self) -> HashMap<&String, &String> {
+            self.meta.computed_labels().iter().collect()
+        }
+    }
 }

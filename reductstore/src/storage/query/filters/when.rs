@@ -3,7 +3,7 @@
 
 use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::Padding::Records;
-use crate::storage::query::filters::{GetMeta, RecordFilter, RecordMeta};
+use crate::storage::query::filters::{FilterRecord, RecordFilter, RecordMeta};
 use log::debug;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::internal_server_error;
@@ -48,7 +48,7 @@ impl<R> WhenFilter<R> {
     }
 }
 
-impl<R: GetMeta> RecordFilter<R> for WhenFilter<R> {
+impl<R: FilterRecord> RecordFilter<R> for WhenFilter<R> {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         self.buffer.push_back(record);
         match self.before {
@@ -75,8 +75,6 @@ impl<R: GetMeta> RecordFilter<R> for WhenFilter<R> {
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect(),
         );
-
-        debug!("Context: {:?}", context);
 
         let result = match self.condition.apply(&context) {
             Ok(value) => value.as_bool()?,
@@ -107,6 +105,7 @@ mod tests {
     use super::*;
 
     use crate::storage::query::condition::Parser;
+    use crate::storage::query::filters::tests::TestFilterRecord;
     use reduct_base::Labels;
     use rstest::rstest;
 
@@ -114,18 +113,19 @@ mod tests {
     fn filter() {
         let parser = Parser::new();
         let json = serde_json::from_str(r#"{"$and": [true, "&label"]}"#).unwrap();
-        let condition = parser.parse(&json).unwrap();
+        let (condition, directives) = parser.parse(json).unwrap();
 
-        let mut filter = WhenFilter::try_new(condition);
+        let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
 
-        let meta = RecordMeta::builder()
+        let record: TestFilterRecord = RecordMeta::builder()
             .timestamp(0)
             .labels(Labels::from_iter(vec![(
                 "label".to_string(),
                 "true".to_string(),
             )]))
-            .build();
-        let result = filter.filter(&meta).unwrap();
-        assert_eq!(result, true);
+            .build()
+            .into();
+        let result = filter.filter(record.clone()).unwrap();
+        assert_eq!(result, Some(vec![record]));
     }
 }
