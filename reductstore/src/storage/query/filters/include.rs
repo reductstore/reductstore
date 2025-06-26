@@ -4,7 +4,7 @@
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
 
-use crate::storage::query::filters::{FilterRecord, RecordFilter, RecordMeta};
+use crate::storage::query::filters::{FilterRecord, RecordFilter};
 
 /// Filter that excludes records with specific labels
 pub struct IncludeLabelFilter {

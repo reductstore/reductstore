@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::filters::{FilterRecord, RecordFilter, RecordMeta};
+use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::ReductError;
 
 /// Filter that passes records with a timestamp within a specific range

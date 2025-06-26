@@ -4,7 +4,7 @@
 use crate::storage::proto::record::State;
 use reduct_base::error::ReductError;
 
-use crate::storage::query::filters::{FilterRecord, RecordFilter, RecordMeta};
+use crate::storage::query::filters::{FilterRecord, RecordFilter};
 
 /// Filter that passes records with a specific state
 pub struct RecordStateFilter {

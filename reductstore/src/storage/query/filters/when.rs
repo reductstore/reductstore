@@ -3,8 +3,7 @@
 
 use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::Padding::Records;
-use crate::storage::query::filters::{FilterRecord, RecordFilter, RecordMeta};
-use log::debug;
+use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::internal_server_error;
 use std::collections::VecDeque;

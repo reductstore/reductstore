@@ -15,7 +15,6 @@ pub(crate) use exclude::ExcludeLabelFilter;
 pub(crate) use include::IncludeLabelFilter;
 pub(crate) use record_state::RecordStateFilter;
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use std::collections::HashMap;
 pub(crate) use time_range::TimeRangeFilter;
 pub(crate) use when::WhenFilter;

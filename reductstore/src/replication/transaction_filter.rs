@@ -3,9 +3,7 @@
 
 use log::warn;
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::ReplicationSettings;
-use reduct_base::Labels;
 use std::collections::HashMap;
 
 use crate::replication::TransactionNotification;

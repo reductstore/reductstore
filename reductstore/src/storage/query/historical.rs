@@ -10,7 +10,7 @@ use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 

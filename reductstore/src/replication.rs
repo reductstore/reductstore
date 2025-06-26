@@ -4,13 +4,11 @@
 use crate::cfg::replication::ReplicationConfig;
 use crate::replication::replication_task::ReplicationTask;
 use crate::storage::storage::Storage;
-use log::Metadata;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationSettings,
 };
-use reduct_base::Labels;
 use std::sync::Arc;
 
 mod diagnostics;

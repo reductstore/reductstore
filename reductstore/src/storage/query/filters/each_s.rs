@@ -3,7 +3,6 @@
 
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 
 /// Filter that passes every N-th record
 pub struct EachSecondFilter {

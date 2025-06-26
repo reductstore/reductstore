@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
 use crate::storage::query::filters::{FilterRecord, RecordFilter};

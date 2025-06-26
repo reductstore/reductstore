@@ -11,7 +11,7 @@ use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
-use reduct_base::error::ErrorCode::{Interrupt, NoContent};
+use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
     BoxedCommiter, BoxedProcessor, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
@@ -19,8 +19,6 @@ use reduct_base::ext::{
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, unprocessable_entity};
 use std::collections::HashMap;
-use std::env::var;
-use std::iter::Filter;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -295,9 +293,8 @@ impl ManageExtensions for ExtRepository {
 }
 
 use crate::ext::filter::DummyFilter;
-use crate::storage::query::filters::{FilterRecord, RecordFilter, WhenFilter};
+use crate::storage::query::filters::{RecordFilter, WhenFilter};
 pub(crate) use create::create_ext_repository;
-use reduct_base::io::ReadRecord;
 
 #[cfg(test)]
 pub(super) mod tests {
