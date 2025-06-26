@@ -23,7 +23,7 @@ use std::collections::HashMap;
 pub(crate) struct Parser {}
 
 pub(crate) type Directives = HashMap<String, Value>;
-static DIRECTIVES: [&str; 1] = ["#before"];
+static DIRECTIVES: [&str; 2] = ["#ctx_before", "#ctx_after"];
 
 impl Parser {
     /// Parses a JSON object into a condition tree.

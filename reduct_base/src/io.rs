@@ -2,6 +2,7 @@ use crate::error::ReductError;
 use crate::{internal_server_error, Labels};
 use async_trait::async_trait;
 use bytes::Bytes;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::runtime::Handle;
 
@@ -40,8 +41,11 @@ impl BuilderRecordMeta {
         self
     }
 
-    pub fn labels(mut self, labels: Labels) -> Self {
-        self.labels = labels;
+    pub fn labels<T: ToString>(mut self, labels: HashMap<T, T>) -> Self {
+        self.labels = labels
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         self
     }
 
@@ -55,8 +59,11 @@ impl BuilderRecordMeta {
         self
     }
 
-    pub fn computed_labels(mut self, computed_labels: Labels) -> Self {
-        self.computed_labels = computed_labels;
+    pub fn computed_labels<T: ToString>(mut self, computed_labels: HashMap<T, T>) -> Self {
+        self.computed_labels = computed_labels
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         self
     }
 
