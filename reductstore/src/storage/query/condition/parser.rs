@@ -416,6 +416,35 @@ mod tests {
         );
     }
 
+    mod parse_directives {
+        use super::*;
+        use rstest::rstest;
+
+        #[rstest]
+        fn test_parse_directives(parser: Parser) {
+            let json = json!({
+                "#ctx_before": "1h",
+                "#ctx_after": "2h"
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(directives.len(), 2);
+            assert_eq!(directives["#ctx_before"], Value::Duration(3600_000_000));
+            assert_eq!(directives["#ctx_after"], Value::Duration(7200_000_000));
+        }
+
+        #[rstest]
+        fn test_parse_invalid_directive(parser: Parser) {
+            let json = json!({
+                "#invalid_directive": "value"
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#invalid_directive' is not supported"
+            );
+        }
+    }
+
     mod parse_operators {
         use super::*;
         #[rstest]
