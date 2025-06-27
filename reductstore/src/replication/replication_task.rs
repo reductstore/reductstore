@@ -375,6 +375,42 @@ mod tests {
     }
 
     #[rstest]
+    fn test_add_new_entry(
+        mut remote_bucket: MockRmBucket,
+        mut notification: TransactionNotification,
+        settings: ReplicationSettings,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+        let mut replication = build_replication(remote_bucket, settings.clone());
+
+        notification.entry = "new_entry".to_string();
+        fs::create_dir_all(
+            replication
+                .storage
+                .data_path()
+                .join(settings.src_bucket)
+                .join("new_entry"),
+        )
+        .unwrap();
+
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(100));
+        assert!(transaction_log_is_empty(&replication));
+        assert_eq!(
+            replication.info(),
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 0,
+            }
+        );
+    }
+
+    #[rstest]
     fn test_replication_ok_active(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,

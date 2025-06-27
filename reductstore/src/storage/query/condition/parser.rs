@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::computed_reference::ComputedReference;
@@ -419,6 +419,7 @@ mod tests {
     mod parse_directives {
         use super::*;
         use rstest::rstest;
+        use serde::Serialize;
 
         #[rstest]
         fn test_parse_directives(parser: Parser) {
@@ -430,6 +431,35 @@ mod tests {
             assert_eq!(directives.len(), 2);
             assert_eq!(directives["#ctx_before"], Value::Duration(3600_000_000));
             assert_eq!(directives["#ctx_after"], Value::Duration(7200_000_000));
+        }
+
+        #[rstest]
+        #[case(true, Value::Bool(true))]
+        #[case(123, Value::Int(123))]
+        #[case(123.45, Value::Float(123.45))]
+        #[case("test", Value::String("test".to_string()))]
+        fn test_parse_directives_primitive_values<T: Serialize>(
+            parser: Parser,
+            #[case] value: T,
+            #[case] expected: Value,
+        ) {
+            let json = json!({
+                "#ctx_before": value,
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(directives["#ctx_before"], expected);
+        }
+
+        #[rstest]
+        fn test_parse_directives_invalid_value(parser: Parser) {
+            let json = json!({
+                "#ctx_before": [1, 2, 3]
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#ctx_before' must be a primitive value"
+            );
         }
 
         #[rstest]

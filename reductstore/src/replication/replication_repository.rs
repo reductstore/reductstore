@@ -673,6 +673,50 @@ mod tests {
         }
     }
 
+    mod notify {
+        use super::*;
+        use reduct_base::io::{ReadRecord, RecordMeta};
+
+        #[rstest]
+        fn test_notify_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            repo.notify(notification.clone()).unwrap();
+            let repl = repo.get_replication("test").unwrap();
+            assert_eq!(repl.info().pending_records, 1);
+        }
+
+        #[rstest]
+        fn test_notify_wrong_bucket(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-2".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            repo.notify(notification).unwrap();
+            let repl = repo.get_replication("test").unwrap();
+            assert_eq!(
+                repl.info().pending_records,
+                0,
+                "Should not notify replication for wrong bucket"
+            );
+        }
+    }
+
     mod from {
         use super::*;
 

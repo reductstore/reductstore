@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod ctx_after;
@@ -10,7 +10,6 @@ use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::internal_server_error;
 use std::collections::VecDeque;
 
 pub(super) enum Padding {
@@ -38,7 +37,7 @@ impl<R> WhenFilter<R> {
             let val = before.as_int()?;
             if val < 0 {
                 return Err(ReductError::unprocessable_entity(
-                    "Padding before must be non-negative",
+                    "#ctx_before must be non-negative",
                 ));
             }
 
@@ -55,7 +54,7 @@ impl<R> WhenFilter<R> {
             let val = after.as_int()?;
             if val < 0 {
                 return Err(ReductError::unprocessable_entity(
-                    "Padding after must be non-negative",
+                    "#ctx_after must be non-negative",
                 ));
             }
             if after.is_duration() {
@@ -81,9 +80,7 @@ impl<R: FilterRecord> RecordFilter<R> for WhenFilter<R> {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         self.ctx_before.queue_record(&mut self.ctx_buffer, record);
 
-        let record = self.ctx_buffer.back().ok_or(internal_server_error!(
-            "Buffer is empty, but we expected at least one record to be present."
-        ))?;
+        let record = self.ctx_buffer.back().unwrap();
 
         // Prepare the context for the condition evaluation
         let context = Context::new(
@@ -216,6 +213,42 @@ mod tests {
 
             let result = filter.filter(record_true.clone()).unwrap();
             assert_eq!(result, Some(vec![record_true]));
+        }
+
+        #[rstest]
+        fn filter_ctx_before_negative(parser: Parser) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#ctx_before": -2,
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("#ctx_before must be non-negative")
+            );
+        }
+
+        #[rstest]
+        fn filter_ctx_after_negative(parser: Parser) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#ctx_after": -2,
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("#ctx_after must be non-negative")
+            );
         }
 
         #[fixture]

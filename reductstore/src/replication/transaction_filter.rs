@@ -344,6 +344,24 @@ mod tests {
     }
 
     #[rstest]
+    fn test_transaction_filter_interrupted(notification: TransactionNotification) {
+        let mut filter = TransactionFilter::try_new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                when: Some(serde_json::json!({"$limit": 0})),
+                ..ReplicationSettings::default()
+            },
+        )
+        .unwrap();
+
+        assert!(
+            filter.filter(notification).is_empty(),
+            "label doesn't exist but we consider it as false"
+        );
+    }
+
+    #[rstest]
     fn test_transaction_filter_invalid_when() {
         let filter = TransactionFilter::try_new(
             "test",
@@ -374,6 +392,26 @@ mod tests {
                 .state(0)
                 .build(),
             event: Transaction::WriteRecord(0),
+        }
+    }
+
+    mod filter_record_impl {
+        use super::*;
+
+        #[rstest]
+        fn test_filter_record_impl(notification: TransactionNotification) {
+            let record: Box<dyn FilterRecord> = Box::new(notification.clone());
+            assert_eq!(record.timestamp(), *notification.event.timestamp());
+
+            for (key, value) in notification.meta.labels() {
+                assert_eq!(record.labels().get(key), Some(&value));
+            }
+
+            for (key, value) in notification.meta.computed_labels() {
+                assert_eq!(record.computed_labels().get(key), Some(&value));
+            }
+
+            assert_eq!(record.state(), notification.meta.state());
         }
     }
 }
