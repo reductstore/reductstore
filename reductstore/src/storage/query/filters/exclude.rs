@@ -2,10 +2,9 @@
 // Licensed under the Business Source License 1.1
 
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
-use crate::storage::query::filters::RecordFilter;
+use crate::storage::query::filters::{FilterRecord, RecordFilter};
 
 /// Filter that excludes records with specific labels
 pub struct ExcludeLabelFilter {
@@ -27,21 +26,27 @@ impl ExcludeLabelFilter {
     }
 }
 
-impl RecordFilter for ExcludeLabelFilter {
-    fn filter(&mut self, record: &RecordMeta) -> Result<bool, ReductError> {
-        let result = !self
-            .labels
-            .iter()
-            .all(|(key, value)| record.labels().iter().any(|(k, v)| k == key && v == value));
-
-        Ok(result)
+impl<R: FilterRecord> RecordFilter<R> for ExcludeLabelFilter {
+    fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
+        let result = !self.labels.iter().all(|(key, value)| {
+            record
+                .labels()
+                .iter()
+                .any(|(k, v)| *k == key && *v == value)
+        });
+        if result {
+            Ok(Some(vec![record]))
+        } else {
+            Ok(Some(vec![]))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::storage::query::filters::tests::TestFilterRecord;
+    use reduct_base::io::RecordMeta;
     use rstest::*;
 
     #[rstest]
@@ -51,13 +56,19 @@ mod tests {
             "value".to_string(),
         )]));
 
-        let meta = RecordMeta::builder()
+        let record: TestFilterRecord = RecordMeta::builder()
             .labels(Labels::from_iter(vec![(
                 "key".to_string(),
                 "value".to_string(),
             )]))
-            .build();
-        assert!(!filter.filter(&meta).unwrap(), "Record should not pass");
+            .build()
+            .into();
+
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![]),
+            "Record with key=value should not pass"
+        );
     }
 
     #[rstest]
@@ -67,13 +78,18 @@ mod tests {
             "value".to_string(),
         )]));
 
-        let meta = RecordMeta::builder()
+        let record: TestFilterRecord = RecordMeta::builder()
             .labels(Labels::from_iter(vec![(
                 "key".to_string(),
                 "other".to_string(),
             )]))
-            .build();
-        assert!(filter.filter(&meta).unwrap(), "Record should pass");
+            .build()
+            .into();
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![record]),
+            "Record with key=other should pass"
+        );
     }
 
     #[rstest]
@@ -83,26 +99,30 @@ mod tests {
             ("key2".to_string(), "value2".to_string()),
         ]));
 
-        let meta = RecordMeta::builder()
+        let record: TestFilterRecord = RecordMeta::builder()
             .labels(Labels::from_iter(vec![
                 ("key1".to_string(), "value1".to_string()),
                 ("key2".to_string(), "value2".to_string()),
                 ("key3".to_string(), "value3".to_string()),
             ]))
-            .build();
-        assert!(
-            !filter.filter(&meta).unwrap(),
+            .build()
+            .into();
+        assert_eq!(
+            filter.filter(record).unwrap(),
+            Some(vec![]),
             "Record should not pass because it has key1=value1 and key2=value2"
         );
 
-        let meta = RecordMeta::builder()
+        let record: TestFilterRecord = RecordMeta::builder()
             .labels(Labels::from_iter(vec![(
                 "key1".to_string(),
                 "value1".to_string(),
             )]))
-            .build();
-        assert!(
-            filter.filter(&meta).unwrap(),
+            .build()
+            .into();
+        assert_eq!(
+            filter.filter(record.clone()).unwrap(),
+            Some(vec![record]),
             "Record should pass because it has only key1=value1"
         );
     }

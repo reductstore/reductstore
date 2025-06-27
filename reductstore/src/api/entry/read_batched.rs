@@ -144,14 +144,17 @@ async fn fetch_and_response_batched_records(
         };
 
         match reader {
-            Ok(reader) => {
-                {
-                    let (name, value) = make_batch_header(&reader);
-                    header_size += name.as_str().len() + value.to_str().unwrap().len() + 2;
-                    body_size += reader.meta().content_length();
-                    headers.insert(name, value);
+            Ok(next_readers) => {
+                for reader in next_readers {
+                    {
+                        let (name, value) = make_batch_header(&reader);
+                        header_size += name.as_str().len() + value.to_str().unwrap().len() + 2;
+                        body_size += reader.meta().content_length();
+                        headers.insert(name, value);
+                    }
+
+                    readers.push(reader);
                 }
-                readers.push(reader);
 
                 if header_size > io_settings.batch_max_metadata_size
                     || body_size > io_settings.batch_max_size
@@ -209,7 +212,7 @@ async fn next_record_reader(
     query_path: &str,
     recv_timeout: Duration,
     ext_repository: &BoxedManageExtensions,
-) -> Option<Result<BoxedReadRecord, ReductError>> {
+) -> Option<Result<Vec<BoxedReadRecord>, ReductError>> {
     // we need to wait for the first record
     if let Ok(result) = timeout(
         recv_timeout,

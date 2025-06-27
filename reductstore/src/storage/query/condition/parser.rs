@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::computed_reference::ComputedReference;
@@ -17,9 +17,13 @@ use crate::storage::query::condition::{Boxed, BoxedNode};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use serde_json::{Map, Number, Value as JsonValue};
+use std::collections::HashMap;
 
 /// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
+
+pub(crate) type Directives = HashMap<String, Value>;
+static DIRECTIVES: [&str; 2] = ["#ctx_before", "#ctx_after"];
 
 impl Parser {
     /// Parses a JSON object into a condition tree.
@@ -32,9 +36,59 @@ impl Parser {
     ///
     /// A boxed node representing the condition tree.
     /// The root node is a `StagedAllOf` that aggregates all expressions
-    pub fn parse(&self, json: &JsonValue) -> Result<BoxedNode, ReductError> {
-        let expressions = Self::parse_recursively(json)?;
-        Ok(AllOf::boxed(expressions)?)
+    pub fn parse(&self, mut json: JsonValue) -> Result<(BoxedNode, Directives), ReductError> {
+        // parse directives if any
+        let directives = Self::parse_directives(&mut json)?;
+        let expressions = Self::parse_recursively(&json)?;
+        Ok((AllOf::boxed(expressions)?, directives))
+    }
+
+    fn parse_directives(json: &mut JsonValue) -> Result<Directives, ReductError> {
+        let mut directives = Directives::new();
+        let mut keys_to_remove = vec![];
+        for (key, value) in json.as_object().unwrap_or(&Map::new()).iter() {
+            if key.starts_with("#") {
+                if !DIRECTIVES.contains(&key.as_str()) {
+                    return Err(unprocessable_entity!(
+                        "Directive '{}' is not supported",
+                        key
+                    ));
+                }
+
+                let value = match value {
+                    JsonValue::Bool(value) => Value::Bool(*value),
+                    JsonValue::Number(value) => {
+                        if value.is_i64() || value.is_u64() {
+                            Value::Int(value.as_i64().unwrap())
+                        } else {
+                            Value::Float(value.as_f64().unwrap())
+                        }
+                    }
+                    JsonValue::String(value) => {
+                        if let Ok(duration) = parse_duration(value) {
+                            duration
+                        } else {
+                            Value::String(value.to_string())
+                        }
+                    }
+                    _ => {
+                        return Err(unprocessable_entity!(
+                            "Directive '{}' must be a primitive value",
+                            key
+                        ));
+                    }
+                };
+
+                directives.insert(key.to_string(), value);
+                keys_to_remove.push(key.to_string());
+            }
+        }
+
+        // Remove directives from the original JSON object
+        for key in keys_to_remove {
+            json.as_object_mut().unwrap().remove(&key);
+        }
+        Ok(directives)
     }
 
     fn parse_recursively(json: &JsonValue) -> Result<Vec<BoxedNode>, ReductError> {
@@ -206,7 +260,7 @@ mod tests {
         let json = json!({
         "$and": [true, {"$gt": [20, 10]}]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -215,7 +269,7 @@ mod tests {
         let json = json!({
             "&label": {"$gt": 10}
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         let context = Context::new(0, HashMap::from_iter(vec![("label", "20")]), HashMap::new());
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
@@ -225,7 +279,7 @@ mod tests {
         let json = json!({
             "$and": [1, -2]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -234,7 +288,7 @@ mod tests {
         let json = json!({
             "$and": [1.1, -2.2]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -243,7 +297,7 @@ mod tests {
         let json = json!({
             "$and": ["a","b"]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -252,7 +306,7 @@ mod tests {
         let json = json!({
             "$eq": ["1h", 3600_000_000u64]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
     }
 
@@ -265,7 +319,7 @@ mod tests {
             ]
         }        );
 
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         let context = Context::new(
             0,
             HashMap::from_iter(vec![("label", "true")]),
@@ -282,7 +336,7 @@ mod tests {
                 1
             ]
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
     }
 
@@ -291,7 +345,7 @@ mod tests {
         let json = json!({
         "$limit": 100
         });
-        let mut node = parser.parse(&json).unwrap();
+        let (mut node, _) = parser.parse(json).unwrap();
         assert_eq!(node.apply(&context).unwrap(), Value::Int(1));
     }
 
@@ -300,7 +354,7 @@ mod tests {
         let json = json!( {
             "$xx": [true, true]
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Operator '$xx' not supported"
@@ -315,7 +369,7 @@ mod tests {
                     "x": "y"
                 }
             }        );
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Object notation must have exactly one operator"
@@ -329,7 +383,7 @@ mod tests {
                 "$in": [10, 20]
             }
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Array type is not supported: [10,20]"
@@ -343,7 +397,7 @@ mod tests {
                 "$and": null
             }
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Null type is not supported: null"
@@ -355,11 +409,70 @@ mod tests {
         let json = json!({
             "and": [true, true]
         });
-        let result = parser.parse(&json);
+        let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Operator 'and' must start with '$'"
         );
+    }
+
+    mod parse_directives {
+        use super::*;
+        use rstest::rstest;
+        use serde::Serialize;
+
+        #[rstest]
+        fn test_parse_directives(parser: Parser) {
+            let json = json!({
+                "#ctx_before": "1h",
+                "#ctx_after": "2h"
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(directives.len(), 2);
+            assert_eq!(directives["#ctx_before"], Value::Duration(3600_000_000));
+            assert_eq!(directives["#ctx_after"], Value::Duration(7200_000_000));
+        }
+
+        #[rstest]
+        #[case(true, Value::Bool(true))]
+        #[case(123, Value::Int(123))]
+        #[case(123.45, Value::Float(123.45))]
+        #[case("test", Value::String("test".to_string()))]
+        fn test_parse_directives_primitive_values<T: Serialize>(
+            parser: Parser,
+            #[case] value: T,
+            #[case] expected: Value,
+        ) {
+            let json = json!({
+                "#ctx_before": value,
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(directives["#ctx_before"], expected);
+        }
+
+        #[rstest]
+        fn test_parse_directives_invalid_value(parser: Parser) {
+            let json = json!({
+                "#ctx_before": [1, 2, 3]
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#ctx_before' must be a primitive value"
+            );
+        }
+
+        #[rstest]
+        fn test_parse_invalid_directive(parser: Parser) {
+            let json = json!({
+                "#invalid_directive": "value"
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#invalid_directive' is not supported"
+            );
+        }
     }
 
     mod parse_operators {
@@ -420,7 +533,7 @@ mod tests {
                 operands
             ))
             .unwrap();
-            let mut node = parser.parse(&json).unwrap();
+            let (mut node, _) = parser.parse(json).unwrap();
             assert!(
                 node.apply(&context).unwrap().as_bool().unwrap(),
                 "{}",

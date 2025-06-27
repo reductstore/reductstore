@@ -194,6 +194,10 @@ impl ManageReplications for ReplicationRepository {
 
     fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         for (_, replication) in self.replications.iter_mut() {
+            if replication.settings().src_bucket != notification.bucket {
+                continue; // skip if the replication is not for the source bucket
+            }
+
             let _ = replication.notify(notification.clone())?;
         }
         Ok(())
@@ -304,7 +308,7 @@ impl ReplicationRepository {
 
         // check syntax of when condition
         if let Some(when) = &settings.when {
-            if let Err(e) = Parser::new().parse(when) {
+            if let Err(e) = Parser::new().parse(when.clone()) {
                 return Err(unprocessable_entity!(
                     "Invalid replication condition: {}",
                     e
@@ -626,6 +630,7 @@ mod tests {
 
     mod get {
         use super::*;
+        use reduct_base::io::RecordMeta;
 
         #[rstest]
         fn test_get_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
@@ -635,7 +640,7 @@ mod tests {
                 repl.notify(TransactionNotification {
                     bucket: "bucket-1".to_string(),
                     entry: "entry-1".to_string(),
-                    labels: Labels::default(),
+                    meta: RecordMeta::builder().build(),
                     event: WriteRecord(0),
                 })
                 .unwrap();
@@ -664,6 +669,50 @@ mod tests {
                 repo.get_mut_replication("test-2").err(),
                 Some(not_found!("Replication 'test-2' does not exist")),
                 "Should not get non existing replication"
+            );
+        }
+    }
+
+    mod notify {
+        use super::*;
+        use reduct_base::io::RecordMeta;
+
+        #[rstest]
+        fn test_notify_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            repo.notify(notification.clone()).unwrap();
+            let repl = repo.get_replication("test").unwrap();
+            assert_eq!(repl.info().pending_records, 1);
+        }
+
+        #[rstest]
+        fn test_notify_wrong_bucket(
+            mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            repo.create_replication("test", settings.clone()).unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-2".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            repo.notify(notification).unwrap();
+            let repl = repo.get_replication("test").unwrap();
+            assert_eq!(
+                repl.info().pending_records,
+                0,
+                "Should not notify replication for wrong bucket"
             );
         }
     }

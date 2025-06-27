@@ -15,6 +15,7 @@ use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
+use reduct_base::io::RecordMeta;
 use reduct_base::{bad_request, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -117,7 +118,7 @@ pub(crate) async fn write_record(
                 .notify(TransactionNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),
-                    labels,
+                    meta: RecordMeta::builder().timestamp(ts).labels(labels).build(),
                     event: WriteRecord(ts),
                 })?;
             Ok(())

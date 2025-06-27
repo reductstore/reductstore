@@ -9,6 +9,7 @@ use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time};
+use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
 use crate::api::entry::common::err_to_batched_header;
@@ -81,7 +82,10 @@ pub(crate) async fn update_batched_records(
                 replication_repo.notify(TransactionNotification {
                     bucket: bucket_name.clone(),
                     entry: entry_name.clone(),
-                    labels: new_labels,
+                    meta: RecordMeta::builder()
+                        .timestamp(time)
+                        .labels(new_labels)
+                        .build(),
                     event: Transaction::UpdateRecord(time),
                 })?;
             }

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
-
+use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
 use crate::api::entry::common::parse_timestamp_from_query;
@@ -81,7 +81,10 @@ pub(crate) async fn update_record(
         .notify(TransactionNotification {
             bucket: bucket.clone(),
             entry: entry_name.clone(),
-            labels: batched_result.get(&ts).unwrap().clone()?,
+            meta: RecordMeta::builder()
+                .timestamp(ts)
+                .labels(batched_result.get(&ts).unwrap().clone()?.clone())
+                .build(),
             event: Transaction::UpdateRecord(ts),
         })?;
 

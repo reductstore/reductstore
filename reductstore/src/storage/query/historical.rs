@@ -1,8 +1,5 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-
-use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
 
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
@@ -10,10 +7,32 @@ use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    EachNFilter, EachSecondFilter, ExcludeLabelFilter, IncludeLabelFilter, RecordFilter,
-    RecordStateFilter, TimeRangeFilter, WhenFilter,
+    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
+    IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, RwLock};
+
+impl FilterRecord for Record {
+    fn state(&self) -> i32 {
+        self.state
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp.as_ref().map_or(0, |ts| ts_to_us(ts))
+    }
+
+    fn labels(&self) -> HashMap<&String, &String> {
+        HashMap::from_iter(self.labels.iter().map(|label| (&label.name, &label.value)))
+    }
+
+    fn computed_labels(&self) -> HashMap<&String, &String> {
+        HashMap::new()
+    }
+}
+
+type Filter = Box<dyn RecordFilter<Record> + Send + Sync>;
 
 pub struct HistoricalQuery {
     /// The start time of the query.
@@ -25,11 +44,9 @@ pub struct HistoricalQuery {
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
     current_block: Option<BlockRef>,
     /// Filters
-    filters: Vec<Box<dyn RecordFilter + Send + Sync>>,
+    filters: Vec<Filter>,
     /// Request only metadata without the content.
     only_metadata: bool,
-    /// Strict mode
-    strict: bool,
     /// Interrupted query
     is_interrupted: bool,
 }
@@ -40,7 +57,7 @@ impl HistoricalQuery {
         stop_time: u64,
         options: QueryOptions,
     ) -> Result<Self, ReductError> {
-        let mut filters: Vec<Box<dyn RecordFilter + Send + Sync>> = vec![
+        let mut filters: Vec<Filter> = vec![
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
             Box::new(RecordStateFilter::new(RecordState::Finished)),
         ];
@@ -63,8 +80,12 @@ impl HistoricalQuery {
 
         if let Some(when) = options.when {
             let parser = Parser::new();
-            let condition = parser.parse(&when)?;
-            filters.push(Box::new(WhenFilter::new(condition)));
+            let (condition, directives) = parser.parse(when)?;
+            filters.push(Box::new(WhenFilter::try_new(
+                condition,
+                directives,
+                options.strict,
+            )?));
         }
 
         Ok(HistoricalQuery {
@@ -74,7 +95,6 @@ impl HistoricalQuery {
             current_block: None,
             filters,
             only_metadata: options.only_metadata,
-            strict: options.strict,
             is_interrupted: false,
         })
     }
@@ -114,10 +134,9 @@ impl Query for HistoricalQuery {
                 let block_ref = bm.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
-                let (mut found_records, continue_query) =
-                    self.filter_records_from_current_block()?;
-                self.is_interrupted = !continue_query;
+                let mut found_records = self.filter_records_from_current_block()?;
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
+
                 self.records_from_current_block.extend(found_records);
                 if !self.records_from_current_block.is_empty() {
                     break;
@@ -146,43 +165,23 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    fn filter_records_from_current_block(&mut self) -> Result<(Vec<Record>, bool), ReductError> {
+    fn filter_records_from_current_block(&mut self) -> Result<Vec<Record>, ReductError> {
         let block = self.current_block.as_ref().unwrap().read()?;
         let mut filtered_records = Vec::new();
         for record in block.record_index().values() {
-            let mut include_record = true;
-            for filter in self.filters.iter_mut() {
-                match filter.filter(&record.clone().into()) {
-                    Ok(false) => {
-                        include_record = false;
-                        break;
-                    }
-                    Ok(true) => {}
-
-                    Err(err) => {
-                        // if the filter is interrupted, we return what we have
-                        // and notify the caller to stop the query
-                        if err.status == ErrorCode::Interrupt {
-                            return Ok((filtered_records, false));
-                        }
-
-                        if self.strict {
-                            // in strict mode, we return an error if a filter fails
-                            return Err(err);
-                        }
-
-                        // in non-strict mode, we ignore the record with the failed filter
-                        include_record = false;
-                        break;
-                    }
+            match apply_filters_recursively(self.filters.as_mut_slice(), vec![record.clone()], 0)? {
+                Some(records) => {
+                    filtered_records.extend(records);
                 }
-            }
-            if include_record {
-                filtered_records.push(record.clone());
+                None => {
+                    // If the filtering is interrupted, we stop processing further records.
+                    self.is_interrupted = true;
+                    break;
+                }
             }
         }
 
-        Ok((filtered_records, true))
+        Ok(filtered_records)
     }
 }
 

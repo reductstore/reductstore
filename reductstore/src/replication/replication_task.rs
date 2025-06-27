@@ -219,32 +219,31 @@ impl ReplicationTask {
 
     pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         // We need to have a filter for each entry
-        {
+        let entry_name = notification.entry.clone();
+        let notifications = {
             let mut lock = self.filter_map.write()?;
             if !lock.contains_key(&notification.entry) {
                 lock.insert(
                     notification.entry.clone(),
-                    TransactionFilter::new(self.name(), self.settings.clone()),
+                    TransactionFilter::try_new(self.name(), self.settings.clone())?,
                 );
             }
 
-            let filter = lock.get_mut(&notification.entry).unwrap();
-            if !filter.filter(&notification) {
-                return Ok(());
-            }
-        }
+            let filter = lock.get_mut(&entry_name).unwrap();
+            filter.filter(notification)
+        };
 
         // NOTE: very important not to lock the log_map for too long
         // because it is used by the replication thread
-        if !self.log_map.read()?.contains_key(&notification.entry) {
+        if !self.log_map.read()?.contains_key(&entry_name) {
             let mut map = self.log_map.write()?;
             map.insert(
-                notification.entry.clone(),
+                entry_name.clone(),
                 RwLock::new(TransactionLog::try_load_or_create(
                     Self::build_path_to_transaction_log(
                         self.storage.data_path(),
                         &self.settings.src_bucket,
-                        &notification.entry,
+                        &entry_name,
                         &self.name,
                     ),
                     self.system_options.transaction_log_size,
@@ -253,12 +252,15 @@ impl ReplicationTask {
         };
 
         let log_map = self.log_map.read()?;
-        let log = log_map.get(&notification.entry).unwrap();
+        let log = log_map.get(&entry_name).unwrap();
 
-        if let Some(_) = log.write()?.push_back(notification.event.clone())? {
-            error!("Transaction log is full, dropping the oldest transaction without replication");
+        for notification in notifications.into_iter() {
+            if let Some(_) = log.write()?.push_back(notification.event)? {
+                error!(
+                    "Transaction log is full, dropping the oldest transaction without replication"
+                );
+            }
         }
-
         Ok(())
     }
 
@@ -331,10 +333,10 @@ mod tests {
 
     use bytes::Bytes;
 
-    use mockall::mock;
-    use rstest::*;
-
     use crate::core::file_cache::FILE_CACHE;
+    use mockall::mock;
+    use reduct_base::io::RecordMeta;
+    use rstest::*;
 
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
@@ -369,6 +371,42 @@ mod tests {
         assert!(
             replication.log_map.read().unwrap().contains_key("test2"),
             "Transaction log is initialized"
+        );
+    }
+
+    #[rstest]
+    fn test_add_new_entry(
+        mut remote_bucket: MockRmBucket,
+        mut notification: TransactionNotification,
+        settings: ReplicationSettings,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+        let mut replication = build_replication(remote_bucket, settings.clone());
+
+        notification.entry = "new_entry".to_string();
+        fs::create_dir_all(
+            replication
+                .storage
+                .data_path()
+                .join(settings.src_bucket)
+                .join("new_entry"),
+        )
+        .unwrap();
+
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(100));
+        assert!(transaction_log_is_empty(&replication));
+        assert_eq!(
+            replication.info(),
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: true,
+                is_provisioned: false,
+                pending_records: 0,
+            }
         );
     }
 
@@ -608,7 +646,7 @@ mod tests {
         TransactionNotification {
             bucket: "src".to_string(),
             entry: "test1".to_string(),
-            labels: Labels::new(),
+            meta: RecordMeta::builder().timestamp(10).build(),
             event: Transaction::WriteRecord(10),
         }
     }
