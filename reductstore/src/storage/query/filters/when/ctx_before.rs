@@ -39,7 +39,7 @@ impl CtxBefore {
                 let mut first_record_ts = ctx_buffer.front().unwrap().timestamp();
                 let last_record_ts = ctx_buffer.back().unwrap().timestamp();
                 while last_record_ts - first_record_ts > us {
-                    ctx_buffer.pop_front().unwrap().timestamp();
+                    ctx_buffer.pop_front().unwrap();
                     first_record_ts = ctx_buffer.front().map_or(0, |r| r.timestamp());
                 }
             }
