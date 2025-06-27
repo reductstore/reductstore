@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integrate ReductRos v0.1.0, [PR-856](https://github.com/reductstore/reductstore/pull/856)
 - Filter buckets by read permission in server information, [PR-849](https://github.com/reductstore/reductstore/pull/849)
 - Support for duration literals, [PR-864](https://github.com/reductstore/reductstore/pull/864)
+- Support for "#ctx_before" and "#ctx_after" directives, [PR-866](https://github.com/reductstore/reductstore/pull/866)
 
 ### Changed
 
