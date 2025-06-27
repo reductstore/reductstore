@@ -1,26 +1,31 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+mod ctx_after;
+mod ctx_before;
+
 use crate::storage::query::condition::{BoxedNode, Context, Directives};
-use crate::storage::query::filters::when::Padding::Records;
+use crate::storage::query::filters::when::ctx_after::CtxAfter;
+use crate::storage::query::filters::when::ctx_before::CtxBefore;
+use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::internal_server_error;
 use std::collections::VecDeque;
 
-enum Padding {
+pub(super) enum Padding {
     Records(usize),
+    Duration(u64),
 }
 
 /// A node representing a when filter with a condition.
 pub struct WhenFilter<R> {
     condition: BoxedNode,
     strict: bool,
-    before: Padding,
-    after: Padding,
 
+    ctx_before: CtxBefore,
+    ctx_after: CtxAfter,
     ctx_buffer: VecDeque<R>,
-    ctx_after_count: i64,
 }
 
 impl<R> WhenFilter<R> {
@@ -30,25 +35,34 @@ impl<R> WhenFilter<R> {
         strict: bool,
     ) -> Result<Self, ReductError> {
         let before = if let Some(before) = directives.get("#ctx_before") {
-            let before = before.as_int()?;
-            if before < 0 {
+            let val = before.as_int()?;
+            if val < 0 {
                 return Err(ReductError::unprocessable_entity(
                     "Padding before must be non-negative",
                 ));
             }
-            Records(before as usize)
+
+            if before.is_duration() {
+                Duration(val as u64)
+            } else {
+                Records(val as usize)
+            }
         } else {
             Records(0) // Default to 0 records before
         };
 
         let after = if let Some(after) = directives.get("#ctx_after") {
-            let after = after.as_int()?;
-            if after < 0 {
+            let val = after.as_int()?;
+            if val < 0 {
                 return Err(ReductError::unprocessable_entity(
                     "Padding after must be non-negative",
                 ));
             }
-            Records(after as usize)
+            if after.is_duration() {
+                Duration(val as u64)
+            } else {
+                Records(val as usize)
+            }
         } else {
             Records(0) // Default to 0 records after
         };
@@ -56,25 +70,16 @@ impl<R> WhenFilter<R> {
         Ok(Self {
             condition,
             strict,
-            before,
-            after,
+            ctx_before: CtxBefore::new(before),
+            ctx_after: CtxAfter::new(after),
             ctx_buffer: VecDeque::new(),
-            ctx_after_count: 0,
         })
     }
 }
 
 impl<R: FilterRecord> RecordFilter<R> for WhenFilter<R> {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
-        // Put the record into the context buffer
-        self.ctx_buffer.push_back(record);
-        match self.before {
-            Padding::Records(n) => {
-                if self.ctx_buffer.len() > n + 1 {
-                    self.ctx_buffer.pop_front();
-                }
-            }
-        }
+        self.ctx_before.queue_record(&mut self.ctx_buffer, record);
 
         let record = self.ctx_buffer.back().ok_or(internal_server_error!(
             "Buffer is empty, but we expected at least one record to be present."
@@ -111,24 +116,10 @@ impl<R: FilterRecord> RecordFilter<R> for WhenFilter<R> {
             }
         };
 
-        if self.check_after_ctx(result) {
+        if self.ctx_after.check(result, record.timestamp()) {
             Ok(Some(self.ctx_buffer.drain(..).collect()))
         } else {
             Ok(Some(vec![]))
-        }
-    }
-}
-
-impl<R: FilterRecord> WhenFilter<R> {
-    fn check_after_ctx(&mut self, condition: bool) -> bool {
-        match self.after {
-            Padding::Records(n) => {
-                self.ctx_after_count -= 1;
-                if condition {
-                    self.ctx_after_count = n as i64;
-                }
-                self.ctx_after_count >= 0
-            }
         }
     }
 }
@@ -158,70 +149,185 @@ mod tests {
         assert_eq!(result, Some(vec![record_true]));
     }
 
-    #[rstest]
-    fn filter_ctx_before_n(
-        parser: Parser,
-        record_true: TestFilterRecord,
-        record_false: TestFilterRecord,
-    ) {
-        let (condition, directives) = parser
-            .parse(json!({
-                "#ctx_before": 2,
-                "$and": [true, "&label"]
-            }))
-            .unwrap();
+    mod context_n {
+        use super::*;
 
-        let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+        #[rstest]
+        fn filter_ctx_before_n(
+            parser: Parser,
+            record_true: TestFilterRecord,
+            record_false: TestFilterRecord,
+        ) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#ctx_before": 2,
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
 
-        let result = filter.filter(record_false.clone()).unwrap();
-        assert_eq!(result, Some(vec![]));
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
 
-        let result = filter.filter(record_false.clone()).unwrap();
-        assert_eq!(result, Some(vec![]));
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
 
-        let result = filter.filter(record_false.clone()).unwrap();
-        assert_eq!(result, Some(vec![]));
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
 
-        let result = filter.filter(record_true.clone()).unwrap();
-        assert_eq!(
-            result,
-            Some(vec![
-                record_false.clone(),
-                record_false,
-                record_true.clone()
-            ])
-        );
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
 
-        let result = filter.filter(record_true.clone()).unwrap();
-        assert_eq!(result, Some(vec![record_true]));
+            let result = filter.filter(record_true.clone()).unwrap();
+            assert_eq!(
+                result,
+                Some(vec![
+                    record_false.clone(),
+                    record_false,
+                    record_true.clone()
+                ])
+            );
+
+            let result = filter.filter(record_true.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_true]));
+        }
+
+        #[rstest]
+        fn filter_ctx_after_n(
+            parser: Parser,
+            record_true: TestFilterRecord,
+            record_false: TestFilterRecord,
+        ) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#ctx_after": 2,
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+
+            let result = filter.filter(record_true.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_true.clone()]));
+
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_false.clone()]));
+
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_false]));
+
+            let result = filter.filter(record_true.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_true]));
+        }
+
+        #[fixture]
+        fn record_false() -> TestFilterRecord {
+            RecordMeta::builder()
+                .labels(HashMap::from_iter(vec![("label", "false")]))
+                .build()
+                .into()
+        }
     }
 
-    #[rstest]
-    fn filter_ctx_after_n(
-        parser: Parser,
-        record_true: TestFilterRecord,
-        record_false: TestFilterRecord,
-    ) {
-        let (condition, directives) = parser
-            .parse(json!({
-                "#ctx_after": 2,
-                "$and": [true, "&label"]
-            }))
-            .unwrap();
+    mod context_dur {
+        use super::*;
 
-        let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+        #[rstest]
+        fn filter_ctx_before_duration(
+            parser: Parser,
+            record_false_3: TestFilterRecord,
+            record_false_4: TestFilterRecord,
+            record_true_5: TestFilterRecord,
+        ) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#ctx_before": "2ms",
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
 
-        let result = filter.filter(record_true.clone()).unwrap();
-        assert_eq!(result, Some(vec![record_true.clone()]));
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+            let result = filter.filter(record_false_3.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
 
-        let result = filter.filter(record_false.clone()).unwrap();
-        assert_eq!(result, Some(vec![record_false.clone()]));
+            let result = filter.filter(record_false_4.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
 
-        let result = filter.filter(record_false.clone()).unwrap();
-        assert_eq!(result, Some(vec![record_false]));
+            let result = filter.filter(record_true_5.clone()).unwrap();
+            assert_eq!(
+                result,
+                Some(vec![record_false_3, record_false_4, record_true_5])
+            );
+        }
 
-        let result = filter.filter(record_true.clone()).unwrap();
-        assert_eq!(result, Some(vec![record_true]));
+        #[rstest]
+        fn filter_ctx_after_duration(
+            parser: Parser,
+            record_true_5: TestFilterRecord,
+            record_false_6: TestFilterRecord,
+            record_false_7: TestFilterRecord,
+        ) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#ctx_after": "2ms",
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+
+            let result = filter.filter(record_true_5.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_true_5]));
+
+            let result = filter.filter(record_false_6.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_false_6]));
+
+            let result = filter.filter(record_false_7.clone()).unwrap();
+            assert_eq!(result, Some(vec![record_false_7]));
+        }
+
+        #[fixture]
+        fn record_false_3() -> TestFilterRecord {
+            RecordMeta::builder()
+                .timestamp(3000)
+                .labels(HashMap::from_iter(vec![("label", "false")]))
+                .build()
+                .into()
+        }
+
+        #[fixture]
+        fn record_false_7() -> TestFilterRecord {
+            RecordMeta::builder()
+                .timestamp(7000)
+                .labels(HashMap::from_iter(vec![("label", "false")]))
+                .build()
+                .into()
+        }
+
+        #[fixture]
+        fn record_false_6() -> TestFilterRecord {
+            RecordMeta::builder()
+                .timestamp(6000)
+                .labels(HashMap::from_iter(vec![("label", "false")]))
+                .build()
+                .into()
+        }
+
+        #[fixture]
+        fn record_true_5() -> TestFilterRecord {
+            RecordMeta::builder()
+                .timestamp(5000)
+                .labels(HashMap::from_iter(vec![("label", "true")]))
+                .build()
+                .into()
+        }
+
+        #[fixture]
+        fn record_false_4() -> TestFilterRecord {
+            RecordMeta::builder()
+                .timestamp(4000)
+                .labels(HashMap::from_iter(vec![("label", "false")]))
+                .build()
+                .into()
+        }
     }
 
     #[fixture]
@@ -233,14 +339,6 @@ mod tests {
     fn record_true() -> TestFilterRecord {
         RecordMeta::builder()
             .labels(HashMap::from_iter(vec![("label", "true")]))
-            .build()
-            .into()
-    }
-
-    #[fixture]
-    fn record_false() -> TestFilterRecord {
-        RecordMeta::builder()
-            .labels(HashMap::from_iter(vec![("label", "false")]))
             .build()
             .into()
     }
