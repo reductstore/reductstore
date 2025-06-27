@@ -64,7 +64,7 @@ mod tests {
     fn test_filter_record(mocked_record: BoxedReadRecord) {
         assert_eq!(mocked_record.state(), Finished as i32);
         assert_eq!(mocked_record.timestamp(), 0);
-        assert!(!mocked_record.labels().is_empty());
+        assert!(mocked_record.labels().is_empty());
         assert!(!mocked_record.computed_labels().is_empty());
     }
 }

@@ -675,7 +675,7 @@ mod tests {
 
     mod notify {
         use super::*;
-        use reduct_base::io::{ReadRecord, RecordMeta};
+        use reduct_base::io::RecordMeta;
 
         #[rstest]
         fn test_notify_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
