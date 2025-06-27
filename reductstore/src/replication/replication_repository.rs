@@ -194,6 +194,10 @@ impl ManageReplications for ReplicationRepository {
 
     fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         for (_, replication) in self.replications.iter_mut() {
+            if replication.settings().src_bucket != notification.bucket {
+                continue; // skip if the replication is not for the source bucket
+            }
+
             let _ = replication.notify(notification.clone())?;
         }
         Ok(())
