@@ -63,14 +63,12 @@ def test_query_entry_next(base_url, session, bucket):
     assert resp.status_code == 200
     assert resp.content == b"some_data"
     assert resp.headers["x-reduct-time"] == "1000"
-    assert resp.headers["x-reduct-last"] == "0"
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
 
     assert resp.status_code == 200
     assert resp.content == b"some_data"
     assert resp.headers["x-reduct-time"] == "1100"
-    assert resp.headers["x-reduct-last"] == "0"
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
     assert resp.status_code == 204

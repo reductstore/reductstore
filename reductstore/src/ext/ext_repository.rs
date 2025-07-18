@@ -874,7 +874,7 @@ pub(super) mod tests {
             }),
             ..Default::default()
         };
-        RecordReader::form_record(record, false)
+        RecordReader::form_record(record)
     }
 
     #[fixture]

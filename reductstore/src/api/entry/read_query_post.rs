@@ -50,7 +50,7 @@ mod tests {
     use crate::core::weak::Weak;
     use crate::storage::query::QueryRx;
     use reduct_base::error::{ErrorCode, ReductError};
-    use reduct_base::io::ReadRecord;
+
     use reduct_base::msg::entry_api::QueryType;
     use rstest::*;
     use serde_json::json;
@@ -76,7 +76,7 @@ mod tests {
             .upgrade()
             .unwrap();
         let mut rx = rx.write().await;
-        assert!(rx.recv().await.unwrap().unwrap().meta().last());
+        assert!(rx.recv().await.unwrap().is_ok());
         assert_eq!(
             rx.recv().await.unwrap().err().unwrap().status,
             ErrorCode::NoContent

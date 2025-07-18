@@ -56,7 +56,6 @@ impl RecordReader {
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
         record_timestamp: u64,
-        last: bool,
     ) -> Result<Self, ReductError> {
         let (record, ctx) = {
             let bm = block_manager.write()?;
@@ -107,7 +106,7 @@ impl RecordReader {
             });
         };
 
-        Ok(Self::form_record_with_rx(rx, record, last))
+        Ok(Self::form_record_with_rx(rx, record))
     }
 
     /// Create a new record reader for a record with no content.
@@ -117,25 +116,19 @@ impl RecordReader {
     /// # Arguments
     ///
     /// * `record` - The record to read
-    /// * `last` - Whether this is the last record in the entry
     ///
     /// # Returns
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks
-    pub fn form_record(record: Record, last: bool) -> Self {
-        let mut meta: RecordMeta = record.into();
-        meta.set_last(last);
+    pub fn form_record(record: Record) -> Self {
+        let meta: RecordMeta = record.into();
         RecordReader { rx: None, meta }
     }
 
-    pub fn form_record_with_rx(rx: RecordRx, record: Record, last: bool) -> Self {
-        let mut me = Self::form_record(record, last);
+    pub fn form_record_with_rx(rx: RecordRx, record: Record) -> Self {
+        let mut me = Self::form_record(record);
         me.rx = Some(rx);
         me
-    }
-
-    pub fn set_last(&mut self, last: bool) {
-        self.meta.set_last(last);
     }
 
     fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
@@ -400,7 +393,7 @@ mod tests {
         #[rstest]
         fn test_state(mut record: Record) {
             record.state = 1;
-            let reader = RecordReader::form_record(record, false);
+            let reader = RecordReader::form_record(record);
             assert_eq!(reader.meta().state(), 1);
         }
 
@@ -408,7 +401,7 @@ mod tests {
         #[tokio::test]
         async fn test_read_timeout(record: Record) {
             let (_tx, rx) = channel(CHANNEL_BUFFER_SIZE);
-            let mut reader = RecordReader::form_record_with_rx(rx, record, false);
+            let mut reader = RecordReader::form_record_with_rx(rx, record);
 
             let result = reader.read_timeout(Duration::from_millis(100)).await;
             assert_eq!(

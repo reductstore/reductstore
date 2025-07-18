@@ -35,15 +35,7 @@ impl Query for LimitedQuery {
         }
 
         self.limit_count -= 1;
-        let reader = self.query.next(block_manager);
-        if self.limit_count == 0 {
-            reader.map(|mut r| {
-                r.set_last(true);
-                r
-            })
-        } else {
-            reader
-        }
+        self.query.next(block_manager)
     }
 }
 
@@ -69,7 +61,6 @@ mod tests {
 
         let reader = query.next(block_manager.clone()).unwrap();
         assert_eq!(reader.meta().timestamp(), 0);
-        assert!(reader.meta().last());
 
         assert_eq!(
             query.next(block_manager).err(),

@@ -394,7 +394,6 @@ mod tests {
                     content_type: "text/plain".to_string(),
                     state: 0,
                 },
-                false,
             ),
             Transaction::WriteRecord(0),
         )
@@ -414,7 +413,6 @@ mod tests {
                     content_type: "text/plain".to_string(),
                     state: 0,
                 },
-                false,
             ),
             Transaction::UpdateRecord(0),
         )
