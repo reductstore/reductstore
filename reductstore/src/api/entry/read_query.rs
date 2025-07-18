@@ -84,7 +84,7 @@ mod tests {
             .upgrade()
             .unwrap();
         let mut rx = rx.write().await;
-        assert!(rx.recv().await.unwrap().unwrap().meta().last());
+        assert!(rx.recv().await.unwrap().is_ok());
 
         assert_eq!(
             rx.recv().await.unwrap().err().unwrap().status,

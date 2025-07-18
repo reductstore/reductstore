@@ -50,7 +50,6 @@ def test_read_write_entries_big_blob_ok(base_url, session, bucket):
 
     assert resp.headers["content-type"] == "application/octet-stream"
     assert resp.headers["x-reduct-time"] == str(ts)
-    assert resp.headers["x-reduct-last"] == "1"
 
 
 @requires_env("API_TOKEN")
@@ -111,7 +110,6 @@ def test_latest_record(base_url, session, bucket):
     assert resp.status_code == 200
     assert resp.content == b"some_data2"
     assert resp.headers["x-reduct-time"] == "1010"
-    assert resp.headers["x-reduct-last"] == "1"
 
 
 def test_read_write_big_blob(base_url, session, bucket):

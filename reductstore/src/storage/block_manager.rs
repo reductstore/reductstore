@@ -955,13 +955,9 @@ mod tests {
             assert_eq!(record.state, 1);
 
             // read content
-            let mut reader = RecordReader::try_new(
-                Arc::clone(&block_manager),
-                block_ref.clone(),
-                record_time,
-                false,
-            )
-            .unwrap();
+            let mut reader =
+                RecordReader::try_new(Arc::clone(&block_manager), block_ref.clone(), record_time)
+                    .unwrap();
 
             let mut received = BytesMut::new();
             while let Some(Ok(chunk)) = reader.blocking_read() {

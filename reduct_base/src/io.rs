@@ -17,7 +17,6 @@ pub struct RecordMeta {
     content_type: String,
     content_length: u64,
     computed_labels: Labels,
-    last: bool,
 }
 
 pub struct BuilderRecordMeta {
@@ -27,7 +26,6 @@ pub struct BuilderRecordMeta {
     content_type: String,
     content_length: u64,
     computed_labels: Labels,
-    last: bool,
 }
 
 impl BuilderRecordMeta {
@@ -67,11 +65,6 @@ impl BuilderRecordMeta {
         self
     }
 
-    pub fn last(mut self, last: bool) -> Self {
-        self.last = last;
-        self
-    }
-
     /// Builds a `RecordMeta` instance from the builder.
     pub fn build(self) -> RecordMeta {
         RecordMeta {
@@ -81,7 +74,6 @@ impl BuilderRecordMeta {
             content_type: self.content_type,
             content_length: self.content_length,
             computed_labels: self.computed_labels,
-            last: self.last,
         }
     }
 }
@@ -96,7 +88,6 @@ impl RecordMeta {
             content_type: "application/octet-stream".to_string(),
             content_length: 0,
             computed_labels: Labels::new(),
-            last: false,
         }
     }
 
@@ -109,7 +100,6 @@ impl RecordMeta {
             content_type: meta.content_type,
             content_length: meta.content_length,
             computed_labels: meta.computed_labels,
-            last: meta.last,
         }
     }
 
@@ -126,11 +116,6 @@ impl RecordMeta {
     /// For filtering unfinished records.
     pub fn state(&self) -> i32 {
         self.state
-    }
-
-    /// Returns true if this is the last record in the stream.
-    pub fn last(&self) -> bool {
-        self.last
     }
 
     /// Returns computed labels associated with the record.
@@ -155,10 +140,6 @@ impl RecordMeta {
     /// Returns the content type of the record as a MIME type.
     pub fn content_type(&self) -> &str {
         &self.content_type
-    }
-
-    pub fn set_last(&mut self, last: bool) {
-        self.last = last;
     }
 }
 
@@ -220,7 +201,7 @@ pub trait WriteRecord {
 pub(crate) mod tests {
     use super::*;
 
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
 
     use tokio::task::spawn_blocking;
 
@@ -255,36 +236,15 @@ pub(crate) mod tests {
         use super::*;
 
         #[rstest]
-        fn test_builder() {
-            let meta = RecordMeta::builder()
-                .timestamp(1234567890)
-                .state(1)
-                .labels(Labels::new())
-                .content_type("application/json".to_string())
-                .content_length(1024)
-                .computed_labels(Labels::new())
-                .last(true)
-                .build();
-
+        fn test_builder(meta: RecordMeta) {
             assert_eq!(meta.timestamp(), 1234567890);
             assert_eq!(meta.state(), 1);
             assert_eq!(meta.content_type(), "application/json");
             assert_eq!(meta.content_length(), 1024);
-            assert_eq!(meta.last(), true);
         }
 
         #[rstest]
-        fn test_builder_from() {
-            let meta = RecordMeta::builder()
-                .timestamp(1234567890)
-                .state(1)
-                .labels(Labels::new())
-                .content_type("application/json".to_string())
-                .content_length(1024)
-                .computed_labels(Labels::new())
-                .last(true)
-                .build();
-
+        fn test_builder_from(meta: RecordMeta) {
             let builder = RecordMeta::builder_from(meta.clone());
             let new_meta = builder.build();
 
@@ -292,7 +252,18 @@ pub(crate) mod tests {
             assert_eq!(new_meta.state(), 1);
             assert_eq!(new_meta.content_type(), "application/json");
             assert_eq!(new_meta.content_length(), 1024);
-            assert_eq!(new_meta.last(), true);
+        }
+
+        #[fixture]
+        fn meta() -> RecordMeta {
+            RecordMeta::builder()
+                .timestamp(1234567890)
+                .state(1)
+                .labels(Labels::new())
+                .content_type("application/json".to_string())
+                .content_length(1024)
+                .computed_labels(Labels::new())
+                .build()
         }
     }
 
@@ -310,7 +281,6 @@ pub(crate) mod tests {
                     .content_type("application/octet-stream".to_string())
                     .content_length(0)
                     .computed_labels(Labels::new())
-                    .last(false)
                     .build(),
             }
         }

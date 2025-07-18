@@ -24,7 +24,6 @@ use hyper::http::HeaderValue;
 use reduct_base::bad_request;
 use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
-use std::i64;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -86,7 +85,6 @@ async fn fetch_and_response_single_record(
         );
         headers.insert("content-length", HeaderValue::from(meta.content_length()));
         headers.insert("x-reduct-time", HeaderValue::from(meta.timestamp()));
-        headers.insert("x-reduct-last", HeaderValue::from(i64::from(meta.last())));
         headers
     };
 
@@ -387,7 +385,6 @@ mod tests {
                         labels: vec![],
                         content_type: "".to_string(),
                     },
-                    false,
                 ),
                 empty_body: false,
             };
