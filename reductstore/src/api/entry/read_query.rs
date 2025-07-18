@@ -44,7 +44,7 @@ mod tests {
     use super::*;
     use crate::api::tests::{components, headers, path_to_entry_1};
     use reduct_base::error::ErrorCode;
-    use reduct_base::io::ReadRecord;
+
     use rstest::*;
 
     #[rstest]
