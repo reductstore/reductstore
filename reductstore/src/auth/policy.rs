@@ -73,14 +73,8 @@ impl Policy for ReadAccessPolicy<'_> {
             return Ok(());
         }
 
-        for bucket in &permissions.read {
-            // Check if the token has read access for the specified bucket with wildcard support
-            let wildcard_bucket = bucket.ends_with('*');
-            if bucket == &self.bucket
-                || (wildcard_bucket && self.bucket.starts_with(&bucket[..bucket.len() - 1]))
-            {
-                return Ok(());
-            }
+        if check_bucket_permissions(&permissions.read, self.bucket) {
+            return Ok(());
         }
 
         Err(forbidden!(
@@ -105,14 +99,8 @@ impl Policy for WriteAccessPolicy<'_> {
             return Ok(());
         }
 
-        for bucket in &permissions.write {
-            // Check if the token has write access for the specified bucket with wildcard support
-            let wildcard_bucket = bucket.ends_with('*');
-            if bucket == &self.bucket
-                || (wildcard_bucket && self.bucket.starts_with(&bucket[..bucket.len() - 1]))
-            {
-                return Ok(());
-            }
+        if check_bucket_permissions(&permissions.write, self.bucket) {
+            return Ok(());
         }
 
         Err(forbidden!(
@@ -121,6 +109,19 @@ impl Policy for WriteAccessPolicy<'_> {
             self.bucket
         ))
     }
+}
+
+fn check_bucket_permissions(token_list: &Vec<String>, bucket: &str) -> bool {
+    for token_bucket in token_list {
+        // Check if the token has access for the specified bucket with wildcard support
+        let wildcard_bucket = token_bucket.ends_with('*');
+        if token_bucket == bucket
+            || (wildcard_bucket && bucket.starts_with(&token_bucket[..token_bucket.len() - 1]))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
