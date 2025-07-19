@@ -1,8 +1,9 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 use reduct_base::error::ReductError;
 
-use reduct_base::msg::token_api::Token;
+use reduct_base::msg::token_api::{Permissions, Token};
+use reduct_base::{forbidden, unprocessable_entity};
 
 /// Policy is a trait that defines the interface for a policy.
 /// A policy is a set of rules that are applied to a token to determine
@@ -46,76 +47,78 @@ pub struct FullAccessPolicy {}
 
 impl Policy for FullAccessPolicy {
     fn validate(&self, token: Result<Token, ReductError>) -> Result<(), ReductError> {
-        if token?
-            .permissions
-            .ok_or(ReductError::internal_server_error("No permissions set"))?
-            .full_access
-        {
+        let token = token?;
+        if token.permissions.unwrap_or_default().full_access {
             Ok(())
         } else {
-            Err(ReductError::forbidden("Token doesn't have full access"))
+            Err(forbidden!(
+                "Token '{}' doesn't have full access",
+                token.name
+            ))
         }
     }
 }
 
 /// ReadAccessPolicy validates a token that has read access for a certain bucket
-pub struct ReadAccessPolicy {
-    pub(crate) bucket: String,
+pub struct ReadAccessPolicy<'a> {
+    pub(crate) bucket: &'a str,
 }
 
-impl Policy for ReadAccessPolicy {
+impl Policy for ReadAccessPolicy<'_> {
     fn validate(&self, token: Result<Token, ReductError>) -> Result<(), ReductError> {
-        let permissions = &token?
-            .permissions
-            .ok_or(ReductError::internal_server_error("No permissions set"))?;
+        let token = token?;
+        let permissions = &token.permissions.unwrap_or_default();
 
         if permissions.full_access {
             return Ok(());
         }
 
         for bucket in &permissions.read {
-            if bucket == &self.bucket {
+            // Check if the token has read access for the specified bucket with wildcard support
+            let wildcard_bucket = bucket.ends_with('*');
+            if bucket == &self.bucket
+                || (wildcard_bucket && self.bucket.starts_with(&bucket[..bucket.len() - 1]))
+            {
                 return Ok(());
             }
         }
 
-        Err(ReductError::forbidden(
-            format!(
-                "Token doesn't have read access for the {} bucket",
-                self.bucket
-            )
-            .as_str(),
+        Err(forbidden!(
+            "Token '{}' doesn't have read access to bucket '{}'",
+            token.name,
+            self.bucket
         ))
     }
 }
 
 /// WriteAccessPolicy validates a token that has write access for a certain bucket
-pub struct WriteAccessPolicy {
-    pub(crate) bucket: String,
+pub struct WriteAccessPolicy<'a> {
+    pub(crate) bucket: &'a str,
 }
 
-impl Policy for WriteAccessPolicy {
+impl Policy for WriteAccessPolicy<'_> {
     fn validate(&self, token: Result<Token, ReductError>) -> Result<(), ReductError> {
-        let permissions = &token?
-            .permissions
-            .ok_or(ReductError::internal_server_error("No permissions set"))?;
+        let token = token?;
+        let permissions = &token.permissions.unwrap_or_default();
 
         if permissions.full_access {
             return Ok(());
         }
 
         for bucket in &permissions.write {
-            if bucket == &self.bucket {
+            // Check if the token has write access for the specified bucket with wildcard support
+            let wildcard_bucket = bucket.ends_with('*');
+            if bucket == &self.bucket
+                || (wildcard_bucket && self.bucket.starts_with(&bucket[..bucket.len() - 1]))
+            {
                 return Ok(());
             }
         }
 
-        Err(ReductError::forbidden(
-            format!(
-                "Token doesn't have write access for the {} bucket",
-                self.bucket
-            )
-            .as_str(),
+        Err(forbidden!(
+            "Token '{}' doesn't have write access to bucket '{}'",
+            token.name,
+            self.bucket
         ))
     }
 }
@@ -129,9 +132,7 @@ mod tests {
     fn test_anonymous_policy() {
         let policy = AnonymousPolicy {};
         assert!(policy.validate(Ok(Token::default())).is_ok());
-        assert!(policy
-            .validate(Err(ReductError::forbidden("Invalid token")))
-            .is_ok());
+        assert!(policy.validate(Err(forbidden!("Invalid token"))).is_ok());
     }
 
     #[test]
@@ -139,8 +140,8 @@ mod tests {
         let policy = AuthenticatedPolicy {};
         assert!(policy.validate(Ok(Token::default())).is_ok());
         assert_eq!(
-            policy.validate(Err(ReductError::forbidden("Invalid token"))),
-            Err(ReductError::forbidden("Invalid token"))
+            policy.validate(Err(forbidden!("Invalid token"))),
+            Err(forbidden!("Invalid token"))
         );
     }
 
@@ -148,6 +149,7 @@ mod tests {
     fn test_full_access_policy() {
         let policy = FullAccessPolicy {};
         let mut token = Token {
+            name: "test_token".to_string(),
             permissions: Some(Permissions {
                 full_access: true,
                 read: vec![],
@@ -160,21 +162,20 @@ mod tests {
         token.permissions.as_mut().unwrap().full_access = false;
         assert_eq!(
             policy.validate(Ok(token)),
-            Err(ReductError::forbidden("Token doesn't have full access"))
+            Err(forbidden!("Token 'test_token' doesn't have full access"))
         );
 
         assert_eq!(
-            policy.validate(Err(ReductError::forbidden("Invalid token"))),
-            Err(ReductError::forbidden("Invalid token"))
+            policy.validate(Err(forbidden!("Invalid token"))),
+            Err(forbidden!("Invalid token"))
         );
     }
 
     #[test]
     fn test_read_access_policy() {
-        let policy = ReadAccessPolicy {
-            bucket: "bucket".to_string(),
-        };
+        let policy = ReadAccessPolicy { bucket: "bucket" };
         let mut token = Token {
+            name: "test_token".to_string(),
             permissions: Some(Permissions {
                 full_access: true,
                 read: vec![],
@@ -190,24 +191,26 @@ mod tests {
 
         token.permissions.as_mut().unwrap().read = vec!["bucket2".to_string()];
         assert_eq!(
-            policy.validate(Ok(token)),
-            Err(ReductError::forbidden(
-                "Token doesn't have read access for the bucket bucket"
+            policy.validate(Ok(token.clone())),
+            Err(forbidden!(
+                "Token 'test_token' doesn't have read access to bucket 'bucket'"
             ))
         );
 
+        token.permissions.as_mut().unwrap().read = vec!["bucket*".to_string()];
+        assert!(policy.validate(Ok(token)).is_ok());
+
         assert_eq!(
-            policy.validate(Err(ReductError::forbidden("Invalid token"))),
-            Err(ReductError::forbidden("Invalid token"))
+            policy.validate(Err(forbidden!("Invalid token"))),
+            Err(forbidden!("Invalid token"))
         );
     }
 
     #[test]
     fn test_write_access_policy() {
-        let policy = WriteAccessPolicy {
-            bucket: "bucket".to_string(),
-        };
+        let policy = WriteAccessPolicy { bucket: "bucket" };
         let mut token = Token {
+            name: "test_token".to_string(),
             permissions: Some(Permissions {
                 full_access: true,
                 read: vec![],
@@ -223,15 +226,18 @@ mod tests {
 
         token.permissions.as_mut().unwrap().write = vec!["bucket2".to_string()];
         assert_eq!(
-            policy.validate(Ok(token)),
-            Err(ReductError::forbidden(
-                "Token doesn't have write access for the bucket bucket"
+            policy.validate(Ok(token.clone())),
+            Err(forbidden!(
+                "Token 'test_token' doesn't have write access to bucket 'bucket'"
             ))
         );
 
+        token.permissions.as_mut().unwrap().write = vec!["bucket*".to_string()];
+        assert!(policy.validate(Ok(token)).is_ok());
+
         assert_eq!(
-            policy.validate(Err(ReductError::forbidden("Invalid token"))),
-            Err(ReductError::forbidden("Invalid token"))
+            policy.validate(Err(forbidden!("Invalid token"))),
+            Err(forbidden!("Invalid token"))
         );
     }
 }

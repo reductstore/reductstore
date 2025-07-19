@@ -29,7 +29,7 @@ pub(crate) async fn remove_query(
         &components,
         &headers,
         WriteAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: bucket_name,
         },
     )
     .await?;

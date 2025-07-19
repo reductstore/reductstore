@@ -20,14 +20,7 @@ pub(crate) async fn remove_record(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket.clone(),
-        },
-    )
-    .await?;
+    check_permissions(&components, &headers, WriteAccessPolicy { bucket }).await?;
 
     let ts = parse_timestamp_from_query(&params)?;
     let entry_name = path.get("entry_name").unwrap();

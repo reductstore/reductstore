@@ -294,6 +294,16 @@ macro_rules! bad_request {
 }
 
 #[macro_export]
+macro_rules! forbidden {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::forbidden(&format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::forbidden($msg)
+    };
+}
+
+#[macro_export]
 macro_rules! unprocessable_entity {
     ($msg:expr, $($arg:tt)*) => {
         ReductError::unprocessable_entity(&format!($msg, $($arg)*))

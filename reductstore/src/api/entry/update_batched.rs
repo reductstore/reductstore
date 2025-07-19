@@ -32,7 +32,7 @@ pub(crate) async fn update_batched_records(
         &components,
         &headers,
         WriteAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: bucket_name,
         },
     )
     .await?;
