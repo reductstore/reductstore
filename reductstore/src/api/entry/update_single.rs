@@ -26,14 +26,7 @@ pub(crate) async fn update_record(
     _: Body,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket.clone(),
-        },
-    )
-    .await?;
+    check_permissions(&components, &headers, WriteAccessPolicy { bucket }).await?;
 
     let ts = parse_timestamp_from_query(&params)?;
 

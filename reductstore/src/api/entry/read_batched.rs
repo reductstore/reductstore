@@ -46,7 +46,7 @@ pub(crate) async fn read_batched_records(
         &components,
         &headers,
         ReadAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: &bucket_name,
         },
     )
     .await?;

@@ -42,12 +42,12 @@ pub(crate) async fn write_batched_records(
     Path(path): Path<HashMap<String, String>>,
     body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
-    let bucket_name = path.get("bucket_name").unwrap().clone();
+    let bucket_name = path.get("bucket_name").unwrap();
     check_permissions(
         &components,
         &headers,
         WriteAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: bucket_name,
         },
     )
     .await?;

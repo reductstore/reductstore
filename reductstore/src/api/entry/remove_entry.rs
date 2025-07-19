@@ -24,7 +24,7 @@ pub(crate) async fn remove_entry(
         &components,
         &headers,
         WriteAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: bucket_name,
         },
     )
     .await?;

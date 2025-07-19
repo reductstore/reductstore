@@ -25,7 +25,7 @@ pub(crate) async fn list(
             &components,
             &headers,
             ReadAccessPolicy {
-                bucket: bucket.name.clone(),
+                bucket: &bucket.name,
             },
         )
         .await

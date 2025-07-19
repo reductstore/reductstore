@@ -25,7 +25,7 @@ pub(crate) async fn rename_entry(
         &components,
         &headers,
         WriteAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: bucket_name,
         },
     )
     .await?;
