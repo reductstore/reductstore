@@ -198,6 +198,9 @@ mod tests {
         );
 
         token.permissions.as_mut().unwrap().read = vec!["bucket*".to_string()];
+        assert!(policy.validate(Ok(token.clone())).is_ok());
+
+        token.permissions.as_mut().unwrap().read = vec!["*".to_string()];
         assert!(policy.validate(Ok(token)).is_ok());
 
         assert_eq!(
@@ -233,6 +236,9 @@ mod tests {
         );
 
         token.permissions.as_mut().unwrap().write = vec!["bucket*".to_string()];
+        assert!(policy.validate(Ok(token.clone())).is_ok());
+
+        token.permissions.as_mut().unwrap().write = vec!["*".to_string()];
         assert!(policy.validate(Ok(token)).is_ok());
 
         assert_eq!(
