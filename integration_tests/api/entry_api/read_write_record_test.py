@@ -67,17 +67,19 @@ def test__read_with_read_token(
 
     resp = session.get(
         f"{base_url}/b/{bucket}/entry?ts=1000",
-        headers=auth_headers(token_without_permissions),
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.get(
-        f"{base_url}/b/{bucket}/entry?ts=1000", headers=auth_headers(token_read_bucket)
+        f"{base_url}/b/{bucket}/entry?ts=1000",
+        headers=auth_headers(token_read_bucket.value),
     )
     assert resp.status_code == 404  # no data
 
     resp = session.get(
-        f"{base_url}/b/{bucket}/entry?ts=1000", headers=auth_headers(token_write_bucket)
+        f"{base_url}/b/{bucket}/entry?ts=1000",
+        headers=auth_headers(token_write_bucket.value),
     )
     assert resp.status_code == 403
 
@@ -150,7 +152,7 @@ def test__write_with_write_token(
     token_read_bucket,
     token_write_bucket,
 ):
-    """Needs write permissions to write"""
+    """Needs to write permissions to write"""
     resp = session.post(
         f"{base_url}/b/{bucket}/entry?ts=1000", headers=auth_headers("")
     )
@@ -158,17 +160,19 @@ def test__write_with_write_token(
 
     resp = session.post(
         f"{base_url}/b/{bucket}/entry?ts=1000",
-        headers=auth_headers(token_without_permissions),
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.post(
-        f"{base_url}/b/{bucket}/entry?ts=1000", headers=auth_headers(token_read_bucket)
+        f"{base_url}/b/{bucket}/entry?ts=1000",
+        headers=auth_headers(token_read_bucket.value),
     )
     assert resp.status_code == 403
 
     resp = session.post(
-        f"{base_url}/b/{bucket}/entry?ts=1000", headers=auth_headers(token_write_bucket)
+        f"{base_url}/b/{bucket}/entry?ts=1000",
+        headers=auth_headers(token_write_bucket.value),
     )
     assert resp.status_code == 200
 
@@ -178,7 +182,6 @@ def test__head_entry_with_full_access_token(
     base_url,
     session,
     bucket,
-    token_without_permissions,
     token_write_bucket,
     token_read_bucket,
 ):
@@ -189,12 +192,13 @@ def test__head_entry_with_full_access_token(
     resp = session.post(
         f"{base_url}/b/{bucket}/{entry_name}?ts={ts}",
         data=dummy_data,
-        headers=auth_headers(token_write_bucket),
+        headers=auth_headers(token_write_bucket.value),
     )
     assert resp.status_code == 200
 
     resp = session.head(
-        f"{base_url}/b/{bucket}/{entry_name}", headers=auth_headers(token_read_bucket)
+        f"{base_url}/b/{bucket}/{entry_name}",
+        headers=auth_headers(token_read_bucket.value),
     )
     assert resp.status_code == 200
     assert len(resp.content) == 0

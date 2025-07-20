@@ -26,7 +26,7 @@ pub(crate) async fn read_query_json(
         &components,
         &headers,
         ReadAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: &bucket_name,
         },
     )
     .await?;

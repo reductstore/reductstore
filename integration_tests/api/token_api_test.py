@@ -36,10 +36,13 @@ def test__creat_token_with_full_access(
     resp = session.post(
         f"{base_url}/tokens/{token_name}",
         json=permissions,
-        headers=auth_headers(token_without_permissions),
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
-    assert resp.headers["x-reduct-error"] == "Token doesn't have full access"
+    assert (
+        resp.headers["x-reduct-error"]
+        == f"Token '{token_without_permissions.name}' doesn't have full access"
+    )
 
 
 @requires_env("API_TOKEN")
@@ -63,10 +66,13 @@ def test__list_token_with_full_access(base_url, session, token_without_permissio
     assert resp.status_code == 401
 
     resp = session.get(
-        f"{base_url}/tokens", headers=auth_headers(token_without_permissions)
+        f"{base_url}/tokens", headers=auth_headers(token_without_permissions.value)
     )
     assert resp.status_code == 403
-    assert resp.headers["x-reduct-error"] == "Token doesn't have full access"
+    assert (
+        resp.headers["x-reduct-error"]
+        == f"Token '{token_without_permissions.name}' doesn't have full access"
+    )
 
 
 @requires_env("API_TOKEN")
@@ -104,10 +110,14 @@ def test__get_token_with_full_access(base_url, session, token_without_permission
     assert resp.status_code == 401
 
     resp = session.get(
-        f"{base_url}/tokens/token-name", headers=auth_headers(token_without_permissions)
+        f"{base_url}/tokens/token-name",
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
-    assert resp.headers["x-reduct-error"] == "Token doesn't have full access"
+    assert (
+        resp.headers["x-reduct-error"]
+        == f"Token '{token_without_permissions.name}' doesn't have full access"
+    )
 
 
 @requires_env("API_TOKEN")
@@ -133,7 +143,11 @@ def test__delete_token_with_full_access(base_url, session, token_without_permiss
     assert resp.status_code == 401
 
     resp = session.delete(
-        f"{base_url}/tokens/token-name", headers=auth_headers(token_without_permissions)
+        f"{base_url}/tokens/token-name",
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
-    assert resp.headers["x-reduct-error"] == "Token doesn't have full access"
+    assert (
+        resp.headers["x-reduct-error"]
+        == f"Token '{token_without_permissions.name}' doesn't have full access"
+    )

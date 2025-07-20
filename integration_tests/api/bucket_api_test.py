@@ -46,7 +46,8 @@ def test__create_bucket_with_full_access_token(
     assert resp.status_code == 401
 
     resp = session.post(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_without_permissions)
+        f"{base_url}/b/{bucket_name}",
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
@@ -94,17 +95,18 @@ def test__get_bucket_with_authenticated_token(
     assert resp.status_code == 401
 
     resp = session.get(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_without_permissions)
+        f"{base_url}/b/{bucket_name}",
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.get(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_read_bucket)
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_read_bucket.value)
     )
     assert resp.status_code == 200
 
     resp = session.get(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_write_bucket)
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_write_bucket.value)
     )
     assert resp.status_code == 403
 
@@ -201,17 +203,18 @@ def test__update_bucket_with_full_access_token(
     assert resp.status_code == 401
 
     resp = session.put(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_without_permissions)
+        f"{base_url}/b/{bucket_name}",
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.put(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_read_bucket)
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_read_bucket.value)
     )
     assert resp.status_code == 403
 
     resp = session.put(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_write_bucket)
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_write_bucket.value)
     )
     assert resp.status_code == 403
 
@@ -242,17 +245,18 @@ def test__remove_bucket_with_full_access_token(
     assert resp.status_code == 401
 
     resp = session.delete(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_without_permissions)
+        f"{base_url}/b/{bucket_name}",
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.delete(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_read_bucket)
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_read_bucket.value)
     )
     assert resp.status_code == 403
 
     resp = session.delete(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_write_bucket)
+        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_write_bucket.value)
     )
     assert resp.status_code == 403
 
@@ -283,7 +287,8 @@ def test__head_bucket_with_full_access_token(
     assert resp.status_code == 401
 
     resp = session.head(
-        f"{base_url}/b/{bucket_name}", headers=auth_headers(token_without_permissions)
+        f"{base_url}/b/{bucket_name}",
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 200
 
@@ -327,20 +332,20 @@ def test__rename_bucket_with_full_access_token(
     resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
         json={"new_name": new_bucket_name},
-        headers=auth_headers(token_without_permissions),
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
         json={"new_name": new_bucket_name},
-        headers=auth_headers(token_read_bucket),
+        headers=auth_headers(token_read_bucket.value),
     )
     assert resp.status_code == 403
 
     resp = session.put(
         f"{base_url}/b/{bucket_name}/rename",
         json={"new_name": new_bucket_name},
-        headers=auth_headers(token_write_bucket),
+        headers=auth_headers(token_write_bucket.value),
     )
     assert resp.status_code == 403

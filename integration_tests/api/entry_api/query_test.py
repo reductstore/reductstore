@@ -292,20 +292,20 @@ def test__query_with_read_token(
 
     resp = session.get(
         f"{base_url}/b/{bucket}/entry/q",
-        headers=auth_headers(token_without_permissions),
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.post(
         f"{base_url}/b/{bucket}/entry/q",
-        headers=auth_headers(token_read_bucket),
+        headers=auth_headers(token_read_bucket.value),
         json={"query_type": "QUERY"},
     )
     assert resp.status_code == 404  # no data
 
     resp = session.post(
         f"{base_url}/b/{bucket}/entry/q",
-        headers=auth_headers(token_write_bucket),
+        headers=auth_headers(token_write_bucket.value),
         json={"query_type": "QUERY"},
     )
     assert resp.status_code == 403

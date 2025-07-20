@@ -30,14 +30,7 @@ pub(crate) async fn write_record(
     body: Body,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
-    check_permissions(
-        &components,
-        &headers.clone(),
-        WriteAccessPolicy {
-            bucket: bucket.clone(),
-        },
-    )
-    .await?;
+    check_permissions(&components, &headers.clone(), WriteAccessPolicy { bucket }).await?;
 
     let mut stream = body.into_data_stream();
 

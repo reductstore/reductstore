@@ -43,7 +43,7 @@ pub(crate) async fn read_record(
         &components,
         &headers,
         ReadAccessPolicy {
-            bucket: bucket_name.clone(),
+            bucket: &bucket_name,
         },
     )
     .await?;

@@ -1,4 +1,4 @@
-from ..conftest import requires_env
+from ..conftest import requires_env, auth_headers
 
 
 def test_remove_entry(base_url, session, bucket):
@@ -29,19 +29,19 @@ def test_remove_with_bucket_write_permissions(
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry",
-        headers={"Authorization": f"Bearer {token_without_permissions}"},
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry",
-        headers={"Authorization": f"Bearer {token_read_bucket}"},
+        headers=auth_headers(token_read_bucket.value),
     )
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry",
-        headers={"Authorization": f"Bearer {token_write_bucket}"},
+        headers=auth_headers(token_write_bucket.value),
     )
     assert resp.status_code == 200
 
@@ -74,27 +74,27 @@ def test_rename_with_bucket_write_permissions(
     token_read_bucket,
     token_write_bucket,
 ):
-    """Needs write permissions to rename entry"""
+    """Needs to write permissions to rename entry"""
     resp = session.post(f"{base_url}/b/{bucket}/entry?ts=1000", data="some_data1")
     assert resp.status_code == 200
 
     resp = session.put(
         f"{base_url}/b/{bucket}/entry/rename",
         json={"new_name": "new_name"},
-        headers={"Authorization": f"Bearer {token_without_permissions}"},
+        headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
 
     resp = session.put(
         f"{base_url}/b/{bucket}/entry/rename",
         json={"new_name": "new_name"},
-        headers={"Authorization": f"Bearer {token_read_bucket}"},
+        headers=auth_headers(token_read_bucket.value),
     )
     assert resp.status_code == 403
 
     resp = session.put(
         f"{base_url}/b/{bucket}/entry/rename",
         json={"new_name": "new_name"},
-        headers={"Authorization": f"Bearer {token_write_bucket}"},
+        headers=auth_headers(token_write_bucket.value),
     )
     assert resp.status_code == 200

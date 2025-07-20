@@ -2,6 +2,7 @@ import json
 import os
 import random
 import secrets
+from collections import namedtuple
 from typing import Callable
 
 import pytest
@@ -75,9 +76,12 @@ def _make_token_permissions(session, base_url, token_generator):
     permissions = {
         "full_access": False,
     }
-    resp = session.post(f"{base_url}/tokens/{token_generator()}", json=permissions)
+    name = token_generator()
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
     assert resp.status_code == 200
-    return json.loads(resp.content)["value"]
+    return namedtuple("Token", ["name", "value"])(
+        name, json.loads(resp.content)["value"]
+    )
 
 
 @pytest.fixture(name="token_read_bucket")
@@ -87,9 +91,12 @@ def _make_token_read_bucket(session, base_url, bucket_name, token_generator):
         "full_access": False,
         "read": [bucket_name],
     }
-    resp = session.post(f"{base_url}/tokens/{token_generator()}", json=permissions)
+    name = token_generator()
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
     assert resp.status_code == 200
-    return json.loads(resp.content)["value"]
+    return namedtuple("Token", ["name", "value"])(
+        name, json.loads(resp.content)["value"]
+    )
 
 
 @pytest.fixture(name="token_write_bucket")
@@ -100,6 +107,9 @@ def _make_token_write_bucket(session, base_url, bucket_name, token_generator):
         "full_access": False,
         "write": [bucket_name],
     }
-    resp = session.post(f"{base_url}/tokens/{token_generator()}", json=permissions)
+    name = token_generator()
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
     assert resp.status_code == 200
-    return json.loads(resp.content)["value"]
+    return namedtuple("Token", ["name", "value"])(
+        name, json.loads(resp.content)["value"]
+    )
