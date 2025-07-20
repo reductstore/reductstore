@@ -1,5 +1,5 @@
 import pytest
-from ..conftest import requires_env
+from ..conftest import requires_env, auth_headers
 
 
 @pytest.fixture(name="write_data")
@@ -92,21 +92,21 @@ def test_remove_record_with_permission(
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry?ts={ts1}",
-        headers={"Authorization": f"Bearer {token_without_permissions}"},
+        headers=auth_headers(token_without_permissions.value),
     )
 
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry?ts={ts1}",
-        headers={"Authorization": f"Bearer {token_read_bucket}"},
+        headers=auth_headers(token_read_bucket.value),
     )
 
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry?ts={ts1}",
-        headers={"Authorization": f"Bearer {token_write_bucket}"},
+        headers=auth_headers(token_write_bucket.value),
     )
 
     assert resp.status_code == 200
@@ -126,21 +126,21 @@ def test_remove_records_in_batch_with_permission(
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry/batch",
-        headers={"Authorization": f"Bearer {token_without_permissions}"},
+        headers=auth_headers(token_without_permissions.value),
     )
 
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry/batch",
-        headers={"Authorization": f"Bearer {token_read_bucket}"},
+        headers=auth_headers(token_read_bucket.value),
     )
 
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry/batch",
-        headers={"Authorization": f"Bearer {token_write_bucket}"},
+        headers=auth_headers(token_write_bucket.value),
     )
 
     assert resp.status_code == 200
@@ -160,21 +160,21 @@ def test_remove_records_query_with_permission(
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry/q?start={ts1}&stop={ts2 + 1}",
-        headers={"Authorization": f"Bearer {token_without_permissions}"},
+        headers=auth_headers(token_without_permissions.value),
     )
 
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry/q?start={ts1}&stop={ts2 + 1}",
-        headers={"Authorization": f"Bearer {token_read_bucket}"},
+        headers=auth_headers(token_read_bucket.value),
     )
 
     assert resp.status_code == 403
 
     resp = session.delete(
         f"{base_url}/b/{bucket}/entry/q?start={ts1}&stop={ts2 + 1}",
-        headers={"Authorization": f"Bearer {token_write_bucket}"},
+        headers=auth_headers(token_write_bucket.value),
     )
 
     assert resp.status_code == 200

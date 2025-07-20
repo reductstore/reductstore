@@ -51,7 +51,7 @@ def test__authorized_info(base_url, session, token_without_permissions):
     assert resp.status_code == 401
 
     resp = session.get(
-        f"{base_url}/info", headers=auth_headers(token_without_permissions)
+        f"{base_url}/info", headers=auth_headers(token_without_permissions.value)
     )
     assert resp.status_code == 200
 
@@ -80,7 +80,7 @@ def test__authorized_list(base_url, session, token_without_permissions):
     assert resp.status_code == 401
 
     resp = session.get(
-        f"{base_url}/list", headers=auth_headers(token_without_permissions)
+        f"{base_url}/list", headers=auth_headers(token_without_permissions.value)
     )
     assert resp.status_code == 200
 
