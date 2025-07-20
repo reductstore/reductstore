@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Filter buckets by read permission in server information, [PR-849](https://github.com/reductstore/reductstore/pull/849)
 - Support for duration literals, [PR-864](https://github.com/reductstore/reductstore/pull/864)
 - Support for `#ctx_before` and `#ctx_after` directives, [PR-866](https://github.com/reductstore/reductstore/pull/866)
-- Support for wild card in write/read tokens, [PR-877](https://github.com/reductstore/reductstore/pull/877)
+- Support for wildcards in write/read token permissions, [PR-877](https://github.com/reductstore/reductstore/pull/877)
 
 ### Changed
 
