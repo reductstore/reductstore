@@ -1,4 +1,4 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::auth::policy::Policy;
@@ -6,7 +6,7 @@ use crate::auth::token_repository::ManageTokens;
 use reduct_base::error::ReductError;
 
 /// Authorization by token
-pub struct TokenAuthorization {
+pub(crate) struct TokenAuthorization {
     api_token: String,
 }
 

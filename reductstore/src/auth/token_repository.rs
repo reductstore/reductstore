@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::auth::proto::token::Permissions as ProtoPermissions;
@@ -22,7 +22,7 @@ use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
 const INIT_TOKEN_NAME: &str = "init-token";
 
-pub trait ManageTokens {
+pub(crate) trait ManageTokens {
     /// Create a new token
     ///
     /// # Arguments
@@ -38,14 +38,6 @@ pub trait ManageTokens {
         name: &str,
         permissions: Permissions,
     ) -> Result<TokenCreateResponse, ReductError>;
-
-    /// Update a token
-    ///
-    /// # Arguments
-    ///
-    /// `name` - The name of the token
-    /// `permissions` - The permissions of the token
-    fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), ReductError>;
 
     /// Get a token by name
     ///
@@ -122,7 +114,7 @@ struct TokenRepository {
     repo: HashMap<String, Token>,
 }
 
-pub fn parse_bearer_token(authorization_header: &str) -> Result<String, ReductError> {
+pub(crate) fn parse_bearer_token(authorization_header: &str) -> Result<String, ReductError> {
     if !authorization_header.starts_with("Bearer ") {
         return Err(ReductError::unauthorized(
             "No bearer token in request header",
@@ -292,6 +284,16 @@ impl ManageTokens for TokenRepository {
             return Err(conflict!("Token '{}' already exists", name));
         }
 
+        for entry in permissions.read.iter().chain(&permissions.write) {
+            let regex = regex::Regex::new(r"^[*A-Za-z0-9_-]*$").unwrap();
+            if !regex.is_match(entry) {
+                return Err(unprocessable_entity!(
+                    "Permission can contain only bucket names or wildcard '*', got '{}'",
+                    entry
+                ));
+            }
+        }
+
         let created_at = DateTime::<Utc>::from(SystemTime::now());
 
         // Create a random hex string
@@ -312,24 +314,6 @@ impl ManageTokens for TokenRepository {
         self.save_repo()?;
 
         Ok(TokenCreateResponse { value, created_at })
-    }
-
-    fn update_token(&mut self, name: &str, permissions: Permissions) -> Result<(), ReductError> {
-        match self.repo.get(name) {
-            Some(token) => {
-                if token.is_provisioned {
-                    Err(conflict!("Can't update provisioned token '{}'", name))
-                } else {
-                    let mut updated_token = token.clone();
-                    updated_token.permissions = Some(permissions);
-                    self.repo.insert(name.to_string(), updated_token);
-                    self.save_repo()?;
-                    Ok(())
-                }
-            }
-
-            None => Err(not_found!("Token '{}' doesn't exist", name)),
-        }
     }
 
     fn get_token(&self, name: &str) -> Result<&Token, ReductError> {
@@ -442,10 +426,6 @@ impl ManageTokens for NoAuthRepository {
         Err(bad_request!("Authentication is disabled"))
     }
 
-    fn update_token(&mut self, _name: &str, _permissions: Permissions) -> Result<(), ReductError> {
-        Err(bad_request!("Authentication is disabled"))
-    }
-
     fn get_token(&self, _name: &str) -> Result<&Token, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
@@ -488,7 +468,7 @@ impl ManageTokens for NoAuthRepository {
 /// Creates a token repository
 ///
 /// If `init_token` is empty, the repository will be stubbed and authentication will be disabled.
-pub fn create_token_repository(
+pub(crate) fn create_token_repository(
     path: PathBuf,
     init_token: &str,
 ) -> Box<dyn ManageTokens + Send + Sync> {
@@ -601,109 +581,51 @@ mod tests {
 
             assert_eq!(token, Err(bad_request!("Authentication is disabled")));
         }
-    }
 
-    mod update_token {
-        use super::*;
         #[rstest]
-        fn test_update_token_ok(mut repo: Box<dyn ManageTokens>) {
-            let token = repo
-                .update_token(
-                    "test",
-                    Permissions {
-                        full_access: false,
-                        read: vec!["test".to_string()],
-                        write: vec![],
-                    },
-                )
-                .unwrap();
+        #[case("*", None)]
+        #[case("bucket_1", None)]
+        #[case("bucket_2", None)]
+        #[case("bucket-*", None)]
+        #[case("%!", Some(unprocessable_entity!("Permission can contain only bucket names or wildcard '*', got '%!'")))]
+        fn test_create_token_check_format_read(
+            mut repo: Box<dyn ManageTokens>,
+            #[case] bucket: &str,
+            #[case] expected: Option<ReductError>,
+        ) {
+            let token = repo.generate_token(
+                "test-1",
+                Permissions {
+                    full_access: true,
+                    read: vec![bucket.to_string()],
+                    write: vec![],
+                },
+            );
 
-            assert_eq!(token, ());
-
-            let token = repo.get_token("test").unwrap().clone();
-
-            assert_eq!(token.name, "test");
-
-            let permissions = token.permissions.unwrap();
-            assert_eq!(permissions.full_access, false);
-            assert_eq!(permissions.read, vec!["test".to_string()]);
+            assert_eq!(token.err(), expected);
         }
 
         #[rstest]
-        fn test_update_token_not_found(mut repo: Box<dyn ManageTokens>) {
-            let token = repo.update_token(
+        #[case("*", None)]
+        #[case("bucket_1", None)]
+        #[case("bucket_2", None)]
+        #[case("bucket-*", None)]
+        #[case("%!", Some(unprocessable_entity!("Permission can contain only bucket names or wildcard '*', got '%!'")))]
+        fn test_create_token_check_format_write(
+            mut repo: Box<dyn ManageTokens>,
+            #[case] bucket: &str,
+            #[case] expected: Option<ReductError>,
+        ) {
+            let token = repo.generate_token(
                 "test-1",
                 Permissions {
                     full_access: true,
                     read: vec![],
-                    write: vec![],
+                    write: vec![bucket.to_string()],
                 },
             );
 
-            assert_eq!(
-                token,
-                Err(ReductError::not_found("Token 'test-1' doesn't exist"))
-            );
-        }
-
-        #[rstest]
-        fn test_update_token_persistent(path: PathBuf) {
-            let mut repo = create_token_repository(path.clone(), "test");
-            repo.generate_token(
-                "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
-                },
-            )
-            .unwrap();
-
-            repo.update_token(
-                "test",
-                Permissions {
-                    full_access: false,
-                    read: vec!["test".to_string()],
-                    write: vec![],
-                },
-            )
-            .unwrap();
-
-            let repo = create_token_repository(path.clone(), "test");
-            let token = repo.get_token("test").unwrap().clone();
-
-            assert_eq!(token.name, "test");
-
-            let permissions = token.permissions.unwrap();
-            assert_eq!(permissions.full_access, false);
-            assert_eq!(permissions.read, vec!["test".to_string()]);
-        }
-
-        #[rstest]
-        fn test_update_provisioned_token(mut repo: Box<dyn ManageTokens>) {
-            let token = repo.get_mut_token("test").unwrap();
-            token.is_provisioned = true;
-
-            let token = repo.update_token("test", Permissions::default());
-
-            assert_eq!(
-                token,
-                Err(conflict!("Can't update provisioned token 'test'"))
-            );
-        }
-
-        #[rstest]
-        fn test_update_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
-            let token = disabled_repo.update_token(
-                "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
-                },
-            );
-
-            assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+            assert_eq!(token.err(), expected);
         }
     }
 
