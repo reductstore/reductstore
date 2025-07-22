@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 use reduct_base::error::ReductError;
 
-use reduct_base::msg::token_api::{Permissions, Token};
-use reduct_base::{forbidden, unprocessable_entity};
+use reduct_base::forbidden;
+use reduct_base::msg::token_api::Token;
 
 /// Policy is a trait that defines the interface for a policy.
 /// A policy is a set of rules that are applied to a token to determine
