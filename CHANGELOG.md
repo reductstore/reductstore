@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for duration literals, [PR-864](https://github.com/reductstore/reductstore/pull/864)
 - Support for `#ctx_before` and `#ctx_after` directives, [PR-866](https://github.com/reductstore/reductstore/pull/866)
 - Support for wildcards in write/read token permissions, [PR-877](https://github.com/reductstore/reductstore/pull/877)
+- Check format of read/write token permissions, [PR-881](https://github.com/reductstore/reductstore/pull/881)
 
 ### Changed
 
