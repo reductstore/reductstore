@@ -10,14 +10,14 @@ use prost::Message;
 use prost_wkt_types::Timestamp;
 use rand::Rng;
 use reduct_base::error::ReductError;
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 use reduct_base::{
     bad_request, conflict, internal_server_error, not_found, unauthorized, unprocessable_entity,
 };
+use regex::Regex;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
 const INIT_TOKEN_NAME: &str = "init-token";
@@ -112,6 +112,7 @@ pub(crate) trait ManageTokens {
 struct TokenRepository {
     config_path: PathBuf,
     repo: HashMap<String, Token>,
+    permission_regex: Regex,
 }
 
 pub(crate) fn parse_bearer_token(authorization_header: &str) -> Result<String, ReductError> {
@@ -144,7 +145,7 @@ impl From<Token> for ProtoToken {
                 seconds: token.created_at.timestamp(),
                 nanos: token.created_at.timestamp_subsec_nanos() as i32,
             }),
-            permissions: permissions,
+            permissions,
         }
     }
 }
@@ -199,7 +200,13 @@ impl TokenRepository {
         }
 
         // Load the token repository from the file system
-        let mut token_repository = TokenRepository { config_path, repo };
+        let permission_regex =
+            Regex::new(r"^[*a-zA-Z0-9_\-]+$").expect("Invalid regex for permissions");
+        let mut token_repository = TokenRepository {
+            config_path,
+            repo,
+            permission_regex,
+        };
 
         match std::fs::read(&token_repository.config_path) {
             Ok(data) => {
@@ -285,8 +292,7 @@ impl ManageTokens for TokenRepository {
         }
 
         for entry in permissions.read.iter().chain(&permissions.write) {
-            let regex = regex::Regex::new(r"^[*A-Za-z0-9_-]*$").unwrap();
-            if !regex.is_match(entry) {
+            if !self.permission_regex.is_match(entry) {
                 return Err(unprocessable_entity!(
                     "Permission can contain only bucket names or wildcard '*', got '{}'",
                     entry
