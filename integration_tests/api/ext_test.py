@@ -65,6 +65,6 @@ def test__ros_ext(base_url, bucket, session):
 
     assert (
         resp.headers["x-reduct-time-24"]
-        == "16,application/json,encoding=cdr,schema=std_msgs/String,topic=/test"
+        == "16,application/json,@encoding=cdr,@schema=std_msgs/String,@topic=/test"
     )
     assert resp.content == b'{"data":"hello"}'
