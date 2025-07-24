@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replace auto-staging for extension filtering with when condition in ext parameter, [PR-838](https://github.com/reductstore/reductstore/pull/838)
 - Update ReductSelect up to v0.3.0, with CSV headers and data buffering, [PR-850](https://github.com/reductstore/reductstore/pull/850)
 - Update ReductROS up to v0.2.0 with binary data encoding, [PR-882](https://github.com/reductstore/reductstore/pull/882)
+- Update WebConsole up to v1.11.0 with many improvements, [PR-883](https://github.com/reductstore/reductstore/pull/883)
 
 ### Fixed
 
