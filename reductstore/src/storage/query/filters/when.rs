@@ -34,14 +34,18 @@ impl<R> WhenFilter<R> {
         strict: bool,
     ) -> Result<Self, ReductError> {
         let before = if let Some(before) = directives.get("#ctx_before") {
-            let val = before.as_int()?;
+            let before_val = before.first().ok_or_else(|| {
+                ReductError::unprocessable_entity("#ctx_before must be a non-empty value")
+            })?;
+
+            let val = before_val.as_int()?;
             if val < 0 {
                 return Err(ReductError::unprocessable_entity(
                     "#ctx_before must be non-negative",
                 ));
             }
 
-            if before.is_duration() {
+            if before_val.is_duration() {
                 Duration(val as u64)
             } else {
                 Records(val as usize)
@@ -51,13 +55,16 @@ impl<R> WhenFilter<R> {
         };
 
         let after = if let Some(after) = directives.get("#ctx_after") {
-            let val = after.as_int()?;
+            let after_val = after.first().ok_or_else(|| {
+                ReductError::unprocessable_entity("#ctx_after must be a non-empty value")
+            })?;
+            let val = after_val.as_int()?;
             if val < 0 {
                 return Err(ReductError::unprocessable_entity(
                     "#ctx_after must be non-negative",
                 ));
             }
-            if after.is_duration() {
+            if after_val.is_duration() {
                 Duration(val as u64)
             } else {
                 Records(val as usize)
