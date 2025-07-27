@@ -455,10 +455,11 @@ mod tests {
         fn test_parse_directives(parser: Parser) {
             let json = json!({
                 "#ctx_before": "1h",
-                "#ctx_after": "2h"
+                "#ctx_after": "2h",
+                "#select_labels": ["label1", "label2"]
             });
             let (_, directives) = parser.parse(json).unwrap();
-            assert_eq!(directives.len(), 2);
+            assert_eq!(directives.len(), 3);
             assert_eq!(
                 directives["#ctx_before"],
                 vec![Value::Duration(3600_000_000)]
@@ -466,6 +467,13 @@ mod tests {
             assert_eq!(
                 directives["#ctx_after"],
                 vec![Value::Duration(7200_000_000)]
+            );
+            assert_eq!(
+                directives["#select_labels"],
+                vec![
+                    Value::String("label1".to_string()),
+                    Value::String("label2".to_string())
+                ]
             );
         }
 
@@ -484,6 +492,33 @@ mod tests {
             });
             let (_, directives) = parser.parse(json).unwrap();
             assert_eq!(directives["#ctx_before"], vec![expected]);
+        }
+
+        #[rstest]
+        fn test_parse_array_directives(parser: Parser) {
+            let json = json!({
+                "#select_labels": ["label1", "label2"]
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(
+                directives["#select_labels"],
+                vec![
+                    Value::String("label1".to_string()),
+                    Value::String("label2".to_string())
+                ]
+            );
+        }
+
+        #[rstest]
+        fn test_parse_directives_empty_array(parser: Parser) {
+            let json = json!({
+                "#select_labels": []
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' cannot be an empty array"
+            );
         }
 
         #[rstest]
