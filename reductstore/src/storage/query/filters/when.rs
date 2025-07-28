@@ -10,8 +10,7 @@ use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
-use std::collections::VecDeque;
-
+use std::collections::{HashMap, HashSet, VecDeque};
 pub(super) enum Padding {
     Records(usize),
     Duration(u64),
@@ -25,6 +24,8 @@ pub struct WhenFilter<R> {
     ctx_before: CtxBefore,
     ctx_after: CtxAfter,
     ctx_buffer: VecDeque<R>,
+
+    select_labels: Option<HashSet<String>>,
 }
 
 impl<R> WhenFilter<R> {
@@ -73,12 +74,20 @@ impl<R> WhenFilter<R> {
             Records(0) // Default to 0 records after
         };
 
+        let select_labels = directives.get("#select_labels").map(|labels| {
+            labels
+                .iter()
+                .map(|label| label.to_string())
+                .collect::<HashSet<String>>()
+        });
+
         Ok(Self {
             condition,
             strict,
             ctx_before: CtxBefore::new(before),
             ctx_after: CtxAfter::new(after),
             ctx_buffer: VecDeque::new(),
+            select_labels,
         })
     }
 }
@@ -121,7 +130,25 @@ impl<R: FilterRecord> RecordFilter<R> for WhenFilter<R> {
         };
 
         if self.ctx_after.check(result, record.timestamp()) {
-            Ok(Some(self.ctx_buffer.drain(..).collect()))
+            let drained = self.ctx_buffer.drain(..);
+            let filtered: Vec<R> = if let Some(select_labels) = &self.select_labels {
+                drained
+                    .map(|mut record| {
+                        let filtered_labels = record
+                            .labels()
+                            .into_iter()
+                            .filter(|(k, _)| select_labels.contains(k.as_str()))
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                            .collect::<HashMap<String, String>>();
+
+                        record.set_labels(filtered_labels);
+                        record
+                    })
+                    .collect()
+            } else {
+                drained.collect()
+            };
+            Ok(Some(filtered))
         } else {
             Ok(Some(vec![]))
         }

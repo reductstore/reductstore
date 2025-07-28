@@ -33,6 +33,12 @@ impl FilterRecord for BoxedReadRecord {
         self.meta().labels().iter().map(|(k, v)| (k, v)).collect()
     }
 
+    fn set_labels(&mut self, labels: HashMap<String, String>) {
+        let labels_mut = self.meta_mut().labels_mut();
+        labels_mut.clear();
+        labels_mut.extend(labels);
+    }
+
     fn computed_labels(&self) -> HashMap<&String, &String> {
         self.meta()
             .computed_labels()

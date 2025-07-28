@@ -225,6 +225,10 @@ impl ReadRecord for RecordReader {
     fn meta(&self) -> &RecordMeta {
         &self.meta
     }
+
+    fn meta_mut(&mut self) -> &mut RecordMeta {
+        &mut self.meta
+    }
 }
 
 /// Read a chunk of the record content

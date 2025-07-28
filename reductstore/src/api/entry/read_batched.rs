@@ -548,7 +548,9 @@ mod tests {
         impl ReadRecord for Record {
             async fn read(&mut self) -> Option<Result<Bytes, ReductError>>;
 
-            fn meta(&self) -> &RecordMeta;
+          fn meta(&self) -> &RecordMeta;
+
+          fn meta_mut(&mut self) -> &mut RecordMeta;
         }
     }
 }

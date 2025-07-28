@@ -113,6 +113,11 @@ impl RecordMeta {
         &self.labels
     }
 
+    /// Returns a mutable reference to the labels associated with the record.
+    pub fn labels_mut(&mut self) -> &mut Labels {
+        &mut self.labels
+    }
+
     /// For filtering unfinished records.
     pub fn state(&self) -> i32 {
         self.state
@@ -179,6 +184,9 @@ pub trait ReadRecord {
 
     /// Returns meta information about the record.
     fn meta(&self) -> &RecordMeta;
+
+    /// Returns a mutable reference to the meta information about the record.
+    fn meta_mut(&mut self) -> &mut RecordMeta;
 }
 
 #[async_trait]
@@ -295,6 +303,10 @@ pub(crate) mod tests {
 
         fn meta(&self) -> &RecordMeta {
             &self.metadata
+        }
+
+        fn meta_mut(&mut self) -> &mut RecordMeta {
+            &mut self.metadata
         }
     }
 }

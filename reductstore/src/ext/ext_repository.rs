@@ -988,5 +988,9 @@ pub(super) mod tests {
         fn meta(&self) -> &RecordMeta {
             &self.meta
         }
+
+        fn meta_mut(&mut self) -> &mut RecordMeta {
+            &mut self.meta
+        }
     }
 }
