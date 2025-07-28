@@ -40,4 +40,4 @@ thread-id = "5.0.0"
 futures = "0.3.31"
 
 [dev-dependencies]
-rstest = "0.25.0"
+rstest = "0.26.1"
