@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update ReductROS up to v0.2.0 with binary data encoding, [PR-882](https://github.com/reductstore/reductstore/pull/882)
 - Update WebConsole up to v1.11.0 with many improvements, [PR-883](https://github.com/reductstore/reductstore/pull/883)
 - Update ReductSelect up to v0.4.0, [PR-889](https://github.com/reductstore/reductstore/pull/889)
+- Update Web Console up to v1.11.1 and ReductSelect up to 0.4.1, [PR-890](https://github.com/reductstore/reductstore/pull/890)
 
 ### Fixed
 
