@@ -160,12 +160,13 @@ impl Query for HistoricalQuery {
         let block = self.current_block.as_ref().unwrap();
 
         if self.only_metadata {
-            Ok(RecordReader::form_record(record.clone()))
+            Ok(RecordReader::form_record(record))
         } else {
             RecordReader::try_new(
                 Arc::clone(&block_manager),
                 block.clone(),
                 ts_to_us(&record.timestamp.unwrap()),
+                Some(record),
             )
         }
     }

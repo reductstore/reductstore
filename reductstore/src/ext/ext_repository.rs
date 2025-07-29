@@ -208,7 +208,6 @@ impl ManageExtensions for ExtRepository {
                     // If no record is available, return a no content error to finish the query.
                     return Some(Err(no_content!("No content")));
                 }
-
                 return result;
             }
         };

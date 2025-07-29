@@ -49,7 +49,7 @@ impl Entry {
                 ));
             }
 
-            RecordReader::try_new(block_manager, block_ref, time)
+            RecordReader::try_new(block_manager, block_ref, time, None)
         })
     }
 }
