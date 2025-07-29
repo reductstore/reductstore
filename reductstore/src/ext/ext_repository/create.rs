@@ -56,17 +56,17 @@ pub fn create_ext_repository(
                 &self,
                 _query_id: u64,
                 query_rx: Arc<AsyncRwLock<QueryRx>>,
-            ) -> Option<Result<Vec<BoxedReadRecord>, ReductError>> {
+            ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
                 let result = query_rx
                     .write()
                     .await
                     .recv()
                     .await
-                    .map(|record| record.map(|r| vec![Box::new(r) as BoxedReadRecord]));
+                    .map(|record| vec![record.map(|r| Box::new(r) as BoxedReadRecord)]);
 
                 if result.is_none() {
                     // If no record is available, return a no content error to finish the query.
-                    return Some(Err(no_content!("")));
+                    return Some(vec![Err(no_content!("No content"))]);
                 }
 
                 result

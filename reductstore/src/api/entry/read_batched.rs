@@ -130,7 +130,7 @@ async fn fetch_and_response_batched_records(
 
     let start_time = std::time::Instant::now();
     loop {
-        let reader = match next_record_reader(
+        let batch_of_readers = match next_record_reader(
             query_id,
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
@@ -143,9 +143,9 @@ async fn fetch_and_response_batched_records(
             None => continue,
         };
 
-        match reader {
-            Ok(next_readers) => {
-                for reader in next_readers {
+        for reader in batch_of_readers {
+            match reader {
+                Ok(reader) => {
                     {
                         let (name, value) = make_batch_header(&reader);
                         header_size += name.as_str().len() + value.to_str().unwrap().len() + 2;
@@ -155,28 +155,28 @@ async fn fetch_and_response_batched_records(
 
                     readers.push(reader);
                 }
-
-                if header_size > io_settings.batch_max_metadata_size
-                    || body_size > io_settings.batch_max_size
-                    || readers.len() > io_settings.batch_max_records
-                    || start_time.elapsed() > io_settings.batch_timeout
-                {
-                    break;
-                }
-            }
-            Err(err) => {
-                if readers.is_empty() {
-                    return Err(HttpError::from(err));
-                } else {
-                    if err.status() == ErrorCode::NoContent {
-                        last = true;
-                        break;
-                    } else {
+                Err(err) => {
+                    if readers.is_empty() {
                         return Err(HttpError::from(err));
+                    } else {
+                        if err.status() == ErrorCode::NoContent {
+                            last = true;
+                            break;
+                        } else {
+                            return Err(HttpError::from(err));
+                        }
                     }
                 }
             }
-        };
+        }
+
+        if header_size > io_settings.batch_max_metadata_size
+            || body_size > io_settings.batch_max_size
+            || readers.len() > io_settings.batch_max_records
+            || start_time.elapsed() > io_settings.batch_timeout
+        {
+            break;
+        }
     }
 
     // TODO: it's workaround
@@ -212,7 +212,7 @@ async fn next_record_reader(
     query_path: &str,
     recv_timeout: Duration,
     ext_repository: &BoxedManageExtensions,
-) -> Option<Result<Vec<BoxedReadRecord>, ReductError>> {
+) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
     // we need to wait for the first record
     if let Ok(result) = timeout(
         recv_timeout,
