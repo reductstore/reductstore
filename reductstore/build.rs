@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     download_web_console("v1.11.0");
 
     #[cfg(feature = "select-ext")]
-    download_ext("select-ext", "v0.3.0");
+    download_ext("select-ext", "v0.4.0");
 
     #[cfg(feature = "ros-ext")]
     download_ext("ros-ext", "v0.2.0");
