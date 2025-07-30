@@ -753,27 +753,24 @@ pub(super) mod tests {
                 "we don't commit the record waiting for flush"
             );
 
+            let results = mocked_ext_repo
+                .fetch_and_process_record(1, query_rx.clone())
+                .await
+                .unwrap();
+
+            assert_eq!(
+                results.len(),
+                2,
+                "Should return one record and non-content error"
+            );
             assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .unwrap()[0]
-                    .as_ref()
-                    .is_ok(),
+                results[0].as_ref().is_ok(),
                 "we should get the record from flush"
             );
-
-            drop(tx); // close the channel to simulate no more records
             assert_eq!(
-                *mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx)
-                    .await
-                    .unwrap()[0]
-                    .as_ref()
-                    .err()
-                    .unwrap(),
-                no_content!("No content"),
-                "and we are done"
+                results[1].as_ref().err().unwrap().status(),
+                NoContent,
+                "we should get no content error"
             );
         }
     }
