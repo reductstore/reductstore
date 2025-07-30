@@ -130,7 +130,7 @@ async fn fetch_and_response_batched_records(
 
     let start_time = std::time::Instant::now();
     loop {
-        let batch_of_readers = match next_record_reader(
+        let batch_of_readers = match next_record_readers(
             query_id,
             rx.upgrade()?,
             &format!("{}/{}/{}", bucket_name, entry_name, query_id),
@@ -170,6 +170,10 @@ async fn fetch_and_response_batched_records(
             }
         }
 
+        if last {
+            break;
+        }
+
         if header_size > io_settings.batch_max_metadata_size
             || body_size > io_settings.batch_max_size
             || readers.len() > io_settings.batch_max_records
@@ -206,7 +210,7 @@ async fn fetch_and_response_batched_records(
 
 // This function is used to get the next record from the query receiver
 // created for better testing
-async fn next_record_reader(
+async fn next_record_readers(
     query_id: u64,
     rx: Arc<AsyncRwLock<QueryRx>>,
     query_path: &str,
@@ -453,7 +457,7 @@ mod tests {
             assert!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(
+                    next_record_readers(
                         1,
                         rx.clone(),
                         "",
@@ -477,7 +481,7 @@ mod tests {
             assert_eq!(
                 timeout(
                     Duration::from_secs(1),
-                    next_record_reader(
+                    next_record_readers(
                         1,
                         rx.clone(),
                         "",
