@@ -544,6 +544,30 @@ mod tests {
                 "[UnprocessableEntity] Directive '#invalid_directive' is not supported"
             );
         }
+
+        #[rstest]
+        fn test_parse_select_labels_with_non_string(parser: Parser) {
+            let json = json!({
+                "#select_labels": ["label1", 123]
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' must contain only strings"
+            );
+        }
+
+        #[rstest]
+        fn test_parse_select_labels_not_array(parser: Parser) {
+            let json = json!({
+                "#select_labels": "not_an_array"
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' must be an array of strings"
+            );
+        }
     }
 
     mod parse_operators {
