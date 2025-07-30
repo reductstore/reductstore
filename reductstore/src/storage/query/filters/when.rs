@@ -160,7 +160,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    use crate::storage::query::condition::Parser;
+    use crate::storage::query::condition::{Directives, Parser};
     use crate::storage::query::filters::tests::TestFilterRecord;
     use reduct_base::io::RecordMeta;
     use rstest::{fixture, rstest};
@@ -285,6 +285,46 @@ mod tests {
             );
         }
 
+        #[rstest]
+        fn filter_ctx_before_empty(parser: Parser) {
+            let (condition, _) = parser
+                .parse(json!({
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut directives = Directives::new();
+            directives.insert("#ctx_before".to_string(), vec![]);
+
+            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("#ctx_before must be a non-empty value")
+            );
+        }
+
+        #[rstest]
+        fn filter_ctx_after_empty(parser: Parser) {
+            let (condition, _) = parser
+                .parse(json!({
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut directives = Directives::new();
+            directives.insert("#ctx_after".to_string(), vec![]);
+
+            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("#ctx_after must be a non-empty value")
+            );
+        }
+
         #[fixture]
         fn record_false() -> TestFilterRecord {
             RecordMeta::builder()
@@ -392,6 +432,71 @@ mod tests {
             RecordMeta::builder()
                 .timestamp(4000)
                 .labels(HashMap::from_iter(vec![("label", "false")]))
+                .build()
+                .into()
+        }
+    }
+
+    mod select_labels {
+        use super::*;
+
+        #[rstest]
+        fn filter_with_select_labels(parser: Parser, record_select_labels: TestFilterRecord) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#select_labels": ["label1", "label3"],
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+
+            let result = filter.filter(record_select_labels).unwrap();
+            assert!(result.is_some());
+            let filtered_records = result.unwrap();
+            assert_eq!(filtered_records.len(), 1);
+
+            let record_labels = filtered_records[0].labels();
+            assert_eq!(record_labels.len(), 2);
+            assert!(record_labels.contains_key(&"label1".to_string()));
+            assert!(record_labels.contains_key(&"label3".to_string()));
+
+            assert!(!record_labels.contains_key(&"label".to_string()));
+            assert!(!record_labels.contains_key(&"label2".to_string()));
+        }
+
+        #[rstest]
+        fn filter_without_select_labels(parser: Parser, record_select_labels: TestFilterRecord) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+
+            let result = filter.filter(record_select_labels).unwrap();
+            assert!(result.is_some());
+            let filtered_records = result.unwrap();
+            assert_eq!(filtered_records.len(), 1);
+
+            let record_labels = filtered_records[0].labels();
+            assert_eq!(record_labels.len(), 4);
+            assert!(record_labels.contains_key(&"label".to_string()));
+            assert!(record_labels.contains_key(&"label1".to_string()));
+            assert!(record_labels.contains_key(&"label2".to_string()));
+            assert!(record_labels.contains_key(&"label3".to_string()));
+        }
+
+        #[fixture]
+        fn record_select_labels() -> TestFilterRecord {
+            RecordMeta::builder()
+                .labels(HashMap::from_iter(vec![
+                    ("label".to_string(), "true".to_string()),
+                    ("label1".to_string(), "value1".to_string()),
+                    ("label2".to_string(), "value2".to_string()),
+                    ("label3".to_string(), "value3".to_string()),
+                ]))
                 .build()
                 .into()
         }
