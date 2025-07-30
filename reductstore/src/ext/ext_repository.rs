@@ -58,7 +58,7 @@ pub(crate) trait ManageExtensions {
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
-    ) -> Option<Result<Vec<BoxedReadRecord>, ReductError>>;
+    ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>>;
 }
 
 pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
@@ -190,7 +190,7 @@ impl ManageExtensions for ExtRepository {
         &self,
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
-    ) -> Option<Result<Vec<BoxedReadRecord>, ReductError>> {
+    ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
         // TODO: The code is awkward, we need to refactor it
         // unfortunately stream! macro does not work here and crashes compiler
         let mut lock = self.query_map.write().await;
@@ -206,7 +206,7 @@ impl ManageExtensions for ExtRepository {
 
                 if result.is_none() {
                     // If no record is available, return a no content error to finish the query.
-                    return Some(Err(no_content!("No content")));
+                    return Some(vec![Err(no_content!("No content"))]);
                 }
                 return result;
             }
@@ -220,7 +220,7 @@ impl ManageExtensions for ExtRepository {
 
             if let Some(result) = item {
                 if let Err(e) = result {
-                    return Some(Err(e));
+                    return Some(vec![Err(e)]);
                 }
 
                 let record = result.unwrap();
@@ -230,24 +230,21 @@ impl ManageExtensions for ExtRepository {
                         let mut commited_records = vec![];
                         for record in records {
                             if let Some(rec) = query.commiter.commit_record(record).await {
-                                match rec {
-                                    Ok(rec) => commited_records.push(rec),
-                                    Err(e) => return Some(Err(e)),
-                                }
+                                commited_records.push(rec);
                             }
                         }
 
                         if commited_records.is_empty() {
                             None
                         } else {
-                            Some(Ok(commited_records))
+                            Some(commited_records)
                         }
                     }
                     Ok(None) => {
                         query.current_stream = None;
                         None
                     }
-                    Err(e) => Some(Err(e)),
+                    Err(e) => Some(vec![Err(e)]),
                 };
             } else {
                 // stream is empty, we need to process the next record
@@ -256,7 +253,7 @@ impl ManageExtensions for ExtRepository {
         }
 
         let Some(record) = query_rx.write().await.recv().await else {
-            return Some(Err(no_content!("No content")));
+            return Some(vec![Err(no_content!("No content"))]);
         };
 
         let record = match record {
@@ -266,15 +263,15 @@ impl ManageExtensions for ExtRepository {
                     if let Some(last_record) = query.commiter.flush().await {
                         match last_record {
                             Ok(rec) => {
-                                Some(Ok(vec![rec])) // return the last record if available
+                                Some(vec![Ok(rec), Err(e)]) // return the last record if available and the error
                             }
-                            Err(e) => Some(Err(e)),
+                            Err(e) => Some(vec![Err(e)]),
                         }
                     } else {
-                        Some(Err(e)) // return no content error if no last record
+                        Some(vec![Err(e)])
                     }
                 } else {
-                    Some(Err(e))
+                    Some(vec![Err(e)])
                 };
             }
         };
@@ -283,7 +280,7 @@ impl ManageExtensions for ExtRepository {
 
         let stream = match query.processor.process_record(Box::new(record)).await {
             Ok(stream) => stream,
-            Err(e) => return Some(Err(e)),
+            Err(e) => return Some(vec![Err(e)]),
         };
 
         query.current_stream = Some(Box::into_pin(stream));
@@ -518,10 +515,11 @@ pub(super) mod tests {
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
             assert_eq!(
-                mocked_ext_repo
+                *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .err()
                     .unwrap(),
                 no_content!("No content"),
@@ -539,10 +537,11 @@ pub(super) mod tests {
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
             assert_eq!(
-                mocked_ext_repo
+                *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .err()
                     .unwrap(),
                 err
@@ -561,7 +560,8 @@ pub(super) mod tests {
             assert!(mocked_ext_repo
                 .fetch_and_process_record(1, query_rx)
                 .await
-                .unwrap()
+                .unwrap()[0]
+                .as_ref()
                 .is_ok(),);
         }
 
@@ -664,19 +664,19 @@ pub(super) mod tests {
             let mut records = mocked_ext_repo
                 .fetch_and_process_record(1, query_rx.clone())
                 .await
-                .unwrap()
                 .unwrap();
 
             assert_eq!(records.len(), 1, "Should return one record");
 
-            let record = records.first_mut().unwrap();
+            let record = records.get_mut(0).unwrap().as_mut().unwrap();
             assert_eq!(record.read().await, None);
 
             assert_eq!(
-                mocked_ext_repo
+                *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .err()
                     .unwrap(),
                 no_content!("")
@@ -747,25 +747,24 @@ pub(super) mod tests {
                 "we don't commit the record waiting for flush"
             );
 
+            let results = mocked_ext_repo
+                .fetch_and_process_record(1, query_rx.clone())
+                .await
+                .unwrap();
+
+            assert_eq!(
+                results.len(),
+                2,
+                "Should return one record and non-content error"
+            );
             assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .unwrap()
-                    .is_ok(),
+                results[0].as_ref().is_ok(),
                 "we should get the record from flush"
             );
-
-            drop(tx); // close the channel to simulate no more records
             assert_eq!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx)
-                    .await
-                    .unwrap()
-                    .err()
-                    .unwrap(),
-                no_content!("No content"),
-                "and we are done"
+                results[1].as_ref().err().unwrap().status(),
+                NoContent,
+                "we should get no content error"
             );
         }
     }
@@ -827,7 +826,8 @@ pub(super) mod tests {
         mocked_ext_repo
             .fetch_and_process_record(1, query_rx.clone())
             .await
-            .unwrap()
+            .unwrap()[0]
+            .as_ref()
             .expect("Should return a record");
 
         assert!(
@@ -839,10 +839,11 @@ pub(super) mod tests {
         );
 
         assert_eq!(
-            mocked_ext_repo
+            *mocked_ext_repo
                 .fetch_and_process_record(1, query_rx)
                 .await
-                .unwrap()
+                .unwrap()[0]
+                .as_ref()
                 .err()
                 .unwrap(),
             no_content!("")

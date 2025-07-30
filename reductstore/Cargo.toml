@@ -43,7 +43,7 @@ regex = "1.11.1"
 bytes = "1.10.1"
 axum = { version = "0.8.4", features = ["default", "macros"] }
 axum-extra = { version = "0.10.0", features = ["default", "typed-header"] }
-tokio = { version = "1.46.1", features = ["full"] }
+tokio = { version = "1.47.0", features = ["full"] }
 hyper = { version = "1.6.0", features = ["full"] }
 futures-util = "0.3.31"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
@@ -73,7 +73,7 @@ serde_json = "1.0.141"
 
 [dev-dependencies]
 mockall = "0.13.1"
-rstest = "0.25.0"
+rstest = "0.26.1"
 serial_test = "3.2.0"
 test-log = "0.2.18"
 reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "blocking"] }

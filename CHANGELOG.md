@@ -24,12 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactor Extension API for multi-line CSV processing, ReductSelect v0.2.0, [PR-823](https://github.com/reductstore/reductstore/pull/823)
 - Run all operands after a compute-staged one on the compute stage, [PR-835](https://github.com/reductstore/reductstore/pull/835)
 - Replace auto-staging for extension filtering with when condition in ext parameter, [PR-838](https://github.com/reductstore/reductstore/pull/838)
-- Update ReductSelect to v0.3.0, with CSV headers and data buffering, [PR-850](https://github.com/reductstore/reductstore/pull/850)
+- Update ReductSelect up to v0.3.0, with CSV headers and data buffering, [PR-850](https://github.com/reductstore/reductstore/pull/850)
+- Update ReductROS up to v0.2.0 with binary data encoding, [PR-882](https://github.com/reductstore/reductstore/pull/882)
+- Update WebConsole up to v1.11.0 with many improvements, [PR-883](https://github.com/reductstore/reductstore/pull/883)
+- Update ReductSelect up to v0.4.0, [PR-889](https://github.com/reductstore/reductstore/pull/889)
+- Update Web Console up to v1.11.1 and ReductSelect up to 0.4.1, [PR-890](https://github.com/reductstore/reductstore/pull/890)
 
 ### Fixed
 
 - Fix hanging query request if no extension registered, [PR-830](https://github.com/reductstore/reductstore/pull/830)
 - Fix `$limit` operator in extension context, [PR-848](https://github.com/reductstore/reductstore/pull/848)
+- Fix query finalization in ExtRepository, [PR-891](https://github.com/reductstore/reductstore/pull/891)
 
 ### Removed
 
