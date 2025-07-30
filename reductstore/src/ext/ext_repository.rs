@@ -208,7 +208,13 @@ impl ManageExtensions for ExtRepository {
                     // If no record is available, return a no content error to finish the query.
                     return Some(vec![Err(no_content!("No content"))]);
                 }
-                return result;
+
+                return result.map(|r| {
+                    r.map_or_else(
+                        |e| vec![Err(e)],
+                        |records| records.into_iter().map(Ok).collect(),
+                    )
+                });
             }
         };
 
