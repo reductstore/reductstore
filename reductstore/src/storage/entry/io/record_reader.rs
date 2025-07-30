@@ -8,7 +8,7 @@ use crate::storage::proto::Record;
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::{debug, error};
+use log::{debug, error, Metadata};
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, timeout};
@@ -48,6 +48,7 @@ impl RecordReader {
     /// * `block_manager` - The block manager to read the record from
     /// * `block_ref` - The block reference to read the record from
     /// * `record_timestamp` - The timestamp of the record
+    /// * `processed_record` - The metadata of the record, if any then we use it instead of reading from the block
     ///
     /// # Returns
     ///
@@ -56,8 +57,9 @@ impl RecordReader {
         block_manager: Arc<RwLock<BlockManager>>,
         block_ref: BlockRef,
         record_timestamp: u64,
+        processed_record: Option<Record>,
     ) -> Result<Self, ReductError> {
-        let (record, ctx) = {
+        let (record_from_block, ctx) = {
             let bm = block_manager.write()?;
             let block = block_ref.read()?;
 
@@ -106,7 +108,13 @@ impl RecordReader {
             });
         };
 
-        Ok(Self::form_record_with_rx(rx, record))
+        if let Some(processed_record) = processed_record {
+            // the reader can be created after when filter
+            // where labels can be processed or changed
+            Ok(Self::form_record_with_rx(rx, processed_record))
+        } else {
+            Ok(Self::form_record_with_rx(rx, record_from_block))
+        }
     }
 
     /// Create a new record reader for a record with no content.
@@ -224,6 +232,10 @@ impl ReadRecord for RecordReader {
 
     fn meta(&self) -> &RecordMeta {
         &self.meta
+    }
+
+    fn meta_mut(&mut self) -> &mut RecordMeta {
+        &mut self.meta
     }
 }
 
@@ -395,6 +407,19 @@ mod tests {
             record.state = 1;
             let reader = RecordReader::form_record(record);
             assert_eq!(reader.meta().state(), 1);
+        }
+
+        #[rstest]
+        fn test_meta_mut(record: Record) {
+            let mut reader = RecordReader::form_record(record);
+            let meta_mut = reader.meta_mut();
+            meta_mut
+                .labels_mut()
+                .insert("test_key".to_string(), "test_value".to_string());
+            assert_eq!(
+                reader.meta().labels().get("test_key"),
+                Some(&"test_value".to_string())
+            );
         }
 
         #[rstest]

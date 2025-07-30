@@ -10,8 +10,7 @@ use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
-use std::collections::VecDeque;
-
+use std::collections::{HashMap, HashSet, VecDeque};
 pub(super) enum Padding {
     Records(usize),
     Duration(u64),
@@ -25,6 +24,8 @@ pub struct WhenFilter<R> {
     ctx_before: CtxBefore,
     ctx_after: CtxAfter,
     ctx_buffer: VecDeque<R>,
+
+    select_labels: Option<HashSet<String>>,
 }
 
 impl<R> WhenFilter<R> {
@@ -34,14 +35,18 @@ impl<R> WhenFilter<R> {
         strict: bool,
     ) -> Result<Self, ReductError> {
         let before = if let Some(before) = directives.get("#ctx_before") {
-            let val = before.as_int()?;
+            let before_val = before.first().ok_or_else(|| {
+                ReductError::unprocessable_entity("#ctx_before must be a non-empty value")
+            })?;
+
+            let val = before_val.as_int()?;
             if val < 0 {
                 return Err(ReductError::unprocessable_entity(
                     "#ctx_before must be non-negative",
                 ));
             }
 
-            if before.is_duration() {
+            if before_val.is_duration() {
                 Duration(val as u64)
             } else {
                 Records(val as usize)
@@ -51,13 +56,16 @@ impl<R> WhenFilter<R> {
         };
 
         let after = if let Some(after) = directives.get("#ctx_after") {
-            let val = after.as_int()?;
+            let after_val = after.first().ok_or_else(|| {
+                ReductError::unprocessable_entity("#ctx_after must be a non-empty value")
+            })?;
+            let val = after_val.as_int()?;
             if val < 0 {
                 return Err(ReductError::unprocessable_entity(
                     "#ctx_after must be non-negative",
                 ));
             }
-            if after.is_duration() {
+            if after_val.is_duration() {
                 Duration(val as u64)
             } else {
                 Records(val as usize)
@@ -66,12 +74,20 @@ impl<R> WhenFilter<R> {
             Records(0) // Default to 0 records after
         };
 
+        let select_labels = directives.get("#select_labels").map(|labels| {
+            labels
+                .iter()
+                .map(|label| label.to_string())
+                .collect::<HashSet<String>>()
+        });
+
         Ok(Self {
             condition,
             strict,
             ctx_before: CtxBefore::new(before),
             ctx_after: CtxAfter::new(after),
             ctx_buffer: VecDeque::new(),
+            select_labels,
         })
     }
 }
@@ -114,7 +130,25 @@ impl<R: FilterRecord> RecordFilter<R> for WhenFilter<R> {
         };
 
         if self.ctx_after.check(result, record.timestamp()) {
-            Ok(Some(self.ctx_buffer.drain(..).collect()))
+            let drained = self.ctx_buffer.drain(..);
+            let filtered: Vec<R> = if let Some(select_labels) = &self.select_labels {
+                drained
+                    .map(|mut record| {
+                        let filtered_labels = record
+                            .labels()
+                            .into_iter()
+                            .filter(|(k, _)| select_labels.contains(k.as_str()))
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                            .collect::<HashMap<String, String>>();
+
+                        record.set_labels(filtered_labels);
+                        record
+                    })
+                    .collect()
+            } else {
+                drained.collect()
+            };
+            Ok(Some(filtered))
         } else {
             Ok(Some(vec![]))
         }
@@ -126,7 +160,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    use crate::storage::query::condition::Parser;
+    use crate::storage::query::condition::{Directives, Parser};
     use crate::storage::query::filters::tests::TestFilterRecord;
     use reduct_base::io::RecordMeta;
     use rstest::{fixture, rstest};
@@ -251,6 +285,46 @@ mod tests {
             );
         }
 
+        #[rstest]
+        fn filter_ctx_before_empty(parser: Parser) {
+            let (condition, _) = parser
+                .parse(json!({
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut directives = Directives::new();
+            directives.insert("#ctx_before".to_string(), vec![]);
+
+            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("#ctx_before must be a non-empty value")
+            );
+        }
+
+        #[rstest]
+        fn filter_ctx_after_empty(parser: Parser) {
+            let (condition, _) = parser
+                .parse(json!({
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut directives = Directives::new();
+            directives.insert("#ctx_after".to_string(), vec![]);
+
+            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("#ctx_after must be a non-empty value")
+            );
+        }
+
         #[fixture]
         fn record_false() -> TestFilterRecord {
             RecordMeta::builder()
@@ -358,6 +432,71 @@ mod tests {
             RecordMeta::builder()
                 .timestamp(4000)
                 .labels(HashMap::from_iter(vec![("label", "false")]))
+                .build()
+                .into()
+        }
+    }
+
+    mod select_labels {
+        use super::*;
+
+        #[rstest]
+        fn filter_with_select_labels(parser: Parser, record_select_labels: TestFilterRecord) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#select_labels": ["label1", "label3"],
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+
+            let result = filter.filter(record_select_labels).unwrap();
+            assert!(result.is_some());
+            let filtered_records = result.unwrap();
+            assert_eq!(filtered_records.len(), 1);
+
+            let record_labels = filtered_records[0].labels();
+            assert_eq!(record_labels.len(), 2);
+            assert!(record_labels.contains_key(&"label1".to_string()));
+            assert!(record_labels.contains_key(&"label3".to_string()));
+
+            assert!(!record_labels.contains_key(&"label".to_string()));
+            assert!(!record_labels.contains_key(&"label2".to_string()));
+        }
+
+        #[rstest]
+        fn filter_without_select_labels(parser: Parser, record_select_labels: TestFilterRecord) {
+            let (condition, directives) = parser
+                .parse(json!({
+                    "$and": [true, "&label"]
+                }))
+                .unwrap();
+
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+
+            let result = filter.filter(record_select_labels).unwrap();
+            assert!(result.is_some());
+            let filtered_records = result.unwrap();
+            assert_eq!(filtered_records.len(), 1);
+
+            let record_labels = filtered_records[0].labels();
+            assert_eq!(record_labels.len(), 4);
+            assert!(record_labels.contains_key(&"label".to_string()));
+            assert!(record_labels.contains_key(&"label1".to_string()));
+            assert!(record_labels.contains_key(&"label2".to_string()));
+            assert!(record_labels.contains_key(&"label3".to_string()));
+        }
+
+        #[fixture]
+        fn record_select_labels() -> TestFilterRecord {
+            RecordMeta::builder()
+                .labels(HashMap::from_iter(vec![
+                    ("label".to_string(), "true".to_string()),
+                    ("label1".to_string(), "value1".to_string()),
+                    ("label2".to_string(), "value2".to_string()),
+                    ("label3".to_string(), "value3".to_string()),
+                ]))
                 .build()
                 .into()
         }

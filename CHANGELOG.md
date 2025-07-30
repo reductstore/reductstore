@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for `#ctx_before` and `#ctx_after` directives, [PR-866](https://github.com/reductstore/reductstore/pull/866)
 - Support for wildcards in write/read token permissions, [PR-877](https://github.com/reductstore/reductstore/pull/877)
 - Check format of read/write token permissions, [PR-881](https://github.com/reductstore/reductstore/pull/881)
+- Add support for selecting specific labels via the `#select_labels` directive, [PR-888](https://github.com/reductstore/reductstore/pull/888)
 
 ### Changed
 
@@ -68,7 +69,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix lock of write channel for small chunks, [PR-834](https://github.com/reductstore/reductstore/pull/834)
 
-
 ## [1.15.2] - 2025-05-21
 
 ### Changed
@@ -98,7 +98,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RS-672: Implement `$limit` operator, [PR-793](https://github.com/reductstore/reductstore/pull/793)
 - RS-645: Implement `$timestamp` operator, [PR-798](https://github.com/reductstore/reductstore/pull/798)
 - RS-646: Enable logging in extensions, [PR-646](https://github.com/reductstore/reductstore/pull/794)
-
 
 ### Changed
 
@@ -242,7 +241,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update Web Console up to v1.8.0, [PR-655](https://github.com/reductstore/reductstore/pull/655)
 
-
 ### Fixed
 
 - RS-544: Fix keeping quota error, [PR-654](https://github.com/reductstore/reductstore/pull/654)
@@ -254,7 +252,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix CI actions after Ubuntu update, [PR-604](https://github.com/reductstore/reductstore/pull/604)
 - RS-536: Update README.md, [PR-649](https://github.com/reductstore/reductstore/pull/649)
 - RS-193: Cross-compilation in CI/CD, [PR-651](https://github.com/reductstore/reductstore/pull/651)
-
 
 ## [1.12.4] - 2024-11-20
 
@@ -744,7 +741,7 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 ### Added
 
-- Labels for  `POST|GET /api/v1/:bucket/:entry` as headers with
+- Labels for `POST|GET /api/v1/:bucket/:entry` as headers with
   prefix `x-reduct-label-`, [PR-224](https://github.com/reductstore/reductstore/pull/224)
 - `include-<label>` and `exclude-<label>` query parameters for query endpoint
   `GET /api/v1/:bucket/:entry/q`, [PR-226](https://github.com/reductstore/reductstore/pull/226)
@@ -1026,7 +1023,7 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Block structure in entry, [PR-58](https://github.com/reductstore/reductstore/pull/58)
 
-## [0.3.0]  - 2022-03-14
+## [0.3.0] - 2022-03-14
 
 ### Added
 
@@ -1047,8 +1044,8 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 ### Fixed:
 
-* Crushing when API token is wrong, [PR-42](https://github.com/reductstore/reductstore/pull/42)
-* Order of authentication checks, [PR-43](https://github.com/reductstore/reductstore/pull/43)
+- Crushing when API token is wrong, [PR-42](https://github.com/reductstore/reductstore/pull/42)
+- Order of authentication checks, [PR-43](https://github.com/reductstore/reductstore/pull/43)
 
 ## [0.2.0] - 2022-02-26
 
@@ -1080,171 +1077,87 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-
 [Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.6...HEAD
-
 [1.15.6]: https://github.com/reductstore/reductstore/compare/v1.15.5...v1.15.6
-
 [1.15.5]: https://github.com/reductstore/reductstore/compare/v1.15.4...v1.15.5
-
 [1.15.4]: https://github.com/reductstore/reductstore/compare/v1.15.3...v1.15.4
-
 [1.15.3]: https://github.com/reductstore/reductstore/compare/v1.15.2...v1.15.3
-
 [1.15.2]: https://github.com/reductstore/reductstore/compare/v1.15.1...v1.15.2
-
 [1.15.1]: https://github.com/reductstore/reductstore/compare/v1.15.0...v1.15.1
-
 [1.15.0]: https://github.com/reductstore/reductstore/compare/v1.14.8...v1.15.0
-
 [1.14.8]: https://github.com/reductstore/reductstore/compare/v1.14.7...v1.14.8
-
 [1.14.7]: https://github.com/reductstore/reductstore/compare/v1.14.6...v1.14.7
-
 [1.14.6]: https://github.com/reductstore/reductstore/compare/v1.14.5...v1.14.6
-
 [1.14.5]: https://github.com/reductstore/reductstore/compare/v1.14.4...v1.14.5
-
 [1.14.4]: https://github.com/reductstore/reductstore/compare/v1.14.3...v1.14.4
-
 [1.14.3]: https://github.com/reductstore/reductstore/compare/v1.14.2...v1.14.3
-
 [1.14.2]: https://github.com/reductstore/reductstore/compare/v1.14.1...v1.14.2
-
 [1.14.1]: https://github.com/reductstore/reductstore/compare/v1.14.0...v1.14.1
-
 [1.14.0]: https://github.com/reductstore/reductstore/compare/v1.13.5...v1.14.0
-
 [1.13.5]: https://github.com/reductstore/reductstore/compare/v1.13.4...v1.13.5
-
 [1.13.4]: https://github.com/reductstore/reductstore/compare/v1.13.3...v1.13.4
-
 [1.13.3]: https://github.com/reductstore/reductstore/compare/v1.13.2...v1.13.3
-
 [1.13.2]: https://github.com/reductstore/reductstore/compare/v1.13.1...v1.13.2
-
 [1.13.1]: https://github.com/reductstore/reductstore/compare/v1.13.0...v1.13.1
-
 [1.13.0]: https://github.com/reductstore/reductstore/compare/v1.12.4...v1.13.0
-
 [1.12.4]: https://github.com/reductstore/reductstore/compare/v1.12.3...v1.12.4
-
 [1.12.3]: https://github.com/reductstore/reductstore/compare/v1.12.2...v1.12.3
-
 [1.12.2]: https://github.com/reductstore/reductstore/compare/v1.12.1...v1.12.2
-
 [1.12.1]: https://github.com/reductstore/reductstore/compare/v1.12.0...v1.12.1
-
 [1.12.0]: https://github.com/reductstore/reductstore/compare/v1.11.1...v1.12.0
-
 [1.11.2]: https://github.com/reductstore/reductstore/compare/v1.11.1...v1.11.2
-
 [1.11.1]: https://github.com/reductstore/reductstore/compare/v1.11.0...v1.11.1
-
 [1.11.0]: https://github.com/reductstore/reductstore/compare/v1.10.1...v1.11.0
-
 [1.10.1]: https://github.com/reductstore/reductstore/compare/v1.10.0...v1.10.1
-
 [1.10.0]: https://github.com/reductstore/reductstore/compare/v1.9.5...v1.10.0
-
 [1.9.5]: https://github.com/reductstore/reductstore/compare/v1.9.4...v1.9.5
-
 [1.9.4]: https://github.com/reductstore/reductstore/compare/v1.9.3...v1.9.4
-
 [1.9.3]: https://github.com/reductstore/reductstore/compare/v1.9.2...v1.9.3
-
 [1.9.2]: https://github.com/reductstore/reductstore/compare/v1.9.1...v1.9.2
-
 [1.9.1]: https://github.com/reductstore/reductstore/compare/v1.9.0...v1.9.1
-
 [1.9.0]: https://github.com/reductstore/reductstore/compare/v1.8.2...v1.9.0
-
 [1.8.2]: https://github.com/reductstore/reductstore/compare/v1.8.1...v1.8.2
-
 [1.8.1]: https://github.com/reductstore/reductstore/compare/v1.8.0...v1.8.1
-
 [1.8.0]: https://github.com/reductstore/reductstore/compare/v1.7.3...v1.8.0
-
 [1.7.3]: https://github.com/reductstore/reductstore/compare/v1.7.2...v1.7.3
-
 [1.7.2]: https://github.com/reductstore/reductstore/compare/v1.7.1...v1.7.2
-
 [1.7.1]: https://github.com/reductstore/reductstore/compare/v1.7.0...v1.7.1
-
 [1.7.0]: https://github.com/reductstore/reductstore/compare/v1.6.2...v1.7.0
-
 [1.6.2]: https://github.com/reductstore/reductstore/compare/v1.6.1...v1.6.2
-
 [1.6.1]: https://github.com/reductstore/reductstore/compare/v1.6.0...v1.6.1
-
 [1.6.0]: https://github.com/reductstore/reductstore/compare/v1.5.1...v1.6.0
-
 [1.5.1]: https://github.com/reductstore/reductstore/compare/v1.5.0...v1.5.1
-
 [1.5.0]: https://github.com/reductstore/reductstore/compare/v1.4.1...v1.5.0
-
 [1.4.1]: https://github.com/reductstore/reductstore/compare/v1.4.0...v1.4.1
-
 [1.4.0]: https://github.com/reductstore/reductstore/compare/v1.4.0-beta.1...v1.4.0
-
 [1.4.0-beta.1]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.2...v1.4.0-beta.1
-
 [1.4.0-alpha.2]: https://github.com/reductstore/reductstore/compare/v1.4.0-alpha.1...v1.4.0-alpha.2
-
 [1.4.0-alpha.1]: https://github.com/reductstore/reductstore/compare/v1.3.2...v1.4.0-alpha.1
-
 [1.3.2]: https://github.com/reductstore/reductstore/compare/v1.3.1...v1.3.2
-
 [1.3.1]: https://github.com/reductstore/reductstore/compare/v1.3.0...v1.3.1
-
 [1.3.0]: https://github.com/reductstore/reductstore/compare/v1.2.3...v1.3.0
-
 [1.2.3]: https://github.com/reductstore/reductstore/compare/v1.2.2...v1.2.3
-
 [1.2.2]: https://github.com/reductstore/reductstore/compare/v1.2.1...v1.2.2
-
 [1.2.1]: https://github.com/reductstore/reductstore/compare/v1.2.0...v1.2.1
-
 [1.2.0]: https://github.com/reductstore/reductstore/compare/v1.1.1...v1.2.0
-
 [1.1.1]: https://github.com/reductstore/reductstore/compare/v1.1.0...v1.1.1
-
 [1.1.0]: https://github.com/reductstore/reductstore/compare/v1.0.0...v1.1.0
-
 [1.0.1]: https://github.com/reductstore/reductstore/compare/v1.0.0...v1.0.1
-
 [1.0.0]: https://github.com/reductstore/reductstore/compare/v0.9.0...v1.0.0
-
 [0.9.0]: https://github.com/reductstore/reductstore/compare/v0.8.0...v0.9.0
-
 [0.8.0]: https://github.com/reductstore/reductstore/compare/v0.7.1...v0.8.0
-
 [0.7.1]: https://github.com/reductstore/reductstore/compare/v0.7.0...v0.7.1
-
 [0.7.0]: https://github.com/reductstore/reductstore/compare/v0.6.1...v0.7.0
-
 [0.6.1]: https://github.com/reductstore/reductstore/compare/v0.6.0...v0.6.1
-
 [0.6.0]: https://github.com/reductstore/reductstore/compare/v0.5.1...v0.6.0
-
 [0.5.1]: https://github.com/reductstore/reductstore/compare/v0.5.0...v0.5.1
-
 [0.5.0]: https://github.com/reductstore/reductstore/compare/v0.4.3...v0.5.0
-
 [0.4.3]: https://github.com/reductstore/reductstore/compare/v0.4.2...v0.4.3
-
 [0.4.2]: https://github.com/reductstore/reductstore/compare/v0.4.1...v0.4.2
-
 [0.4.1]: https://github.com/reductstore/reductstore/compare/v0.4.0...v0.4.1
-
 [0.4.0]: https://github.com/reductstore/reductstore/compare/v0.3.0...v0.4.0
-
 [0.3.0]: https://github.com/reductstore/reductstore/compare/v0.2.1...v0.3.0
-
 [0.2.1]: https://github.com/reductstore/reductstore/compare/v0.2.0...v0.2.1
-
 [0.2.0]: https://github.com/reductstore/reductstore/compare/v0.1.1...v0.2.0
-
 [0.1.1]: https://github.com/reductstore/reductstore/compare/v0.1.0...v0.1.1
-
 [0.1.0]: https://github.com/reductstore/reductstore/releases/tag/v0.1.0

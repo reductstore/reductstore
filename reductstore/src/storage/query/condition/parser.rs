@@ -22,8 +22,8 @@ use std::collections::HashMap;
 /// Parses a JSON object into a condition tree.
 pub(crate) struct Parser {}
 
-pub(crate) type Directives = HashMap<String, Value>;
-static DIRECTIVES: [&str; 2] = ["#ctx_before", "#ctx_after"];
+pub(crate) type Directives = HashMap<String, Vec<Value>>;
+static DIRECTIVES: [&str; 3] = ["#ctx_before", "#ctx_after", "#select_labels"];
 
 impl Parser {
     /// Parses a JSON object into a condition tree.
@@ -55,31 +55,61 @@ impl Parser {
                     ));
                 }
 
-                let value = match value {
-                    JsonValue::Bool(value) => Value::Bool(*value),
-                    JsonValue::Number(value) => {
-                        if value.is_i64() || value.is_u64() {
-                            Value::Int(value.as_i64().unwrap())
-                        } else {
-                            Value::Float(value.as_f64().unwrap())
+                let values = if key == "#select_labels" {
+                    match value {
+                        JsonValue::Array(arr) => {
+                            if arr.is_empty() {
+                                return Err(unprocessable_entity!(
+                                    "Directive '{}' cannot be an empty array",
+                                    key
+                                ));
+                            }
+
+                            arr.iter()
+                                .map(|v| match v {
+                                    JsonValue::String(s) => Ok(Value::String(s.clone())),
+                                    _ => Err(unprocessable_entity!(
+                                        "Directive '{}' must contain only strings",
+                                        key
+                                    )),
+                                })
+                                .collect::<Result<Vec<Value>, _>>()?
+                        }
+                        _ => {
+                            return Err(unprocessable_entity!(
+                                "Directive '{}' must be an array of strings",
+                                key
+                            ));
                         }
                     }
-                    JsonValue::String(value) => {
-                        if let Ok(duration) = parse_duration(value) {
-                            duration
-                        } else {
-                            Value::String(value.to_string())
+                } else {
+                    let parsed = match value {
+                        JsonValue::Bool(value) => Value::Bool(*value),
+                        JsonValue::Number(value) => {
+                            if value.is_i64() || value.is_u64() {
+                                Value::Int(value.as_i64().unwrap())
+                            } else {
+                                Value::Float(value.as_f64().unwrap())
+                            }
                         }
-                    }
-                    _ => {
-                        return Err(unprocessable_entity!(
-                            "Directive '{}' must be a primitive value",
-                            key
-                        ));
-                    }
+                        JsonValue::String(value) => {
+                            if let Ok(duration) = parse_duration(value) {
+                                duration
+                            } else {
+                                Value::String(value.to_string())
+                            }
+                        }
+                        _ => {
+                            return Err(unprocessable_entity!(
+                                "Directive '{}' must be a primitive value",
+                                key
+                            ));
+                        }
+                    };
+                    vec![parsed]
                 };
 
-                directives.insert(key.to_string(), value);
+                directives.insert(key.to_string(), values);
                 keys_to_remove.push(key.to_string());
             }
         }
@@ -425,12 +455,26 @@ mod tests {
         fn test_parse_directives(parser: Parser) {
             let json = json!({
                 "#ctx_before": "1h",
-                "#ctx_after": "2h"
+                "#ctx_after": "2h",
+                "#select_labels": ["label1", "label2"]
             });
             let (_, directives) = parser.parse(json).unwrap();
-            assert_eq!(directives.len(), 2);
-            assert_eq!(directives["#ctx_before"], Value::Duration(3600_000_000));
-            assert_eq!(directives["#ctx_after"], Value::Duration(7200_000_000));
+            assert_eq!(directives.len(), 3);
+            assert_eq!(
+                directives["#ctx_before"],
+                vec![Value::Duration(3600_000_000)]
+            );
+            assert_eq!(
+                directives["#ctx_after"],
+                vec![Value::Duration(7200_000_000)]
+            );
+            assert_eq!(
+                directives["#select_labels"],
+                vec![
+                    Value::String("label1".to_string()),
+                    Value::String("label2".to_string())
+                ]
+            );
         }
 
         #[rstest]
@@ -447,7 +491,34 @@ mod tests {
                 "#ctx_before": value,
             });
             let (_, directives) = parser.parse(json).unwrap();
-            assert_eq!(directives["#ctx_before"], expected);
+            assert_eq!(directives["#ctx_before"], vec![expected]);
+        }
+
+        #[rstest]
+        fn test_parse_array_directives(parser: Parser) {
+            let json = json!({
+                "#select_labels": ["label1", "label2"]
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(
+                directives["#select_labels"],
+                vec![
+                    Value::String("label1".to_string()),
+                    Value::String("label2".to_string())
+                ]
+            );
+        }
+
+        #[rstest]
+        fn test_parse_directives_empty_array(parser: Parser) {
+            let json = json!({
+                "#select_labels": []
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' cannot be an empty array"
+            );
         }
 
         #[rstest]
@@ -471,6 +542,30 @@ mod tests {
             assert_eq!(
                 result.err().unwrap().to_string(),
                 "[UnprocessableEntity] Directive '#invalid_directive' is not supported"
+            );
+        }
+
+        #[rstest]
+        fn test_parse_select_labels_with_non_string(parser: Parser) {
+            let json = json!({
+                "#select_labels": ["label1", 123]
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' must contain only strings"
+            );
+        }
+
+        #[rstest]
+        fn test_parse_select_labels_not_array(parser: Parser) {
+            let json = json!({
+                "#select_labels": "not_an_array"
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' must be an array of strings"
             );
         }
     }

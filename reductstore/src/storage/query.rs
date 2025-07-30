@@ -15,6 +15,7 @@ use crate::storage::query::base::{Query, QueryOptions};
 use log::{debug, trace, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
+use reduct_base::io::ReadRecord;
 use reduct_base::unprocessable_entity;
 use std::cmp::{max, min};
 use std::sync::{Arc, Mutex, RwLock};

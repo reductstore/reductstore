@@ -33,6 +33,12 @@ impl FilterRecord for BoxedReadRecord {
         self.meta().labels().iter().map(|(k, v)| (k, v)).collect()
     }
 
+    fn set_labels(&mut self, labels: HashMap<String, String>) {
+        let labels_mut = self.meta_mut().labels_mut();
+        labels_mut.clear();
+        labels_mut.extend(labels);
+    }
+
     fn computed_labels(&self) -> HashMap<&String, &String> {
         self.meta()
             .computed_labels()
@@ -66,5 +72,18 @@ mod tests {
         assert_eq!(mocked_record.timestamp(), 0);
         assert!(mocked_record.labels().is_empty());
         assert!(!mocked_record.computed_labels().is_empty());
+    }
+
+    #[rstest]
+    fn test_set_labels(mut mocked_record: BoxedReadRecord) {
+        let mut labels = HashMap::new();
+        labels.insert("test_key".to_string(), "test_value".to_string());
+        mocked_record.set_labels(labels);
+
+        assert_eq!(mocked_record.labels().len(), 1);
+        assert_eq!(
+            mocked_record.labels().get(&"test_key".to_string()),
+            Some(&&"test_value".to_string())
+        );
     }
 }

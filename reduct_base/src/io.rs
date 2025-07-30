@@ -113,6 +113,11 @@ impl RecordMeta {
         &self.labels
     }
 
+    /// Returns a mutable reference to the labels associated with the record.
+    pub fn labels_mut(&mut self) -> &mut Labels {
+        &mut self.labels
+    }
+
     /// For filtering unfinished records.
     pub fn state(&self) -> i32 {
         self.state
@@ -179,6 +184,9 @@ pub trait ReadRecord {
 
     /// Returns meta information about the record.
     fn meta(&self) -> &RecordMeta;
+
+    /// Returns a mutable reference to the meta information about the record.
+    fn meta_mut(&mut self) -> &mut RecordMeta;
 }
 
 #[async_trait]
@@ -254,6 +262,19 @@ pub(crate) mod tests {
             assert_eq!(new_meta.content_length(), 1024);
         }
 
+        #[rstest]
+        fn test_meta_mut() {
+            let mut record = MockRecord::new();
+            let meta_mut = record.meta_mut();
+            meta_mut
+                .labels_mut()
+                .insert("test_key".to_string(), "test_value".to_string());
+            assert_eq!(
+                record.meta().labels().get("test_key"),
+                Some(&"test_value".to_string())
+            );
+        }
+
         #[fixture]
         fn meta() -> RecordMeta {
             RecordMeta::builder()
@@ -295,6 +316,10 @@ pub(crate) mod tests {
 
         fn meta(&self) -> &RecordMeta {
             &self.metadata
+        }
+
+        fn meta_mut(&mut self) -> &mut RecordMeta {
+            &mut self.metadata
         }
     }
 }
