@@ -419,5 +419,25 @@ mod tests {
 
             assert_eq!(record.state(), notification.meta.state());
         }
+
+        #[rstest]
+        fn test_set_labels(mut notification: TransactionNotification) {
+            let new_labels = HashMap::from([
+                ("a".to_string(), "b".to_string()),
+                ("c".to_string(), "d".to_string()),
+            ]);
+
+            notification.set_labels(new_labels.clone());
+
+            assert_eq!(notification.labels().len(), 2);
+            assert_eq!(
+                notification.labels().get(&"a".to_string()),
+                Some(&&"b".to_string())
+            );
+            assert_eq!(
+                notification.labels().get(&"c".to_string()),
+                Some(&&"d".to_string())
+            );
+        }
     }
 }
