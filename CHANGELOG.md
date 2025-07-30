@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix hanging query request if no extension registered, [PR-830](https://github.com/reductstore/reductstore/pull/830)
 - Fix `$limit` operator in extension context, [PR-848](https://github.com/reductstore/reductstore/pull/848)
+- Fix query finalization in ExtRepository, [PR-891](https://github.com/reductstore/reductstore/pull/891)
 
 ### Removed
 
