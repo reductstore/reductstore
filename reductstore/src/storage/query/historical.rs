@@ -202,11 +202,35 @@ mod tests {
     use super::*;
 
     use crate::storage::proto::record;
+    use crate::storage::proto::{us_to_ts, Record};
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
     use reduct_base::ext::BoxedReadRecord;
     use reduct_base::io::ReadRecord;
     use reduct_base::{no_content, not_found};
+
+    #[test]
+    fn test_set_labels() {
+        let mut record = Record {
+            timestamp: Some(us_to_ts(&100)),
+            begin: 0,
+            end: 10,
+            state: record::State::Finished as i32,
+            labels: vec![],
+            content_type: "text/plain".to_string(),
+        };
+
+        let new_labels = HashMap::from([
+            ("key1".to_string(), "value1".to_string()),
+            ("key2".to_string(), "value2".to_string()),
+        ]);
+
+        record.set_labels(new_labels);
+
+        assert_eq!(record.labels.len(), 2);
+        assert_eq!(record.labels()[&"key1".to_string()], "value1");
+        assert_eq!(record.labels()[&"key2".to_string()], "value2");
+    }
 
     #[rstest]
     fn test_query_ok_1_rec(block_manager: Arc<RwLock<BlockManager>>) {
