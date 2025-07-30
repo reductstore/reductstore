@@ -73,4 +73,17 @@ mod tests {
         assert!(mocked_record.labels().is_empty());
         assert!(!mocked_record.computed_labels().is_empty());
     }
+
+    #[rstest]
+    fn test_set_labels(mut mocked_record: BoxedReadRecord) {
+        let mut labels = HashMap::new();
+        labels.insert("test_key".to_string(), "test_value".to_string());
+        mocked_record.set_labels(labels);
+
+        assert_eq!(mocked_record.labels().len(), 1);
+        assert_eq!(
+            mocked_record.labels().get(&"test_key".to_string()),
+            Some(&&"test_value".to_string())
+        );
+    }
 }
