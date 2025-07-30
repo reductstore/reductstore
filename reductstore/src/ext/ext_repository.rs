@@ -521,10 +521,11 @@ pub(super) mod tests {
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
             assert_eq!(
-                mocked_ext_repo
+                *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .err()
                     .unwrap(),
                 no_content!("No content"),
@@ -542,10 +543,11 @@ pub(super) mod tests {
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
             assert_eq!(
-                mocked_ext_repo
+                *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .err()
                     .unwrap(),
                 err
@@ -564,7 +566,8 @@ pub(super) mod tests {
             assert!(mocked_ext_repo
                 .fetch_and_process_record(1, query_rx)
                 .await
-                .unwrap()
+                .unwrap()[0]
+                .as_ref()
                 .is_ok(),);
         }
 
@@ -667,19 +670,19 @@ pub(super) mod tests {
             let mut records = mocked_ext_repo
                 .fetch_and_process_record(1, query_rx.clone())
                 .await
-                .unwrap()
                 .unwrap();
 
             assert_eq!(records.len(), 1, "Should return one record");
 
-            let record = records.first_mut().unwrap();
+            let record = records.get_mut(0).unwrap().as_mut().unwrap();
             assert_eq!(record.read().await, None);
 
             assert_eq!(
-                mocked_ext_repo
+                *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .err()
                     .unwrap(),
                 no_content!("")
@@ -754,17 +757,19 @@ pub(super) mod tests {
                 mocked_ext_repo
                     .fetch_and_process_record(1, query_rx.clone())
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .is_ok(),
                 "we should get the record from flush"
             );
 
             drop(tx); // close the channel to simulate no more records
             assert_eq!(
-                mocked_ext_repo
+                *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
                     .await
-                    .unwrap()
+                    .unwrap()[0]
+                    .as_ref()
                     .err()
                     .unwrap(),
                 no_content!("No content"),
@@ -830,7 +835,8 @@ pub(super) mod tests {
         mocked_ext_repo
             .fetch_and_process_record(1, query_rx.clone())
             .await
-            .unwrap()
+            .unwrap()[0]
+            .as_ref()
             .expect("Should return a record");
 
         assert!(
@@ -842,10 +848,11 @@ pub(super) mod tests {
         );
 
         assert_eq!(
-            mocked_ext_repo
+            *mocked_ext_repo
                 .fetch_and_process_record(1, query_rx)
                 .await
-                .unwrap()
+                .unwrap()[0]
+                .as_ref()
                 .err()
                 .unwrap(),
             no_content!("")

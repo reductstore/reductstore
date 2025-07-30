@@ -487,10 +487,11 @@ mod tests {
                 )
                 .await
                 .unwrap()
-                .unwrap()
-                .err()
-                .unwrap()
-                .status(),
+                .unwrap()[0]
+                    .as_ref()
+                    .err()
+                    .unwrap()
+                    .status(),
                 ErrorCode::NoContent,
                 "should return None if the query is closed"
             );

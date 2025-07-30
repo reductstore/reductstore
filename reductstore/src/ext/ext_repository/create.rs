@@ -109,7 +109,9 @@ mod tests {
             result.is_some(),
             "Should return Some if no record is available"
         );
-        let err = result.unwrap().err().unwrap();
-        assert_eq!(err.status(), NoContent);
+        assert_eq!(
+            result.unwrap()[0].as_ref().err().unwrap().status(),
+            NoContent
+        );
     }
 }
