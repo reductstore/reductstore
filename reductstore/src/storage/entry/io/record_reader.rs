@@ -410,6 +410,19 @@ mod tests {
         }
 
         #[rstest]
+        fn test_meta_mut(record: Record) {
+            let mut reader = RecordReader::form_record(record);
+            let meta_mut = reader.meta_mut();
+            meta_mut
+                .labels_mut()
+                .insert("test_key".to_string(), "test_value".to_string());
+            assert_eq!(
+                reader.meta().labels().get("test_key"),
+                Some(&"test_value".to_string())
+            );
+        }
+
+        #[rstest]
         #[tokio::test]
         async fn test_read_timeout(record: Record) {
             let (_tx, rx) = channel(CHANNEL_BUFFER_SIZE);

@@ -262,6 +262,19 @@ pub(crate) mod tests {
             assert_eq!(new_meta.content_length(), 1024);
         }
 
+        #[rstest]
+        fn test_meta_mut() {
+            let mut record = MockRecord::new();
+            let meta_mut = record.meta_mut();
+            meta_mut
+                .labels_mut()
+                .insert("test_key".to_string(), "test_value".to_string());
+            assert_eq!(
+                record.meta().labels().get("test_key"),
+                Some(&"test_value".to_string())
+            );
+        }
+
         #[fixture]
         fn meta() -> RecordMeta {
             RecordMeta::builder()
