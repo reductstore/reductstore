@@ -8,7 +8,7 @@ use crate::storage::proto::Record;
 use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::{debug, error, Metadata};
+use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, timeout};

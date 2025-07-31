@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2025-07-31
+
 ### Added
 
 - Pass server information to extensions, [PR-816](https://github.com/reductstore/reductstore/pull/816)
@@ -1077,7 +1079,8 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.15.6...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/reductstore/reductstore/compare/v1.15.6...v1.16.0
 [1.15.6]: https://github.com/reductstore/reductstore/compare/v1.15.5...v1.15.6
 [1.15.5]: https://github.com/reductstore/reductstore/compare/v1.15.4...v1.15.5
 [1.15.4]: https://github.com/reductstore/reductstore/compare/v1.15.3...v1.15.4
