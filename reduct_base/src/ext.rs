@@ -18,7 +18,7 @@ pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 pub type BoxedRecordStream =
     Box<dyn Stream<Item = Result<BoxedReadRecord, ReductError>> + Send + Sync>;
 
-pub const EXTENSION_API_VERSION: &str = "0.2";
+pub const EXTENSION_API_VERSION: &str = "0.3";
 
 #[async_trait]
 pub trait Commiter {
