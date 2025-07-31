@@ -1,6 +1,6 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-#[allow(unused_imports)]
+
 use reqwest::{
     blocking::{get, Client},
     StatusCode, Url,
@@ -30,10 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     download_web_console("v1.11.1");
 
     #[cfg(feature = "select-ext")]
-    download_ext("select-ext", "v0.4.1");
+    download_ext("select-ext", "v0.4.2");
 
     #[cfg(feature = "ros-ext")]
-    download_ext("ros-ext", "v0.2.0");
+    download_ext("ros-ext", "v0.2.1");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
