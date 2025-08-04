@@ -43,7 +43,7 @@ regex = "1.11.1"
 bytes = "1.10.1"
 axum = { version = "0.8.4", features = ["default", "macros"] }
 axum-extra = { version = "0.10.0", features = ["default", "typed-header"] }
-tokio = { version = "1.47.0", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
 hyper = { version = "1.6.0", features = ["full"] }
 futures-util = "0.3.31"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
