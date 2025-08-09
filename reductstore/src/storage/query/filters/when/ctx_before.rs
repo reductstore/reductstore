@@ -84,7 +84,7 @@ impl CtxBefore {
 mod tests {
     use super::*;
     use crate::storage::query::filters::tests::TestFilterRecord;
-    use crate::storage::query::filters::when::ctx_after::CtxAfter;
+
     use reduct_base::io::RecordMeta;
     use rstest::*;
 

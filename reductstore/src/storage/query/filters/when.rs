@@ -9,11 +9,9 @@ use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::ctx_after::CtxAfter;
 use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::select_labels::LabelSelector;
-use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::unprocessable_entity;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 
 pub(super) enum Padding {
     Records(usize),
@@ -103,7 +101,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    use crate::storage::query::condition::{Directives, Parser};
+    use crate::storage::query::condition::Parser;
     use crate::storage::query::filters::tests::TestFilterRecord;
     use reduct_base::io::RecordMeta;
     use rstest::{fixture, rstest};
