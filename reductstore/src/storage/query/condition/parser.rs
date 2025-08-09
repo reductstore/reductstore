@@ -503,6 +503,31 @@ mod tests {
                 "[UnprocessableEntity] Directive '#invalid_directive' is not supported"
             );
         }
+
+        #[rstest]
+        fn test_parse_object_directive(parser: Parser) {
+            let json = json!({
+                "#ctx_before": {"invalid": "object"}
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#ctx_before' cannot be an object"
+            );
+        }
+
+        #[rstest]
+        fn test_parse_null_directive(parser: Parser) {
+            let json = json!({
+                "#ctx_before": null
+            });
+
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#ctx_before' cannot be null"
+            );
+        }
     }
 
     mod parse_operators {
