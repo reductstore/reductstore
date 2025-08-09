@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.1] - 2025-08-09
+
+### Fixed
+
+- Fix directive parsing and order of operators in conditional query, [PR-899](https://github.com/reductstore/reductstore/pull/899)
+
+### Changed
+
+- Update Web Console up to v1.11.2, [PR-900](https://github.com/reductstore/reductstore/pull/900)
+
 ## [1.16.0] - 2025-07-31
 
 ### Added
@@ -1079,7 +1089,8 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.16.1...HEAD
+[1.16.1]: https://github.com/reductstore/reductstore/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/reductstore/reductstore/compare/v1.15.6...v1.16.0
 [1.15.6]: https://github.com/reductstore/reductstore/compare/v1.15.5...v1.15.6
 [1.15.5]: https://github.com/reductstore/reductstore/compare/v1.15.4...v1.15.5

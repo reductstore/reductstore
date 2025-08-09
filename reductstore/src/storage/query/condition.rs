@@ -1,7 +1,6 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::query::condition::value::Value;
 use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -67,3 +66,4 @@ impl Debug for BoxedNode {
 
 pub(crate) use parser::Directives;
 pub(crate) use parser::Parser;
+pub(crate) use value::Value;
