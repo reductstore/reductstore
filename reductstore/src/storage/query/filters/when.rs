@@ -3,10 +3,12 @@
 
 mod ctx_after;
 mod ctx_before;
+mod select_labels;
 
 use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::ctx_after::CtxAfter;
 use crate::storage::query::filters::when::ctx_before::CtxBefore;
+use crate::storage::query::filters::when::select_labels::LabelSelector;
 use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
@@ -27,65 +29,22 @@ pub struct WhenFilter<R> {
     ctx_after: CtxAfter,
     ctx_buffer: VecDeque<R>,
 
-    select_labels: Option<HashSet<String>>,
+    label_selector: LabelSelector,
 }
 
 impl<R> WhenFilter<R> {
     pub fn try_new(
         condition: BoxedNode,
-        directives: Directives,
+        mut directives: Directives,
         strict: bool,
     ) -> Result<Self, ReductError> {
-        let before = if let Some(before) = directives.get("#ctx_before") {
-            let before_val = before
-                .first()
-                .ok_or_else(|| unprocessable_entity!("#ctx_before must be a non-empty value"))?;
-
-            let val = before_val.as_int()?;
-            if val < 0 {
-                return Err(unprocessable_entity!("#ctx_before must be non-negative",));
-            }
-
-            if before_val.is_duration() {
-                Duration(val as u64)
-            } else {
-                Records(val as usize)
-            }
-        } else {
-            Records(0) // Default to 0 records before
-        };
-
-        let after = if let Some(after) = directives.get("#ctx_after") {
-            let after_val = after
-                .first()
-                .ok_or_else(|| unprocessable_entity!("#ctx_after must be a non-empty value"))?;
-            let val = after_val.as_int()?;
-            if val < 0 {
-                return Err(unprocessable_entity!("#ctx_after must be non-negative",));
-            }
-            if after_val.is_duration() {
-                Duration(val as u64)
-            } else {
-                Records(val as usize)
-            }
-        } else {
-            Records(0) // Default to 0 records after
-        };
-
-        let select_labels = directives.get("#select_labels").map(|labels| {
-            labels
-                .iter()
-                .map(|label| label.to_string())
-                .collect::<HashSet<String>>()
-        });
-
         Ok(Self {
             condition,
             strict,
-            ctx_before: CtxBefore::new(before),
-            ctx_after: CtxAfter::new(after),
+            ctx_before: CtxBefore::try_new(directives.remove("#ctx_before"))?,
+            ctx_after: CtxAfter::try_new(directives.remove("#ctx_after"))?,
+            label_selector: LabelSelector::try_new(directives.remove("#select_labels"))?,
             ctx_buffer: VecDeque::new(),
-            select_labels,
         })
     }
 }
@@ -129,23 +88,9 @@ impl<R: FilterRecord> RecordFilter<R> for WhenFilter<R> {
 
         if self.ctx_after.check(result, record.timestamp()) {
             let drained = self.ctx_buffer.drain(..);
-            let filtered: Vec<R> = if let Some(select_labels) = &self.select_labels {
-                drained
-                    .map(|mut record| {
-                        let filtered_labels = record
-                            .labels()
-                            .into_iter()
-                            .filter(|(k, _)| select_labels.contains(k.as_str()))
-                            .map(|(k, v)| (k.to_string(), v.to_string()))
-                            .collect::<HashMap<String, String>>();
-
-                        record.set_labels(filtered_labels);
-                        record
-                    })
-                    .collect()
-            } else {
-                drained.collect()
-            };
+            let filtered = drained
+                .map(|record| self.label_selector.select_labels(record))
+                .collect();
             Ok(Some(filtered))
         } else {
             Ok(Some(vec![]))
@@ -285,82 +230,6 @@ mod tests {
 
             let result = filter.filter(record_true.clone()).unwrap();
             assert_eq!(result, Some(vec![record_true]));
-        }
-
-        #[rstest]
-        fn filter_ctx_before_negative(parser: Parser) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "#ctx_before": -2,
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
-                .err()
-                .unwrap();
-            assert_eq!(
-                err,
-                ReductError::unprocessable_entity("#ctx_before must be non-negative")
-            );
-        }
-
-        #[rstest]
-        fn filter_ctx_after_negative(parser: Parser) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "#ctx_after": -2,
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
-                .err()
-                .unwrap();
-            assert_eq!(
-                err,
-                ReductError::unprocessable_entity("#ctx_after must be non-negative")
-            );
-        }
-
-        #[rstest]
-        fn filter_ctx_before_empty(parser: Parser) {
-            let (condition, _) = parser
-                .parse(json!({
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let mut directives = Directives::new();
-            directives.insert("#ctx_before".to_string(), vec![]);
-
-            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
-                .err()
-                .unwrap();
-            assert_eq!(
-                err,
-                ReductError::unprocessable_entity("#ctx_before must be a non-empty value")
-            );
-        }
-
-        #[rstest]
-        fn filter_ctx_after_empty(parser: Parser) {
-            let (condition, _) = parser
-                .parse(json!({
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let mut directives = Directives::new();
-            directives.insert("#ctx_after".to_string(), vec![]);
-
-            let err = WhenFilter::<TestFilterRecord>::try_new(condition, directives, true)
-                .err()
-                .unwrap();
-            assert_eq!(
-                err,
-                ReductError::unprocessable_entity("#ctx_after must be a non-empty value")
-            );
         }
 
         #[fixture]

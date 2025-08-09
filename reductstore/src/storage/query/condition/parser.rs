@@ -55,35 +55,8 @@ impl Parser {
                     ));
                 }
 
-                let values = if key == "#select_labels" {
-                    match value {
-                        JsonValue::Array(arr) => {
-                            if arr.is_empty() {
-                                return Err(unprocessable_entity!(
-                                    "Directive '{}' cannot be an empty array",
-                                    key
-                                ));
-                            }
-
-                            arr.iter()
-                                .map(|v| match v {
-                                    JsonValue::String(s) => Ok(Value::String(s.clone())),
-                                    _ => Err(unprocessable_entity!(
-                                        "Directive '{}' must contain only strings",
-                                        key
-                                    )),
-                                })
-                                .collect::<Result<Vec<Value>, _>>()?
-                        }
-                        _ => {
-                            return Err(unprocessable_entity!(
-                                "Directive '{}' must be an array of strings",
-                                key
-                            ));
-                        }
-                    }
-                } else {
-                    let parsed = match value {
+                let parse_primitive = |v: &JsonValue| -> Value {
+                    match v {
                         JsonValue::Bool(value) => Value::Bool(*value),
                         JsonValue::Number(value) => {
                             if value.is_i64() || value.is_u64() {
@@ -99,17 +72,27 @@ impl Parser {
                                 Value::String(value.to_string())
                             }
                         }
-                        _ => {
-                            return Err(unprocessable_entity!(
-                                "Directive '{}' must be a primitive value",
-                                key
-                            ));
-                        }
-                    };
-                    vec![parsed]
+                        _ => panic!("Unsupported directive value type: {}", v), // panic because it's programming error
+                    }
                 };
 
-                directives.insert(key.to_string(), values);
+                let mut parsed_values = vec![];
+
+                if value.is_null() {
+                    return Err(unprocessable_entity!("Directive '{}' cannot be null", key));
+                } else if value.is_object() {
+                    return Err(unprocessable_entity!(
+                        "Directive '{}' cannot be an object",
+                        key
+                    ));
+                } else if value.is_array() {
+                    for item in value.as_array().unwrap() {
+                        parsed_values.push(parse_primitive(item));
+                    }
+                } else {
+                    parsed_values.push(parse_primitive(value))
+                }
+                directives.insert(key.to_string(), parsed_values);
                 keys_to_remove.push(key.to_string());
             }
         }
@@ -510,30 +493,6 @@ mod tests {
         }
 
         #[rstest]
-        fn test_parse_directives_empty_array(parser: Parser) {
-            let json = json!({
-                "#select_labels": []
-            });
-            let result = parser.parse(json);
-            assert_eq!(
-                result.err().unwrap().to_string(),
-                "[UnprocessableEntity] Directive '#select_labels' cannot be an empty array"
-            );
-        }
-
-        #[rstest]
-        fn test_parse_directives_invalid_value(parser: Parser) {
-            let json = json!({
-                "#ctx_before": [1, 2, 3]
-            });
-            let result = parser.parse(json);
-            assert_eq!(
-                result.err().unwrap().to_string(),
-                "[UnprocessableEntity] Directive '#ctx_before' must be a primitive value"
-            );
-        }
-
-        #[rstest]
         fn test_parse_invalid_directive(parser: Parser) {
             let json = json!({
                 "#invalid_directive": "value"
@@ -542,30 +501,6 @@ mod tests {
             assert_eq!(
                 result.err().unwrap().to_string(),
                 "[UnprocessableEntity] Directive '#invalid_directive' is not supported"
-            );
-        }
-
-        #[rstest]
-        fn test_parse_select_labels_with_non_string(parser: Parser) {
-            let json = json!({
-                "#select_labels": ["label1", 123]
-            });
-            let result = parser.parse(json);
-            assert_eq!(
-                result.err().unwrap().to_string(),
-                "[UnprocessableEntity] Directive '#select_labels' must contain only strings"
-            );
-        }
-
-        #[rstest]
-        fn test_parse_select_labels_not_array(parser: Parser) {
-            let json = json!({
-                "#select_labels": "not_an_array"
-            });
-            let result = parser.parse(json);
-            assert_eq!(
-                result.err().unwrap().to_string(),
-                "[UnprocessableEntity] Directive '#select_labels' must be an array of strings"
             );
         }
     }
