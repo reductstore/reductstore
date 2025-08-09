@@ -175,7 +175,6 @@ mod tests {
                 "$limit": [1]
                 }))
                 .unwrap();
-            println!("Condition: {:?}", condition);
 
             let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
 
