@@ -116,7 +116,7 @@ impl Parser {
 
         // Remove directives from the original JSON object
         for key in keys_to_remove {
-            json.as_object_mut().unwrap().remove(&key);
+            json.as_object_mut().unwrap().shift_remove(&key);
         }
         Ok(directives)
     }

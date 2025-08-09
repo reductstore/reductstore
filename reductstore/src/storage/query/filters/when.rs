@@ -10,7 +10,9 @@ use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::unprocessable_entity;
 use std::collections::{HashMap, HashSet, VecDeque};
+
 pub(super) enum Padding {
     Records(usize),
     Duration(u64),
@@ -35,15 +37,13 @@ impl<R> WhenFilter<R> {
         strict: bool,
     ) -> Result<Self, ReductError> {
         let before = if let Some(before) = directives.get("#ctx_before") {
-            let before_val = before.first().ok_or_else(|| {
-                ReductError::unprocessable_entity("#ctx_before must be a non-empty value")
-            })?;
+            let before_val = before
+                .first()
+                .ok_or_else(|| unprocessable_entity!("#ctx_before must be a non-empty value"))?;
 
             let val = before_val.as_int()?;
             if val < 0 {
-                return Err(ReductError::unprocessable_entity(
-                    "#ctx_before must be non-negative",
-                ));
+                return Err(unprocessable_entity!("#ctx_before must be non-negative",));
             }
 
             if before_val.is_duration() {
@@ -56,14 +56,12 @@ impl<R> WhenFilter<R> {
         };
 
         let after = if let Some(after) = directives.get("#ctx_after") {
-            let after_val = after.first().ok_or_else(|| {
-                ReductError::unprocessable_entity("#ctx_after must be a non-empty value")
-            })?;
+            let after_val = after
+                .first()
+                .ok_or_else(|| unprocessable_entity!("#ctx_after must be a non-empty value"))?;
             let val = after_val.as_int()?;
             if val < 0 {
-                return Err(ReductError::unprocessable_entity(
-                    "#ctx_after must be non-negative",
-                ));
+                return Err(unprocessable_entity!("#ctx_after must be non-negative",));
             }
             if after_val.is_duration() {
                 Duration(val as u64)
@@ -219,6 +217,46 @@ mod tests {
 
             let result = filter.filter(record_true.clone()).unwrap();
             assert_eq!(result, Some(vec![record_true]));
+        }
+
+        #[rstest]
+        fn filter_ctx_before_with_limit(
+            parser: Parser,
+            record_true: TestFilterRecord,
+            record_false: TestFilterRecord,
+        ) {
+            let (condition, directives) = parser
+                .parse(json!({
+                "#ctx_before": 2,
+                "$and": [true, "&label"],
+                "$limit": [1]
+                }))
+                .unwrap();
+            println!("Condition: {:?}", condition);
+
+            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
+
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
+
+            let result = filter.filter(record_false.clone()).unwrap();
+            assert_eq!(result, Some(vec![]));
+
+            let result = filter.filter(record_true.clone()).unwrap();
+            assert_eq!(
+                result,
+                Some(vec![
+                    record_false.clone(),
+                    record_false,
+                    record_true.clone()
+                ])
+            );
+
+            let result = filter.filter(record_true.clone()).unwrap();
+            assert_eq!(result, None);
         }
 
         #[rstest]
