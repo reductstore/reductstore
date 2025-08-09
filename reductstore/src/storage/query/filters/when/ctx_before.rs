@@ -1,9 +1,12 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::storage::query::condition::Value;
 use crate::storage::query::filters::when::Padding;
 use crate::storage::query::filters::when::Padding::{Duration, Records};
 use crate::storage::query::filters::FilterRecord;
+use reduct_base::error::ReductError;
+use reduct_base::unprocessable_entity;
 use std::collections::VecDeque;
 
 /// Context for managing records before a condition is checked in a `when` filter.
@@ -12,8 +15,38 @@ pub(super) struct CtxBefore {
 }
 
 impl CtxBefore {
-    pub fn new(before: Padding) -> Self {
-        CtxBefore { before }
+    pub fn try_new(directive: Option<Vec<Value>>) -> Result<Self, ReductError> {
+        let before = match directive {
+            Some(before) => {
+                if before.len() != 1 {
+                    return Err(unprocessable_entity!("#ctx_before must be a single value"));
+                }
+
+                let before_val = before.first().unwrap();
+                let val = before_val.as_int().map_err(|e| {
+                    unprocessable_entity!(
+                        "#ctx_before must be an integer or duration: {}",
+                        e.message
+                    )
+                })?;
+                if val < 0 {
+                    return Err(unprocessable_entity!("#ctx_before must be non-negative",));
+                }
+
+                if before_val.is_duration() {
+                    Duration(val as u64)
+                } else {
+                    Records(val as usize)
+                }
+            }
+
+            None => {
+                // Default to 0 records before if no padding is specified
+                Records(0)
+            }
+        };
+
+        Ok(CtxBefore { before })
     }
 
     /// Queues a record into the context buffer, managing the size based on the `before` padding.
@@ -51,12 +84,13 @@ impl CtxBefore {
 mod tests {
     use super::*;
     use crate::storage::query::filters::tests::TestFilterRecord;
+
     use reduct_base::io::RecordMeta;
     use rstest::*;
 
     #[rstest]
     fn test_ctx_before_records() {
-        let ctx = CtxBefore::new(Records(2));
+        let ctx = CtxBefore::try_new(Some(vec![Value::Int(2)])).unwrap();
         let mut buffer = VecDeque::new();
         let record: TestFilterRecord = RecordMeta::builder().build().into();
 
@@ -76,7 +110,7 @@ mod tests {
 
     #[rstest]
     fn test_ctx_before_duration() {
-        let ctx = CtxBefore::new(Duration(5000));
+        let ctx = CtxBefore::try_new(Some(vec![Value::Duration(5000)])).unwrap();
         let mut buffer = VecDeque::new();
         let record1: TestFilterRecord = RecordMeta::builder().timestamp(1000).build().into();
         let record2: TestFilterRecord = RecordMeta::builder().timestamp(6000).build().into();
@@ -100,6 +134,30 @@ mod tests {
             buffer.front(),
             Some(&record2),
             "Should keep the second record"
+        );
+    }
+
+    #[test]
+    fn test_ctx_after_invalid() {
+        let result = CtxBefore::try_new(Some(vec![Value::Int(-1)]));
+        assert_eq!(
+            result.err().unwrap(),
+            unprocessable_entity!("#ctx_before must be non-negative")
+        );
+
+        let result = CtxBefore::try_new(Some(vec![Value::String("invalid".to_string())]));
+        assert_eq!(result.err().unwrap(), unprocessable_entity!("#ctx_before must be an integer or duration: Value 'invalid' could not be parsed as integer"));
+
+        let result = CtxBefore::try_new(Some(vec![Value::Int(1), Value::Int(2)]));
+        assert_eq!(
+            result.err().unwrap(),
+            unprocessable_entity!("#ctx_before must be a single value")
+        );
+
+        let result = CtxBefore::try_new(Some(vec![]));
+        assert_eq!(
+            result.err().unwrap(),
+            unprocessable_entity!("#ctx_before must be a single value")
         );
     }
 }
