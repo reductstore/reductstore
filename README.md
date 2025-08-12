@@ -107,6 +107,7 @@ Here are the client SDKs available:
 - [Python Client SDK](https://github.com/reductstore/reduct-py)
 - [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
 - [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
+- [Go Client SDK](https://github.com/reductstore/reduct-go)
 
 ## Tools
 
