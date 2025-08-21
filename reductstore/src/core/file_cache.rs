@@ -2,12 +2,13 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
+use log::{error, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fs::{remove_dir_all, remove_file, rename, File};
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, RwLock, Weak};
+use std::sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, Weak};
 use std::time::Duration;
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
@@ -91,13 +92,7 @@ impl FileCache {
         } else {
             let file = File::options().read(true).open(path)?;
             let file = Arc::new(RwLock::new(file));
-            cache.insert(
-                path.clone(),
-                FileDescriptor {
-                    file_ref: Arc::clone(&file),
-                    mode: AccessMode::Read,
-                },
-            );
+            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file)?;
             file
         };
 
@@ -140,13 +135,7 @@ impl FileCache {
                 .read(true)
                 .open(path)?;
             let file = Arc::new(RwLock::new(file));
-            cache.insert(
-                path.clone(),
-                FileDescriptor {
-                    file_ref: Arc::clone(&file),
-                    mode: AccessMode::ReadWrite,
-                },
-            );
+            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file)?;
             file
         };
 
@@ -154,6 +143,31 @@ impl FileCache {
             file.write()?.seek(pos)?;
         }
         Ok(FileWeak::new(file, path.clone()))
+    }
+
+    /// Saves a file descriptor in the cache and syncs any discarded files.
+    ///
+    /// We need to make sure that we sync all files that were discarded
+    fn save_in_cache_and_sync_discarded(
+        path: PathBuf,
+        cache: &mut RwLockWriteGuard<Cache<PathBuf, FileDescriptor>>,
+        file: &Arc<RwLock<File>>,
+    ) -> Result<(), ReductError> {
+        let discarded_files = cache.insert(
+            path.clone(),
+            FileDescriptor {
+                file_ref: Arc::clone(file),
+                mode: AccessMode::ReadWrite,
+            },
+        );
+
+        for (_, file) in discarded_files {
+            if let Err(err) = file.file_ref.write()?.sync_all() {
+                warn!("Failed to sync file {}: {}", path.display(), err);
+            }
+        }
+
+        Ok(())
     }
 
     /// Removes a file from the file system and the cache.
@@ -177,7 +191,11 @@ impl FileCache {
     /// removing the file from the file system.
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
-        cache.remove(path);
+        if let Some(removed) = cache.remove(path) {
+            if let Err(err) = removed.file_ref.write()?.sync_all() {
+                warn!("Failed to sync file {}: {}", path.display(), err);
+            }
+        }
 
         if path.try_exists()? {
             remove_file(path)?;
