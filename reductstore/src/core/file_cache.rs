@@ -2,20 +2,29 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
-use log::{error, warn};
+use log::{debug, error, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fs::{remove_dir_all, remove_file, rename, File};
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, Weak};
+use std::thread::spawn;
 use std::time::Duration;
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
-pub(crate) static FILE_CACHE: LazyLock<FileCache> =
-    LazyLock::new(|| FileCache::new(FILE_CACHE_MAX_SIZE, FILE_CACHE_TIME_TO_LIVE));
+const FILECACHE_SYNC_INTERVAL: Duration = Duration::from_millis(100);
+
+pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
+    FileCache::new(
+        FILE_CACHE_MAX_SIZE,
+        FILE_CACHE_TIME_TO_LIVE,
+        FILECACHE_SYNC_INTERVAL,
+    )
+});
 
 pub(crate) struct FileWeak {
     file: Weak<RwLock<File>>,
@@ -49,6 +58,7 @@ enum AccessMode {
 struct FileDescriptor {
     file_ref: FileRc,
     mode: AccessMode,
+    synced: bool,
 }
 
 /// A cache to keep file descriptors open
@@ -58,6 +68,7 @@ struct FileDescriptor {
 #[derive(Clone)]
 pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
+    stop_sync_worker: Arc<AtomicBool>,
 }
 
 impl FileCache {
@@ -67,9 +78,42 @@ impl FileCache {
     ///
     /// * `max_size` - The maximum number of file descriptors to keep open
     /// * `ttl` - The time to live for a file descriptor
-    pub fn new(max_size: usize, ttl: Duration) -> Self {
+    /// * `sync_interval` - The interval to sync files from cache to disk
+    pub fn new(max_size: usize, ttl: Duration, sync_interval: Duration) -> Self {
+        let cache = Arc::new(RwLock::new(Cache::<PathBuf, FileDescriptor>::new(
+            max_size, ttl,
+        )));
+        let cache_clone = Arc::clone(&cache);
+        let stop_sync_worker = Arc::new(AtomicBool::new(false));
+        let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
+
+        spawn(move || {
+            // Periodically sync files from cache to disk
+            while !stop_sync_worker.load(Ordering::Relaxed) {
+                std::thread::sleep(sync_interval);
+                let Ok(mut cache) = cache.write() else {
+                    error!("Failed to acquire write lock on file cache");
+                    continue;
+                };
+
+                for (path, file_desc) in cache.iter_mut() {
+                    if file_desc.mode != AccessMode::ReadWrite || file_desc.synced {
+                        continue; // Only sync files that are in read-write mode
+                    }
+
+                    if let Err(err) = file_desc.file_ref.write().unwrap().sync_all() {
+                        warn!("Failed to sync file {}: {}", path.display(), err);
+                    }
+
+                    debug!("Syncing file {} to disk", path.display());
+                    file_desc.synced = true; // Mark as synced after successful sync
+                }
+            }
+        });
+
         FileCache {
-            cache: Arc::new(RwLock::new(Cache::new(max_size, ttl))),
+            cache: cache_clone,
+            stop_sync_worker: stop_sync_worker_clone,
         }
     }
 
@@ -119,13 +163,14 @@ impl FileCache {
         let mut cache = self.cache.write()?;
 
         let file = if let Some(desc) = cache.get_mut(path) {
+            desc.synced = false;
+
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
                 let rw_file = File::options().write(true).read(true).open(path)?;
                 desc.file_ref = Arc::new(RwLock::new(rw_file));
                 desc.mode = AccessMode::ReadWrite;
-
                 Arc::clone(&desc.file_ref)
             }
         } else {
@@ -143,31 +188,6 @@ impl FileCache {
             file.write()?.seek(pos)?;
         }
         Ok(FileWeak::new(file, path.clone()))
-    }
-
-    /// Saves a file descriptor in the cache and syncs any discarded files.
-    ///
-    /// We need to make sure that we sync all files that were discarded
-    fn save_in_cache_and_sync_discarded(
-        path: PathBuf,
-        cache: &mut RwLockWriteGuard<Cache<PathBuf, FileDescriptor>>,
-        file: &Arc<RwLock<File>>,
-    ) -> Result<(), ReductError> {
-        let discarded_files = cache.insert(
-            path.clone(),
-            FileDescriptor {
-                file_ref: Arc::clone(file),
-                mode: AccessMode::ReadWrite,
-            },
-        );
-
-        for (_, file) in discarded_files {
-            if let Err(err) = file.file_ref.write()?.sync_all() {
-                warn!("Failed to sync file {}: {}", path.display(), err);
-            }
-        }
-
-        Ok(())
     }
 
     /// Removes a file from the file system and the cache.
@@ -245,6 +265,38 @@ impl FileCache {
         cache.remove(old_path);
         rename(old_path, new_path)?;
         Ok(())
+    }
+
+    /// Saves a file descriptor in the cache and syncs any discarded files.
+    ///
+    /// We need to make sure that we sync all files that were discarded
+    fn save_in_cache_and_sync_discarded(
+        path: PathBuf,
+        cache: &mut RwLockWriteGuard<Cache<PathBuf, FileDescriptor>>,
+        file: &Arc<RwLock<File>>,
+    ) -> Result<(), ReductError> {
+        let discarded_files = cache.insert(
+            path.clone(),
+            FileDescriptor {
+                file_ref: Arc::clone(file),
+                mode: AccessMode::ReadWrite,
+                synced: false,
+            },
+        );
+
+        for (_, file) in discarded_files {
+            if let Err(err) = file.file_ref.write()?.sync_all() {
+                warn!("Failed to sync file {}: {}", path.display(), err);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for FileCache {
+    fn drop(&mut self) {
+        self.stop_sync_worker.store(true, Ordering::Relaxed);
     }
 }
 
