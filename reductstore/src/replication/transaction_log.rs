@@ -3,7 +3,7 @@
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::Transaction;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -73,39 +73,13 @@ impl TransactionLog {
             let write_pos = u64::from_be_bytes(buf[0..8].try_into().unwrap()) as usize;
             let read_pos = u64::from_be_bytes(buf[8..16].try_into().unwrap()) as usize;
 
-            // Integrity check for the transaction log
-            if write_pos < HEADER_SIZE
-                || write_pos > capacity_in_bytes
-                || (write_pos - HEADER_SIZE) % ENTRY_SIZE != 0
-            {
-                println!("{}", write_pos - HEADER_SIZE % ENTRY_SIZE);
-                return Err(internal_server_error!(
-                    "Invalid write position {} in transaction log {:?}",
-                    write_pos,
-                    path
-                ));
-            }
-
-            if read_pos < HEADER_SIZE
-                || read_pos > capacity_in_bytes
-                || (read_pos - HEADER_SIZE) % ENTRY_SIZE != 0
-            {
-                return Err(internal_server_error!(
-                    "Invalid read position {} in transaction log {:?}",
-                    read_pos,
-                    path
-                ));
-            }
-
-            if init_capacity_in_bytes < HEADER_SIZE
-                || (capacity_in_bytes - HEADER_SIZE) % ENTRY_SIZE != 0
-            {
-                return Err(internal_server_error!(
-                    "Invalid size {} of transaction log {:?}",
-                    capacity_in_bytes,
-                    path
-                ));
-            }
+            Self::integrity_check(
+                path,
+                init_capacity_in_bytes,
+                capacity_in_bytes,
+                write_pos,
+                read_pos,
+            )?;
 
             let capacity_in_bytes = if init_capacity_in_bytes != capacity_in_bytes {
                 // If the capacity is changed, we need to check if the log is empty
@@ -139,6 +113,44 @@ impl TransactionLog {
         };
 
         Ok(instance)
+    }
+
+    fn integrity_check(
+        path: &PathBuf,
+        init_capacity_in_bytes: usize,
+        capacity_in_bytes: usize,
+        write_pos: usize,
+        read_pos: usize,
+    ) -> Result<(), ReductError> {
+        if init_capacity_in_bytes < HEADER_SIZE
+            || (capacity_in_bytes - HEADER_SIZE) % ENTRY_SIZE != 0
+        {
+            return Err(internal_server_error!(
+                "Invalid size {} of transaction log {}",
+                capacity_in_bytes,
+                path.to_str().unwrap_or("unknown path")
+            ));
+        }
+
+        let check_pos = |pos: usize, name: &str| {
+            if pos < HEADER_SIZE
+                || pos >= capacity_in_bytes
+                || (pos - HEADER_SIZE) % ENTRY_SIZE != 0
+            {
+                return Err(internal_server_error!(
+                    "Invalid {} position {} in transaction log {}",
+                    name,
+                    pos,
+                    path.to_str().unwrap_or("unknown path")
+                ));
+            }
+            Ok(())
+        };
+
+        check_pos(write_pos, "write")?;
+        check_pos(read_pos, "read")?;
+
+        Ok(())
     }
 
     /// Push a new transaction to the log.
@@ -212,7 +224,7 @@ impl TransactionLog {
     pub fn pop_front(&mut self, n: usize) -> Result<usize, ReductError> {
         let mut popped = 0usize;
         for _ in 0..n {
-            if self.read_pos >= self.write_pos {
+            if self.read_pos == self.write_pos {
                 break;
             }
             self.unsafe_pop()?;
@@ -284,13 +296,13 @@ mod tests {
 
     #[rstest]
     fn test_new_transaction_log(path: PathBuf) {
-        let transaction_log = TransactionLog::try_load_or_create(path, 100).unwrap();
+        let transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
         assert_eq!(transaction_log.is_empty(), true);
     }
 
     #[rstest]
     fn test_write_read_transaction_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 100).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
@@ -321,7 +333,7 @@ mod tests {
 
     #[rstest]
     fn test_write_broken_type(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 100).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
@@ -350,7 +362,7 @@ mod tests {
 
     #[rstest]
     fn test_out_of_range(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 100).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
@@ -382,7 +394,7 @@ mod tests {
 
     #[rstest]
     fn test_overflow(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
@@ -398,14 +410,14 @@ mod tests {
 
     #[rstest]
     fn test_recovery(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
                 .unwrap();
         }
 
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
             transaction_log.front(2).unwrap(),
@@ -418,27 +430,27 @@ mod tests {
 
     #[rstest]
     fn test_recovery_init(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
             .unwrap();
         drop(transaction_log);
 
-        let transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
+        let transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
         assert_eq!(transaction_log.write_pos, HEADER_SIZE + ENTRY_SIZE);
         assert_eq!(transaction_log.read_pos, HEADER_SIZE);
     }
 
     #[rstest]
     fn test_recovery_empty_cache(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
             .unwrap();
 
         FILE_CACHE.discard_recursive(&path).unwrap(); // discard the cache to simulate restart
 
-        let mut transaction_log = TransactionLog::try_load_or_create(path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
 
         // check if the transaction log is still working after cache discard
         assert_eq!(
@@ -451,13 +463,13 @@ mod tests {
 
     #[rstest]
     fn test_resize_empty_log(path: PathBuf) {
-        TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        TransactionLog::try_load_or_create(&path, 3).unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(path.clone(), 5).unwrap();
+        TransactionLog::try_load_or_create(&path, 5).unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 5 + HEADER_SIZE
@@ -466,7 +478,7 @@ mod tests {
 
     #[rstest]
     fn test_resize_non_empty_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(path.clone(), 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
             .unwrap();
@@ -475,12 +487,75 @@ mod tests {
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(path.clone(), 5).unwrap();
+        TransactionLog::try_load_or_create(&path, 5).unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE,
             "The log is not empty, so the capacity should not be changed."
         );
+    }
+
+    mod integrity_tests {
+        use super::*;
+
+        #[rstest]
+        #[case([0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 0, 16], "Invalid write position 17 in transaction log"
+        )]
+        #[case([0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 16], "Invalid write position 1 in transaction log"
+        )]
+        #[case([0, 0, 0, 0, 0, 0, 0, 34, 0, 0, 0, 0, 0, 0, 0, 16], "Invalid write position 34 in transaction log"
+        )]
+        #[case([0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 17], "Invalid read position 17 in transaction log"
+        )]
+        #[case([0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 1], "Invalid read position 1 in transaction log"
+        )]
+        #[case([0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 34], "Invalid read position 34 in transaction log"
+        )]
+        fn test_invalid_position(
+            #[case] buf: [u8; 16],
+            #[case] expected_error: &str,
+            path: PathBuf,
+        ) {
+            {
+                let file = FILE_CACHE
+                    .write_or_create(&path, SeekFrom::Start(0))
+                    .unwrap()
+                    .upgrade()
+                    .unwrap();
+                let mut file = file.write().unwrap();
+                file.write_all(&buf).unwrap();
+                file.set_len((HEADER_SIZE + ENTRY_SIZE * 2) as u64).unwrap();
+            }
+
+            let result = TransactionLog::try_load_or_create(&path, 3);
+            assert_eq!(
+                result.err().unwrap(),
+                internal_server_error!("{} {}", expected_error, path.to_str().unwrap())
+            );
+        }
+
+        #[rstest]
+        fn test_invalid_size(path: PathBuf) {
+            {
+                let file = FILE_CACHE
+                    .write_or_create(&path, SeekFrom::Start(0))
+                    .unwrap()
+                    .upgrade()
+                    .unwrap();
+                let mut file = file.write().unwrap();
+                file.write_all(&[0u8; 16]).unwrap();
+                file.set_len((HEADER_SIZE + 1) as u64).unwrap();
+            }
+
+            let result = TransactionLog::try_load_or_create(&path, 3);
+            assert_eq!(
+                result.err().unwrap(),
+                internal_server_error!(
+                    "Invalid size 17 of transaction log {}",
+                    path.to_str().unwrap()
+                )
+            );
+        }
     }
 
     #[fixture]

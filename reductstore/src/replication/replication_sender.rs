@@ -632,7 +632,8 @@ mod tests {
 
         let log_map = Arc::new(RwLock::new(HashMap::new()));
         let log = RwLock::new(
-            TransactionLog::try_load_or_create(storage.data_path().join("test.log"), 1000).unwrap(),
+            TransactionLog::try_load_or_create(&storage.data_path().join("test.log"), 1000)
+                .unwrap(),
         );
 
         log_map.write().unwrap().insert("test".to_string(), log);
