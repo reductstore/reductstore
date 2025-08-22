@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fs::{remove_dir_all, remove_file, rename, File};
@@ -338,7 +338,6 @@ mod tests {
 
     use rstest::*;
     use std::io::Read;
-    use std::os::unix::fs::PermissionsExt;
     use std::thread::sleep;
 
     #[rstest]
