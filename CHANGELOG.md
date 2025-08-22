@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Fixed
+
+- Prevent data lost of unsynchronized files in case of power failure for unfinished blocks, [PR-901](
+
 ## [1.16.1] - 2025-08-09
 
 ### Fixed
