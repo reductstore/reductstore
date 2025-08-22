@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
+use crate::core::file_cache::AccessMode::ReadWrite;
 use log::{debug, error, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -65,6 +66,8 @@ struct FileDescriptor {
 ///
 /// This optimization is needed for network file systems because opening
 /// and closing files for writing causes synchronization overhead.
+///
+/// Additionally, it periodically syncs files to disk to ensure data integrity.
 #[derive(Clone)]
 pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
@@ -142,7 +145,12 @@ impl FileCache {
         } else {
             let file = File::options().read(true).open(path)?;
             let file = Arc::new(RwLock::new(file));
-            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file)?;
+            Self::save_in_cache_and_sync_discarded(
+                path.clone(),
+                &mut cache,
+                &file,
+                AccessMode::Read,
+            )?;
             file
         };
 
@@ -186,7 +194,12 @@ impl FileCache {
                 .read(true)
                 .open(path)?;
             let file = Arc::new(RwLock::new(file));
-            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file)?;
+            Self::save_in_cache_and_sync_discarded(
+                path.clone(),
+                &mut cache,
+                &file,
+                AccessMode::ReadWrite,
+            )?;
             file
         };
 
@@ -217,12 +230,7 @@ impl FileCache {
     /// removing the file from the file system.
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
-        if let Some(removed) = cache.remove(path) {
-            if let Err(err) = removed.file_ref.write()?.sync_all() {
-                warn!("Failed to sync file {}: {}", path.display(), err);
-            }
-        }
-
+        cache.remove(path);
         if path.try_exists()? {
             remove_file(path)?;
         }
@@ -239,6 +247,12 @@ impl FileCache {
         Ok(())
     }
 
+    /// Discards all files in the cache that are under the specified path.
+    ///
+    /// This function iterates through the cache and removes all file descriptors
+    /// whose paths start with the specified `path`. If a file is in read-write mode
+    /// and has not been synced, it attempts to sync the file before removing it from the cache.
+    ///
     pub fn discard_recursive(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
         let files_to_remove = cache
@@ -247,9 +261,18 @@ impl FileCache {
             .filter(|file_path| file_path.starts_with(path))
             .map(|file_path| (*file_path).clone())
             .collect::<Vec<PathBuf>>();
+
         for file_path in files_to_remove {
-            cache.remove(&file_path);
+            if let Some(file) = cache.remove(&file_path) {
+                // If the file is in read-write mode and not synced, we need to sync it before removing from cache
+                if file.mode == AccessMode::ReadWrite && !file.synced {
+                    if let Err(err) = file.file_ref.write()?.sync_all() {
+                        warn!("Failed to sync file {}: {}", file_path.display(), err);
+                    }
+                }
+            }
         }
+
         Ok(())
     }
 
@@ -280,12 +303,13 @@ impl FileCache {
         path: PathBuf,
         cache: &mut RwLockWriteGuard<Cache<PathBuf, FileDescriptor>>,
         file: &Arc<RwLock<File>>,
+        mode: AccessMode,
     ) -> Result<(), ReductError> {
         let discarded_files = cache.insert(
             path.clone(),
             FileDescriptor {
                 file_ref: Arc::clone(file),
-                mode: AccessMode::ReadWrite,
+                mode,
                 synced: false,
             },
         );
@@ -461,7 +485,7 @@ mod tests {
 
     #[fixture]
     fn cache() -> FileCache {
-        FileCache::new(2, Duration::from_millis(100))
+        FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100))
     }
 
     #[fixture]
