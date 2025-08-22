@@ -138,6 +138,10 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         self.store.keys().collect()
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&K, &mut V)> {
+        self.store.iter_mut().map(|(k, v)| (k, &mut v.value))
+    }
+
     fn discard_old_descriptors(&mut self) -> Vec<(K, V)> {
         // remove old descriptors
         let mut removed = Vec::new();
