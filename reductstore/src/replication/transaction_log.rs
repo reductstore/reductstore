@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FILE_CACHE;
@@ -28,28 +28,6 @@ pub(super) struct TransactionLog {
 const HEADER_SIZE: usize = 16;
 const ENTRY_SIZE: usize = 9;
 
-impl Drop for TransactionLog {
-    fn drop(&mut self) {
-        // Flush and sync the file in a separate thread.
-        let file = FILE_CACHE.write_or_create(&self.file_path, SeekFrom::Current(0));
-        if file.is_err() {
-            error!("Failed to open transaction log: {}", file.err().unwrap());
-            return;
-        }
-
-        let file = file.unwrap().upgrade().unwrap();
-        let sync = || {
-            let mut file = file.write()?;
-            file.flush()?;
-            file.sync_all()?;
-
-            Ok::<(), ReductError>(())
-        };
-
-        sync().map_or_else(|e| error!("Failed to sync transaction log: {}", e), |r| r);
-    }
-}
-
 impl TransactionLog {
     /// Create a new transaction log or load an existing one.
     ///
@@ -61,7 +39,7 @@ impl TransactionLog {
     /// # Returns
     ///
     /// A new transaction log instance or an error.
-    pub fn try_load_or_create(path: PathBuf, capacity: usize) -> Result<Self, ReductError> {
+    pub fn try_load_or_create(path: &PathBuf, capacity: usize) -> Result<Self, ReductError> {
         let init_capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
 
         let instance = if !path.try_exists()? {
@@ -77,7 +55,7 @@ impl TransactionLog {
             file.sync_all()?;
 
             Self {
-                file_path: path,
+                file_path: path.clone(),
                 capacity_in_bytes: init_capacity_in_bytes,
                 write_pos: HEADER_SIZE,
                 read_pos: HEADER_SIZE,
@@ -94,6 +72,41 @@ impl TransactionLog {
             };
             let write_pos = u64::from_be_bytes(buf[0..8].try_into().unwrap()) as usize;
             let read_pos = u64::from_be_bytes(buf[8..16].try_into().unwrap()) as usize;
+
+            // Integrity check for the transaction log
+            if write_pos < HEADER_SIZE
+                || write_pos > capacity_in_bytes
+                || (write_pos - HEADER_SIZE) % ENTRY_SIZE != 0
+            {
+                println!("{}", write_pos - HEADER_SIZE % ENTRY_SIZE);
+                return Err(internal_server_error!(
+                    "Invalid write position {} in transaction log {:?}",
+                    write_pos,
+                    path
+                ));
+            }
+
+            if read_pos < HEADER_SIZE
+                || read_pos > capacity_in_bytes
+                || (read_pos - HEADER_SIZE) % ENTRY_SIZE != 0
+            {
+                return Err(internal_server_error!(
+                    "Invalid read position {} in transaction log {:?}",
+                    read_pos,
+                    path
+                ));
+            }
+
+            if init_capacity_in_bytes < HEADER_SIZE
+                || (capacity_in_bytes - HEADER_SIZE) % ENTRY_SIZE != 0
+            {
+                return Err(internal_server_error!(
+                    "Invalid size {} of transaction log {:?}",
+                    capacity_in_bytes,
+                    path
+                ));
+            }
+
             let capacity_in_bytes = if init_capacity_in_bytes != capacity_in_bytes {
                 // If the capacity is changed, we need to check if the log is empty
                 // then we can change the capacity.
@@ -118,7 +131,7 @@ impl TransactionLog {
             };
 
             Self {
-                file_path: path,
+                file_path: path.to_path_buf(),
                 capacity_in_bytes,
                 write_pos,
                 read_pos,
@@ -199,7 +212,7 @@ impl TransactionLog {
     pub fn pop_front(&mut self, n: usize) -> Result<usize, ReductError> {
         let mut popped = 0usize;
         for _ in 0..n {
-            if self.read_pos == self.write_pos {
+            if self.read_pos >= self.write_pos {
                 break;
             }
             self.unsafe_pop()?;

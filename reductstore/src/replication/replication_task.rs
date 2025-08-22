@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
@@ -131,10 +131,25 @@ impl ReplicationTask {
                         &entry.name,
                         &replication_name,
                     );
-                    let log = TransactionLog::try_load_or_create(
-                        path,
+                    let log = match TransactionLog::try_load_or_create(
+                        &path,
                         thr_system_options.transaction_log_size,
-                    )?;
+                    ) {
+                        Ok(log) => log,
+                        Err(err) => {
+                            error!(
+                                "Failed to load transaction log for entry '{}': {:?}",
+                                entry.name, err
+                            );
+                            info!("Creating a new transaction log for entry '{}'", entry.name);
+                            FILE_CACHE.remove(&path)?;
+                            TransactionLog::try_load_or_create(
+                                &path,
+                                thr_system_options.transaction_log_size,
+                            )?
+                        }
+                    };
+
                     logs.insert(entry.name, RwLock::new(log));
                 }
 
@@ -183,7 +198,7 @@ impl ReplicationTask {
 
                         info!("Creating a new transaction log: {:?}", path);
                         match TransactionLog::try_load_or_create(
-                            path,
+                            &path,
                             thr_system_options.transaction_log_size,
                         ) {
                             Ok(log) => {
@@ -240,7 +255,7 @@ impl ReplicationTask {
             map.insert(
                 entry_name.clone(),
                 RwLock::new(TransactionLog::try_load_or_create(
-                    Self::build_path_to_transaction_log(
+                    &Self::build_path_to_transaction_log(
                         self.storage.data_path(),
                         &self.settings.src_bucket,
                         &entry_name,
