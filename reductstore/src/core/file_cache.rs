@@ -122,7 +122,7 @@ impl FileCache {
                 continue;
             }
 
-            debug!("Syncing file {} to disk", path.display());
+            debug!("File {} synced to disk", path.display());
             file_desc.synced = true; // Mark as synced after successful sync
         }
     }
