@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix double synchronization of transaction log + integrity checks, [PR-912](https://github.com/reductstore/reductstore/pull/912)
+
 ## [1.16.2] - 2025-08-22
 
 ### Fixed
