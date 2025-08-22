@@ -93,35 +93,37 @@ impl FileCache {
             // Periodically sync files from cache to disk
             while !stop_sync_worker.load(Ordering::Relaxed) {
                 std::thread::sleep(sync_interval);
-                let Ok(mut cache) = cache.write() else {
-                    error!("Failed to acquire write lock on file cache");
-                    continue;
-                };
-
-                for (path, file_desc) in cache.iter_mut() {
-                    // Sync only writeable files that are not synced yet
-                    // and are not used by other threads
-                    if file_desc.mode != AccessMode::ReadWrite
-                        || file_desc.synced
-                        || Arc::strong_count(&file_desc.file_ref) > 1
-                        || Arc::weak_count(&file_desc.file_ref) > 0
-                    {
-                        continue;
-                    }
-
-                    if let Err(err) = file_desc.file_ref.write().unwrap().sync_all() {
-                        warn!("Failed to sync file {}: {}", path.display(), err);
-                    }
-
-                    debug!("Syncing file {} to disk", path.display());
-                    file_desc.synced = true; // Mark as synced after successful sync
-                }
+                Self::sync_rw_and_unused_files(&cache);
             }
         });
 
         FileCache {
             cache: cache_clone,
             stop_sync_worker: stop_sync_worker_clone,
+        }
+    }
+
+    fn sync_rw_and_unused_files(cache: &Arc<RwLock<Cache<PathBuf, FileDescriptor>>>) {
+        let mut cache = cache.write().unwrap();
+
+        for (path, file_desc) in cache.iter_mut() {
+            // Sync only writeable files that are not synced yet
+            // and are not used by other threads
+            if file_desc.mode != AccessMode::ReadWrite
+                || file_desc.synced
+                || Arc::strong_count(&file_desc.file_ref) > 1
+                || Arc::weak_count(&file_desc.file_ref) > 0
+            {
+                continue;
+            }
+
+            if let Err(err) = file_desc.file_ref.write().unwrap().sync_all() {
+                warn!("Failed to sync file {}: {}", path.display(), err);
+                continue;
+            }
+
+            debug!("Syncing file {} to disk", path.display());
+            file_desc.synced = true; // Mark as synced after successful sync
         }
     }
 
@@ -149,7 +151,7 @@ impl FileCache {
                 &mut cache,
                 &file,
                 AccessMode::Read,
-            )?;
+            );
             file
         };
 
@@ -198,7 +200,7 @@ impl FileCache {
                 &mut cache,
                 &file,
                 AccessMode::ReadWrite,
-            )?;
+            );
             file
         };
 
@@ -303,7 +305,7 @@ impl FileCache {
         cache: &mut RwLockWriteGuard<Cache<PathBuf, FileDescriptor>>,
         file: &Arc<RwLock<File>>,
         mode: AccessMode,
-    ) -> Result<(), ReductError> {
+    ) -> () {
         let discarded_files = cache.insert(
             path.clone(),
             FileDescriptor {
@@ -314,12 +316,10 @@ impl FileCache {
         );
 
         for (_, file) in discarded_files {
-            if let Err(err) = file.file_ref.write()?.sync_all() {
+            if let Err(err) = file.file_ref.write().unwrap().sync_all() {
                 warn!("Failed to sync file {}: {}", path.display(), err);
             }
         }
-
-        Ok(())
     }
 }
 
@@ -338,6 +338,7 @@ mod tests {
 
     use rstest::*;
     use std::io::Read;
+    use std::os::unix::fs::PermissionsExt;
     use std::thread::sleep;
 
     #[rstest]
@@ -480,6 +481,53 @@ mod tests {
         assert!(file_2.upgrade().is_err());
 
         assert_eq!(tmp_dir.exists(), false);
+    }
+
+    mod sync_rw_and_unused_files {
+        use super::*;
+
+        #[rstest]
+        fn test_sync_unused_files(cache: FileCache, tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_sync_rw_and_unused_files.txt");
+            {
+                let _file_ref = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .unwrap()
+                    .upgrade()
+                    .unwrap();
+
+                assert!(
+                    !cache.cache.write().unwrap().get(&file_path).unwrap().synced,
+                    "File should not be synced initially"
+                );
+            }
+
+            // Wait for the sync worker to run
+            sleep(Duration::from_millis(150));
+
+            assert!(
+                cache.cache.write().unwrap().get(&file_path).unwrap().synced,
+                "File should be synced after sync worker runs"
+            );
+        }
+
+        #[rstest]
+        fn test_not_sync_used_files(cache: FileCache, tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_not_sync_unused_files.txt");
+            let _file_ref = cache
+                .write_or_create(&file_path, SeekFrom::Start(0))
+                .unwrap()
+                .upgrade()
+                .unwrap();
+
+            // Wait for the sync worker to run
+            sleep(Duration::from_millis(150));
+
+            assert!(
+                !cache.cache.write().unwrap().get(&file_path).unwrap().synced,
+                "File should not be synced after sync worker runs"
+            );
+        }
     }
 
     #[fixture]
