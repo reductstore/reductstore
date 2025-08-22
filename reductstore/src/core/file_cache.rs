@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
-use crate::core::file_cache::AccessMode::ReadWrite;
 use log::{debug, error, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
