@@ -97,8 +97,14 @@ impl FileCache {
                 };
 
                 for (path, file_desc) in cache.iter_mut() {
-                    if file_desc.mode != AccessMode::ReadWrite || file_desc.synced {
-                        continue; // Only sync files that are in read-write mode
+                    // Sync only writeable files that are not synced yet
+                    // and are not used by other threads
+                    if file_desc.mode != AccessMode::ReadWrite
+                        || file_desc.synced
+                        || Arc::strong_count(&file_desc.file_ref) > 1
+                        || Arc::weak_count(&file_desc.file_ref) > 0
+                    {
+                        continue;
                     }
 
                     if let Err(err) = file_desc.file_ref.write().unwrap().sync_all() {
