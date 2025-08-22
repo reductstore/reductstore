@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
@@ -131,10 +131,25 @@ impl ReplicationTask {
                         &entry.name,
                         &replication_name,
                     );
-                    let log = TransactionLog::try_load_or_create(
-                        path,
+                    let log = match TransactionLog::try_load_or_create(
+                        &path,
                         thr_system_options.transaction_log_size,
-                    )?;
+                    ) {
+                        Ok(log) => log,
+                        Err(err) => {
+                            error!(
+                                "Failed to load transaction log for entry '{}': {:?}",
+                                entry.name, err
+                            );
+                            info!("Creating a new transaction log for entry '{}'", entry.name);
+                            FILE_CACHE.remove(&path)?;
+                            TransactionLog::try_load_or_create(
+                                &path,
+                                thr_system_options.transaction_log_size,
+                            )?
+                        }
+                    };
+
                     logs.insert(entry.name, RwLock::new(log));
                 }
 
@@ -183,7 +198,7 @@ impl ReplicationTask {
 
                         info!("Creating a new transaction log: {:?}", path);
                         match TransactionLog::try_load_or_create(
-                            path,
+                            &path,
                             thr_system_options.transaction_log_size,
                         ) {
                             Ok(log) => {
@@ -240,7 +255,7 @@ impl ReplicationTask {
             map.insert(
                 entry_name.clone(),
                 RwLock::new(TransactionLog::try_load_or_create(
-                    Self::build_path_to_transaction_log(
+                    &Self::build_path_to_transaction_log(
                         self.storage.data_path(),
                         &self.settings.src_bucket,
                         &entry_name,
@@ -329,9 +344,9 @@ impl Drop for ReplicationTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
     use bytes::Bytes;
+    use std::fs;
+    use std::io::Write;
 
     use crate::core::file_cache::FILE_CACHE;
     use mockall::mock;
@@ -361,8 +376,12 @@ mod tests {
     }
 
     #[rstest]
-    fn test_transaction_log_init(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
-        let replication = build_replication(remote_bucket, settings);
+    fn test_transaction_log_init(
+        remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        let replication = build_replication(path, remote_bucket, settings);
         assert_eq!(replication.log_map.read().unwrap().len(), 2);
         assert!(
             replication.log_map.read().unwrap().contains_key("test1"),
@@ -375,16 +394,57 @@ mod tests {
     }
 
     #[rstest]
+    fn test_transaction_log_init_err(
+        remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        {
+            // create a broken transaction log
+            let log_path = ReplicationTask::build_path_to_transaction_log(
+                &path,
+                &settings.src_bucket,
+                "test1",
+                &"test".to_string(),
+            );
+
+            fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+            let mut log_file = fs::File::create(&log_path).unwrap();
+
+            log_file
+                .write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+                .unwrap();
+        }
+
+        let replication = build_replication(path, remote_bucket, settings);
+        assert_eq!(replication.log_map.read().unwrap().len(), 2);
+        let log_len = replication
+            .log_map
+            .read()
+            .unwrap()
+            .get("test1")
+            .unwrap()
+            .read()
+            .unwrap()
+            .len();
+        assert_eq!(
+            log_len, 0,
+            "Task recreated a new transaction log for 'test1' after broken log"
+        );
+    }
+
+    #[rstest]
     fn test_add_new_entry(
         mut remote_bucket: MockRmBucket,
         mut notification: TransactionNotification,
         settings: ReplicationSettings,
+        path: PathBuf,
     ) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings.clone());
+        let mut replication = build_replication(path, remote_bucket, settings.clone());
 
         notification.entry = "new_entry".to_string();
         fs::create_dir_all(
@@ -415,12 +475,13 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
+        path: PathBuf,
     ) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings);
 
         replication.notify(notification).unwrap();
         sleep(Duration::from_millis(100));
@@ -451,12 +512,13 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
+        path: PathBuf,
     ) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(false);
-        let mut replication = build_replication(remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings);
 
         replication.notify(notification).unwrap();
         sleep(Duration::from_millis(100));
@@ -487,6 +549,7 @@ mod tests {
         mut notification: TransactionNotification,
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
+        path: PathBuf,
     ) {
         remote_bucket
             .expect_write_batch()
@@ -497,7 +560,7 @@ mod tests {
             ..settings
         };
 
-        let mut replication = build_replication(MockRmBucket::new(), settings.clone());
+        let mut replication = build_replication(path, MockRmBucket::new(), settings.clone());
 
         let mut time = 10;
         for entry in &["test1", "test2"] {
@@ -525,12 +588,13 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
+        path: PathBuf,
     ) {
         remote_bucket
             .expect_write_batch()
             .return_const(Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings.clone());
+        let mut replication = build_replication(path, remote_bucket, settings.clone());
         replication.notify(notification.clone()).unwrap();
 
         let path = ReplicationTask::build_path_to_transaction_log(
@@ -554,12 +618,13 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
+        path: PathBuf,
     ) {
         remote_bucket
             .expect_write_batch()
             .return_const(Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(remote_bucket, settings.clone());
+        let mut replication = build_replication(path, remote_bucket, settings.clone());
         replication.notify(notification.clone()).unwrap();
 
         let path = ReplicationTask::build_path_to_transaction_log(
@@ -590,12 +655,11 @@ mod tests {
     }
 
     fn build_replication(
+        path: PathBuf,
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationTask {
-        let tmp_dir = tempfile::tempdir().unwrap().keep();
-
-        let storage = Arc::new(Storage::load(tmp_dir, None));
+        let storage = Arc::new(Storage::load(path, None));
 
         let bucket = storage
             .create_bucket("src", BucketSettings::default())
@@ -665,6 +729,11 @@ mod tests {
             each_s: None,
             when: None,
         }
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        tempfile::tempdir().unwrap().keep()
     }
 
     fn transaction_log_is_empty(replication: &ReplicationTask) -> bool {
