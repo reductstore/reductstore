@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Prevent data lost of unsynchronized files in case of power failure for unfinished blocks, [PR-901](
+- Prevent data lost of unsynchronized files in case of power failure for unfinished blocks, [PR-909](https://github.com/reductstore/reductstore/pull/909)
+
+### Security
+
+- CVE-2025-55159: Update slab up to 0.4.11, [PR-911](https://github.com/reductstore/reductstore/pull/911)
 
 ## [1.16.1] - 2025-08-09
 
