@@ -1,0 +1,19 @@
+[package]
+name = "backpack-rs"
+version = "0.1.0"
+description = "Backpack is a connector to cloud storage services with caching and local storage capabilities."
+readme = "README.md"
+
+
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+license = "MPL-2.0"
+
+[dependencies]
+url = "2.5.7"
+
+
+[dev-dependencies]
+rstest = "0.26.1"

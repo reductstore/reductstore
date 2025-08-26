@@ -3,7 +3,7 @@
 members = [
     "reductstore",
     "reduct_base",
-    "reduct_macros"]
+    "reduct_macros", "backpack_rs"]
 
 resolver = "2"
 
