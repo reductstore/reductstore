@@ -19,4 +19,16 @@ impl super::Backend for FileSystemBackend {
     fn path(&self) -> &PathBuf {
         &self.path
     }
+
+    fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    fn remove(&self, path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+
+    fn remove_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::remove_dir_all(path)
+    }
 }

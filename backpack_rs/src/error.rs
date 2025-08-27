@@ -19,6 +19,12 @@ impl Error {
     }
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.details)
+    }
+}
+
 impl From<ParseError> for Error {
     fn from(err: ParseError) -> Self {
         Error::new(&err.to_string())

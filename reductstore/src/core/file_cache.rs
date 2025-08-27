@@ -2,14 +2,16 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
+use backpack_rs::fs::File;
+use backpack_rs::Backpack;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use std::fs::{remove_dir_all, remove_file, rename, File};
+use std::backtrace::Backtrace;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, Weak};
+use std::sync::{Arc, LazyLock, Mutex, RwLock, RwLockWriteGuard, Weak};
 use std::thread::spawn;
 use std::time::Duration;
 
@@ -67,10 +69,10 @@ struct FileDescriptor {
 /// and closing files for writing causes synchronization overhead.
 ///
 /// Additionally, it periodically syncs files to disk to ensure data integrity.
-#[derive(Clone)]
 pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
     stop_sync_worker: Arc<AtomicBool>,
+    backpack: RwLock<Backpack>,
 }
 
 impl FileCache {
@@ -81,7 +83,7 @@ impl FileCache {
     /// * `max_size` - The maximum number of file descriptors to keep open
     /// * `ttl` - The time to live for a file descriptor
     /// * `sync_interval` - The interval to sync files from cache to disk
-    pub fn new(max_size: usize, ttl: Duration, sync_interval: Duration) -> Self {
+    fn new(max_size: usize, ttl: Duration, sync_interval: Duration) -> Self {
         let cache = Arc::new(RwLock::new(Cache::<PathBuf, FileDescriptor>::new(
             max_size, ttl,
         )));
@@ -100,6 +102,7 @@ impl FileCache {
         FileCache {
             cache: cache_clone,
             stop_sync_worker: stop_sync_worker_clone,
+            backpack: RwLock::new(Backpack::default()),
         }
     }
 
@@ -127,6 +130,10 @@ impl FileCache {
         }
     }
 
+    pub fn set_backpack(&self, backpack: Backpack) {
+        *self.backpack.write().unwrap() = backpack;
+    }
+
     /// Get a file descriptor for reading
     ///
     /// If the file is not in the cache, it will be opened and added to the cache.
@@ -144,7 +151,7 @@ impl FileCache {
         let file = if let Some(desc) = cache.get_mut(path) {
             Arc::clone(&desc.file_ref)
         } else {
-            let file = File::options().read(true).open(path)?;
+            let file = self.backpack.read()?.open_options().read(true).open(path)?;
             let file = Arc::new(RwLock::new(file));
             Self::save_in_cache_and_sync_discarded(
                 path.clone(),
@@ -183,13 +190,22 @@ impl FileCache {
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
-                let rw_file = File::options().write(true).read(true).open(path)?;
+                let rw_file = self
+                    .backpack
+                    .read()?
+                    .open_options()
+                    .write(true)
+                    .read(true)
+                    .open(path)?;
                 desc.file_ref = Arc::new(RwLock::new(rw_file));
                 desc.mode = AccessMode::ReadWrite;
                 Arc::clone(&desc.file_ref)
             }
         } else {
-            let file = File::options()
+            let file = self
+                .backpack
+                .read()?
+                .open_options()
                 .create(true)
                 .write(true)
                 .read(true)
@@ -233,7 +249,7 @@ impl FileCache {
         let mut cache = self.cache.write()?;
         cache.remove(path);
         if path.try_exists()? {
-            remove_file(path)?;
+            self.backpack.read()?.remove(path)?;
         }
 
         Ok(())
@@ -242,7 +258,7 @@ impl FileCache {
     pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
         self.discard_recursive(path)?;
         if path.try_exists()? {
-            remove_dir_all(path)?;
+            self.backpack.read()?.remove_dir_all(path)?;
         }
 
         Ok(())
@@ -293,7 +309,7 @@ impl FileCache {
     pub fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
         cache.remove(old_path);
-        rename(old_path, new_path)?;
+        self.backpack.read()?.rename(old_path, new_path)?;
         Ok(())
     }
 
@@ -531,7 +547,7 @@ mod tests {
 
     #[fixture]
     fn cache() -> FileCache {
-        FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100))
+        FileCache::init(2, Duration::from_millis(100), Duration::from_millis(100))
     }
 
     #[fixture]

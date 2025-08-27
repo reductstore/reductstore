@@ -3,37 +3,31 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::backend::{BoxedBackend, FileSystemBackend};
+use crate::backend::{BoxedBackend, FileSystemBackend, NoopBackend};
 use crate::error::Error;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use url::Url;
 
 mod backend;
-mod error;
-mod fs;
+pub mod error;
+pub mod fs;
 
 pub struct BackpackBuilder {
-    locations: Vec<String>,
+    location: String,
     cache_size: usize,
-    backends: Vec<Arc<RwLock<BoxedBackend>>>,
 }
 
 impl BackpackBuilder {
     pub fn new() -> Self {
         Self {
-            locations: Vec::new(),
+            location: String::new(),
             cache_size: 1024 * 1024 * 100, // 100 MiB default cache size
-            backends: Vec::new(),
         }
     }
 
-    pub fn add_location<S: ToString>(mut self, location: S) -> Self {
-        if self.locations.len() > 0 {
-            panic!("Only one storage location is supported for now");
-        }
-
-        self.locations.push(location.to_string());
+    pub fn location<S: ToString>(mut self, location: S) -> Self {
+        self.location = location.to_string();
         self
     }
 
@@ -42,37 +36,45 @@ impl BackpackBuilder {
         self
     }
 
-    pub fn try_build(mut self) -> Result<Backpack, Error> {
-        if self.locations.len() == 0 {
-            return Err(Error::new("At least one location must be specified"));
-        }
-
-        for location in &self.locations {
-            let url = Url::parse(location)?;
+    pub fn try_build(self) -> Result<Backpack, Error> {
+        let backend: Arc<RwLock<BoxedBackend>> = if let Ok(url) = Url::parse(&self.location) {
             match url.scheme() {
                 "file" => {
                     // handle file:// scheme with relative and absolute paths
-                    let backend = FileSystemBackend::new(location[5..].into());
-                    self.backends.push(Arc::new(RwLock::new(Box::new(backend))));
+                    Arc::new(RwLock::new(Box::new(FileSystemBackend::new(
+                        self.location[5..].into(),
+                    ))))
                 }
                 _ => {
                     return Err(Error::new(&format!("Unsupported scheme: {}", url.scheme())));
                 }
             }
-        }
+        } else {
+            // treat as local path
+            Arc::new(RwLock::new(Box::new(FileSystemBackend::new(
+                self.location.into(),
+            ))))
+        };
 
         Ok(Backpack {
-            locations: self.locations,
             cache_size: self.cache_size,
-            backends: self.backends,
+            backend,
         })
     }
 }
 
 pub struct Backpack {
-    locations: Vec<String>,
     cache_size: usize,
-    backends: Vec<Arc<RwLock<BoxedBackend>>>,
+    backend: Arc<RwLock<BoxedBackend>>,
+}
+
+impl Default for Backpack {
+    fn default() -> Self {
+        Self {
+            cache_size: 1024 * 1024 * 100, // 100 MiB default cache size
+            backend: Arc::new(RwLock::new(Box::new(NoopBackend::new()))),
+        }
+    }
 }
 
 impl Backpack {
@@ -87,12 +89,31 @@ impl Backpack {
     /// ```
     /// use backpack_rs::Backpack;
     ///
-    /// let backpack = Backpack::builder().add_location("s3://mybucket.com/mnt/data").try_build().unwrap();
+    /// let backpack = Backpack::builder().location("s3://mybucket.com/mnt/data").try_build().unwrap();
     /// let mut options = backpack.open_options();
     /// let file = options.read(true).open("example.txt");
     /// ```
     pub fn open_options(&self) -> fs::OpenOptions {
-        fs::OpenOptions::new(Arc::clone(&self.backends[0]))
+        fs::OpenOptions::new(Arc::clone(&self.backend))
+    }
+
+    pub fn rename<P: AsRef<std::path::Path>, Q: AsRef<std::path::Path>>(
+        &self,
+        from: P,
+        to: Q,
+    ) -> std::io::Result<()> {
+        let backend = self.backend.read().unwrap();
+        backend.rename(from.as_ref(), to.as_ref())
+    }
+
+    pub fn remove<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+        let backend = self.backend.read().unwrap();
+        backend.remove(path.as_ref())
+    }
+
+    pub fn remove_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+        let backend = self.backend.read().unwrap();
+        backend.remove_dir_all(path.as_ref())
     }
 }
 
@@ -104,7 +125,7 @@ mod tests {
     #[rstest]
     fn open_options() {
         let backpack = Backpack::builder()
-            .add_location("file:///tmp")
+            .location("file:///tmp")
             .try_build()
             .unwrap();
         let mut options = backpack.open_options();

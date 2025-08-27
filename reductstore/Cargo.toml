@@ -30,6 +30,7 @@ crate-type = ["lib"]
 [dependencies]
 reduct-base = { path = "../reduct_base", version = "1.15.0", features = ["ext"] }
 reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
+backpack-rs = { path = "../backpack_rs", version = "0.1.0" }
 
 chrono = { version = "0.4.41", features = ["serde"] }
 zip = "4.3.0"

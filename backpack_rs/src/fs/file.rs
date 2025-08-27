@@ -5,6 +5,7 @@
 use crate::backend::BoxedBackend;
 use std::fs::File as StdFile;
 use std::fs::OpenOptions as StdOpenOptions;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, RwLock};
 
 pub struct File {
@@ -58,5 +59,45 @@ impl OpenOptions {
         let full_path = self.backend.read().unwrap().path().join(path);
         let file = self.inner.open(full_path)?;
         Ok(File { inner: file })
+    }
+}
+
+impl File {
+    pub fn sync_all(&self) -> std::io::Result<()> {
+        self.inner.sync_all()
+    }
+
+    pub fn sync_data(&self) -> std::io::Result<()> {
+        self.inner.sync_data()
+    }
+
+    pub fn set_len(&self, size: u64) -> std::io::Result<()> {
+        self.inner.set_len(size)
+    }
+
+    pub fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
+        self.inner.metadata()
+    }
+}
+
+impl Read for File {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl Write for File {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl Seek for File {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
     }
 }

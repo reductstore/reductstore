@@ -11,7 +11,9 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::cfg::io::IoConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
+use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
+use backpack_rs::Backpack;
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
@@ -91,6 +93,19 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
+        FILE_CACHE.set_backpack(
+            Backpack::builder()
+                .location(self.data_path.clone())
+                .try_build()
+                .map_err(|e| {
+                    internal_server_error!(
+                        "Failed to initialize storage backend at {}: {}",
+                        self.data_path,
+                        e
+                    )
+                })?,
+        );
+
         let storage = Arc::new(self.provision_buckets());
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
