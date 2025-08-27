@@ -7,11 +7,10 @@ use backpack_rs::Backpack;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use std::backtrace::Backtrace;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, RwLock, RwLockWriteGuard, Weak};
+use std::sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, Weak};
 use std::thread::spawn;
 use std::time::Duration;
 

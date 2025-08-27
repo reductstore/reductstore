@@ -13,7 +13,7 @@ use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
 use prost::Message;
 
-use crate::core::file_cache::{FileCache, FILE_CACHE};
+use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{

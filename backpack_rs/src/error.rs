@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::convert::Infallible;
-use url::{ParseError, Url};
+use url::ParseError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
