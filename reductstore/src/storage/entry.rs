@@ -18,7 +18,6 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -27,6 +26,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
 };
@@ -74,7 +74,7 @@ impl Entry {
         path: PathBuf,
         settings: EntrySettings,
     ) -> Result<Self, ReductError> {
-        fs::create_dir_all(path.join(name))?;
+        FILE_CACHE.create_dir_all(&path.join(name))?;
         let path = path.join(name);
         Ok(Self {
             name: name.to_string(),

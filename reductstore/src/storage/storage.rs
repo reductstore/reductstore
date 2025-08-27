@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use log::{debug, error, info};
@@ -50,13 +50,12 @@ impl Storage {
     pub fn load(data_path: PathBuf, license: Option<License>) -> Storage {
         if !data_path.try_exists().unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
-            std::fs::create_dir_all(&data_path).unwrap();
+            FILE_CACHE.create_dir_all(&data_path).unwrap();
         }
 
         // restore buckets
         let mut buckets = BTreeMap::new();
-        for entry in std::fs::read_dir(&data_path).unwrap() {
-            let path = entry.unwrap().path();
+        for path in FILE_CACHE.read_dir(&data_path).unwrap() {
             if path.is_dir() {
                 match Bucket::restore(path.clone()) {
                     Ok(bucket) => {
@@ -236,7 +235,7 @@ impl Storage {
                 Some(_) => {
                     sync_task.wait()?;
                     FILE_CACHE.discard_recursive(&path)?;
-                    std::fs::rename(&path, &new_path)?;
+                    FILE_CACHE.rename(&path, &new_path)?;
                     let bucket = Bucket::restore(new_path)?;
                     buckets.insert(new_name.to_string(), Arc::new(bucket));
                     debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);

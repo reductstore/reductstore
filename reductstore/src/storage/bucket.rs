@@ -24,6 +24,7 @@ use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
 use std::collections::BTreeMap;
+use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
@@ -56,7 +57,7 @@ impl Bucket {
         settings: BucketSettings,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
-        std::fs::create_dir_all(&path)?;
+        FILE_CACHE.create_dir_all(&path)?;
         let settings = Self::fill_settings(settings, Self::defaults());
 
         let bucket = Bucket {
@@ -82,7 +83,15 @@ impl Bucket {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
-        let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
+        let buf = {
+            let lock = FILE_CACHE
+                .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
+                .upgrade()?;
+            let mut buf = Vec::new();
+            lock.write()?.read_to_end(&mut buf)?;
+            buf
+        };
+
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf))
             .map_err(|e| internal_server_error!("Failed to decode settings: {}", e))?;
 
@@ -92,8 +101,7 @@ impl Bucket {
         let mut entries = BTreeMap::new();
         let mut task_set = Vec::new();
 
-        for entry in std::fs::read_dir(&path)? {
-            let path = entry?.path();
+        for path in FILE_CACHE.read_dir(&path)? {
             if path.is_dir() {
                 let handler = Entry::restore(
                     path,
@@ -289,7 +297,7 @@ impl Bucket {
 
             entries.write()?.remove(&old_name);
             FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
-            std::fs::rename(&old_path, &new_path)?;
+            FILE_CACHE.rename(&old_path, &new_path)?;
 
             let entry = Entry::restore(
                 new_path,

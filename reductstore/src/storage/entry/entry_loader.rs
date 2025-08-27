@@ -1,9 +1,8 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
+use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -14,6 +13,7 @@ use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
 use prost::Message;
 
+use crate::core::file_cache::{FileCache, FILE_CACHE};
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -80,9 +80,7 @@ impl EntryLoader {
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
-        for filein in fs::read_dir(path.clone())? {
-            let file = filein?;
-            let path = file.path();
+        for path in FILE_CACHE.read_dir(&path)? {
             if path.is_dir() {
                 continue;
             }
@@ -97,20 +95,23 @@ impl EntryLoader {
                     error!("Failed to decode block {:?}: {}", path, $err);
                     warn!("Removing meta block {:?}", path);
                     let mut data_path = path.clone();
-                    fs::remove_file(path)?;
+                    FILE_CACHE.remove(&path)?;
 
                     data_path.set_extension(DATA_FILE_EXT[1..].to_string());
                     warn!("Removing data block {:?}", data_path);
-                    fs::remove_file(data_path)?;
+                    FILE_CACHE.remove(&data_path)?;
                     continue;
                 }};
             }
 
-            let buf = fs::read(path.clone())?;
+            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+            let mut buf = vec![];
+            file.write()?.read_to_end(&mut buf)?;
             let mut crc = Digest::new();
             crc.write(&buf);
 
-            let mut block = match MinimalBlock::decode(Bytes::from(buf)) {
+            let descriptor_content = Bytes::from(buf);
+            let mut block = match MinimalBlock::decode(descriptor_content.clone()) {
                 Ok(block) => block,
                 Err(err) => {
                     remove_bad_block!(err);
@@ -120,7 +121,7 @@ impl EntryLoader {
             // Migration for old blocks without fields to speed up the restore process
             if block.record_count == 0 {
                 debug!("Record count is 0. Migrate the block");
-                let mut full_block = match Block::decode(Bytes::from(fs::read(path.clone())?)) {
+                let mut full_block = match Block::decode(descriptor_content) {
                     Ok(block) => block,
                     Err(err) => {
                         remove_bad_block!(err);
@@ -133,7 +134,11 @@ impl EntryLoader {
                 block.record_count = full_block.record_count;
                 block.metadata_size = full_block.metadata_size;
 
-                let mut file = fs::File::create(path.clone())?;
+                let lock = FILE_CACHE
+                    .write_or_create(&path, SeekFrom::Start(0))?
+                    .upgrade()?;
+                let mut file = lock.write()?;
+                file.set_len(0)?;
 
                 let buf = full_block.encode_to_vec();
                 crc = Digest::new();
@@ -199,10 +204,10 @@ impl EntryLoader {
     }
 
     fn check_descriptor_count(path: &PathBuf, block_index: &BlockIndex) -> Result<(), ReductError> {
-        let number_of_descriptors = std::fs::read_dir(&path)?
+        let number_of_descriptors = FILE_CACHE
+            .read_dir(&path)?
             .into_iter()
             .filter(|entry| {
-                let entry = entry.as_ref().unwrap().path();
                 entry.is_file()
                     && DESCRIPTOR_FILE_EXT.contains(entry.extension().unwrap().to_str().unwrap())
             })

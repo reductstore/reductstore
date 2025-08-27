@@ -115,6 +115,16 @@ impl Backpack {
         let backend = self.backend.read().unwrap();
         backend.remove_dir_all(path.as_ref())
     }
+
+    pub fn create_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+        let backend = self.backend.read().unwrap();
+        backend.create_dir_all(path.as_ref())
+    }
+
+    pub fn read_dir(&self, path: &PathBuf) -> std::io::Result<std::fs::ReadDir> {
+        let backend = self.backend.read().unwrap();
+        backend.read_dir(path)
+    }
 }
 
 #[cfg(test)]

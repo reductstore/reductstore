@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use bytes::Bytes;
@@ -7,7 +7,6 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::{BTreeSet, HashMap};
-use std::fs::read_dir;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 
@@ -135,15 +134,10 @@ impl BlockIndex {
                 ));
             };
 
-            let has_block_descriptors = read_dir(&path.parent().unwrap())?.any(|file| {
-                file.map(|f| {
-                    f.file_name()
-                        .to_str()
-                        .unwrap()
-                        .ends_with(DESCRIPTOR_FILE_EXT)
-                })
-                .unwrap_or(false)
-            });
+            let has_block_descriptors = FILE_CACHE
+                .read_dir(&path.parent().unwrap().into())?
+                .iter()
+                .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
 
             if lock.metadata()?.len() == 0 && has_block_descriptors {
                 return Err(internal_server_error!("Block index {:?} is empty", path));

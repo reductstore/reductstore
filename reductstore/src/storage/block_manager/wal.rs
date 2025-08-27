@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::hash_map::Entry::{Occupied, Vacant};
@@ -239,9 +239,7 @@ impl Wal for WalImpl {
 
     fn list(&self) -> Result<Vec<u64>, ReductError> {
         let mut blocks = Vec::new();
-        for entry in std::fs::read_dir(&self.root_path)? {
-            let entry = entry?;
-            let path = entry.path();
+        for path in FILE_CACHE.read_dir(&self.root_path)? {
             if path.extension().unwrap_or_default() == "wal" {
                 let block_id = path
                     .file_stem()
@@ -276,7 +274,9 @@ impl Wal for WalImpl {
 pub(in crate::storage) fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send + Sync> {
     let wal_folder = entry_path.join("wal");
     if !wal_folder.try_exists().unwrap() {
-        std::fs::create_dir_all(&wal_folder).expect("Failed to create WAL folder");
+        FILE_CACHE
+            .create_dir_all(&wal_folder)
+            .expect("Failed to create WAL folder");
     }
     Box::new(WalImpl::new(entry_path.join("wal")))
 }

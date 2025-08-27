@@ -31,4 +31,12 @@ impl super::Backend for FileSystemBackend {
     fn remove_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
         std::fs::remove_dir_all(path)
     }
+
+    fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(path)
+    }
+
+    fn read_dir(&self, path: &std::path::Path) -> std::io::Result<std::fs::ReadDir> {
+        std::fs::read_dir(path)
+    }
 }

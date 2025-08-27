@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
@@ -262,6 +262,20 @@ impl FileCache {
         }
 
         Ok(())
+    }
+
+    pub fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {
+        self.backpack.read()?.create_dir_all(path)?;
+        Ok(())
+    }
+
+    pub fn read_dir(&self, path: &PathBuf) -> Result<Vec<PathBuf>, ReductError> {
+        let mut entries = Vec::new();
+        for entry in self.backpack.read()?.read_dir(path)? {
+            let entry = entry?;
+            entries.push(entry.path());
+        }
+        Ok(entries)
     }
 
     /// Discards all files in the cache that are under the specified path.
