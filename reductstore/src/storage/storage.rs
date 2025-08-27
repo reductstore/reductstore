@@ -293,6 +293,7 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use backpack_rs::Backpack;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
@@ -410,12 +411,13 @@ mod tests {
         }
 
         #[rstest]
-        fn test_ignore_broken_buket(storage: Storage) {
+        fn test_ignore_broken_bucket(storage: Storage) {
             let bucket_settings = BucketSettings {
                 quota_size: Some(100),
                 quota_type: Some(QuotaType::FIFO),
                 ..Bucket::defaults()
             };
+
             let bucket = storage
                 .create_bucket("test", bucket_settings.clone())
                 .unwrap()
@@ -423,7 +425,7 @@ mod tests {
             assert_eq!(bucket.name(), "test");
 
             let path = storage.data_path.join("test");
-            std::fs::remove_file(path.join(SETTINGS_NAME)).unwrap();
+            FILE_CACHE.remove(&path.join(SETTINGS_NAME)).unwrap();
             let storage = Storage::load(storage.data_path.clone(), None);
             assert_eq!(
                 storage.info().unwrap(),
@@ -658,6 +660,12 @@ mod tests {
 
     #[fixture]
     fn storage(path: PathBuf) -> Storage {
+        FILE_CACHE.set_storage_backend(
+            Backpack::builder()
+                .location(path.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
         Storage::load(path, None)
     }
 }

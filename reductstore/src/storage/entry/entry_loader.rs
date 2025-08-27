@@ -357,6 +357,7 @@ mod tests {
     use crate::storage::block_manager::wal::WalEntry;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
+    use std::fs;
     use std::io::SeekFrom;
 
     use super::*;
@@ -645,6 +646,7 @@ mod tests {
     mod wal_recovery {
         use crate::storage::proto::Record;
         use reduct_base::error::ErrorCode::InternalServerError;
+        use std::fs;
         use std::fs::File;
 
         use super::*;

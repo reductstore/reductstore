@@ -93,7 +93,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
-        FILE_CACHE.set_backpack(
+        FILE_CACHE.set_storage_backend(
             Backpack::builder()
                 .location(self.data_path.clone())
                 .try_build()

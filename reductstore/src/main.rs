@@ -232,7 +232,8 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown() {
         let handle = Handle::new();
-        let storage = Arc::new(Storage::load(tempdir().unwrap().keep(), None));
+        let cfg = Cfg::from_env(StdEnvGetter::default()); // init file cache
+        let storage = cfg.build().unwrap().storage;
         shutdown_app(handle.clone(), storage.clone());
     }
 

@@ -89,7 +89,7 @@ impl Backpack {
     /// ```
     /// use backpack_rs::Backpack;
     ///
-    /// let backpack = Backpack::builder().location("s3://mybucket.com/mnt/data").try_build().unwrap();
+    /// let backpack = Backpack::builder().location("file:.").try_build().unwrap();
     /// let mut options = backpack.open_options();
     /// let file = options.read(true).open("example.txt");
     /// ```

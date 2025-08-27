@@ -130,7 +130,7 @@ impl FileCache {
         }
     }
 
-    pub fn set_backpack(&self, backpack: Backpack) {
+    pub fn set_storage_backend(&self, backpack: Backpack) {
         *self.backpack.write().unwrap() = backpack;
     }
 
@@ -561,7 +561,17 @@ mod tests {
 
     #[fixture]
     fn cache() -> FileCache {
-        FileCache::init(2, Duration::from_millis(100), Duration::from_millis(100))
+        let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
+        cache.set_storage_backend(
+            Backpack::builder()
+                .location(format!(
+                    "file://{}",
+                    tempfile::tempdir().unwrap().path().display()
+                ))
+                .try_build()
+                .unwrap(),
+        );
+        cache
     }
 
     #[fixture]

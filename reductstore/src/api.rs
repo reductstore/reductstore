@@ -172,14 +172,17 @@ fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
     use crate::cfg::replication::ReplicationConfig;
+    use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::replication::create_replication_repo;
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
+    use backpack_rs::Backpack;
     use bytes::Bytes;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -188,8 +191,6 @@ mod tests {
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
     use std::collections::HashMap;
-
-    use super::*;
 
     mod http_error {
         use super::*;
@@ -267,6 +268,12 @@ mod tests {
     #[fixture]
     pub(crate) async fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().keep();
+        FILE_CACHE.set_storage_backend(
+            Backpack::builder()
+                .location(data_path.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
 
         let storage = Storage::load(data_path.clone(), None);
         let mut token_repo = create_token_repository(data_path.clone(), "init-token");
