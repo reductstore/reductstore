@@ -3,12 +3,14 @@
 
 pub mod io;
 mod provision;
+mod remote_storage;
 pub mod replication;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::cfg::io::IoConfig;
+use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
@@ -48,7 +50,8 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub replications: HashMap<String, ReplicationSettings>,
     pub io_conf: IoConfig,
     pub replication_conf: ReplicationConfig,
-    env: Env<EnvGetter>,
+    pub cs_config: RemoteStorageConfig,
+    pub env: Env<EnvGetter>,
 }
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
@@ -76,6 +79,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             replications: Self::parse_replications(&mut env),
             io_conf: Self::parse_io_config(&mut env),
             replication_conf: Self::parse_replication_config(&mut env, port),
+            cs_config: Self::parse_remote_storage_cfg(&mut env),
             env,
         };
 
@@ -93,18 +97,22 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
-        FILE_CACHE.set_storage_backend(
-            Backpack::builder()
-                .location(self.data_path.clone())
-                .try_build()
-                .map_err(|e| {
-                    internal_server_error!(
-                        "Failed to initialize storage backend at {}: {}",
-                        self.data_path,
-                        e
-                    )
-                })?,
-        );
+        let mut backend_builder = Backpack::builder().location(self.data_path.clone());
+        if let Some(region) = &self.cs_config.region {
+            backend_builder = backend_builder.region(region)
+        }
+
+        if let Some(local_cache_path) = &self.cs_config.local_cache_path {
+            backend_builder = backend_builder.local_cache_path(local_cache_path);
+        }
+
+        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
+            internal_server_error!(
+                "Failed to initialize storage backend at {}: {}",
+                self.data_path,
+                e
+            )
+        })?);
 
         let storage = Arc::new(self.provision_buckets());
         let token_repo = self.provision_tokens();

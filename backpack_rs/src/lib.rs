@@ -3,7 +3,9 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::backend::{BoxedBackend, FileSystemBackend, NoopBackend};
+use crate::backend::fs::FileSystemBackend;
+use crate::backend::s3::{S3Backend, S3BackendSettings};
+use crate::backend::{BoxedBackend, NoopBackend};
 use crate::error::Error;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -14,20 +16,24 @@ pub mod error;
 pub mod fs;
 
 pub struct BackpackBuilder {
-    location: String,
+    location: Option<String>,
     cache_size: usize,
+    local_cache_path: Option<String>,
+    region: Option<String>,
 }
 
 impl BackpackBuilder {
     pub fn new() -> Self {
         Self {
-            location: String::new(),
+            location: None,
             cache_size: 1024 * 1024 * 100, // 100 MiB default cache size
+            region: None,
+            local_cache_path: None,
         }
     }
 
     pub fn location<S: ToString>(mut self, location: S) -> Self {
-        self.location = location.to_string();
+        self.location = Some(location.to_string());
         self
     }
 
@@ -36,14 +42,42 @@ impl BackpackBuilder {
         self
     }
 
+    pub fn local_cache_path<S: ToString>(mut self, path: S) -> Self {
+        self.local_cache_path = Some(path.to_string());
+        self
+    }
+
+    pub fn region<S: ToString>(mut self, region: S) -> Self {
+        self.region = Some(region.to_string());
+        self
+    }
+
     pub fn try_build(self) -> Result<Backpack, Error> {
-        let backend: Arc<RwLock<BoxedBackend>> = if let Ok(url) = Url::parse(&self.location) {
+        let location = self
+            .location
+            .ok_or_else(|| Error::new("Location is required"))?;
+        let backend: Arc<RwLock<BoxedBackend>> = if let Ok(url) = Url::parse(&location) {
             match url.scheme() {
-                "file" => {
-                    // handle file:// scheme with relative and absolute paths
-                    Arc::new(RwLock::new(Box::new(FileSystemBackend::new(
-                        self.location[5..].into(),
-                    ))))
+                #[cfg(feature = "fs")]
+                "file" => Arc::new(RwLock::new(Box::new(FileSystemBackend::new(
+                    location[5..].into(),
+                )))),
+                #[cfg(feature = "s3")]
+                "s3" => {
+                    let Some(region) = self.region else {
+                        return Err(Error::new("Region is required for S3 backend"));
+                    };
+
+                    let Some(local_cache_path) = self.local_cache_path else {
+                        return Err(Error::new("Local cache path is required for S3 backend"));
+                    };
+
+                    let settings = S3BackendSettings {
+                        region,
+                        local_cache_path: PathBuf::from(local_cache_path),
+                    };
+
+                    Arc::new(RwLock::new(Box::new(S3Backend::new(settings))))
                 }
                 _ => {
                     return Err(Error::new(&format!("Unsupported scheme: {}", url.scheme())));
@@ -51,8 +85,16 @@ impl BackpackBuilder {
             }
         } else {
             // treat as local path
+            #[cfg(not(feature = "fs"))]
+            {
+                return Err(Error::new(
+                    "Filesystem backend is not enabled. Enable the 'fs' feature.",
+                ));
+            }
+
+            #[cfg(feature = "fs")]
             Arc::new(RwLock::new(Box::new(FileSystemBackend::new(
-                self.location.into(),
+                location.into(),
             ))))
         };
 
@@ -124,6 +166,11 @@ impl Backpack {
     pub fn read_dir(&self, path: &PathBuf) -> std::io::Result<std::fs::ReadDir> {
         let backend = self.backend.read().unwrap();
         backend.read_dir(path)
+    }
+
+    pub fn try_exists<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<bool> {
+        let backend = self.backend.read().unwrap();
+        backend.try_exists(path.as_ref())
     }
 }
 

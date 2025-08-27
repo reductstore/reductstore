@@ -326,6 +326,11 @@ impl FileCache {
         Ok(())
     }
 
+    pub fn try_exists(&self, path: &PathBuf) -> Result<bool, ReductError> {
+        let backpack = self.backpack.read()?;
+        Ok(backpack.try_exists(path)?)
+    }
+
     /// Saves a file descriptor in the cache and syncs any discarded files.
     ///
     /// We need to make sure that we sync all files that were discarded

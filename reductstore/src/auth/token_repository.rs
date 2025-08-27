@@ -3,6 +3,7 @@
 
 use crate::auth::proto::token::Permissions as ProtoPermissions;
 use crate::auth::proto::{Token as ProtoToken, TokenRepo as ProtoTokenRepo, TokenRepo};
+use crate::core::file_cache::FILE_CACHE;
 use chrono::{DateTime, Utc};
 use log::{debug, warn};
 use prost::bytes::Bytes;
@@ -16,6 +17,7 @@ use reduct_base::{
 };
 use regex::Regex;
 use std::collections::HashMap;
+use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -208,13 +210,23 @@ impl TokenRepository {
             permission_regex,
         };
 
-        match std::fs::read(&token_repository.config_path) {
-            Ok(data) => {
+        let lock = FILE_CACHE.read(&token_repository.config_path, SeekFrom::Start(0));
+        match lock {
+            Ok(lock) => {
                 debug!(
                     "Loading token repository from {}",
                     token_repository.config_path.as_path().display()
                 );
-                let toke_repository = ProtoTokenRepo::decode(&mut Bytes::from(data))
+
+                let mut buf = Vec::new();
+                lock.upgrade()
+                    .unwrap()
+                    .write()
+                    .unwrap()
+                    .read_to_end(&mut buf)
+                    .expect("Could not read token repository");
+
+                let toke_repository = ProtoTokenRepo::decode(&mut Bytes::from(buf))
                     .expect("Could not decode token repository");
                 for token in toke_repository.tokens {
                     token_repository
@@ -263,15 +275,20 @@ impl TokenRepository {
         let mut buf = Vec::new();
         repo.encode(&mut buf)
             .map_err(|_| ReductError::internal_server_error("Could not encode token repository"))?;
-        std::fs::write(&self.config_path, buf).map_err(|err| {
+
+        let lock = FILE_CACHE
+            .write_or_create(&self.config_path, SeekFrom::Start(0))?
+            .upgrade()?;
+
+        let mut file = lock.write()?;
+        file.set_len(0)?;
+        file.write_all(&buf).map_err(|err| {
             internal_server_error!(
                 "Could not write token repository to {}: {}",
                 self.config_path.as_path().display(),
                 err
             )
-        })?;
-
-        Ok(())
+        })
     }
 }
 

@@ -3,6 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::backend::StorageBackend;
 use std::path::PathBuf;
 
 pub(crate) struct FileSystemBackend {
@@ -15,7 +16,7 @@ impl FileSystemBackend {
     }
 }
 
-impl super::Backend for FileSystemBackend {
+impl StorageBackend for FileSystemBackend {
     fn path(&self) -> &PathBuf {
         &self.path
     }
@@ -38,5 +39,9 @@ impl super::Backend for FileSystemBackend {
 
     fn read_dir(&self, path: &std::path::Path) -> std::io::Result<std::fs::ReadDir> {
         std::fs::read_dir(path)
+    }
+
+    fn try_exists(&self, path: &std::path::Path) -> std::io::Result<bool> {
+        path.try_exists()
     }
 }

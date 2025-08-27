@@ -2,12 +2,16 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
-mod fs;
+#[cfg(feature = "fs")]
+pub(super) mod fs;
+
+#[cfg(feature = "s3")]
+pub(super) mod s3;
 
 use std::fs::ReadDir;
 use std::path::{Path, PathBuf};
 
-pub trait Backend {
+pub trait StorageBackend {
     fn path(&self) -> &PathBuf;
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
 
@@ -17,12 +21,14 @@ pub trait Backend {
 
     fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
 
-    fn read_dir(&self, path: &Path) -> std::io::Result<std::fs::ReadDir>;
+    fn read_dir(&self, path: &Path) -> std::io::Result<ReadDir>;
+
+    fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
 }
 
 pub(crate) struct NoopBackend;
 
-impl Backend for NoopBackend {
+impl StorageBackend for NoopBackend {
     fn path(&self) -> &PathBuf {
         panic!("NoopBackend does not have a path");
     }
@@ -49,6 +55,10 @@ impl Backend for NoopBackend {
             path.display()
         );
     }
+
+    fn try_exists(&self, _path: &Path) -> std::io::Result<bool> {
+        Ok(false)
+    }
 }
 
 impl NoopBackend {
@@ -57,6 +67,4 @@ impl NoopBackend {
     }
 }
 
-pub type BoxedBackend = Box<dyn Backend + Send + Sync>;
-
-pub(crate) use fs::FileSystemBackend;
+pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;

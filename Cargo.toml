@@ -11,4 +11,4 @@ resolver = "2"
 version = "1.16.3"
 authors = ["Alexey Timin <atimin@reduct.store>", "ReductSoftware UG <info@reduct.store>"]
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.89.0"

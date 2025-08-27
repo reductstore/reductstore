@@ -11,8 +11,18 @@ rust-version.workspace = true
 
 license = "MPL-2.0"
 
+[features]
+default = ["fs", "s3"]
+fs = []
+s3 = ["dep:aws-sdk-s3", "dep:aws-config", "dep:tokio"]
+
 [dependencies]
 url = "2.5.7"
+
+# s3 backend
+aws-sdk-s3 = { version = "1.103.0", optional = true, features = ["rustls"] }
+aws-config = { version = "1.8.5", optional = true, features = ["rustls"] }
+tokio = { version= "1.47.1" , optional = true, features = ["rt"]}
 
 
 [dev-dependencies]
