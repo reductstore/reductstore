@@ -8,6 +8,7 @@ pub(super) mod fs;
 #[cfg(feature = "s3")]
 pub(super) mod s3;
 
+use std::arch::x86_64::_MM_PERM_ENUM;
 use std::fs::ReadDir;
 use std::path::{Path, PathBuf};
 
@@ -24,6 +25,8 @@ pub trait StorageBackend {
     fn read_dir(&self, path: &Path) -> std::io::Result<ReadDir>;
 
     fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
+
+    fn sync(&self, path: &Path) -> std::io::Result<()>;
 }
 
 pub(crate) struct NoopBackend;
@@ -58,6 +61,10 @@ impl StorageBackend for NoopBackend {
 
     fn try_exists(&self, _path: &Path) -> std::io::Result<bool> {
         Ok(false)
+    }
+
+    fn sync(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

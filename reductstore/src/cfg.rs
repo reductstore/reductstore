@@ -97,13 +97,36 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
-        let mut backend_builder = Backpack::builder().location(self.data_path.clone());
-        if let Some(region) = &self.cs_config.region {
-            backend_builder = backend_builder.region(region)
+        let mut backend_builder = Backpack::builder()
+            .backend_type(self.cs_config.backend_type.clone())
+            .local_data_path(&self.data_path);
+
+        if let Some(bucket) = &self.cs_config.bucket {
+            backend_builder = backend_builder.remote_bucket(bucket);
         }
 
-        if let Some(local_cache_path) = &self.cs_config.local_cache_path {
-            backend_builder = backend_builder.local_cache_path(local_cache_path);
+        if let Some(cache_path) = &self.cs_config.endpoint {
+            backend_builder = backend_builder.remote_cache_path(cache_path);
+        }
+
+        if let Some(region) = &self.cs_config.region {
+            backend_builder = backend_builder.remote_region(region);
+        }
+
+        if let Some(endpoint) = &self.cs_config.endpoint {
+            backend_builder = backend_builder.remote_endpoint(endpoint);
+        }
+
+        if let Some(access_key) = &self.cs_config.access_key {
+            backend_builder = backend_builder.remote_access_key(access_key);
+        }
+
+        if let Some(secret_key) = &self.cs_config.secret_key {
+            backend_builder = backend_builder.remote_secret_key(secret_key);
+        }
+
+        if let Some(cache_path) = &self.cs_config.cache_path {
+            backend_builder = backend_builder.remote_cache_path(cache_path);
         }
 
         FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {

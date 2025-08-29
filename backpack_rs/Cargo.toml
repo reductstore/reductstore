@@ -14,14 +14,16 @@ license = "MPL-2.0"
 [features]
 default = ["fs", "s3"]
 fs = []
-s3 = ["dep:aws-sdk-s3", "dep:aws-config", "dep:tokio"]
+s3 = ["dep:aws-sdk-s3", "dep:aws-config", "dep:tokio", "dep:aws-credential-types"]
 
 [dependencies]
 url = "2.5.7"
+log = "0.4.27"
 
 # s3 backend
 aws-sdk-s3 = { version = "1.103.0", optional = true, features = ["rustls"] }
 aws-config = { version = "1.8.5", optional = true, features = ["rustls"] }
+aws-credential-types = { version = "1.2.5", optional = true, features = ["hardcoded-credentials"]}
 tokio = { version= "1.47.1" , optional = true, features = ["rt"]}
 
 

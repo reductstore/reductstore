@@ -15,7 +15,16 @@ use std::path::PathBuf;
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub(in crate::cfg) fn provision_buckets(&self) -> Storage {
         let license = parse_license(self.license_path.clone());
-        let storage = Storage::load(PathBuf::from(self.data_path.clone()), license);
+        let data_path = if self.cs_config.backend_type == backpack_rs::BackendType::Filesystem {
+            self.data_path.clone()
+        } else {
+            self.cs_config
+                .cache_path
+                .clone()
+                .expect("Cache path must be set for remote storage")
+        };
+
+        let storage = Storage::load(PathBuf::from(data_path), license);
         for (name, settings) in &self.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {

@@ -726,7 +726,9 @@ name = "backpack-rs"
 version = "0.1.0"
 dependencies = [
  "aws-config",
+ "aws-credential-types",
  "aws-sdk-s3",
+ "log",
  "rstest",
  "tokio",
  "url",

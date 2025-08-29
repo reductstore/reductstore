@@ -15,105 +15,143 @@ mod backend;
 pub mod error;
 pub mod fs;
 
+#[derive(Default, Clone, Debug, PartialEq)]
+pub enum BackendType {
+    #[default]
+    Filesystem,
+    S3,
+}
+
+#[derive(Default)]
 pub struct BackpackBuilder {
-    location: Option<String>,
-    cache_size: usize,
-    local_cache_path: Option<String>,
-    region: Option<String>,
+    backend_type: BackendType,
+
+    local_data_path: Option<String>,
+    remote_bucket: Option<String>,
+    remote_cache_path: Option<String>,
+    remote_region: Option<String>,
+    remote_endpoint: Option<String>,
+    remote_access_key: Option<String>,
+    remote_secret_key: Option<String>,
 }
 
 impl BackpackBuilder {
     pub fn new() -> Self {
-        Self {
-            location: None,
-            cache_size: 1024 * 1024 * 100, // 100 MiB default cache size
-            region: None,
-            local_cache_path: None,
-        }
+        Self::default()
     }
 
-    pub fn location<S: ToString>(mut self, location: S) -> Self {
-        self.location = Some(location.to_string());
+    pub fn backend_type(mut self, backend_type: BackendType) -> Self {
+        self.backend_type = backend_type;
         self
     }
 
-    pub fn cache_size(mut self, size: usize) -> Self {
-        self.cache_size = size;
+    pub fn local_data_path(mut self, path: &str) -> Self {
+        self.local_data_path = Some(path.to_string());
         self
     }
 
-    pub fn local_cache_path<S: ToString>(mut self, path: S) -> Self {
-        self.local_cache_path = Some(path.to_string());
+    pub fn remote_bucket(mut self, bucket: &str) -> Self {
+        self.remote_bucket = Some(bucket.to_string());
         self
     }
 
-    pub fn region<S: ToString>(mut self, region: S) -> Self {
-        self.region = Some(region.to_string());
+    pub fn remote_cache_path(mut self, path: &str) -> Self {
+        self.remote_cache_path = Some(path.to_string());
+        self
+    }
+
+    pub fn remote_region(mut self, region: &str) -> Self {
+        self.remote_region = Some(region.to_string());
+        self
+    }
+
+    pub fn remote_endpoint(mut self, endpoint: &str) -> Self {
+        self.remote_endpoint = Some(endpoint.to_string());
+        self
+    }
+
+    pub fn remote_access_key(mut self, access_key: &str) -> Self {
+        self.remote_access_key = Some(access_key.to_string());
+        self
+    }
+
+    pub fn remote_secret_key(mut self, secret_key: &str) -> Self {
+        self.remote_secret_key = Some(secret_key.to_string());
         self
     }
 
     pub fn try_build(self) -> Result<Backpack, Error> {
-        let location = self
-            .location
-            .ok_or_else(|| Error::new("Location is required"))?;
-        let backend: Arc<RwLock<BoxedBackend>> = if let Ok(url) = Url::parse(&location) {
-            match url.scheme() {
-                #[cfg(feature = "fs")]
-                "file" => Arc::new(RwLock::new(Box::new(FileSystemBackend::new(
-                    location[5..].into(),
-                )))),
-                #[cfg(feature = "s3")]
-                "s3" => {
-                    let Some(region) = self.region else {
-                        return Err(Error::new("Region is required for S3 backend"));
-                    };
-
-                    let Some(local_cache_path) = self.local_cache_path else {
-                        return Err(Error::new("Local cache path is required for S3 backend"));
-                    };
-
-                    let settings = S3BackendSettings {
-                        region,
-                        local_cache_path: PathBuf::from(local_cache_path),
-                    };
-
-                    Arc::new(RwLock::new(Box::new(S3Backend::new(settings))))
-                }
-                _ => {
-                    return Err(Error::new(&format!("Unsupported scheme: {}", url.scheme())));
-                }
-            }
-        } else {
-            // treat as local path
-            #[cfg(not(feature = "fs"))]
-            {
-                return Err(Error::new(
-                    "Filesystem backend is not enabled. Enable the 'fs' feature.",
-                ));
-            }
-
+        let backend: BoxedBackend = match self.backend_type {
             #[cfg(feature = "fs")]
-            Arc::new(RwLock::new(Box::new(FileSystemBackend::new(
-                location.into(),
-            ))))
+            BackendType::Filesystem => {
+                let Some(data_path) = self.local_data_path else {
+                    Err(Error::new(
+                        "local_data_path is required for Filesystem backend",
+                    ))?
+                };
+
+                Box::new(FileSystemBackend::new(PathBuf::from(data_path)))
+            }
+
+            #[cfg(feature = "s3")]
+            BackendType::S3 => {
+                let Some(bucket) = self.remote_bucket else {
+                    Err(Error::new("remote_bucket is required for S3 backend"))?
+                };
+
+                let Some(cache_path) = self.remote_cache_path else {
+                    Err(Error::new("remote_cache_path is required for S3 backend"))?
+                };
+
+                let Some(region) = self.remote_region else {
+                    Err(Error::new("remote_region is required for S3 backend"))?
+                };
+
+                let Some(endpoint) = self.remote_endpoint else {
+                    Err(Error::new("remote_endpoint is required for S3 backend"))?
+                };
+
+                let Some(access_key) = self.remote_access_key else {
+                    Err(Error::new("remote_access_key is required for S3 backend"))?
+                };
+
+                let Some(secret_key) = self.remote_secret_key else {
+                    Err(Error::new("remote_secret_key is required for S3 backend"))?
+                };
+
+                let url = Url::parse(&endpoint)
+                    .map_err(|e| Error::new(&format!("Invalid endpoint URL: {}", e)))?;
+                let settings = S3BackendSettings {
+                    cache_path: PathBuf::from(cache_path),
+                    endpoint: url.to_string(),
+                    access_key,
+                    secret_key,
+                    region,
+                    bucket,
+                };
+
+                Box::new(S3Backend::new(settings))
+            }
+
+            #[allow(unreachable_code)]
+            _ => Err(Error::new(
+                "Unsupported backend type or feature not enabled",
+            ))?,
         };
 
         Ok(Backpack {
-            cache_size: self.cache_size,
-            backend,
+            backend: Arc::new(RwLock::new(backend)),
         })
     }
 }
 
 pub struct Backpack {
-    cache_size: usize,
     backend: Arc<RwLock<BoxedBackend>>,
 }
 
 impl Default for Backpack {
     fn default() -> Self {
         Self {
-            cache_size: 1024 * 1024 * 100, // 100 MiB default cache size
             backend: Arc::new(RwLock::new(Box::new(NoopBackend::new()))),
         }
     }
@@ -131,7 +169,7 @@ impl Backpack {
     /// ```
     /// use backpack_rs::Backpack;
     ///
-    /// let backpack = Backpack::builder().location("file:.").try_build().unwrap();
+    /// let backpack = Backpack::builder().local_data_path(".").try_build().unwrap();
     /// let mut options = backpack.open_options();
     /// let file = options.read(true).open("example.txt");
     /// ```
@@ -182,7 +220,7 @@ mod tests {
     #[rstest]
     fn open_options() {
         let backpack = Backpack::builder()
-            .location("file:///tmp")
+            .local_data_path("tmp")
             .try_build()
             .unwrap();
         let mut options = backpack.open_options();

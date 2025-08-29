@@ -44,4 +44,9 @@ impl StorageBackend for FileSystemBackend {
     fn try_exists(&self, path: &std::path::Path) -> std::io::Result<bool> {
         path.try_exists()
     }
+
+    fn sync(&self, path: &std::path::Path) -> std::io::Result<()> {
+        // do nothing because the file owner is responsible for syncing with fs
+        Ok(())
+    }
 }

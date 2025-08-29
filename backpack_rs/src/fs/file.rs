@@ -6,15 +6,19 @@ use crate::backend::BoxedBackend;
 use std::fs::File as StdFile;
 use std::fs::OpenOptions as StdOpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 pub struct File {
     inner: StdFile,
+    backend: Arc<RwLock<BoxedBackend>>,
+    path: PathBuf,
 }
 
 pub struct OpenOptions {
     inner: StdOpenOptions,
     backend: Arc<RwLock<BoxedBackend>>,
+    must_sync: bool,
 }
 
 impl OpenOptions {
@@ -22,6 +26,7 @@ impl OpenOptions {
         Self {
             inner: StdOpenOptions::new(),
             backend,
+            must_sync: true,
         }
     }
 
@@ -47,6 +52,7 @@ impl OpenOptions {
 
     pub fn create(&mut self, create: bool) -> &mut Self {
         self.inner.create(create);
+        self.must_sync = false;
         self
     }
 
@@ -55,20 +61,32 @@ impl OpenOptions {
         self
     }
 
-    pub fn open<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<File> {
-        let full_path = self.backend.read().unwrap().path().join(path);
-        let file = self.inner.open(full_path)?;
-        Ok(File { inner: file })
+    pub fn open<P: AsRef<std::path::Path>>(&mut self, mut path: P) -> std::io::Result<File> {
+        let backend = self.backend.read().unwrap();
+        let full_path = backend.path().join(path.as_ref());
+        if self.must_sync {
+            // the call initiates downloading the file if it does not exist locally
+            backend.try_exists(path.as_ref())?;
+        }
+
+        let file = self.inner.open(full_path.clone())?;
+        Ok(File {
+            inner: file,
+            backend: Arc::clone(&self.backend),
+            path: full_path,
+        })
     }
 }
 
 impl File {
     pub fn sync_all(&self) -> std::io::Result<()> {
-        self.inner.sync_all()
+        self.inner.sync_all()?;
+        self.backend.read().unwrap().sync(&self.path)
     }
 
     pub fn sync_data(&self) -> std::io::Result<()> {
-        self.inner.sync_data()
+        self.inner.sync_data()?;
+        self.backend.read().unwrap().sync(&self.path)
     }
 
     pub fn set_len(&self, size: u64) -> std::io::Result<()> {

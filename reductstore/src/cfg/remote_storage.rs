@@ -3,21 +3,38 @@
 
 use crate::cfg::Cfg;
 use crate::core::env::{Env, GetEnv};
+use backpack_rs::BackendType;
 use bytesize::ByteSize;
 use std::time::Duration;
 
 /// Cloud storage settings
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RemoteStorageConfig {
+    pub backend_type: BackendType,
+    pub bucket: Option<String>,
+    pub endpoint: Option<String>,
     pub region: Option<String>,
-    pub local_cache_path: Option<String>,
+    pub access_key: Option<String>,
+    pub secret_key: Option<String>,
+    pub cache_path: Option<String>,
 }
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub(super) fn parse_remote_storage_cfg(env: &mut Env<EnvGetter>) -> RemoteStorageConfig {
         RemoteStorageConfig {
+            backend_type: env
+                .get_optional::<String>("RS_REMOTE_BACKEND_TYPE")
+                .map(|s| match s.to_lowercase().as_str() {
+                    "s3" => BackendType::S3,
+                    _ => BackendType::Filesystem,
+                })
+                .unwrap_or(BackendType::Filesystem),
+            bucket: env.get_optional::<String>("RS_REMOTE_BUCKET"),
+            endpoint: env.get_optional::<String>("RS_REMOTE_ENDPOINT"),
             region: env.get_optional::<String>("RS_REMOTE_REGION"),
-            local_cache_path: env.get_optional::<String>("RS_REMOTE_CACHE_PATH"),
+            access_key: env.get_optional::<String>("RS_REMOTE_ACCESS_KEY"),
+            secret_key: env.get_optional::<String>("RS_REMOTE_SECRET_KEY"),
+            cache_path: env.get_optional::<String>("RS_REMOTE_CACHE_PATH"),
         }
     }
 }
