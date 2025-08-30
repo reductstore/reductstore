@@ -118,7 +118,7 @@ impl BlockIndex {
     }
 
     pub fn try_load(path: PathBuf) -> Result<Self, ReductError> {
-        if !path.try_exists()? {
+        if !FILE_CACHE.try_exists(&path)? {
             return Err(internal_server_error!("Block index {:?} not found", path));
         }
 

@@ -6,10 +6,11 @@
 use crate::backend::StorageBackend;
 use crate::error::Error;
 use aws_config::{BehaviorVersion, Region, SdkConfig};
-use aws_sdk_s3::config::Credentials;
+use aws_sdk_s3::config::{Credentials, IntoShared};
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::{Client, Config};
 use log::{debug, info};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, io};
@@ -90,6 +91,8 @@ impl S3ClientWrapper {
     pub fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
+        let key = format!("r/{}", key);
+
         block_in_place(move || {
             rt.block_on(async {
                 let mut resp = client
@@ -119,6 +122,8 @@ impl S3ClientWrapper {
         let client = Arc::clone(&self.client);
         let data = std::fs::read(src)?;
         let rt = Arc::clone(&self.rt);
+        let key = format!("r/{}", key);
+
         block_in_place(move || {
             rt.block_on(async {
                 client
@@ -145,9 +150,9 @@ impl S3ClientWrapper {
         let rt = Arc::clone(&self.rt);
 
         let dir_key = if key.ends_with('/') {
-            key.to_string()
+            format!("r/{}", key)
         } else {
-            format!("{}/", key)
+            format!("r/{}/", key)
         };
 
         block_in_place(|| {
@@ -170,9 +175,15 @@ impl S3ClientWrapper {
     pub(crate) fn list_objects(&self, key: &str) -> Result<Vec<String>, io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
+        let prefix = if key.ends_with("/") || key.is_empty() {
+            format!("r/{}", key)
+        } else {
+            format!("r/{}/", key)
+        };
+
         block_in_place(|| {
             rt.block_on(async {
-                let mut keys = Vec::new();
+                let mut keys = HashSet::new();
                 let mut continuation_token = None;
 
                 loop {
@@ -180,7 +191,7 @@ impl S3ClientWrapper {
                         .list_objects_v2()
                         .bucket(&self.bucket)
                         .set_continuation_token(continuation_token.clone())
-                        .prefix(key)
+                        .prefix(&prefix)
                         .send()
                         .await
                         .map_err(|e| {
@@ -191,8 +202,20 @@ impl S3ClientWrapper {
                         })?;
 
                     for object in resp.contents() {
-                        if let Some(key) = object.key() {
-                            keys.push(key.to_string());
+                        // Didn't find a better way to filter out "subdirectories"
+                        let Some(key) = object.key() else { continue };
+                        if key == &prefix {
+                            continue;
+                        }
+
+                        let key = key.strip_prefix(&prefix).unwrap_or(key);
+                        if let Some((first, rest)) = key.split_once('/') {
+                            // treat first segment as a "dir"
+                            let dir = format!("{}/", first);
+                            keys.insert(dir);
+                        } else {
+                            // no slash => top-level "file"
+                            keys.insert(key.to_string());
                         }
                     }
 
@@ -203,7 +226,7 @@ impl S3ClientWrapper {
                     }
                 }
 
-                Ok(keys)
+                Ok(keys.into_iter().collect())
             })
         })
     }
@@ -211,6 +234,8 @@ impl S3ClientWrapper {
     fn remove_object(&self, key: &str) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
+        let key = format!("r/{}", key);
+
         block_in_place(|| {
             rt.block_on(async {
                 client
@@ -281,24 +306,32 @@ impl StorageBackend for S3Backend {
         self.wrapper.create_dir_all(key)
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<fs::ReadDir> {
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
         let s3_key = path
             .strip_prefix(&self.cache_path)
             .unwrap()
             .to_str()
             .unwrap_or("");
+
+        let mut paths = vec![];
         for key in self.wrapper.list_objects(s3_key)? {
+            if key == s3_key {
+                continue;
+            }
+
+            let local_path = self.cache_path.join(path).join(&key);
             if key.ends_with('/') {
-                let local_dir = self.cache_path.join(&key);
                 debug!(
                     "Creating local directory {} for S3 key: {}",
-                    local_dir.to_str().unwrap_or(""),
+                    local_path.to_str().unwrap_or(""),
                     key
                 );
-                fs::create_dir_all(local_dir)?;
+                fs::create_dir_all(&local_path)?;
             }
+
+            paths.push(local_path);
         }
-        Ok(fs::read_dir(path)?)
+        Ok(paths)
     }
 
     fn try_exists(&self, path: &Path) -> std::io::Result<bool> {

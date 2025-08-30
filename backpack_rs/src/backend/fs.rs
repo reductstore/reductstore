@@ -37,8 +37,12 @@ impl StorageBackend for FileSystemBackend {
         std::fs::create_dir_all(path)
     }
 
-    fn read_dir(&self, path: &std::path::Path) -> std::io::Result<std::fs::ReadDir> {
-        std::fs::read_dir(path)
+    fn read_dir(&self, path: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
+        std::fs::read_dir(path).map(|read_dir| {
+            read_dir
+                .filter_map(|entry| entry.ok().map(|e| e.path()))
+                .collect()
+        })
     }
 
     fn try_exists(&self, path: &std::path::Path) -> std::io::Result<bool> {

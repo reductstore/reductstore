@@ -201,7 +201,7 @@ impl Backpack {
         backend.create_dir_all(path.as_ref())
     }
 
-    pub fn read_dir(&self, path: &PathBuf) -> std::io::Result<std::fs::ReadDir> {
+    pub fn read_dir(&self, path: &PathBuf) -> std::io::Result<Vec<PathBuf>> {
         let backend = self.backend.read().unwrap();
         backend.read_dir(path)
     }

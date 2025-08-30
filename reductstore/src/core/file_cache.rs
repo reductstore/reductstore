@@ -17,7 +17,7 @@ use std::time::Duration;
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
-const FILECACHE_SYNC_INTERVAL: Duration = Duration::from_millis(100);
+const FILECACHE_SYNC_INTERVAL: Duration = Duration::from_millis(60_000);
 
 pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
     FileCache::new(
@@ -269,12 +269,7 @@ impl FileCache {
     }
 
     pub fn read_dir(&self, path: &PathBuf) -> Result<Vec<PathBuf>, ReductError> {
-        let mut entries = Vec::new();
-        for entry in self.backpack.read()?.read_dir(path)? {
-            let entry = entry?;
-            entries.push(entry.path());
-        }
-        Ok(entries)
+        Ok(self.backpack.read()?.read_dir(path)?)
     }
 
     /// Discards all files in the cache that are under the specified path.

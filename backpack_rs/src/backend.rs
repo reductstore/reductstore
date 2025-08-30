@@ -22,7 +22,7 @@ pub trait StorageBackend {
 
     fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
 
-    fn read_dir(&self, path: &Path) -> std::io::Result<ReadDir>;
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
 
     fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
 
@@ -52,11 +52,8 @@ impl StorageBackend for NoopBackend {
         Ok(())
     }
 
-    fn read_dir(&self, path: &Path) -> std::io::Result<ReadDir> {
-        panic!(
-            "NoopBackend does not support read_dir on path: {}",
-            path.display()
-        );
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
+        Ok(vec![])
     }
 
     fn try_exists(&self, _path: &Path) -> std::io::Result<bool> {
