@@ -27,6 +27,8 @@ pub trait StorageBackend {
     fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
 
     fn sync(&self, path: &Path) -> std::io::Result<()>;
+
+    fn download(&self, path: &Path) -> std::io::Result<()>;
 }
 
 pub(crate) struct NoopBackend;
@@ -61,6 +63,10 @@ impl StorageBackend for NoopBackend {
     }
 
     fn sync(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn download(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 }

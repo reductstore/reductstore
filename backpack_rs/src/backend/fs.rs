@@ -53,4 +53,9 @@ impl StorageBackend for FileSystemBackend {
         // do nothing because the file owner is responsible for syncing with fs
         Ok(())
     }
+
+    fn download(&self, _path: &std::path::Path) -> std::io::Result<()> {
+        // do nothing because filesystem backend does not need downloading
+        Ok(())
+    }
 }

@@ -207,10 +207,9 @@ impl EntryLoader {
         let number_of_descriptors = FILE_CACHE
             .read_dir(&path)?
             .into_iter()
-            .filter(|entry| {
-                entry.is_file()
-                    && DESCRIPTOR_FILE_EXT.contains(entry.extension().unwrap().to_str().unwrap())
-            })
+            .filter(|entry|
+                // path maybe a virtual from remote storage
+                entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT))
             .count();
 
         if number_of_descriptors != block_index.tree().len() {
@@ -234,14 +233,14 @@ impl EntryLoader {
         let mut inconsistent_data = false;
         for block_id in block_index.tree().iter() {
             let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
-            if !desc_path.exists() {
-                warn!("Block descriptor {:?} not found", path);
+            if !FILE_CACHE.try_exists(&desc_path)? {
+                warn!("Block descriptor {:?} not found", desc_path);
                 inconsistent_data = true;
             }
 
             let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
-            if !data_path.exists() {
-                warn!("Block descriptor {:?} not found. Removing it", path);
+            if !FILE_CACHE.try_exists(&data_path)? {
+                warn!("Block descriptor {:?} not found. Removing it", data_path);
             }
         }
 
