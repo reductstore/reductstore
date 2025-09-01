@@ -50,8 +50,41 @@ impl StorageBackend for S3Backend {
         &self.cache_path
     }
 
-    fn rename(&self, _from: &std::path::Path, _to: &std::path::Path) -> std::io::Result<()> {
-        todo!()
+    fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        fs::rename(from, to)?;
+
+        let from_key = from
+            .strip_prefix(&self.cache_path)
+            .unwrap()
+            .to_str()
+            .unwrap_or("");
+
+        let to_key = to
+            .strip_prefix(&self.cache_path)
+            .unwrap()
+            .to_str()
+            .unwrap_or("");
+
+        debug!(
+            "Renaming S3 object from key: {} to key: {}",
+            from_key, to_key
+        );
+        // at least minio doesn't remove folders recursively, so we need to list and remove all objects
+        for key in self.wrapper.list_objects(&from_key, true)? {
+            self.wrapper.rename_object(
+                &format!("{}/{}", from_key, key),
+                &format!("{}/{}", to_key, key),
+            )?;
+        }
+
+        if to.is_dir() {
+            self.wrapper
+                .rename_object(&format!("{}/", from_key), &format!("{}/", to_key))?;
+        } else {
+            self.wrapper.rename_object(from_key, to_key)?;
+        }
+
+        Ok(())
     }
 
     fn remove(&self, path: &std::path::Path) -> std::io::Result<()> {
@@ -75,11 +108,12 @@ impl StorageBackend for S3Backend {
             .unwrap_or("");
 
         debug!("Removing S3 directory for key: {}", s3_key);
-        for key in self.wrapper.list_objects(&s3_key)? {
-            self.wrapper
-                .remove_object(format!("{}/{}", s3_key, key).as_str())?;
+        // at least minio doesn't remove folders recursively, so we need to list and remove all objects
+        for key in self.wrapper.list_objects(&s3_key, true)? {
+            self.wrapper.remove_object(&format!("{}/{}", s3_key, key))?;
         }
-        Ok(())
+
+        self.wrapper.remove_object(&format!("{}/", s3_key))
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -107,7 +141,7 @@ impl StorageBackend for S3Backend {
             .unwrap_or("");
 
         let mut paths = vec![];
-        for key in self.wrapper.list_objects(s3_key)? {
+        for key in self.wrapper.list_objects(s3_key, false)? {
             if key == s3_key {
                 continue;
             }

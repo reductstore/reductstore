@@ -1,8 +1,9 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::DEFAULT_PORT;
+use crate::core::file_cache::FILE_CACHE;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
     Label as ProtoLabel, ReplicationRepo as ProtoReplicationRepo,
@@ -21,6 +22,8 @@ use reduct_base::msg::replication_api::{
 };
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
+use std::io::SeekFrom::Start;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use url::Url;
@@ -215,13 +218,25 @@ impl ReplicationRepository {
             config,
         };
 
-        match std::fs::read(&repo.repo_path) {
-            Ok(data) => {
+        let read_conf_file = || {
+            let lock = FILE_CACHE
+                .write_or_create(&repo.repo_path, Start(0))
+                .expect("Failed to create or open replication repository file")
+                .upgrade()
+                .unwrap();
+
+            let mut buf = Vec::new();
+            lock.write().unwrap().read_to_end(&mut buf)?;
+            Ok::<Vec<u8>, ReductError>(buf)
+        };
+
+        match read_conf_file() {
+            Ok(buf) => {
                 debug!(
                     "Reading replication repository from {}",
                     repo.repo_path.as_os_str().to_str().unwrap_or("...")
                 );
-                let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(data))
+                let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(buf))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
                     if let Err(err) =
@@ -231,14 +246,7 @@ impl ReplicationRepository {
                     }
                 }
             }
-            Err(_) => {
-                debug!(
-                    "Creating a new token repository {}",
-                    repo.repo_path.as_os_str().to_str().unwrap_or("...")
-                );
-                repo.save_repo()
-                    .expect("Failed to create a new token repository");
-            }
+            Err(_) => {}
         }
         repo
     }
@@ -260,13 +268,16 @@ impl ReplicationRepository {
             .encode(&mut buf)
             .expect("Error encoding replication repository");
 
-        std::fs::write(&self.repo_path, buf).map_err(|e| {
-            ReductError::internal_server_error(&format!(
-                "Failed to write replication repository to {}: {}",
-                self.repo_path.as_os_str().to_str().unwrap_or("..."),
-                e
-            ))
-        })
+        let lock = FILE_CACHE
+            .write_or_create(&self.repo_path, Start(0))?
+            .upgrade()?;
+
+        let mut file = lock.write()?;
+        file.set_len(0)?;
+        file.write_all(&buf)?;
+        file.sync_all()?;
+
+        Ok(())
     }
 
     fn create_or_update_replication_task(

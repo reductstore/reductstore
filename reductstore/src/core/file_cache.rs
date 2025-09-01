@@ -4,7 +4,7 @@
 use crate::core::cache::Cache;
 use backpack_rs::fs::File;
 use backpack_rs::Backpack;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::{Seek, SeekFrom};
@@ -17,13 +17,13 @@ use std::time::Duration;
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
-const FILECACHE_SYNC_INTERVAL: Duration = Duration::from_millis(60_000);
+const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(60_000);
 
 pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
     FileCache::new(
         FILE_CACHE_MAX_SIZE,
         FILE_CACHE_TIME_TO_LIVE,
-        FILECACHE_SYNC_INTERVAL,
+        FILE_CACHE_SYNC_INTERVAL,
     )
 });
 
@@ -59,7 +59,6 @@ enum AccessMode {
 struct FileDescriptor {
     file_ref: FileRc,
     mode: AccessMode,
-    synced: bool,
 }
 
 /// A cache to keep file descriptors open
@@ -93,8 +92,8 @@ impl FileCache {
         spawn(move || {
             // Periodically sync files from cache to disk
             while !stop_sync_worker.load(Ordering::Relaxed) {
-                std::thread::sleep(sync_interval);
-                Self::sync_rw_and_unused_files(&cache);
+                std::thread::sleep(Duration::from_millis(100));
+                Self::sync_rw_and_unused_files(&cache, sync_interval);
             }
         });
 
@@ -105,27 +104,32 @@ impl FileCache {
         }
     }
 
-    fn sync_rw_and_unused_files(cache: &Arc<RwLock<Cache<PathBuf, FileDescriptor>>>) {
+    fn sync_rw_and_unused_files(
+        cache: &Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
+        sync_interval: Duration,
+    ) {
         let mut cache = cache.write().unwrap();
 
         for (path, file_desc) in cache.iter_mut() {
             // Sync only writeable files that are not synced yet
             // and are not used by other threads
+            let Some(mut file) = file_desc.file_ref.try_write().ok() else {
+                continue;
+            };
+
             if file_desc.mode != AccessMode::ReadWrite
-                || file_desc.synced
                 || Arc::strong_count(&file_desc.file_ref) > 1
                 || Arc::weak_count(&file_desc.file_ref) > 0
+                || file.is_synced()
+                || file.last_synced().elapsed() < sync_interval
             {
                 continue;
             }
 
-            if let Err(err) = file_desc.file_ref.write().unwrap().sync_all() {
+            if let Err(err) = file.sync_all() {
                 warn!("Failed to sync file {}: {}", path.display(), err);
                 continue;
             }
-
-            debug!("File {} synced to disk", path.display());
-            file_desc.synced = true; // Mark as synced after successful sync
         }
     }
 
@@ -184,8 +188,6 @@ impl FileCache {
         let mut cache = self.cache.write()?;
 
         let file = if let Some(desc) = cache.get_mut(path) {
-            desc.synced = false;
-
             if desc.mode == AccessMode::ReadWrite {
                 Arc::clone(&desc.file_ref)
             } else {
@@ -290,7 +292,7 @@ impl FileCache {
         for file_path in files_to_remove {
             if let Some(file) = cache.remove(&file_path) {
                 // If the file is in read-write mode and not synced, we need to sync it before removing from cache
-                if file.mode == AccessMode::ReadWrite && !file.synced {
+                if file.mode == AccessMode::ReadWrite && !file.file_ref.read()?.is_synced() {
                     if let Err(err) = file.file_ref.write()?.sync_all() {
                         warn!("Failed to sync file {}: {}", file_path.display(), err);
                     }
@@ -340,7 +342,6 @@ impl FileCache {
             FileDescriptor {
                 file_ref: Arc::clone(file),
                 mode,
-                synced: false,
             },
         );
 
@@ -355,6 +356,7 @@ impl FileCache {
 impl Drop for FileCache {
     fn drop(&mut self) {
         self.stop_sync_worker.store(true, Ordering::Relaxed);
+        Self::sync_rw_and_unused_files(&self.cache, Duration::from_secs(0));
     }
 }
 

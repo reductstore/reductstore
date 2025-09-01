@@ -118,10 +118,12 @@ impl Bucket {
                 .encode(&mut buf)
                 .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
 
-            let file = FILE_CACHE
+            let lock = FILE_CACHE
                 .write_or_create(&path, SeekFrom::Start(0))?
                 .upgrade()?;
-            file.write()?.write_all(&buf)?;
+            let mut file = lock.write()?;
+            file.write_all(&buf)?;
+            file.sync_all()?;
             Ok(())
         })
     }

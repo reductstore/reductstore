@@ -288,7 +288,10 @@ impl TokenRepository {
                 self.config_path.as_path().display(),
                 err
             )
-        })
+        })?;
+
+        file.sync_all()?;
+        Ok(())
     }
 }
 

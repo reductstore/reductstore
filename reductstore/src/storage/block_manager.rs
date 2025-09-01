@@ -233,14 +233,14 @@ impl BlockManager {
         let file = FILE_CACHE
             .write_or_create(&path, SeekFrom::Current(0))?
             .upgrade()?;
-        let data_block = file.write()?;
+        let mut data_block = file.write()?;
         data_block.set_len(block.size())?;
         data_block.sync_all()?;
 
         let file = FILE_CACHE
             .write_or_create(&self.path_to_desc(block.block_id()), SeekFrom::Current(0))?
             .upgrade()?;
-        let descr_block = file.write()?;
+        let mut descr_block = file.write()?;
         descr_block.sync_all()?;
 
         Ok(())

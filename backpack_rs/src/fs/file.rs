@@ -3,6 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::backend::BoxedBackend;
+use log::info;
 use std::fs::File as StdFile;
 use std::fs::OpenOptions as StdOpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -13,11 +14,14 @@ pub struct File {
     inner: StdFile,
     backend: Arc<RwLock<BoxedBackend>>,
     path: PathBuf,
+    last_synced: std::time::Instant,
+    is_synced: bool,
 }
 
 pub struct OpenOptions {
     inner: StdOpenOptions,
     backend: Arc<RwLock<BoxedBackend>>,
+    create: bool,
 }
 
 impl OpenOptions {
@@ -25,6 +29,7 @@ impl OpenOptions {
         Self {
             inner: StdOpenOptions::new(),
             backend,
+            create: false,
         }
     }
 
@@ -51,6 +56,7 @@ impl OpenOptions {
 
     pub fn create(&mut self, create: bool) -> &mut Self {
         self.inner.create(create);
+        self.create = true;
         self
     }
 
@@ -64,7 +70,12 @@ impl OpenOptions {
         let full_path = backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
-            backend.download(&full_path)?;
+            if let Err(err) = backend.download(&full_path) {
+                if !self.create {
+                    // it's ok if the file does not exist and we are going to create it
+                    return Err(err);
+                }
+            }
         }
 
         let file = self.inner.open(full_path.clone())?;
@@ -72,19 +83,33 @@ impl OpenOptions {
             inner: file,
             backend: Arc::clone(&self.backend),
             path: full_path,
+            last_synced: std::time::Instant::now(),
+            is_synced: true,
         })
     }
 }
 
 impl File {
-    pub fn sync_all(&self) -> std::io::Result<()> {
+    pub fn sync_all(&mut self) -> std::io::Result<()> {
+        if self.is_synced() {
+            return Ok(());
+        }
+
+        info!("File {} synced to disk", self.path.display());
+
         self.inner.sync_all()?;
-        self.backend.read().unwrap().sync(&self.path)
+        self.backend.read().unwrap().sync(&self.path)?;
+        self.last_synced = std::time::Instant::now();
+        self.is_synced = true;
+        Ok(())
     }
 
-    pub fn sync_data(&self) -> std::io::Result<()> {
-        self.inner.sync_data()?;
-        self.backend.read().unwrap().sync(&self.path)
+    pub fn last_synced(&self) -> std::time::Instant {
+        self.last_synced
+    }
+
+    pub fn is_synced(&self) -> bool {
+        self.is_synced
     }
 
     pub fn set_len(&self, size: u64) -> std::io::Result<()> {
@@ -104,6 +129,7 @@ impl Read for File {
 
 impl Write for File {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.is_synced = false;
         self.inner.write(buf)
     }
 
