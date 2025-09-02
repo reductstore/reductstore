@@ -56,35 +56,10 @@ impl OpenOptions {
         self
     }
 
-    pub fn append(&mut self, append: bool) -> &mut Self {
-        self.inner.append(append);
-        if append {
-            self.mode = AccessMode::ReadWrite;
-        }
-
-        self
-    }
-
-    pub fn truncate(&mut self, truncate: bool) -> &mut Self {
-        self.inner.truncate(truncate);
-        if truncate {
-            self.mode = AccessMode::ReadWrite;
-        }
-        self
-    }
-
     pub fn create(&mut self, create: bool) -> &mut Self {
         self.inner.create(create);
         self.create = create;
         if create {
-            self.mode = AccessMode::ReadWrite;
-        }
-        self
-    }
-
-    pub fn create_new(&mut self, create_new: bool) -> &mut Self {
-        self.inner.create_new(create_new);
-        if create_new {
             self.mode = AccessMode::ReadWrite;
         }
         self
