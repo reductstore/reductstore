@@ -8,7 +8,7 @@ use crate::backend::s3::{S3Backend, S3BackendSettings};
 use crate::backend::{BoxedBackend, NoopBackend};
 use crate::error::Error;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use url::Url;
 
 mod backend;
@@ -133,7 +133,7 @@ impl BackpackBuilder {
                 Box::new(S3Backend::new(settings))
             }
 
-            #[allow(unreachable_code)]
+            #[allow(unreachable_patterns)]
             _ => Err(Error::new(
                 "Unsupported backend type or feature not enabled",
             ))?,

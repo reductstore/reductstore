@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::backend::StorageBackend;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) struct FileSystemBackend {
     path: PathBuf,
@@ -21,23 +21,23 @@ impl StorageBackend for FileSystemBackend {
         &self.path
     }
 
-    fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::rename(from, to)
     }
 
-    fn remove(&self, path: &std::path::Path) -> std::io::Result<()> {
+    fn remove(&self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_file(path)
     }
 
-    fn remove_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_dir_all(path)
     }
 
-    fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+    fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(path)
     }
 
-    fn read_dir(&self, path: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
         std::fs::read_dir(path).map(|read_dir| {
             read_dir
                 .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -45,16 +45,16 @@ impl StorageBackend for FileSystemBackend {
         })
     }
 
-    fn try_exists(&self, path: &std::path::Path) -> std::io::Result<bool> {
+    fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
         path.try_exists()
     }
 
-    fn sync(&self, path: &std::path::Path) -> std::io::Result<()> {
+    fn sync(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because the file owner is responsible for syncing with fs
         Ok(())
     }
 
-    fn download(&self, _path: &std::path::Path) -> std::io::Result<()> {
+    fn download(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because filesystem backend does not need downloading
         Ok(())
     }

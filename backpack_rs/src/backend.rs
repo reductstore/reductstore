@@ -8,8 +8,6 @@ pub(super) mod fs;
 #[cfg(feature = "s3")]
 pub(super) mod s3;
 
-use std::arch::x86_64::_MM_PERM_ENUM;
-use std::fs::ReadDir;
 use std::path::{Path, PathBuf};
 
 pub trait StorageBackend {
@@ -54,7 +52,7 @@ impl StorageBackend for NoopBackend {
         Ok(())
     }
 
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
+    fn read_dir(&self, _path: &Path) -> std::io::Result<Vec<PathBuf>> {
         Ok(vec![])
     }
 

@@ -7,20 +7,9 @@ mod wrapper;
 
 use crate::backend::s3::wrapper::S3ClientWrapper;
 use crate::backend::StorageBackend;
-use crate::error::Error;
-use aws_config::{BehaviorVersion, Region, SdkConfig};
-use aws_sdk_s3::config::{Credentials, IntoShared};
-use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
-use aws_sdk_s3::operation::head_object::HeadObjectError::NotFound;
-use aws_sdk_s3::{Client, Config};
-use log::{debug, info};
-use std::collections::HashSet;
+use log::debug;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::{fs, io};
-use tokio::io::AsyncWriteExt;
-use tokio::runtime::{Handle, Runtime};
-use tokio::task::block_in_place;
 
 pub(crate) struct S3BackendSettings {
     pub cache_path: PathBuf,
@@ -46,11 +35,11 @@ impl S3Backend {
 }
 
 impl StorageBackend for S3Backend {
-    fn path(&self) -> &std::path::PathBuf {
+    fn path(&self) -> &PathBuf {
         &self.cache_path
     }
 
-    fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         fs::rename(from, to)?;
 
         let from_key = from
@@ -87,7 +76,7 @@ impl StorageBackend for S3Backend {
         Ok(())
     }
 
-    fn remove(&self, path: &std::path::Path) -> std::io::Result<()> {
+    fn remove(&self, path: &Path) -> io::Result<()> {
         if let Err(err) = fs::remove_file(path) {
             if err.kind() != io::ErrorKind::NotFound {
                 return Err(err);
@@ -103,7 +92,7 @@ impl StorageBackend for S3Backend {
         self.wrapper.remove_object(s3_key)
     }
 
-    fn remove_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         fs::remove_dir_all(path)?;
         let s3_key = path
             .strip_prefix(&self.cache_path)
@@ -204,7 +193,7 @@ impl StorageBackend for S3Backend {
         Ok(())
     }
 
-    fn download(&self, path: &std::path::Path) -> std::io::Result<()> {
+    fn download(&self, path: &Path) -> std::io::Result<()> {
         let full_path = self.cache_path.join(path);
         if full_path.exists() {
             return Ok(());

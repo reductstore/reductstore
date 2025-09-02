@@ -7,8 +7,8 @@ use log::info;
 use std::fs::File as StdFile;
 use std::fs::OpenOptions as StdOpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 pub struct File {
     inner: StdFile,
@@ -65,7 +65,7 @@ impl OpenOptions {
         self
     }
 
-    pub fn open<P: AsRef<std::path::Path>>(&mut self, mut path: P) -> std::io::Result<File> {
+    pub fn open<P: AsRef<std::path::Path>>(&mut self, path: P) -> std::io::Result<File> {
         let full_path = self.backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed

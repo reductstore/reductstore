@@ -4,12 +4,10 @@
 use crate::cfg::Cfg;
 use crate::core::env::{Env, GetEnv};
 use backpack_rs::BackendType;
-use bytesize::ByteSize;
-use std::time::Duration;
 
 /// Cloud storage settings
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RemoteStorageConfig {
+pub struct RemoteStorageConfig {
     pub backend_type: BackendType,
     pub bucket: Option<String>,
     pub endpoint: Option<String>,
