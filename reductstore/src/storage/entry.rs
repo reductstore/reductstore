@@ -14,7 +14,7 @@ use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
-use log::debug;
+use log::{debug, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use std::collections::HashMap;
@@ -235,7 +235,6 @@ impl Entry {
 
         let oldest_block_id = *index_tree.first().unwrap();
         let block_manager = Arc::clone(&self.block_manager);
-
         match try_unique(
             &format!("{}/{}", self.task_group(), oldest_block_id),
             "try to remove oldest block",
@@ -243,6 +242,10 @@ impl Entry {
             move || {
                 let mut bm = block_manager.write().unwrap();
                 bm.remove_block(oldest_block_id)?;
+                debug!(
+                    "Removing the oldest block {}.blk",
+                    bm.path().join(oldest_block_id.to_string()).display()
+                );
                 Ok(())
             },
         ) {
