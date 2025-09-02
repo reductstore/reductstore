@@ -96,6 +96,8 @@ impl S3ClientWrapper {
                     let data = chunk?;
                     file.write_all(&data).await?;
                 }
+                file.flush().await?;
+                file.sync_all().await?;
                 Ok(())
             })
         })
