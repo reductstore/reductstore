@@ -526,7 +526,15 @@ mod tests {
                     .unwrap();
 
                 assert!(
-                    !cache.cache.write().unwrap().get(&file_path).unwrap().synced,
+                    !cache
+                        .cache
+                        .write()
+                        .unwrap()
+                        .get(&file_path)
+                        .unwrap()
+                        .read()
+                        .unwrap()
+                        .is_synced(),
                     "File should not be synced initially"
                 );
             }
@@ -535,7 +543,15 @@ mod tests {
             sleep(Duration::from_millis(150));
 
             assert!(
-                cache.cache.write().unwrap().get(&file_path).unwrap().synced,
+                cache
+                    .cache
+                    .write()
+                    .unwrap()
+                    .get(&file_path)
+                    .unwrap()
+                    .read()
+                    .unwrap()
+                    .is_synced(),
                 "File should be synced after sync worker runs"
             );
         }
@@ -553,7 +569,15 @@ mod tests {
             sleep(Duration::from_millis(150));
 
             assert!(
-                !cache.cache.write().unwrap().get(&file_path).unwrap().synced,
+                !cache
+                    .cache
+                    .write()
+                    .unwrap()
+                    .get(&file_path)
+                    .unwrap()
+                    .read()
+                    .unwrap()
+                    .is_synced(),
                 "File should not be synced after sync worker runs"
             );
         }
@@ -564,10 +588,7 @@ mod tests {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
         cache.set_storage_backend(
             Backpack::builder()
-                .location(format!(
-                    "file://{}",
-                    tempfile::tempdir().unwrap().path().display()
-                ))
+                .local_data_path(tempfile::tempdir().unwrap().keep().to_str().unwrap())
                 .try_build()
                 .unwrap(),
         );

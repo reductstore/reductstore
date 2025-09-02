@@ -558,7 +558,7 @@ mod tests {
             let mut sender = entry
                 .begin_write(
                     1000000,
-                    MAX_IO_BUFFER_SIZE + 1,
+                    (MAX_IO_BUFFER_SIZE + 1) as u64,
                     "text/plain".to_string(),
                     Labels::new(),
                 )
@@ -633,7 +633,12 @@ mod tests {
 
     pub fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) {
         let mut sender = entry
-            .begin_write(time, data.len(), "text/plain".to_string(), Labels::new())
+            .begin_write(
+                time,
+                data.len() as u64,
+                "text/plain".to_string(),
+                Labels::new(),
+            )
             .wait()
             .unwrap();
         sender.blocking_send(Ok(Some(Bytes::from(data)))).unwrap();
@@ -644,7 +649,7 @@ mod tests {
 
     pub fn write_record_with_labels(entry: &mut Entry, time: u64, data: Vec<u8>, labels: Labels) {
         let mut sender = entry
-            .begin_write(time, data.len(), "text/plain".to_string(), labels)
+            .begin_write(time, data.len() as u64, "text/plain".to_string(), labels)
             .wait()
             .unwrap();
         sender.blocking_send(Ok(Some(Bytes::from(data)))).unwrap();

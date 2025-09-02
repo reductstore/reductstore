@@ -552,7 +552,7 @@ mod tests {
             .begin_write(
                 entry_name,
                 time,
-                content.len(),
+                content.len() as u64,
                 "".to_string(),
                 Labels::new(),
             )

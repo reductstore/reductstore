@@ -270,7 +270,7 @@ mod tests {
         let data_path = tempfile::tempdir().unwrap().keep();
         FILE_CACHE.set_storage_backend(
             Backpack::builder()
-                .location(data_path.to_str().unwrap())
+                .local_data_path(data_path.to_str().unwrap())
                 .try_build()
                 .unwrap(),
         );

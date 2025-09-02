@@ -664,7 +664,7 @@ mod tests {
     fn storage(path: PathBuf) -> Storage {
         FILE_CACHE.set_storage_backend(
             Backpack::builder()
-                .location(path.to_str().unwrap())
+                .local_data_path(path.to_str().unwrap())
                 .try_build()
                 .unwrap(),
         );

@@ -528,7 +528,7 @@ mod tests {
                 .unwrap()
                 .upgrade()
                 .unwrap();
-            let file = rc.write().unwrap();
+            let mut file = rc.write().unwrap();
             file.set_len(0).unwrap();
             file.sync_all().unwrap();
         }
