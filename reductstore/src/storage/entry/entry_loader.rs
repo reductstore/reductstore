@@ -233,14 +233,19 @@ impl EntryLoader {
         let mut inconsistent_data = false;
         for block_id in block_index.tree().iter() {
             let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
-            if !FILE_CACHE.try_exists(&desc_path)? {
+            if FILE_CACHE.try_exists(&desc_path)? {
+                let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
+                if !FILE_CACHE.try_exists(&data_path)? {
+                    warn!(
+                        "Data block {:?} not found. Removing its descriptor",
+                        data_path
+                    );
+                    FILE_CACHE.remove(&desc_path)?;
+                    inconsistent_data = true;
+                }
+            } else {
                 warn!("Block descriptor {:?} not found", desc_path);
                 inconsistent_data = true;
-            }
-
-            let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
-            if !FILE_CACHE.try_exists(&data_path)? {
-                warn!("Block descriptor {:?} not found. Removing it", data_path);
             }
         }
 

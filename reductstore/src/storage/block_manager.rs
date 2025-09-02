@@ -204,7 +204,7 @@ impl BlockManager {
             let file = FILE_CACHE
                 .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))?
                 .upgrade()?;
-            let file = file.write()?;
+            let mut file = file.write()?;
             file.set_len(max_block_size)?;
         }
 

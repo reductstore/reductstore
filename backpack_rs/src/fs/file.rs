@@ -112,7 +112,8 @@ impl File {
         self.is_synced
     }
 
-    pub fn set_len(&self, size: u64) -> std::io::Result<()> {
+    pub fn set_len(&mut self, size: u64) -> std::io::Result<()> {
+        self.is_synced = false;
         self.inner.set_len(size)
     }
 

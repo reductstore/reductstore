@@ -88,7 +88,11 @@ impl StorageBackend for S3Backend {
     }
 
     fn remove(&self, path: &std::path::Path) -> std::io::Result<()> {
-        fs::remove_file(path)?;
+        if let Err(err) = fs::remove_file(path) {
+            if err.kind() != io::ErrorKind::NotFound {
+                return Err(err);
+            }
+        }
         let s3_key = path
             .strip_prefix(&self.cache_path)
             .unwrap()

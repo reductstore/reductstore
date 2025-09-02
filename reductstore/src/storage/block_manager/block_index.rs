@@ -241,7 +241,6 @@ impl BlockIndex {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)
         })?;
 
-        lock.flush()?;
         lock.sync_all()?;
 
         Ok(())

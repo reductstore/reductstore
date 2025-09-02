@@ -93,7 +93,7 @@ impl FileCache {
             // Periodically sync files from cache to disk
             while !stop_sync_worker.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(100));
-                Self::sync_rw_and_unused_files(&cache, sync_interval);
+                Self::sync_rw_and_unused_files(&cache, sync_interval, false);
             }
         });
 
@@ -107,16 +107,24 @@ impl FileCache {
     fn sync_rw_and_unused_files(
         cache: &Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
         sync_interval: Duration,
+        force: bool,
     ) {
         let mut cache = cache.write().unwrap();
 
         for (path, file_desc) in cache.iter_mut() {
-            // Sync only writeable files that are not synced yet
-            // and are not used by other threads
-            let Some(mut file) = file_desc.file_ref.try_write().ok() else {
-                continue;
+            let mut file = if force {
+                // force sync, we need to get a write lock and wait for it
+                file_desc.file_ref.write().unwrap()
+            } else {
+                // if the file is used by other threads, sync it next time
+                let Some(file) = file_desc.file_ref.try_write().ok() else {
+                    continue;
+                };
+                file
             };
 
+            // Sync only writeable files that are not synced yet
+            // and are not used by other threads
             if file_desc.mode != AccessMode::ReadWrite
                 || Arc::strong_count(&file_desc.file_ref) > 1
                 || Arc::weak_count(&file_desc.file_ref) > 0
@@ -249,9 +257,7 @@ impl FileCache {
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
         cache.remove(path);
-        if path.try_exists()? {
-            self.backpack.read()?.remove(path)?;
-        }
+        self.backpack.read()?.remove(path)?;
 
         Ok(())
     }
@@ -328,6 +334,10 @@ impl FileCache {
         Ok(backpack.try_exists(path)?)
     }
 
+    pub fn force_sync_all(&self) {
+        Self::sync_rw_and_unused_files(&self.cache, Duration::from_secs(0), true);
+    }
+
     /// Saves a file descriptor in the cache and syncs any discarded files.
     ///
     /// We need to make sure that we sync all files that were discarded
@@ -356,7 +366,6 @@ impl FileCache {
 impl Drop for FileCache {
     fn drop(&mut self) {
         self.stop_sync_worker.store(true, Ordering::Relaxed);
-        Self::sync_rw_and_unused_files(&self.cache, Duration::from_secs(0));
     }
 }
 
