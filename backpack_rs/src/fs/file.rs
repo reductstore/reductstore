@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::backend::BoxedBackend;
-use log::info;
+use log::{debug, info};
 use std::fs::File as StdFile;
 use std::fs::OpenOptions as StdOpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum AccessMode {
     Read,
     ReadWrite,
@@ -120,10 +120,10 @@ impl File {
             return Ok(());
         }
 
-        info!("File {} synced to disk", self.path.display());
+        debug!("File {} synced to storage backend", self.path.display());
 
         self.inner.sync_all()?;
-        self.backend.sync(&self.path)?;
+        self.backend.upload(&self.path)?;
         self.last_synced = Instant::now();
         self.is_synced = true;
         Ok(())
@@ -152,6 +152,10 @@ impl File {
 
     pub fn mode(&self) -> &AccessMode {
         &self.mode
+    }
+
+    pub fn access(&self) -> std::io::Result<()> {
+        self.backend.update_local_cache(&self.path, &self.mode)
     }
 }
 

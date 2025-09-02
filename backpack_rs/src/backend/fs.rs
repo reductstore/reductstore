@@ -4,6 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::backend::StorageBackend;
+use crate::fs::AccessMode;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct FileSystemBackend {
@@ -49,7 +50,7 @@ impl StorageBackend for FileSystemBackend {
         path.try_exists()
     }
 
-    fn sync(&self, _path: &Path) -> std::io::Result<()> {
+    fn upload(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because the file owner is responsible for syncing with fs
         Ok(())
     }
@@ -57,5 +58,15 @@ impl StorageBackend for FileSystemBackend {
     fn download(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because filesystem backend does not need downloading
         Ok(())
+    }
+
+    fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()> {
+        // do nothing because filesystem backend does not need access tracking
+        Ok(())
+    }
+
+    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+        // do nothing because filesystem backend does not have a cache
+        vec![]
     }
 }

@@ -9,7 +9,7 @@ use aws_credential_types::Credentials;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
-use log::info;
+use log::{debug, info};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,16 +33,6 @@ impl S3ClientWrapper {
                 .build()
                 .unwrap(),
         );
-
-        info!("Clearing S3 cache path: {:?}", settings.cache_path);
-        if settings.cache_path.exists() {
-            fs::remove_dir_all(&settings.cache_path).unwrap_or_else(|e| {
-                panic!(
-                    "Failed to clear S3 cache path {:?}: {}",
-                    settings.cache_path, e
-                )
-            });
-        }
 
         info!("Initializing S3 client for bucket: {}", settings.bucket);
         let base = block_in_place(|| {
@@ -324,7 +314,7 @@ impl S3ClientWrapper {
         let from_key = format!("r/{}", from);
         let to_key = format!("r/{}", to);
 
-        info!(
+        debug!(
             "Renaming S3 object from key: {} to key: {}",
             &from_key, &to_key
         );

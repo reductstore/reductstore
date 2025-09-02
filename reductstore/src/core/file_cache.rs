@@ -4,9 +4,10 @@
 use crate::core::cache::Cache;
 use backpack_rs::fs::{AccessMode, File};
 use backpack_rs::Backpack;
-use log::warn;
+use log::{debug, info, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::fs;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,18 +34,22 @@ pub(crate) struct FileWeak {
 }
 
 impl FileWeak {
-    fn new(file: FileRc, path: PathBuf) -> Self {
+    fn new(file: FileRc) -> Self {
         FileWeak {
             file: Arc::downgrade(&file),
-            path,
+            path: file.read().unwrap().path().clone(),
         }
     }
 
     pub fn upgrade(&self) -> Result<FileRc, ReductError> {
-        self.file.upgrade().ok_or(internal_server_error!(
+        let file = self.file.upgrade().ok_or(internal_server_error!(
             "File descriptor for {:?} is no longer available",
             self.path
-        ))
+        ))?;
+
+        // Notify storage backend that the file was accessed
+        file.read()?.access()?;
+        Ok(file)
     }
 }
 
@@ -59,7 +64,7 @@ pub(crate) type FileRc = Arc<RwLock<File>>;
 pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileRc>>>,
     stop_sync_worker: Arc<AtomicBool>,
-    backpack: RwLock<Backpack>,
+    backpack: Arc<RwLock<Backpack>>,
 }
 
 impl FileCache {
@@ -75,28 +80,42 @@ impl FileCache {
         let cache_clone = Arc::clone(&cache);
         let stop_sync_worker = Arc::new(AtomicBool::new(false));
         let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
+        let backpack = Arc::new(RwLock::new(Backpack::default()));
+        let backpack_clone = Arc::clone(&backpack);
 
         spawn(move || {
             // Periodically sync files from cache to disk
             while !stop_sync_worker.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(100));
-                Self::sync_rw_and_unused_files(&cache, sync_interval, false);
+                Self::sync_rw_and_unused_files(&backpack_clone, &cache, sync_interval, false);
             }
         });
 
         FileCache {
             cache: cache_clone,
             stop_sync_worker: stop_sync_worker_clone,
-            backpack: RwLock::new(Backpack::default()),
+            backpack,
         }
     }
 
     fn sync_rw_and_unused_files(
+        backend: &Arc<RwLock<Backpack>>,
         cache: &Arc<RwLock<Cache<PathBuf, FileRc>>>,
         sync_interval: Duration,
         force: bool,
     ) {
         let mut cache = cache.write().unwrap();
+        let invalidated_files = backend.read().unwrap().invalidate_locally_cached_files();
+        for path in invalidated_files {
+            if let Some(file) = cache.remove(&path) {
+                if let Err(err) = file.write().unwrap().sync_all() {
+                    warn!("Failed to sync invalidated file {:?}: {}", path, err);
+                }
+            }
+
+            fs::remove_file(&path).ok();
+            debug!("Removed invalidated file {:?} from cache and storage", path);
+        }
 
         for (path, file) in cache.iter_mut() {
             let mut file_lock = if force {
@@ -146,19 +165,23 @@ impl FileCache {
     /// A file reference
     pub fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
         let mut cache = self.cache.write()?;
+        let open_file = |cache| -> Result<FileRc, ReductError> {
+            let file = self.backpack.read()?.open_options().read(true).open(path)?;
+            let file = Arc::new(RwLock::new(file));
+            Self::save_in_cache_and_sync_discarded(path.clone(), cache, &file);
+            Ok(file)
+        };
+
         let file = if let Some(file) = cache.get_mut(path) {
             Arc::clone(&file)
         } else {
-            let file = self.backpack.read()?.open_options().read(true).open(path)?;
-            let file = Arc::new(RwLock::new(file));
-            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file);
-            file
+            open_file(&mut cache)?
         };
 
         if pos != SeekFrom::Current(0) {
             file.write()?.seek(pos)?;
         }
-        Ok(FileWeak::new(file, path.clone()))
+        Ok(FileWeak::new(file))
     }
 
     /// Get a file descriptor for writing
@@ -176,38 +199,36 @@ impl FileCache {
     /// A file reference
     pub fn write_or_create(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
         let mut cache = self.cache.write()?;
-
-        let file = if let Some(file) = cache.get_mut(path) {
-            if file.read()?.mode() == &AccessMode::ReadWrite {
-                Arc::clone(&file)
-            } else {
-                let rw_file = self
-                    .backpack
-                    .read()?
-                    .open_options()
-                    .write(true)
-                    .read(true)
-                    .open(path)?;
-                Arc::new(RwLock::new(rw_file))
-            }
-        } else {
+        let open_file = |cache, create| -> Result<FileRc, ReductError> {
             let file = self
                 .backpack
                 .read()?
                 .open_options()
-                .create(true)
+                .create(create)
                 .write(true)
                 .read(true)
                 .open(path)?;
             let file = Arc::new(RwLock::new(file));
-            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file);
-            file
+            Self::save_in_cache_and_sync_discarded(path.clone(), cache, &file);
+            Ok(file)
+        };
+
+        let file = if let Some(file) = cache.get_mut(path).cloned() {
+            let lock = file.read()?;
+            if lock.mode() == &AccessMode::ReadWrite {
+                Arc::clone(&file)
+            } else {
+                // file was opened in read-only mode, we need to reopen it in read-write mode
+                open_file(&mut cache, false)?
+            }
+        } else {
+            open_file(&mut cache, true)?
         };
 
         if pos != SeekFrom::Current(0) {
             file.write()?.seek(pos)?;
         }
-        Ok(FileWeak::new(file, path.clone()))
+        Ok(FileWeak::new(file))
     }
 
     /// Removes a file from the file system and the cache.
@@ -311,7 +332,7 @@ impl FileCache {
     }
 
     pub fn force_sync_all(&self) {
-        Self::sync_rw_and_unused_files(&self.cache, Duration::from_secs(0), true);
+        Self::sync_rw_and_unused_files(&self.backpack, &self.cache, Duration::from_secs(0), true);
     }
 
     /// Saves a file descriptor in the cache and syncs any discarded files.
@@ -326,7 +347,7 @@ impl FileCache {
 
         for (_, file) in discarded_files {
             if let Err(err) = file.write().unwrap().sync_all() {
-                warn!("Failed to sync file {}: {}", path.display(), err);
+                warn!("Failed to sync file {:?}: {}", path, err);
             }
         }
     }

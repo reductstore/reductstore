@@ -8,6 +8,7 @@ pub(super) mod fs;
 #[cfg(feature = "s3")]
 pub(super) mod s3;
 
+use crate::fs::AccessMode;
 use std::path::{Path, PathBuf};
 
 pub trait StorageBackend {
@@ -24,9 +25,13 @@ pub trait StorageBackend {
 
     fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
 
-    fn sync(&self, path: &Path) -> std::io::Result<()>;
+    fn upload(&self, path: &Path) -> std::io::Result<()>;
 
     fn download(&self, path: &Path) -> std::io::Result<()>;
+
+    fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
+
+    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
 }
 
 pub(crate) struct NoopBackend;
@@ -60,12 +65,20 @@ impl StorageBackend for NoopBackend {
         Ok(false)
     }
 
-    fn sync(&self, _path: &Path) -> std::io::Result<()> {
+    fn upload(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 
     fn download(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
+    }
+
+    fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+        vec![]
     }
 }
 

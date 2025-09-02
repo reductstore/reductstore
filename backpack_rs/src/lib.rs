@@ -14,7 +14,6 @@ use url::Url;
 mod backend;
 pub mod error;
 pub mod fs;
-mod local_cache;
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub enum BackendType {
@@ -215,6 +214,10 @@ impl Backpack {
 
     pub fn try_exists<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<bool> {
         self.backend.try_exists(path.as_ref())
+    }
+
+    pub fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+        self.backend.invalidate_locally_cached_files()
     }
 }
 
