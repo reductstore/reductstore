@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::cache::Cache;
-use backpack_rs::fs::File;
+use backpack_rs::fs::{AccessMode, File};
 use backpack_rs::Backpack;
 use log::warn;
 use reduct_base::error::ReductError;
@@ -50,17 +50,6 @@ impl FileWeak {
 
 pub(crate) type FileRc = Arc<RwLock<File>>;
 
-#[derive(PartialEq)]
-enum AccessMode {
-    Read,
-    ReadWrite,
-}
-
-struct FileDescriptor {
-    file_ref: FileRc,
-    mode: AccessMode,
-}
-
 /// A cache to keep file descriptors open
 ///
 /// This optimization is needed for network file systems because opening
@@ -68,7 +57,7 @@ struct FileDescriptor {
 ///
 /// Additionally, it periodically syncs files to disk to ensure data integrity.
 pub(crate) struct FileCache {
-    cache: Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
+    cache: Arc<RwLock<Cache<PathBuf, FileRc>>>,
     stop_sync_worker: Arc<AtomicBool>,
     backpack: RwLock<Backpack>,
 }
@@ -82,9 +71,7 @@ impl FileCache {
     /// * `ttl` - The time to live for a file descriptor
     /// * `sync_interval` - The interval to sync files from cache to disk
     fn new(max_size: usize, ttl: Duration, sync_interval: Duration) -> Self {
-        let cache = Arc::new(RwLock::new(Cache::<PathBuf, FileDescriptor>::new(
-            max_size, ttl,
-        )));
+        let cache = Arc::new(RwLock::new(Cache::<PathBuf, FileRc>::new(max_size, ttl)));
         let cache_clone = Arc::clone(&cache);
         let stop_sync_worker = Arc::new(AtomicBool::new(false));
         let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
@@ -105,19 +92,19 @@ impl FileCache {
     }
 
     fn sync_rw_and_unused_files(
-        cache: &Arc<RwLock<Cache<PathBuf, FileDescriptor>>>,
+        cache: &Arc<RwLock<Cache<PathBuf, FileRc>>>,
         sync_interval: Duration,
         force: bool,
     ) {
         let mut cache = cache.write().unwrap();
 
-        for (path, file_desc) in cache.iter_mut() {
-            let mut file = if force {
+        for (path, file) in cache.iter_mut() {
+            let mut file_lock = if force {
                 // force sync, we need to get a write lock and wait for it
-                file_desc.file_ref.write().unwrap()
+                file.write().unwrap()
             } else {
                 // if the file is used by other threads, sync it next time
-                let Some(file) = file_desc.file_ref.try_write().ok() else {
+                let Some(file) = file.try_write().ok() else {
                     continue;
                 };
                 file
@@ -125,16 +112,16 @@ impl FileCache {
 
             // Sync only writeable files that are not synced yet
             // and are not used by other threads
-            if file_desc.mode != AccessMode::ReadWrite
-                || Arc::strong_count(&file_desc.file_ref) > 1
-                || Arc::weak_count(&file_desc.file_ref) > 0
-                || file.is_synced()
-                || file.last_synced().elapsed() < sync_interval
+            if file_lock.mode() != &AccessMode::ReadWrite
+                || Arc::strong_count(&file) > 1
+                || Arc::weak_count(&file) > 0
+                || file_lock.is_synced()
+                || file_lock.last_synced().elapsed() < sync_interval
             {
                 continue;
             }
 
-            if let Err(err) = file.sync_all() {
+            if let Err(err) = file_lock.sync_all() {
                 warn!("Failed to sync file {}: {}", path.display(), err);
                 continue;
             }
@@ -159,17 +146,12 @@ impl FileCache {
     /// A file reference
     pub fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
         let mut cache = self.cache.write()?;
-        let file = if let Some(desc) = cache.get_mut(path) {
-            Arc::clone(&desc.file_ref)
+        let file = if let Some(file) = cache.get_mut(path) {
+            Arc::clone(&file)
         } else {
             let file = self.backpack.read()?.open_options().read(true).open(path)?;
             let file = Arc::new(RwLock::new(file));
-            Self::save_in_cache_and_sync_discarded(
-                path.clone(),
-                &mut cache,
-                &file,
-                AccessMode::Read,
-            );
+            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file);
             file
         };
 
@@ -195,9 +177,9 @@ impl FileCache {
     pub fn write_or_create(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
         let mut cache = self.cache.write()?;
 
-        let file = if let Some(desc) = cache.get_mut(path) {
-            if desc.mode == AccessMode::ReadWrite {
-                Arc::clone(&desc.file_ref)
+        let file = if let Some(file) = cache.get_mut(path) {
+            if file.read()?.mode() == &AccessMode::ReadWrite {
+                Arc::clone(&file)
             } else {
                 let rw_file = self
                     .backpack
@@ -206,9 +188,7 @@ impl FileCache {
                     .write(true)
                     .read(true)
                     .open(path)?;
-                desc.file_ref = Arc::new(RwLock::new(rw_file));
-                desc.mode = AccessMode::ReadWrite;
-                Arc::clone(&desc.file_ref)
+                Arc::new(RwLock::new(rw_file))
             }
         } else {
             let file = self
@@ -220,12 +200,7 @@ impl FileCache {
                 .read(true)
                 .open(path)?;
             let file = Arc::new(RwLock::new(file));
-            Self::save_in_cache_and_sync_discarded(
-                path.clone(),
-                &mut cache,
-                &file,
-                AccessMode::ReadWrite,
-            );
+            Self::save_in_cache_and_sync_discarded(path.clone(), &mut cache, &file);
             file
         };
 
@@ -298,8 +273,9 @@ impl FileCache {
         for file_path in files_to_remove {
             if let Some(file) = cache.remove(&file_path) {
                 // If the file is in read-write mode and not synced, we need to sync it before removing from cache
-                if file.mode == AccessMode::ReadWrite && !file.file_ref.read()?.is_synced() {
-                    if let Err(err) = file.file_ref.write()?.sync_all() {
+                let mut lock = file.write()?;
+                if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
+                    if let Err(err) = lock.sync_all() {
                         warn!("Failed to sync file {}: {}", file_path.display(), err);
                     }
                 }
@@ -343,20 +319,13 @@ impl FileCache {
     /// We need to make sure that we sync all files that were discarded
     fn save_in_cache_and_sync_discarded(
         path: PathBuf,
-        cache: &mut RwLockWriteGuard<Cache<PathBuf, FileDescriptor>>,
+        cache: &mut RwLockWriteGuard<Cache<PathBuf, FileRc>>,
         file: &Arc<RwLock<File>>,
-        mode: AccessMode,
     ) -> () {
-        let discarded_files = cache.insert(
-            path.clone(),
-            FileDescriptor {
-                file_ref: Arc::clone(file),
-                mode,
-            },
-        );
+        let discarded_files = cache.insert(path.clone(), Arc::clone(file));
 
         for (_, file) in discarded_files {
-            if let Err(err) = file.file_ref.write().unwrap().sync_all() {
+            if let Err(err) = file.write().unwrap().sync_all() {
                 warn!("Failed to sync file {}: {}", path.display(), err);
             }
         }

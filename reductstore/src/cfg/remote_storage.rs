@@ -4,6 +4,7 @@
 use crate::cfg::Cfg;
 use crate::core::env::{Env, GetEnv};
 use backpack_rs::BackendType;
+use bytesize::ByteSize;
 
 /// Cloud storage settings
 #[derive(Clone, Debug, PartialEq)]
@@ -15,6 +16,7 @@ pub struct RemoteStorageConfig {
     pub access_key: Option<String>,
     pub secret_key: Option<String>,
     pub cache_path: Option<String>,
+    pub cache_size: u64,
 }
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
@@ -33,6 +35,10 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             access_key: env.get_optional::<String>("RS_REMOTE_ACCESS_KEY"),
             secret_key: env.get_optional::<String>("RS_REMOTE_SECRET_KEY"),
             cache_path: env.get_optional::<String>("RS_REMOTE_CACHE_PATH"),
+            cache_size: env
+                .get_optional::<ByteSize>("RS_REMOTE_CACHE_SIZE")
+                .unwrap_or(ByteSize::gb(1))
+                .as_u64(),
         }
     }
 }

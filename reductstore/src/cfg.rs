@@ -97,9 +97,11 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
+        // Initialize storage backend
         let mut backend_builder = Backpack::builder()
             .backend_type(self.cs_config.backend_type.clone())
-            .local_data_path(&self.data_path);
+            .local_data_path(&self.data_path)
+            .cache_size(self.cs_config.cache_size);
 
         if let Some(bucket) = &self.cs_config.bucket {
             backend_builder = backend_builder.remote_bucket(bucket);

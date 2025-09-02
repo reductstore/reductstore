@@ -14,6 +14,7 @@ use url::Url;
 mod backend;
 pub mod error;
 pub mod fs;
+mod local_cache;
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub enum BackendType {
@@ -33,6 +34,7 @@ pub struct BackpackBuilder {
     remote_endpoint: Option<String>,
     remote_access_key: Option<String>,
     remote_secret_key: Option<String>,
+    remote_cache_size: Option<u64>,
 }
 
 impl BackpackBuilder {
@@ -57,6 +59,11 @@ impl BackpackBuilder {
 
     pub fn remote_cache_path(mut self, path: &str) -> Self {
         self.remote_cache_path = Some(path.to_string());
+        self
+    }
+
+    pub fn cache_size(mut self, size: u64) -> Self {
+        self.remote_cache_size = Some(size);
         self
     }
 
@@ -119,6 +126,10 @@ impl BackpackBuilder {
                     Err(Error::new("remote_secret_key is required for S3 backend"))?
                 };
 
+                let Some(cache_size) = self.remote_cache_size else {
+                    Err(Error::new("remote_cache_size is required for S3 backend"))?
+                };
+
                 let url = Url::parse(&endpoint)
                     .map_err(|e| Error::new(&format!("Invalid endpoint URL: {}", e)))?;
                 let settings = S3BackendSettings {
@@ -128,6 +139,7 @@ impl BackpackBuilder {
                     secret_key,
                     region,
                     bucket,
+                    cache_size,
                 };
 
                 Box::new(S3Backend::new(settings))

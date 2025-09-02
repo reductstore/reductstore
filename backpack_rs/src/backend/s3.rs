@@ -13,6 +13,7 @@ use std::{fs, io};
 
 pub(crate) struct S3BackendSettings {
     pub cache_path: PathBuf,
+    pub cache_size: u64,
     pub endpoint: String,
     pub access_key: String,
     pub secret_key: String,
@@ -154,7 +155,7 @@ impl StorageBackend for S3Backend {
         Ok(paths)
     }
 
-    fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
+    fn try_exists(&self, path: &Path) -> io::Result<bool> {
         // check cache first and then load from s3 if not in cache
         let full_path = self.cache_path.join(path);
         if full_path.exists() {
@@ -174,7 +175,7 @@ impl StorageBackend for S3Backend {
         self.wrapper.head_object(s3_key)
     }
 
-    fn sync(&self, full_path: &Path) -> std::io::Result<()> {
+    fn sync(&self, full_path: &Path) -> io::Result<()> {
         // upload to s3
         let s3_key = full_path
             .strip_prefix(&self.cache_path)
@@ -193,7 +194,7 @@ impl StorageBackend for S3Backend {
         Ok(())
     }
 
-    fn download(&self, path: &Path) -> std::io::Result<()> {
+    fn download(&self, path: &Path) -> io::Result<()> {
         let full_path = self.cache_path.join(path);
         if full_path.exists() {
             return Ok(());

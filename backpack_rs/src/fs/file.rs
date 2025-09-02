@@ -9,19 +9,28 @@ use std::fs::OpenOptions as StdOpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
+
+#[derive(PartialEq, Clone)]
+pub enum AccessMode {
+    Read,
+    ReadWrite,
+}
 
 pub struct File {
     inner: StdFile,
     backend: Arc<BoxedBackend>,
     path: PathBuf,
-    last_synced: std::time::Instant,
+    last_synced: Instant,
     is_synced: bool,
+    mode: AccessMode,
 }
 
 pub struct OpenOptions {
     inner: StdOpenOptions,
     backend: Arc<BoxedBackend>,
     create: bool,
+    mode: AccessMode,
 }
 
 impl OpenOptions {
@@ -30,6 +39,7 @@ impl OpenOptions {
             inner: StdOpenOptions::new(),
             backend,
             create: false,
+            mode: AccessMode::Read,
         }
     }
 
@@ -40,32 +50,47 @@ impl OpenOptions {
 
     pub fn write(&mut self, write: bool) -> &mut Self {
         self.inner.write(write);
+        if write {
+            self.mode = AccessMode::ReadWrite;
+        }
         self
     }
 
     pub fn append(&mut self, append: bool) -> &mut Self {
         self.inner.append(append);
+        if append {
+            self.mode = AccessMode::ReadWrite;
+        }
 
         self
     }
 
     pub fn truncate(&mut self, truncate: bool) -> &mut Self {
         self.inner.truncate(truncate);
+        if truncate {
+            self.mode = AccessMode::ReadWrite;
+        }
         self
     }
 
     pub fn create(&mut self, create: bool) -> &mut Self {
         self.inner.create(create);
-        self.create = true;
+        self.create = create;
+        if create {
+            self.mode = AccessMode::ReadWrite;
+        }
         self
     }
 
     pub fn create_new(&mut self, create_new: bool) -> &mut Self {
         self.inner.create_new(create_new);
+        if create_new {
+            self.mode = AccessMode::ReadWrite;
+        }
         self
     }
 
-    pub fn open<P: AsRef<std::path::Path>>(&mut self, path: P) -> std::io::Result<File> {
+    pub fn open<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<File> {
         let full_path = self.backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
@@ -82,8 +107,9 @@ impl OpenOptions {
             inner: file,
             backend: Arc::clone(&self.backend),
             path: full_path,
-            last_synced: std::time::Instant::now(),
+            last_synced: Instant::now(),
             is_synced: true,
+            mode: self.mode.clone(),
         })
     }
 }
@@ -98,11 +124,20 @@ impl File {
 
         self.inner.sync_all()?;
         self.backend.sync(&self.path)?;
-        self.last_synced = std::time::Instant::now();
+        self.last_synced = Instant::now();
         self.is_synced = true;
         Ok(())
     }
+    pub fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
+        self.inner.metadata()
+    }
 
+    pub fn set_len(&mut self, size: u64) -> std::io::Result<()> {
+        self.is_synced = false;
+        self.inner.set_len(size)
+    }
+
+    // Specifically for cache management
     pub fn last_synced(&self) -> std::time::Instant {
         self.last_synced
     }
@@ -111,13 +146,12 @@ impl File {
         self.is_synced
     }
 
-    pub fn set_len(&mut self, size: u64) -> std::io::Result<()> {
-        self.is_synced = false;
-        self.inner.set_len(size)
+    pub fn path(&self) -> &PathBuf {
+        &self.path
     }
 
-    pub fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
-        self.inner.metadata()
+    pub fn mode(&self) -> &AccessMode {
+        &self.mode
     }
 }
 

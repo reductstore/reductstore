@@ -5,4 +5,4 @@
 
 mod file;
 
-pub use file::{File, OpenOptions};
+pub use file::{AccessMode, File, OpenOptions};
