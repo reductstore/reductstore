@@ -308,7 +308,4 @@ impl Backend {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use rstest::*;
-}
+mod tests {}
