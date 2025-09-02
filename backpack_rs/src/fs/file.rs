@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct File {
     inner: StdFile,
-    backend: Arc<RwLock<BoxedBackend>>,
+    backend: Arc<BoxedBackend>,
     path: PathBuf,
     last_synced: std::time::Instant,
     is_synced: bool,
@@ -20,12 +20,12 @@ pub struct File {
 
 pub struct OpenOptions {
     inner: StdOpenOptions,
-    backend: Arc<RwLock<BoxedBackend>>,
+    backend: Arc<BoxedBackend>,
     create: bool,
 }
 
 impl OpenOptions {
-    pub(crate) fn new(backend: Arc<RwLock<BoxedBackend>>) -> Self {
+    pub(crate) fn new(backend: Arc<BoxedBackend>) -> Self {
         Self {
             inner: StdOpenOptions::new(),
             backend,
@@ -66,11 +66,10 @@ impl OpenOptions {
     }
 
     pub fn open<P: AsRef<std::path::Path>>(&mut self, mut path: P) -> std::io::Result<File> {
-        let backend = self.backend.read().unwrap();
-        let full_path = backend.path().join(path.as_ref());
+        let full_path = self.backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
-            if let Err(err) = backend.download(&full_path) {
+            if let Err(err) = self.backend.download(&full_path) {
                 if !self.create {
                     // it's ok if the file does not exist and we are going to create it
                     return Err(err);
@@ -98,7 +97,7 @@ impl File {
         info!("File {} synced to disk", self.path.display());
 
         self.inner.sync_all()?;
-        self.backend.read().unwrap().sync(&self.path)?;
+        self.backend.sync(&self.path)?;
         self.last_synced = std::time::Instant::now();
         self.is_synced = true;
         Ok(())

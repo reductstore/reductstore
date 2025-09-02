@@ -140,19 +140,19 @@ impl BackpackBuilder {
         };
 
         Ok(Backpack {
-            backend: Arc::new(RwLock::new(backend)),
+            backend: Arc::new(backend),
         })
     }
 }
 
 pub struct Backpack {
-    backend: Arc<RwLock<BoxedBackend>>,
+    backend: Arc<BoxedBackend>,
 }
 
 impl Default for Backpack {
     fn default() -> Self {
         Self {
-            backend: Arc::new(RwLock::new(Box::new(NoopBackend::new()))),
+            backend: Arc::new(Box::new(NoopBackend::new())),
         }
     }
 }
@@ -182,33 +182,27 @@ impl Backpack {
         from: P,
         to: Q,
     ) -> std::io::Result<()> {
-        let backend = self.backend.read().unwrap();
-        backend.rename(from.as_ref(), to.as_ref())
+        self.backend.rename(from.as_ref(), to.as_ref())
     }
 
     pub fn remove<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
-        let backend = self.backend.read().unwrap();
-        backend.remove(path.as_ref())
+        self.backend.remove(path.as_ref())
     }
 
     pub fn remove_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
-        let backend = self.backend.read().unwrap();
-        backend.remove_dir_all(path.as_ref())
+        self.backend.remove_dir_all(path.as_ref())
     }
 
     pub fn create_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
-        let backend = self.backend.read().unwrap();
-        backend.create_dir_all(path.as_ref())
+        self.backend.create_dir_all(path.as_ref())
     }
 
     pub fn read_dir(&self, path: &PathBuf) -> std::io::Result<Vec<PathBuf>> {
-        let backend = self.backend.read().unwrap();
-        backend.read_dir(path)
+        self.backend.read_dir(path)
     }
 
     pub fn try_exists<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<bool> {
-        let backend = self.backend.read().unwrap();
-        backend.try_exists(path.as_ref())
+        self.backend.try_exists(path.as_ref())
     }
 }
 
