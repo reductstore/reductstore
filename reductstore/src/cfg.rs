@@ -9,13 +9,13 @@ pub mod replication;
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
+use crate::backend::Backend;
 use crate::cfg::io::IoConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
-use backpack_rs::Backpack;
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
@@ -98,7 +98,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
 
     pub fn build(&self) -> Result<Components, ReductError> {
         // Initialize storage backend
-        let mut backend_builder = Backpack::builder()
+        let mut backend_builder = Backend::builder()
             .backend_type(self.cs_config.backend_type.clone())
             .local_data_path(&self.data_path)
             .cache_size(self.cs_config.cache_size);

@@ -17,10 +17,14 @@ categories = ["database-implementations", "command-line-utilities", "database"]
 include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LICENSE"]
 
 [features]
-default = ["web-console"]
+default = ["web-console", "fs-backend", "s3-backend"]
 web-console = []
 select-ext = []
 ros-ext = []
+
+
+fs-backend = []
+s3-backend = ["dep:aws-sdk-s3", "dep:aws-config", "dep:aws-credential-types"]
 
 [lib]
 crate-type = ["lib"]
@@ -30,7 +34,6 @@ crate-type = ["lib"]
 [dependencies]
 reduct-base = { path = "../reduct_base", version = "1.15.0", features = ["ext"] }
 reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
-backpack-rs = { path = "../backpack_rs", version = "0.1.0" }
 
 chrono = { version = "0.4.41", features = ["serde"] }
 zip = "4.5.0"
@@ -65,6 +68,12 @@ crossbeam-channel = "0.5.15"
 dlopen2 = "0.8.0"
 log = "0.4"
 prost = "0.14.1"
+
+
+# optional dependencies for s3 backend
+aws-sdk-s3 = { version = "1.103.0", optional = true, features = ["rustls"] }
+aws-config = { version = "1.8.5", optional = true, features = ["rustls"] }
+aws-credential-types = { version = "1.2.5", optional = true, features = ["hardcoded-credentials"]}
 
 [build-dependencies]
 prost-build = "0.14.1"

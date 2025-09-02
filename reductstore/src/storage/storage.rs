@@ -295,7 +295,7 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use backpack_rs::Backpack;
+    use crate::backend::Backend;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
@@ -663,7 +663,7 @@ mod tests {
     #[fixture]
     fn storage(path: PathBuf) -> Storage {
         FILE_CACHE.set_storage_backend(
-            Backpack::builder()
+            Backend::builder()
                 .local_data_path(path.to_str().unwrap())
                 .try_build()
                 .unwrap(),

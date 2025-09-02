@@ -1,9 +1,9 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::backend::BackendType;
 use crate::cfg::Cfg;
 use crate::core::env::{Env, GetEnv};
-use backpack_rs::BackendType;
 use bytesize::ByteSize;
 
 /// Cloud storage settings

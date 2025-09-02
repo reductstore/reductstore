@@ -722,20 +722,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "backpack-rs"
-version = "0.1.0"
-dependencies = [
- "aws-config",
- "aws-credential-types",
- "aws-sdk-s3",
- "log",
- "rstest",
- "tokio",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "backtrace"
 version = "0.3.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2793,10 +2779,12 @@ dependencies = [
  "assert_matches",
  "async-stream",
  "async-trait",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-s3",
  "axum",
  "axum-extra",
  "axum-server",
- "backpack-rs",
  "base64 0.22.1",
  "byteorder",
  "bytes",
@@ -3812,7 +3800,6 @@ dependencies = [
  "once_cell",
  "regex-automata",
  "sharded-slab",
- "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",

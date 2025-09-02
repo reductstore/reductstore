@@ -175,6 +175,7 @@ mod tests {
     use super::*;
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
+    use crate::backend::Backend;
     use crate::cfg::replication::ReplicationConfig;
     use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
@@ -182,7 +183,6 @@ mod tests {
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
-    use backpack_rs::Backpack;
     use bytes::Bytes;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -269,7 +269,7 @@ mod tests {
     pub(crate) async fn components() -> Arc<Components> {
         let data_path = tempfile::tempdir().unwrap().keep();
         FILE_CACHE.set_storage_backend(
-            Backpack::builder()
+            Backend::builder()
                 .local_data_path(data_path.to_str().unwrap())
                 .try_build()
                 .unwrap(),

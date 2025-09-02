@@ -611,9 +611,9 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
+    use crate::backend::Backend;
     use crate::storage::entry::RecordWriter;
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
-    use backpack_rs::Backpack;
     use rand::distr::Alphanumeric;
     use rand::{rng, Rng};
     use reduct_base::io::WriteRecord;
@@ -1079,7 +1079,7 @@ mod tests {
     fn block_manager(block_id: u64) -> BlockManager {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         FILE_CACHE.set_storage_backend(
-            Backpack::builder()
+            Backend::builder()
                 .local_data_path(path.to_str().unwrap())
                 .try_build()
                 .unwrap(),

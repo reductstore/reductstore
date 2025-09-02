@@ -5,9 +5,9 @@
 
 mod wrapper;
 
+use crate::backend::file::AccessMode;
 use crate::backend::s3::wrapper::S3ClientWrapper;
 use crate::backend::StorageBackend;
-use crate::fs::AccessMode;
 use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

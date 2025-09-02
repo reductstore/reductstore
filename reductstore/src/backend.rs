@@ -3,17 +3,99 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::backend::fs::FileSystemBackend;
-use crate::backend::s3::{S3Backend, S3BackendSettings};
-use crate::backend::{BoxedBackend, NoopBackend};
-use crate::error::Error;
-use std::path::PathBuf;
+#[cfg(feature = "fs-backend")]
+pub(super) mod fs;
+
+#[cfg(feature = "s3-backend")]
+pub(super) mod s3;
+
+pub(crate) mod file;
+
+use crate::backend::file::{AccessMode, OpenOptions};
+use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
-mod backend;
-pub mod error;
-pub mod fs;
+pub(crate) trait StorageBackend {
+    fn path(&self) -> &PathBuf;
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+
+    fn remove(&self, path: &Path) -> std::io::Result<()>;
+
+    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+
+    fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
+
+    fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
+
+    fn upload(&self, path: &Path) -> std::io::Result<()>;
+
+    fn download(&self, path: &Path) -> std::io::Result<()>;
+
+    fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
+
+    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+}
+
+pub(crate) struct NoopBackend;
+
+impl StorageBackend for NoopBackend {
+    fn path(&self) -> &PathBuf {
+        panic!("NoopBackend does not have a path");
+    }
+
+    fn rename(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn remove(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn remove_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn create_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn read_dir(&self, _path: &Path) -> std::io::Result<Vec<PathBuf>> {
+        Ok(vec![])
+    }
+
+    fn try_exists(&self, _path: &Path) -> std::io::Result<bool> {
+        Ok(false)
+    }
+
+    fn upload(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn download(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+        vec![]
+    }
+}
+
+impl NoopBackend {
+    pub fn new() -> Self {
+        NoopBackend
+    }
+}
+
+pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub enum BackendType {
@@ -86,52 +168,66 @@ impl BackpackBuilder {
         self
     }
 
-    pub fn try_build(self) -> Result<Backpack, Error> {
+    pub fn try_build(self) -> Result<Backend, ReductError> {
         let backend: BoxedBackend = match self.backend_type {
-            #[cfg(feature = "fs")]
+            #[cfg(feature = "fs-backend")]
             BackendType::Filesystem => {
                 let Some(data_path) = self.local_data_path else {
-                    Err(Error::new(
+                    Err(internal_server_error!(
                         "local_data_path is required for Filesystem backend",
                     ))?
                 };
 
-                Box::new(FileSystemBackend::new(PathBuf::from(data_path)))
+                Box::new(fs::FileSystemBackend::new(PathBuf::from(data_path)))
             }
 
-            #[cfg(feature = "s3")]
+            #[cfg(feature = "s3-backend")]
             BackendType::S3 => {
                 let Some(bucket) = self.remote_bucket else {
-                    Err(Error::new("remote_bucket is required for S3 backend"))?
+                    Err(internal_server_error!(
+                        "remote_bucket is required for S3 backend"
+                    ))?
                 };
 
                 let Some(cache_path) = self.remote_cache_path else {
-                    Err(Error::new("remote_cache_path is required for S3 backend"))?
+                    Err(internal_server_error!(
+                        "remote_cache_path is required for S3 backend"
+                    ))?
                 };
 
                 let Some(region) = self.remote_region else {
-                    Err(Error::new("remote_region is required for S3 backend"))?
+                    Err(internal_server_error!(
+                        "remote_region is required for S3 backend"
+                    ))?
                 };
 
                 let Some(endpoint) = self.remote_endpoint else {
-                    Err(Error::new("remote_endpoint is required for S3 backend"))?
+                    Err(internal_server_error!(
+                        "remote_endpoint is required for S3 backend"
+                    ))?
                 };
 
                 let Some(access_key) = self.remote_access_key else {
-                    Err(Error::new("remote_access_key is required for S3 backend"))?
+                    Err(internal_server_error!(
+                        "remote_access_key is required for S3 backend"
+                    ))?
                 };
 
                 let Some(secret_key) = self.remote_secret_key else {
-                    Err(Error::new("remote_secret_key is required for S3 backend"))?
+                    Err(internal_server_error!(
+                        "remote_secret_key is required for S3 backend"
+                    ))?
                 };
 
                 let Some(cache_size) = self.remote_cache_size else {
-                    Err(Error::new("remote_cache_size is required for S3 backend"))?
+                    Err(internal_server_error!(
+                        "remote_cache_size is required for S3 backend"
+                    ))?
                 };
 
                 let url = Url::parse(&endpoint)
-                    .map_err(|e| Error::new(&format!("Invalid endpoint URL: {}", e)))?;
-                let settings = S3BackendSettings {
+                    .map_err(|e| internal_server_error!("Invalid endpoint URL: {}", e))?;
+                let settings = s3::S3BackendSettings {
                     cache_path: PathBuf::from(cache_path),
                     endpoint: url.to_string(),
                     access_key,
@@ -141,26 +237,26 @@ impl BackpackBuilder {
                     cache_size,
                 };
 
-                Box::new(S3Backend::new(settings))
+                Box::new(s3::S3Backend::new(settings))
             }
 
             #[allow(unreachable_patterns)]
-            _ => Err(Error::new(
+            _ => Err(internal_server_error!(
                 "Unsupported backend type or feature not enabled",
             ))?,
         };
 
-        Ok(Backpack {
+        Ok(Backend {
             backend: Arc::new(backend),
         })
     }
 }
 
-pub struct Backpack {
+pub struct Backend {
     backend: Arc<BoxedBackend>,
 }
 
-impl Default for Backpack {
+impl Default for Backend {
     fn default() -> Self {
         Self {
             backend: Arc::new(Box::new(NoopBackend::new())),
@@ -168,24 +264,14 @@ impl Default for Backpack {
     }
 }
 
-impl Backpack {
+impl Backend {
     pub fn builder() -> BackpackBuilder {
         BackpackBuilder::new()
     }
 
     /// Create a new instance of `fs::OpenOptions`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use backpack_rs::Backpack;
-    ///
-    /// let backpack = Backpack::builder().local_data_path(".").try_build().unwrap();
-    /// let mut options = backpack.open_options();
-    /// let file = options.read(true).open("example.txt");
-    /// ```
-    pub fn open_options(&self) -> fs::OpenOptions {
-        fs::OpenOptions::new(Arc::clone(&self.backend))
+    pub fn open_options(&self) -> OpenOptions {
+        OpenOptions::new(Arc::clone(&self.backend))
     }
 
     pub fn rename<P: AsRef<std::path::Path>, Q: AsRef<std::path::Path>>(

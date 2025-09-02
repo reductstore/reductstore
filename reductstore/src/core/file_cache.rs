@@ -1,9 +1,9 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::backend::file::{AccessMode, File};
+use crate::backend::Backend;
 use crate::core::cache::Cache;
-use backpack_rs::fs::{AccessMode, File};
-use backpack_rs::Backpack;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -64,7 +64,7 @@ pub(crate) type FileRc = Arc<RwLock<File>>;
 pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileRc>>>,
     stop_sync_worker: Arc<AtomicBool>,
-    backpack: Arc<RwLock<Backpack>>,
+    backpack: Arc<RwLock<Backend>>,
 }
 
 impl FileCache {
@@ -80,7 +80,7 @@ impl FileCache {
         let cache_clone = Arc::clone(&cache);
         let stop_sync_worker = Arc::new(AtomicBool::new(false));
         let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
-        let backpack = Arc::new(RwLock::new(Backpack::default()));
+        let backpack = Arc::new(RwLock::new(Backend::default()));
         let backpack_clone = Arc::clone(&backpack);
 
         spawn(move || {
@@ -99,7 +99,7 @@ impl FileCache {
     }
 
     fn sync_rw_and_unused_files(
-        backend: &Arc<RwLock<Backpack>>,
+        backend: &Arc<RwLock<Backend>>,
         cache: &Arc<RwLock<Cache<PathBuf, FileRc>>>,
         sync_interval: Duration,
         force: bool,
@@ -147,7 +147,7 @@ impl FileCache {
         }
     }
 
-    pub fn set_storage_backend(&self, backpack: Backpack) {
+    pub fn set_storage_backend(&self, backpack: Backend) {
         *self.backpack.write().unwrap() = backpack;
     }
 
@@ -589,7 +589,7 @@ mod tests {
     fn cache() -> FileCache {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
         cache.set_storage_backend(
-            Backpack::builder()
+            Backend::builder()
                 .local_data_path(tempfile::tempdir().unwrap().keep().to_str().unwrap())
                 .try_build()
                 .unwrap(),

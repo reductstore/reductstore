@@ -365,8 +365,8 @@ mod tests {
     use std::io::SeekFrom;
 
     use super::*;
+    use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
-    use backpack_rs::Backpack;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
@@ -460,7 +460,7 @@ mod tests {
     #[rstest]
     fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
         FILE_CACHE.set_storage_backend(
-            Backpack::builder()
+            Backend::builder()
                 .local_data_path(path.to_str().unwrap())
                 .try_build()
                 .unwrap(),

@@ -176,10 +176,10 @@ impl QueryWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
-    use backpack_rs::Backpack;
     use prost_wkt_types::Timestamp;
     use reduct_base::io::ReadRecord;
     use rstest::*;
@@ -322,7 +322,7 @@ mod tests {
             .join("entry");
 
         FILE_CACHE.set_storage_backend(
-            Backpack::builder()
+            Backend::builder()
                 .local_data_path(path.to_str().unwrap())
                 .try_build()
                 .unwrap(),
