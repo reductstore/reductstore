@@ -366,6 +366,7 @@ mod tests {
 
     use super::*;
     use crate::core::file_cache::FILE_CACHE;
+    use backpack_rs::Backpack;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
@@ -458,8 +459,16 @@ mod tests {
 
     #[rstest]
     fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
+        FILE_CACHE.set_storage_backend(
+            Backpack::builder()
+                .local_data_path(path.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
+
         let path = path.join("entry");
-        fs::create_dir_all(path.clone()).unwrap();
+        FILE_CACHE.create_dir_all(&path).unwrap();
+
         let mut block_manager = BlockManager::new(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
@@ -493,10 +502,19 @@ mod tests {
             .clone()
             .into();
         block_proto.record_count = 0;
-        fs::write(path.join("1.meta"), block_proto.encode_to_vec()).unwrap();
+
+        let lock = FILE_CACHE
+            .write_or_create(&path.join("1.meta"), SeekFrom::Start(0))
+            .unwrap()
+            .upgrade()
+            .unwrap();
+
+        lock.write()
+            .unwrap()
+            .write_all(&block_proto.encode_to_vec())
+            .unwrap();
 
         // repack the block
-        FILE_CACHE.remove(&path.join(BLOCK_INDEX_FILE)).unwrap();
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings).unwrap();
         let info = entry.info().unwrap();
 

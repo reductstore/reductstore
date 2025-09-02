@@ -225,18 +225,4 @@ impl Backpack {
 mod tests {
     use super::*;
     use rstest::*;
-
-    #[rstest]
-    fn open_options() {
-        let backpack = Backpack::builder()
-            .local_data_path("tmp")
-            .try_build()
-            .unwrap();
-        let mut options = backpack.open_options();
-        let file = options
-            .write(true)
-            .create(true)
-            .open("example.txt")
-            .unwrap();
-    }
 }

@@ -230,6 +230,9 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_shutdown() {
+        let data_path = tempdir().unwrap().keep();
+        env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+
         let handle = Handle::new();
         let cfg = Cfg::from_env(StdEnvGetter::default()); // init file cache
         let storage = cfg.build().unwrap().storage;

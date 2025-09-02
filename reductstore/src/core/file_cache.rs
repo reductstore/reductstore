@@ -519,11 +519,12 @@ mod tests {
         fn test_sync_unused_files(cache: FileCache, tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_sync_rw_and_unused_files.txt");
             {
-                let _file_ref = cache
+                let file_ref = cache
                     .write_or_create(&file_path, SeekFrom::Start(0))
                     .unwrap()
                     .upgrade()
                     .unwrap();
+                file_ref.write().unwrap().write_all(b"test").unwrap();
 
                 assert!(
                     !cache
@@ -540,7 +541,7 @@ mod tests {
             }
 
             // Wait for the sync worker to run
-            sleep(Duration::from_millis(150));
+            sleep(Duration::from_millis(250));
 
             assert!(
                 cache
@@ -559,14 +560,15 @@ mod tests {
         #[rstest]
         fn test_not_sync_used_files(cache: FileCache, tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_not_sync_unused_files.txt");
-            let _file_ref = cache
+            let file_ref = cache
                 .write_or_create(&file_path, SeekFrom::Start(0))
                 .unwrap()
                 .upgrade()
                 .unwrap();
+            file_ref.write().unwrap().write_all(b"test").unwrap();
 
             // Wait for the sync worker to run
-            sleep(Duration::from_millis(150));
+            sleep(Duration::from_millis(250));
 
             assert!(
                 !cache

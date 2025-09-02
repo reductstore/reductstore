@@ -233,7 +233,9 @@ impl Wal for WalImpl {
 
     fn remove(&self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        FILE_CACHE.remove(&path)?;
+        if FILE_CACHE.try_exists(&path)? {
+            FILE_CACHE.remove(&path)?;
+        }
         Ok(())
     }
 
