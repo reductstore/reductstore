@@ -9,13 +9,13 @@ use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-pub(super) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<usize, HttpError> {
+pub(super) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<u64, HttpError> {
     let content_size = headers
         .get("content-length")
         .ok_or(unprocessable_entity!("content-length header is required"))?
         .to_str()
         .map_err(|_| unprocessable_entity!("content-length header must be a string",))?
-        .parse::<usize>()
+        .parse::<u64>()
         .map_err(|_| unprocessable_entity!("content-length header must be a number"))?;
     Ok(content_size)
 }

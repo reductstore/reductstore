@@ -215,6 +215,11 @@ impl Entry {
         })
     }
 
+    pub fn size(&self) -> u64 {
+        let bm = self.block_manager.read().unwrap();
+        bm.index().size()
+    }
+
     /// Try to remove the oldest block.
     ///
     /// # Returns

@@ -142,8 +142,7 @@ impl Bucket {
     /// * `&mut Entry` - The entry or an HTTPError
     pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
         check_name_convention(key)?;
-        let mut entries = self.entries.write()?;
-        if !entries.contains_key(key) {
+        if !self.entries.read()?.contains_key(key) {
             let settings = self.settings.read()?;
             let entry = Entry::try_new(
                 &key,
@@ -153,10 +152,12 @@ impl Bucket {
                     max_block_records: settings.max_block_records.unwrap(),
                 },
             )?;
-            entries.insert(key.to_string(), Arc::new(entry));
+            self.entries
+                .write()?
+                .insert(key.to_string(), Arc::new(entry));
         }
 
-        Ok(entries.get_mut(key).unwrap().clone().into())
+        Ok(self.entries.read()?.get(key).unwrap().clone().into())
     }
 
     /// Get an entry in the bucket
@@ -186,7 +187,7 @@ impl Bucket {
         let mut latest_record = 0u64;
         let mut entries: Vec<EntryInfo> = vec![];
 
-        let entry_map = self.entries.read().unwrap();
+        let entry_map = self.entries.read()?;
         for entry in entry_map.values() {
             let info = entry.info()?;
             entries.push(info.clone());
@@ -205,7 +206,7 @@ impl Bucket {
                     .is_provisioned
                     .load(std::sync::atomic::Ordering::Relaxed),
             },
-            settings: self.settings.read().unwrap().clone(),
+            settings: self.settings.read()?.clone(),
             entries,
         })
     }
@@ -228,7 +229,7 @@ impl Bucket {
         &self,
         name: &str,
         time: u64,
-        content_size: usize,
+        content_size: u64,
         content_type: String,
         labels: Labels,
     ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {

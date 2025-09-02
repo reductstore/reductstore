@@ -8,7 +8,7 @@ use crate::{unprocessable_entity, Labels};
 use http::{HeaderMap, HeaderValue};
 
 pub struct RecordHeader {
-    pub content_length: usize,
+    pub content_length: u64,
     pub content_type: String,
     pub labels: Labels,
 }
@@ -30,7 +30,7 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
         .ok_or(unprocessable_entity!("Invalid batched header"))?;
     let content_length = content_length
         .trim()
-        .parse::<usize>()
+        .parse::<u64>()
         .map_err(|_| unprocessable_entity!("Invalid content length"))?;
 
     let (content_type, rest) = rest
