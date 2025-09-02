@@ -4,7 +4,7 @@
 use crate::core::cache::Cache;
 use backpack_rs::fs::{AccessMode, File};
 use backpack_rs::Backpack;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fs;

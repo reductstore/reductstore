@@ -11,7 +11,7 @@ use crate::fs::AccessMode;
 use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, RwLock};
+use std::sync::Mutex;
 use std::time::Instant;
 use std::{fs, io};
 
@@ -305,7 +305,7 @@ impl StorageBackend for S3Backend {
     fn upload(&self, full_path: &Path) -> io::Result<()> {
         // upload to s3
         let s3_key = {
-            let mut cache = &mut self.local_cache.lock().unwrap();
+            let cache = &mut self.local_cache.lock().unwrap();
             cache.register_file(full_path)?;
             cache.build_key(full_path)
         };

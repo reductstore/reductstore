@@ -14,7 +14,7 @@ use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, spawn_query_task, QueryRx};
-use log::{debug, info};
+use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use std::collections::HashMap;

@@ -60,7 +60,7 @@ impl StorageBackend for FileSystemBackend {
         Ok(())
     }
 
-    fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()> {
+    fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
         // do nothing because filesystem backend does not need access tracking
         Ok(())
     }

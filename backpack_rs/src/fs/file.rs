@@ -3,7 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::backend::BoxedBackend;
-use log::{debug, info};
+use log::debug;
 use std::fs::File as StdFile;
 use std::fs::OpenOptions as StdOpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
