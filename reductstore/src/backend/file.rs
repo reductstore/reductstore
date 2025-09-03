@@ -156,3 +156,220 @@ impl Seek for File {
         self.inner.seek(pos)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::StorageBackend;
+    use mockall::mock;
+    use rstest::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use tempfile::tempdir;
+
+    mod open_options {
+        use super::*;
+        use std::fs;
+
+        #[rstest]
+        fn test_open_options_read(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+            let copy_path = path.clone();
+
+            // download because it does not exist in cache
+            mock_backend.expect_download().times(1).returning(move |p| {
+                assert_eq!(p, copy_path.join("non-existing.txt").as_path());
+                fs::create_dir_all(p.parent().unwrap()).unwrap();
+                fs::write(&copy_path.join("non-existing.txt"), "content").unwrap();
+                Ok(())
+            });
+
+            let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .read(true)
+                .open("non-existing.txt")
+                .unwrap();
+
+            assert_eq!(file.mode(), &AccessMode::Read);
+            assert!(file.is_synced());
+            assert_eq!(file.path(), &path.join("non-existing.txt"));
+            assert_eq!(file.metadata().unwrap().len(), 7);
+        }
+
+        #[rstest]
+        fn test_open_options_read_existing(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+
+            // no download because it exists in cache
+            mock_backend.expect_download().times(0);
+
+            let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .read(true)
+                .open("test.txt")
+                .unwrap();
+
+            assert_eq!(file.mode(), &AccessMode::Read);
+            assert!(file.is_synced());
+            assert_eq!(file.path(), &path.join("test.txt"));
+            assert_eq!(file.metadata().unwrap().len(), 7);
+        }
+
+        #[rstest]
+        fn test_open_options_create_ignore_download_err(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+
+            // download fails but it's ok because we are going to create the file
+            mock_backend.expect_download().times(1).returning(move |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "File not found",
+                ))
+            });
+
+            let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .write(true)
+                .create(true)
+                .open("new_file.txt")
+                .unwrap();
+
+            assert_eq!(file.mode(), &AccessMode::ReadWrite);
+            assert!(file.is_synced());
+            assert_eq!(file.path(), &path.join("new_file.txt"));
+            assert_eq!(file.metadata().unwrap().len(), 0);
+        }
+    }
+
+    mod sync {
+        use super::*;
+        use std::io::Write;
+
+        #[rstest]
+        fn test_file_sync_all(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+
+            // expect upload when syncing
+            mock_backend.expect_upload().times(1).returning(move |p| {
+                assert_eq!(p, path.join("test.txt").as_path());
+                Ok(())
+            });
+
+            let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .write(true)
+                .open("test.txt")
+                .unwrap();
+
+            assert!(file.is_synced());
+            file.write_all(b" more").unwrap();
+            assert!(!file.is_synced());
+            file.sync_all().unwrap();
+            assert!(file.is_synced());
+        }
+
+        #[rstest]
+        fn test_is_sync_after_write(mock_backend: MockBackend) {
+            let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .write(true)
+                .open("test.txt")
+                .unwrap();
+
+            assert!(file.is_synced());
+            file.write_all(b" more").unwrap();
+            assert!(!file.is_synced());
+        }
+
+        #[rstest]
+        fn test_is_sync_after_set_len(mock_backend: MockBackend) {
+            let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .write(true)
+                .open("test.txt")
+                .unwrap();
+
+            assert!(file.is_synced());
+            file.set_len(10).unwrap();
+            assert!(!file.is_synced());
+        }
+    }
+
+    mod access {
+        use super::*;
+        use std::io::Write;
+
+        #[rstest]
+        fn test_file_access_read(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+
+            // expect update_local_cache when accessing
+            mock_backend
+                .expect_update_local_cache()
+                .times(1)
+                .returning(move |p, mode| {
+                    assert_eq!(p, path.join("test.txt").as_path());
+                    assert_eq!(mode, &AccessMode::Read);
+                    Ok(())
+                });
+
+            let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .read(true)
+                .open("test.txt")
+                .unwrap();
+
+            file.access().unwrap();
+        }
+
+        #[rstest]
+        fn test_file_access_read_write(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+
+            // expect update_local_cache when accessing
+            mock_backend
+                .expect_update_local_cache()
+                .times(1)
+                .returning(move |p, mode| {
+                    assert_eq!(p, path.join("test.txt").as_path());
+                    assert_eq!(mode, &AccessMode::ReadWrite);
+                    Ok(())
+                });
+
+            let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .write(true)
+                .open("test.txt")
+                .unwrap();
+
+            file.access().unwrap();
+        }
+    }
+
+    mock! {
+        pub Backend {}
+
+        impl StorageBackend for Backend {
+            fn path(&self) -> &PathBuf;
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+            fn remove(&self, path: &Path) -> std::io::Result<()>;
+            fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
+            fn try_exists(&self, path: &Path) -> std::io::Result<bool>;
+            fn upload(&self, path: &Path) -> std::io::Result<()>;
+            fn download(&self, path: &Path) -> std::io::Result<()>;
+            fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
+            fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+        }
+
+    }
+
+    #[fixture]
+    fn mock_backend(path: PathBuf) -> MockBackend {
+        // create the file in cache
+        fs::create_dir_all(path.as_path()).unwrap();
+        fs::write(&path.join("test.txt"), "content").unwrap();
+
+        let mut backend = MockBackend::new();
+        backend.expect_path().return_const(path.clone());
+        backend
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        tempdir().unwrap().keep()
+    }
+}
