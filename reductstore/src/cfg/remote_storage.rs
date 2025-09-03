@@ -25,7 +25,9 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             backend_type: env
                 .get_optional::<String>("RS_REMOTE_BACKEND_TYPE")
                 .map(|s| match s.to_lowercase().as_str() {
+                    #[cfg(feature = "s3-backend")]
                     "s3" => BackendType::S3,
+                    #[cfg(feature = "fs-backend")]
                     _ => BackendType::Filesystem,
                 })
                 .unwrap_or(BackendType::Filesystem),

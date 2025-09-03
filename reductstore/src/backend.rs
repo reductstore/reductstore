@@ -6,8 +6,7 @@
 #[cfg(feature = "fs-backend")]
 pub(super) mod fs;
 
-#[cfg(feature = "s3-backend")]
-pub(super) mod s3;
+pub(super) mod remote;
 
 pub(crate) mod file;
 
@@ -99,8 +98,10 @@ pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub enum BackendType {
+    #[cfg(feature = "fs-backend")]
     #[default]
     Filesystem,
+    #[cfg(feature = "s3-backend")]
     S3,
 }
 
@@ -185,13 +186,13 @@ impl BackpackBuilder {
             BackendType::S3 => {
                 let Some(bucket) = self.remote_bucket else {
                     Err(internal_server_error!(
-                        "remote_bucket is required for S3 backend"
+                        "remote_bucket is required remote S3 backend"
                     ))?
                 };
 
                 let Some(cache_path) = self.remote_cache_path else {
                     Err(internal_server_error!(
-                        "remote_cache_path is required for S3 backend"
+                        "remote_cache_path is required remote S3 backend"
                     ))?
                 };
 
@@ -227,7 +228,8 @@ impl BackpackBuilder {
 
                 let url = Url::parse(&endpoint)
                     .map_err(|e| internal_server_error!("Invalid endpoint URL: {}", e))?;
-                let settings = s3::S3BackendSettings {
+                let settings = remote::RemoteBackendSettings {
+                    connector_type: BackendType::S3,
                     cache_path: PathBuf::from(cache_path),
                     endpoint: url.to_string(),
                     access_key,
@@ -237,7 +239,7 @@ impl BackpackBuilder {
                     cache_size,
                 };
 
-                Box::new(s3::S3Backend::new(settings))
+                Box::new(remote::RemoteBackend::new(settings))
             }
 
             #[allow(unreachable_patterns)]

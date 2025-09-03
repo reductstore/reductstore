@@ -3,7 +3,8 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::backend::s3::S3BackendSettings;
+use crate::backend::remote::RemoteBackendSettings;
+use crate::backend::remote::RemoteStorageConnector;
 use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
@@ -17,18 +18,18 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::task::block_in_place;
-pub(super) struct S3ClientWrapper {
+pub(super) struct S3Connector {
     bucket: String,
     client: Arc<Client>,
     rt: Arc<Runtime>,
 }
 
-impl S3ClientWrapper {
-    pub fn new(settings: S3BackendSettings) -> Self {
+impl S3Connector {
+    pub fn new(settings: RemoteBackendSettings) -> Self {
         let rt = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
-                .thread_name("s3-client-worker")
+                .thread_name("remote-client-worker")
                 .enable_all()
                 .build()
                 .unwrap(),
@@ -59,14 +60,16 @@ impl S3ClientWrapper {
 
         let client = Client::from_conf(conf.clone());
 
-        S3ClientWrapper {
+        S3Connector {
             client: Arc::new(client),
             bucket: settings.bucket,
             rt,
         }
     }
+}
 
-    pub fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error> {
+impl RemoteStorageConnector for S3Connector {
+    fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("r/{}", key);
@@ -102,8 +105,7 @@ impl S3ClientWrapper {
             })
         })
     }
-
-    pub(crate) fn upload_object(&self, key: &str, src: &PathBuf) -> Result<(), io::Error> {
+    fn upload_object(&self, key: &str, src: &PathBuf) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("r/{}", key);
@@ -134,8 +136,7 @@ impl S3ClientWrapper {
             })
         })
     }
-
-    pub(crate) fn create_dir_all(&self, key: &str) -> Result<(), io::Error> {
+    fn create_dir_all(&self, key: &str) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
 
@@ -169,12 +170,7 @@ impl S3ClientWrapper {
             })
         })
     }
-
-    pub(crate) fn list_objects(
-        &self,
-        key: &str,
-        recursive: bool,
-    ) -> Result<Vec<String>, io::Error> {
+    fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let prefix = if key.ends_with("/") || key.is_empty() {
@@ -203,7 +199,7 @@ impl S3ClientWrapper {
                                     "S3 list_objects_v2 error bucket={}, key={}: {}",
                                     &self.bucket,
                                     &prefix,
-                                    e.message().unwrap_or("")
+                                    e.message().unwrap_or("connection error")
                                 ),
                             )
                         })?;
@@ -242,8 +238,7 @@ impl S3ClientWrapper {
             })
         })
     }
-
-    pub(crate) fn remove_object(&self, key: &str) -> Result<(), io::Error> {
+    fn remove_object(&self, key: &str) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("r/{}", key);
@@ -271,8 +266,7 @@ impl S3ClientWrapper {
             })
         })
     }
-
-    pub(crate) fn head_object(&self, key: &str) -> Result<bool, io::Error> {
+    fn head_object(&self, key: &str) -> Result<bool, io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("r/{}", key);
@@ -309,8 +303,7 @@ impl S3ClientWrapper {
             })
         })
     }
-
-    pub(crate) fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error> {
+    fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let from_key = format!("r/{}", from);
