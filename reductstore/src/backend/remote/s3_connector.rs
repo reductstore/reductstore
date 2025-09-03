@@ -89,7 +89,7 @@ impl RemoteStorageConnector for S3Connector {
                                 "S3 get_object error bucket={}, key={}: {}",
                                 &self.bucket,
                                 &key,
-                                e.message().unwrap_or("")
+                                e.message().unwrap_or("connection error")
                             ),
                         )
                     })?;
@@ -128,7 +128,7 @@ impl RemoteStorageConnector for S3Connector {
                                 "S3 put_object error bucket={}, key={}: {}",
                                 &self.bucket,
                                 &key,
-                                e.message().unwrap_or("")
+                                e.message().unwrap_or("connection error")
                             ),
                         )
                     })?;
@@ -162,7 +162,7 @@ impl RemoteStorageConnector for S3Connector {
                                 "S3 put_object error bucket={}, key={}: {}",
                                 &self.bucket,
                                 dir_key,
-                                e.message().unwrap_or("")
+                                e.message().unwrap_or("connection error")
                             ),
                         )
                     })?;
@@ -258,7 +258,7 @@ impl RemoteStorageConnector for S3Connector {
                                 "S3 delete_object error bucket={}, key={}: {}",
                                 &self.bucket,
                                 &key,
-                                e.message().unwrap_or("")
+                                e.message().unwrap_or("connection error")
                             ),
                         )
                     })?;
@@ -295,7 +295,7 @@ impl RemoteStorageConnector for S3Connector {
                                 "S3 head_object error bucket={}, key={}: {}",
                                 &self.bucket,
                                 &key,
-                                e.message().unwrap_or("")
+                                e.message().unwrap_or("connection error")
                             ),
                         ))
                     }
@@ -330,7 +330,7 @@ impl RemoteStorageConnector for S3Connector {
                                 &self.bucket,
                                 &from_key,
                                 &to_key,
-                                e.message().unwrap_or("")
+                                e.message().unwrap_or("connection error")
                             ),
                         )
                     })?;
@@ -349,12 +349,133 @@ impl RemoteStorageConnector for S3Connector {
                                 "S3 delete_object error bucket={}, key={}: {}",
                                 &self.bucket,
                                 &from_key,
-                                e.message().unwrap_or("")
+                                e.message().unwrap_or("connection error")
                             ),
                         )
                     })?;
                 Ok(())
             })
         })
+    }
+}
+
+// Dummy tests - we can't do real S3 operations in CI
+// These tests are just to ensure that the code paths are correct
+// and that error handling works as expected.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[rstest]
+    fn download_object(connector: S3Connector) {
+        let key = "test_download.txt";
+        let dest = PathBuf::from("/tmp/test_download.txt");
+
+        assert_eq!(
+            connector
+                .download_object(key, &dest)
+                .err()
+                .unwrap()
+                .to_string(),
+            "S3 get_object error bucket=test-bucket, key=r/test_download.txt: connection error"
+        );
+    }
+
+    #[rstest]
+    fn upload_object(connector: S3Connector, path: PathBuf) {
+        let key = "test_upload.txt";
+        let src = path.join("test_upload.txt");
+        fs::write(&src, b"test upload content").unwrap();
+
+        assert_eq!(
+            connector
+                .upload_object(key, &src)
+                .err()
+                .unwrap()
+                .to_string(),
+            "S3 put_object error bucket=test-bucket, key=r/test_upload.txt: connection error"
+        );
+    }
+
+    #[rstest]
+    fn create_dir_all(connector: S3Connector) {
+        let key = "test_dir/";
+
+        assert_eq!(
+            connector.create_dir_all(key).err().unwrap().to_string(),
+            "S3 put_object error bucket=test-bucket, key=r/test_dir/: connection error"
+        );
+    }
+
+    #[rstest]
+    fn list_objects(connector: S3Connector) {
+        let key = "test_list/";
+        let recursive = false;
+
+        assert_eq!(
+            connector
+                .list_objects(key, recursive)
+                .err()
+                .unwrap()
+                .to_string(),
+            "S3 list_objects_v2 error bucket=test-bucket, key=r/test_list/: connection error"
+        );
+    }
+
+    #[rstest]
+    fn remove_object(connector: S3Connector) {
+        let key = "test_remove.txt";
+
+        assert_eq!(
+            connector.remove_object(key).err().unwrap().to_string(),
+            "S3 delete_object error bucket=test-bucket, key=r/test_remove.txt: connection error"
+        );
+    }
+
+    #[rstest]
+    fn head_object(connector: S3Connector) {
+        let key = "test_head.txt";
+
+        assert_eq!(
+            connector.head_object(key).err().unwrap().to_string(),
+            "S3 head_object error bucket=test-bucket, key=r/test_head.txt: connection error"
+        );
+    }
+
+    #[rstest]
+    fn rename_object(connector: S3Connector) {
+        let from = "test_rename_from.txt";
+        let to = "test_rename_to.txt";
+
+        assert_eq!(connector.rename_object(from, to).err().unwrap().to_string(),
+            "S3 rename_object error bucket=test-bucket, from_key=r/test_rename_from.txt, to_key=r/test_rename_to.txt: connection error"
+        );
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        tempdir().unwrap().keep()
+    }
+
+    #[fixture]
+    fn connector(settings: RemoteBackendSettings) -> S3Connector {
+        S3Connector::new(settings)
+    }
+
+    #[fixture]
+    fn settings() -> RemoteBackendSettings {
+        RemoteBackendSettings {
+            connector_type: Default::default(),
+            cache_path: Default::default(),
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            endpoint: "http://xxxxx:9000".to_string(), // we do just a dry run
+            access_key: "minioadmin".to_string(),
+            secret_key: "minioadmin".to_string(),
+            cache_size: 0,
+        }
     }
 }
