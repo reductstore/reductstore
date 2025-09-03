@@ -400,13 +400,10 @@ mod tests {
     mod create {
         use super::*;
         use mockall::predicate::eq;
-        use std::fs;
         use std::path::PathBuf;
 
         #[rstest]
         fn test_create_dir_all(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
-            let dir_key = "dir1/";
-
             mock_connector
                 .expect_create_dir_all()
                 .with(eq("dir1"))
@@ -430,8 +427,6 @@ mod tests {
 
         #[rstest]
         fn test_read_dir(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
-            let dir_key = "dir1/";
-
             mock_connector
                 .expect_list_objects()
                 .with(eq("dir1"), eq(false))
@@ -459,7 +454,7 @@ mod tests {
 
         #[rstest]
         fn test_try_exists_file_in_cache(
-            mut mock_connector: MockRemoteStorageConnector,
+            mock_connector: MockRemoteStorageConnector,
             path: PathBuf,
         ) {
             let file_key = "file1.txt";

@@ -307,6 +307,3 @@ impl Backend {
         self.backend.invalidate_locally_cached_files()
     }
 }
-
-#[cfg(test)]
-mod tests {}

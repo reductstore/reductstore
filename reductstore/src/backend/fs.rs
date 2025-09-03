@@ -70,3 +70,137 @@ impl StorageBackend for FileSystemBackend {
         vec![]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::*;
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    mod rename_file {
+        use super::*;
+        use std::io::Read;
+
+        #[rstest]
+        fn test_rename_file(fs_backend: FileSystemBackend) {
+            let path = fs_backend.path().join("old_name.txt");
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&path)
+                .unwrap();
+            writeln!(file, "This is a test file.").unwrap();
+
+            let new_path = path.with_file_name("new_name.txt");
+            fs_backend.rename(&path, &new_path).unwrap();
+            assert!(!fs_backend.try_exists(&path).unwrap());
+            assert!(fs_backend.try_exists(&new_path).unwrap());
+
+            let mut read_file = OpenOptions::new().read(true).open(&new_path).unwrap();
+            let mut content = String::new();
+            read_file.read_to_string(&mut content).unwrap();
+            assert_eq!(content, "This is a test file.\n");
+        }
+    }
+
+    mod remove_file {
+        use super::*;
+        use std::fs::OpenOptions;
+
+        #[rstest]
+        fn test_remove_file(fs_backend: FileSystemBackend) {
+            let path = fs_backend.path().join("temp_file.txt");
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&path)
+                .unwrap();
+            writeln!(file, "Temporary file content.").unwrap();
+
+            assert!(fs_backend.try_exists(&path).unwrap());
+            fs_backend.remove(&path).unwrap();
+            assert!(!fs_backend.try_exists(&path).unwrap());
+        }
+    }
+
+    mod remove_dir_all {
+        use super::*;
+        use std::fs::OpenOptions;
+
+        #[rstest]
+        fn test_remove_dir_all(fs_backend: FileSystemBackend) {
+            let dir_path = fs_backend.path().join("temp_dir");
+            fs_backend.create_dir_all(&dir_path).unwrap();
+            let file_path = dir_path.join("file.txt");
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .unwrap();
+            writeln!(file, "File in temporary directory.").unwrap();
+            file.sync_all().unwrap();
+
+            fs_backend.remove_dir_all(&dir_path).unwrap();
+            assert!(!fs_backend.try_exists(&dir_path).unwrap());
+        }
+    }
+
+    mod create_dir_all {
+        use super::*;
+
+        #[rstest]
+        fn test_create_dir_all(fs_backend: FileSystemBackend) {
+            let dir_path = fs_backend.path().join("new_dir/sub_dir");
+            fs_backend.create_dir_all(&dir_path).unwrap();
+            assert!(fs_backend.try_exists(&dir_path).unwrap());
+        }
+    }
+
+    mod read_dir {
+        use super::*;
+        use std::fs::OpenOptions;
+        use zip::write::FileOptions;
+
+        #[rstest]
+        fn test_read_dir(fs_backend: FileSystemBackend) {
+            let dir_path = fs_backend.path().join("read_dir_test");
+            fs_backend.create_dir_all(&dir_path).unwrap();
+
+            let file1_path = dir_path.join("file1.txt");
+            let _ = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file1_path)
+                .unwrap();
+
+            let file2_path = dir_path.join("file2.txt");
+            let _ = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file2_path)
+                .unwrap();
+
+            fs_backend.create_dir_all(&dir_path.join("child/")).unwrap();
+
+            let entries = fs_backend.read_dir(&dir_path).unwrap();
+            let entry_names: Vec<String> = entries
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+                .collect();
+
+            assert_eq!(entry_names.len(), 3);
+            assert!(entry_names.contains(&"file1.txt".to_string()));
+            assert!(entry_names.contains(&"file2.txt".to_string()));
+            assert!(entry_names.contains(&"child".to_string()));
+        }
+    }
+
+    #[fixture]
+    fn fs_backend() -> FileSystemBackend {
+        let dir = tempdir().unwrap().keep();
+        let backend = FileSystemBackend::new(dir.to_path_buf());
+        backend
+    }
+}
