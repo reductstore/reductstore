@@ -279,6 +279,168 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "s3-backend")]
+    mod s3 {
+        use super::*;
+        #[rstest]
+        fn test_backend_builder_s3() {
+            {
+                let backend = Backend::builder()
+                    .backend_type(BackendType::S3)
+                    .remote_bucket("my-bucket")
+                    .remote_cache_path("/tmp/cache")
+                    .remote_region("us-east-1")
+                    .remote_endpoint("http://localhost:9000")
+                    .remote_access_key("access_key")
+                    .remote_secret_key("secret_key")
+                    .cache_size(1024 * 1024 * 1024) // 1 GB
+                    .try_build()
+                    .expect("Failed to build S3 backend");
+                assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/cache"));
+            }
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_bucket_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("remote_bucket is required remote S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_cache_path_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("remote_cache_path is required remote S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_region_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path("/tmp/cache")
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("remote_region is required for S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_endpoint_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path("/tmp/cache")
+                .remote_region("us-east-1")
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("remote_endpoint is required for S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_access_key_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path("/tmp/cache")
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("remote_access_key is required for S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_secret_key_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path("/tmp/cache")
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .remote_access_key("access_key")
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("remote_secret_key is required for S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_cache_size_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path("/tmp/cache")
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .remote_access_key("access_key")
+                .remote_secret_key("secret_key")
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("remote_cache_size is required for S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_invalid_endpoint() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path("/tmp/cache")
+                .remote_region("us-east-1")
+                .remote_endpoint("invalid-url")
+                .remote_access_key("access_key")
+                .remote_secret_key("secret_key")
+                .cache_size(1024 * 1024 * 1024) // 1 GB
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("Invalid endpoint URL: relative URL without a base")
+            );
+        }
+    }
+
     mod open {
         use super::*;
         #[rstest]
@@ -419,29 +581,6 @@ mod tests {
             let backend = build_backend(mock_backend);
             let invalidated = backend.invalidate_locally_cached_files();
             assert_eq!(invalidated, expected_invalidated);
-        }
-    }
-
-    #[cfg(feature = "s3-backend")]
-    mod s3 {
-        use super::*;
-        #[rstest]
-        fn test_backend_builder_s3() {
-            {
-                let backend = Backend::builder()
-                    .backend_type(BackendType::S3)
-                    .local_data_path("/tmp/cache")
-                    .remote_bucket("my-bucket")
-                    .remote_cache_path("/tmp/cache")
-                    .remote_region("us-east-1")
-                    .remote_endpoint("http://localhost:9000")
-                    .remote_access_key("access_key")
-                    .remote_secret_key("secret_key")
-                    .cache_size(1024 * 1024 * 1024) // 1 GB
-                    .try_build()
-                    .expect("Failed to build S3 backend");
-                assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/cache"));
-            }
         }
     }
 

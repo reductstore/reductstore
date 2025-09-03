@@ -291,7 +291,6 @@ mod tests {
 
     mod access {
         use super::*;
-        use std::io::Write;
 
         #[rstest]
         fn test_file_access_read(mut mock_backend: MockBackend) {
@@ -307,7 +306,7 @@ mod tests {
                     Ok(())
                 });
 
-            let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+            let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .read(true)
                 .open("test.txt")
                 .unwrap();
