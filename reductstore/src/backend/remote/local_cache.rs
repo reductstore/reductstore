@@ -40,6 +40,7 @@ impl LocalCache {
             .to_str()
             .unwrap_or("")
             .to_string()
+            .replace('\\', "/") // normalize Windows paths
     }
 
     pub fn remove(&mut self, path: &Path) -> io::Result<()> {

@@ -161,7 +161,6 @@ mod tests {
     mod read_dir {
         use super::*;
         use std::fs::OpenOptions;
-        use zip::write::FileOptions;
 
         #[rstest]
         fn test_read_dir(fs_backend: FileSystemBackend) {
