@@ -415,14 +415,15 @@ mod tests {
         assert_eq!(cfg.ext_path, Some("/tmp/ext".to_string()));
     }
 
-    #[cfg(feature = "s3-backend")]
+    #[cfg(feature = "fs-backend")]
     #[rstest]
-    #[should_panic(expected = "Crashes because storage can't start without S3 service")]
-    fn test_remote_storage_s3(mut env_getter: MockEnvGetter) {
+    fn test_remote_storage_s3() {
+        // we cover only s3 parts here, filesystem is used as backend
+        let mut env_getter = MockEnvGetter::new();
         env_getter
             .expect_get()
-            .with(eq("RS_REMOTE_BACKEND_TYPE"))
-            .return_const(Ok("s3".to_string()));
+            .with(eq("RS_DATA_PATH"))
+            .return_const(Ok("/tmp/data".to_string()));
         env_getter
             .expect_get()
             .with(eq("RS_REMOTE_BUCKET"))
@@ -454,7 +455,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-
+        env_getter.expect_all().returning(|| BTreeMap::new());
         let cfg = Cfg::from_env(env_getter);
         cfg.build().unwrap();
     }
