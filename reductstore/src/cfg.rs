@@ -415,10 +415,54 @@ mod tests {
         assert_eq!(cfg.ext_path, Some("/tmp/ext".to_string()));
     }
 
+    #[cfg(feature = "s3-backend")]
+    #[rstest]
+    #[should_panic(expected = "Crashes because storage can't start without S3 service")]
+    fn test_remote_storage_s3(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_BACKEND_TYPE"))
+            .return_const(Ok("s3".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_BUCKET"))
+            .return_const(Ok("my-bucket".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ENDPOINT"))
+            .return_const(Ok("https://s3.example.com".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_REGION"))
+            .return_const(Ok("us-east-1".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ACCESS_KEY"))
+            .return_const(Ok("my-access-key".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_SECRET_KEY"))
+            .return_const(Ok("my-secret-key".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_PATH"))
+            .return_const(Ok("/tmp/cache".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_SIZE"))
+            .return_const(Ok("1073741824".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = Cfg::from_env(env_getter);
+        cfg.build().unwrap();
+    }
+
     #[fixture]
     fn env_getter() -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();
         mock_getter.expect_all().returning(|| BTreeMap::new());
-        return mock_getter;
+        mock_getter
     }
 }

@@ -44,3 +44,121 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cfg::tests::MockEnvGetter;
+    use mockall::predicate::eq;
+    use rstest::*;
+    use std::env::VarError;
+
+    #[cfg(feature = "fs-backend")]
+    #[rstest]
+    fn test_default_remote_storage_cfg() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_BACKEND_TYPE"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_BUCKET"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ENDPOINT"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_REGION"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ACCESS_KEY"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_SECRET_KEY"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_PATH"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_SIZE"))
+            .return_const(Err(VarError::NotPresent));
+
+        let mut env = Env::new(env_getter);
+
+        let cfg = Cfg::parse_remote_storage_cfg(&mut env);
+        assert_eq!(
+            cfg,
+            RemoteStorageConfig {
+                backend_type: BackendType::Filesystem,
+                bucket: None,
+                endpoint: None,
+                region: None,
+                access_key: None,
+                secret_key: None,
+                cache_path: None,
+                cache_size: ByteSize::gb(1).as_u64(),
+            }
+        );
+    }
+
+    #[cfg(feature = "s3-backend")]
+    #[rstest]
+    fn test_custom_remote_storage_cfg() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_BACKEND_TYPE"))
+            .return_const(Ok("s3".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_BUCKET"))
+            .return_const(Ok("my-bucket".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ENDPOINT"))
+            .return_const(Ok("https://s3.example.com".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_REGION"))
+            .return_const(Ok("us-west-1".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ACCESS_KEY"))
+            .return_const(Ok("my-access-key".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_SECRET_KEY"))
+            .return_const(Ok("my-secret-key".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_PATH"))
+            .return_const(Ok("/tmp/cache".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_SIZE"))
+            .return_const(Ok("2GB".to_string()));
+        let mut env = Env::new(env_getter);
+
+        let cfg = Cfg::parse_remote_storage_cfg(&mut env);
+        assert_eq!(
+            cfg,
+            RemoteStorageConfig {
+                backend_type: BackendType::S3,
+                bucket: Some("my-bucket".to_string()),
+                endpoint: Some("https://s3.example.com".to_string()),
+                region: Some("us-west-1".to_string()),
+                access_key: Some("my-access-key".to_string()),
+                secret_key: Some("my-secret-key".to_string()),
+                cache_path: Some("/tmp/cache".to_string()),
+                cache_size: ByteSize::gb(2).as_u64(),
+            }
+        );
+    }
+}

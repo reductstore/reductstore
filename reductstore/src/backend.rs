@@ -188,11 +188,6 @@ impl BackpackBuilder {
 
                 Box::new(remote::RemoteBackend::new(settings))
             }
-
-            #[allow(unreachable_patterns)]
-            _ => Err(internal_server_error!(
-                "Unsupported backend type or feature not enabled",
-            ))?,
         };
 
         Ok(Backend {
