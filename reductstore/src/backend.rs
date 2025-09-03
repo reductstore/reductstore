@@ -9,8 +9,10 @@ pub(super) mod fs;
 pub(super) mod remote;
 
 pub(crate) mod file;
+mod noop;
 
 use crate::backend::file::{AccessMode, OpenOptions};
+use crate::backend::noop::NoopBackend;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::path::{Path, PathBuf};
@@ -37,60 +39,6 @@ pub(crate) trait StorageBackend {
     fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
 
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
-}
-
-pub(crate) struct NoopBackend;
-
-impl StorageBackend for NoopBackend {
-    fn path(&self) -> &PathBuf {
-        panic!("NoopBackend does not have a path");
-    }
-
-    fn rename(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    fn remove(&self, _path: &Path) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    fn remove_dir_all(&self, _path: &Path) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    fn create_dir_all(&self, _path: &Path) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    fn read_dir(&self, _path: &Path) -> std::io::Result<Vec<PathBuf>> {
-        Ok(vec![])
-    }
-
-    fn try_exists(&self, _path: &Path) -> std::io::Result<bool> {
-        Ok(false)
-    }
-
-    fn upload(&self, _path: &Path) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    fn download(&self, _path: &Path) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
-        vec![]
-    }
-}
-
-impl NoopBackend {
-    pub fn new() -> Self {
-        NoopBackend
-    }
 }
 
 pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
@@ -305,5 +253,232 @@ impl Backend {
 
     pub fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         self.backend.invalidate_locally_cached_files()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockall::mock;
+    use rstest::*;
+    use tempfile::tempdir;
+
+    #[cfg(feature = "fs-backend")]
+    mod fs {
+        use super::*;
+        #[rstest]
+        fn test_backend_builder_fs() {
+            {
+                let backend = Backend::builder()
+                    .backend_type(BackendType::Filesystem)
+                    .local_data_path("/tmp/data")
+                    .try_build()
+                    .expect("Failed to build Filesystem backend");
+                assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/data"));
+            }
+        }
+    }
+
+    mod open {
+        use super::*;
+        #[rstest]
+        fn test_backend_open_options(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().join("test.txt").clone();
+
+            // download because it is not cached yet
+            mock_backend.expect_download().returning(move |p| {
+                assert_eq!(path, p);
+                Ok(())
+            });
+
+            let backend = build_backend(mock_backend);
+            let file = backend
+                .open_options()
+                .create(true)
+                .write(true)
+                .open("test.txt")
+                .unwrap();
+
+            assert!(file.is_synced());
+            assert_eq!(file.mode(), &AccessMode::ReadWrite);
+            assert_eq!(file.metadata().unwrap().len(), 0);
+        }
+    }
+
+    mod rename {
+        use super::*;
+
+        #[rstest]
+        fn test_backend_rename(mut mock_backend: MockBackend) {
+            mock_backend
+                .expect_rename()
+                .returning(move |old_path, new_path| {
+                    assert_eq!(old_path, Path::new("old_name.txt"));
+                    assert_eq!(new_path, Path::new("new_name.txt"));
+                    Ok(())
+                });
+
+            let backend = build_backend(mock_backend);
+            backend.rename("old_name.txt", "new_name.txt").unwrap();
+        }
+    }
+
+    mod remove {
+        use super::*;
+
+        #[rstest]
+        fn test_backend_remove(mut mock_backend: MockBackend) {
+            mock_backend.expect_remove().returning(move |path| {
+                assert_eq!(path, Path::new("temp_file.txt"));
+                Ok(())
+            });
+
+            let backend = build_backend(mock_backend);
+            backend.remove("temp_file.txt").unwrap();
+        }
+    }
+
+    mod remove_dir_all {
+        use super::*;
+
+        #[rstest]
+        fn test_backend_remove_dir_all(mut mock_backend: MockBackend) {
+            mock_backend.expect_remove_dir_all().returning(move |path| {
+                assert_eq!(path, Path::new("temp_dir"));
+                Ok(())
+            });
+
+            let backend = build_backend(mock_backend);
+            backend.remove_dir_all("temp_dir").unwrap();
+        }
+    }
+
+    mod create_dir_all {
+        use super::*;
+
+        #[rstest]
+        fn test_backend_create_dir_all(mut mock_backend: MockBackend) {
+            mock_backend.expect_create_dir_all().returning(move |path| {
+                assert_eq!(path, Path::new("new_dir"));
+                Ok(())
+            });
+
+            let backend = build_backend(mock_backend);
+            backend.create_dir_all("new_dir").unwrap();
+        }
+    }
+
+    mod read_dir {
+        use super::*;
+
+        #[rstest]
+        fn test_backend_read_dir(mut mock_backend: MockBackend) {
+            let expected_files = vec![PathBuf::from("file1.txt"), PathBuf::from("file2.txt")];
+            let copy_of_expected = expected_files.clone();
+            mock_backend.expect_read_dir().returning(move |path| {
+                assert_eq!(path, Path::new("some_dir"));
+                Ok(copy_of_expected.clone())
+            });
+
+            let backend = build_backend(mock_backend);
+            let files = backend.read_dir(&PathBuf::from("some_dir")).unwrap();
+            assert_eq!(files, expected_files);
+        }
+    }
+
+    mod try_exists {
+        use super::*;
+
+        #[rstest]
+        fn test_backend_try_exists(mut mock_backend: MockBackend) {
+            mock_backend.expect_try_exists().returning(move |path| {
+                assert_eq!(path, Path::new("existing_file.txt"));
+                Ok(true)
+            });
+
+            let backend = build_backend(mock_backend);
+            let exists = backend.try_exists("existing_file.txt").unwrap();
+            assert!(exists);
+        }
+    }
+
+    mod invalidate_locally_cached_files {
+        use super::*;
+
+        #[rstest]
+        fn test_backend_invalidate_locally_cached_files(mut mock_backend: MockBackend) {
+            let expected_invalidated = vec![
+                PathBuf::from("cached_file1.txt"),
+                PathBuf::from("cached_file2.txt"),
+            ];
+            let copy_of_expected = expected_invalidated.clone();
+            mock_backend
+                .expect_invalidate_locally_cached_files()
+                .returning(move || copy_of_expected.clone());
+
+            let backend = build_backend(mock_backend);
+            let invalidated = backend.invalidate_locally_cached_files();
+            assert_eq!(invalidated, expected_invalidated);
+        }
+    }
+
+    #[cfg(feature = "s3-backend")]
+    mod s3 {
+        use super::*;
+        #[rstest]
+        fn test_backend_builder_s3() {
+            {
+                let backend = Backend::builder()
+                    .backend_type(BackendType::S3)
+                    .local_data_path("/tmp/cache")
+                    .remote_bucket("my-bucket")
+                    .remote_cache_path("/tmp/cache")
+                    .remote_region("us-east-1")
+                    .remote_endpoint("http://localhost:9000")
+                    .remote_access_key("access_key")
+                    .remote_secret_key("secret_key")
+                    .cache_size(1024 * 1024 * 1024) // 1 GB
+                    .try_build()
+                    .expect("Failed to build S3 backend");
+                assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/cache"));
+            }
+        }
+    }
+
+    mock! {
+        pub Backend {}
+
+        impl StorageBackend for Backend {
+            fn path(&self) -> &PathBuf;
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+            fn remove(&self, path: &Path) -> std::io::Result<()>;
+            fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
+            fn try_exists(&self, path: &Path) -> std::io::Result<bool>;
+            fn upload(&self, path: &Path) -> std::io::Result<()>;
+            fn download(&self, path: &Path) -> std::io::Result<()>;
+            fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
+            fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+        }
+
+    }
+
+    #[fixture]
+    fn mock_backend(path: PathBuf) -> MockBackend {
+        let mut mock = MockBackend::new();
+        mock.expect_path().return_const(path.clone());
+        mock
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        tempdir().unwrap().keep()
+    }
+
+    fn build_backend(mock_backend: MockBackend) -> Backend {
+        Backend {
+            backend: Arc::new(Box::new(mock_backend)),
+        }
     }
 }
