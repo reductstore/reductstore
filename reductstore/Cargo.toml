@@ -17,7 +17,7 @@ categories = ["database-implementations", "command-line-utilities", "database"]
 include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LICENSE"]
 
 [features]
-default = ["web-console", "fs-backend", "s3-backend"]
+default = ["web-console", "fs-backend"]
 web-console = []
 select-ext = []
 ros-ext = []

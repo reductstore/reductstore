@@ -4,19 +4,23 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod local_cache;
+
+#[cfg(feature = "s3-backend")]
 mod s3_connector;
 
 use crate::backend::file::AccessMode;
 use crate::backend::remote::local_cache::LocalCache;
-use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, StorageBackend};
-use log::{debug, info, warn};
-use std::collections::HashMap;
+use log::debug;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
-use std::{fs, io};
 
+#[cfg(feature = "s3-backend")]
+use crate::backend::remote::s3_connector::S3Connector;
+
+#[allow(dead_code)]
 pub(super) trait RemoteStorageConnector {
     fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error>;
     fn upload_object(&self, key: &str, src: &PathBuf) -> Result<(), io::Error>;
@@ -27,6 +31,7 @@ pub(super) trait RemoteStorageConnector {
     fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
 }
 
+#[allow(dead_code)]
 pub(crate) struct RemoteBackendSettings {
     pub connector_type: BackendType,
     pub cache_path: PathBuf,
@@ -50,6 +55,7 @@ pub(crate) struct RemoteBackend {
 }
 
 impl RemoteBackend {
+    #[allow(dead_code, unused_variables)]
     pub fn new(settings: RemoteBackendSettings) -> Self {
         let cache_path = settings.cache_path.clone();
         let local_cache = Mutex::new(LocalCache::new(cache_path.clone(), settings.cache_size));
@@ -63,6 +69,7 @@ impl RemoteBackend {
                 panic!("Filesystem remote storage backend is not supported, falling back to S3 connector"),
         };
 
+        #[allow(unreachable_code)]
         RemoteBackend {
             cache_path,
             connector,

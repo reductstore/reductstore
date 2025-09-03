@@ -15,7 +15,6 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use url::Url;
 
 pub(crate) trait StorageBackend {
     fn path(&self) -> &PathBuf;
@@ -226,7 +225,7 @@ impl BackpackBuilder {
                     ))?
                 };
 
-                let url = Url::parse(&endpoint)
+                let url = url::Url::parse(&endpoint)
                     .map_err(|e| internal_server_error!("Invalid endpoint URL: {}", e))?;
                 let settings = remote::RemoteBackendSettings {
                     connector_type: BackendType::S3,

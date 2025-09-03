@@ -16,6 +16,7 @@ pub(super) struct LocalCache {
     entries: HashMap<PathBuf, crate::backend::remote::LocalCacheEntry>,
 }
 
+#[allow(dead_code)]
 impl LocalCache {
     pub fn new(path: PathBuf, max_size: u64) -> Self {
         info!("Cleaning up local cache at {:?}", path);
