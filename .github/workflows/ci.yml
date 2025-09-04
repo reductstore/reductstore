@@ -215,6 +215,8 @@ jobs:
           access_key: ${MINIO_ACCESS_KEY}
           secret_key: ${MINIO_SECRET_KEY}
           bucket: ${MINIO_BUCKET}
+          source_dir: 'public'
+          target_dir: '/'
 
       - name: Generate code coverage
         env:
