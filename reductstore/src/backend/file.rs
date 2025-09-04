@@ -69,8 +69,13 @@ impl OpenOptions {
         let full_path = self.backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
-            if self.backend.try_exists(&full_path)? && !self.create {
+            if self.backend.try_exists(&full_path)? {
                 self.backend.download(&full_path)?;
+            } else if !self.create {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("File {:?} does not exist", full_path),
+                ));
             }
         }
 
@@ -173,6 +178,11 @@ mod tests {
             let path = mock_backend.path().to_path_buf();
             let copy_path = path.clone();
 
+            // check if file exists
+            mock_backend
+                .expect_try_exists()
+                .times(1)
+                .returning(|_| Ok(true));
             // download because it does not exist in cache
             mock_backend.expect_download().times(1).returning(move |p| {
                 assert_eq!(p, copy_path.join("non-existing.txt").as_path());
@@ -211,16 +221,18 @@ mod tests {
         }
 
         #[rstest]
-        fn test_open_options_create_ignore_download_err(mut mock_backend: MockBackend) {
+        fn test_open_options_create_ignore_file_not_exist(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
+            let copy_path = path.clone();
 
-            // download fails but it's ok because we are going to create the file
-            mock_backend.expect_download().times(1).returning(move |_| {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "File not found",
-                ))
-            });
+            mock_backend
+                .expect_try_exists()
+                .times(1)
+                .returning(move |p| {
+                    assert_eq!(p, copy_path.join("new_file.txt").as_path());
+                    Ok(false)
+                });
+            mock_backend.expect_download().times(0);
 
             let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .write(true)

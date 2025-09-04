@@ -429,6 +429,9 @@ mod tests {
             let path = mock_backend.path().join("test.txt").clone();
 
             // download because it is not cached yet
+            mock_backend
+                .expect_try_exists()
+                .returning(move |_| Ok(true));
             mock_backend.expect_download().returning(move |p| {
                 assert_eq!(path, p);
                 Ok(())
