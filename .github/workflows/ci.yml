@@ -474,7 +474,7 @@ jobs:
           sleep 5
           docker logs reductstore-1
 
-      - name: Check data after migraiton
+      - name: Check data after migration
         run: python3 ./integration_tests/data_check/checker.py
 
       - name: Save docker logs
@@ -483,7 +483,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: docker-log-recovery-${{matrix.cmd}}
+          name: docker-log-recovery-${{matrix.cmd}}-${{matrix.backend}}
           path: /tmp/docker-log.zip
 
       - name: Show replication report
