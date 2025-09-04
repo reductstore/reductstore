@@ -31,6 +31,6 @@ runs:
       run: |
         echo "Create bucket ${{ inputs.bucket_name }}"
 
-        docker exec minio mc alias set local http://localhost:9000 ${{ inputs.access_key }} ${{ inputs.secret_key }}
-        docker exec minio mc mb local/${{ inputs.bucket_name }}
+        docker exec minio-server mc alias set local http://localhost:9000 ${{ inputs.access_key }} ${{ inputs.secret_key }}
+        docker exec minio-server mc mb local/${{ inputs.bucket_name }}
       shell: bash
