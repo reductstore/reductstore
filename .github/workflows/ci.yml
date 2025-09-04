@@ -163,6 +163,7 @@ jobs:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: test
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/run-minio
         with:
           access_key: ${{ env.MINIO_ACCESS_KEY }}
