@@ -222,8 +222,8 @@ jobs:
 
           echo "Create bucket ${MINIO_BUCKET_NAME}"
 
-          docker exec minio mc alias set local ${MINIO_ENDPOINT} minioadmin minioadmin
-          docker exec minio mc mb local/${MINIO_BUCKET_NAME}
+          docker exec minio mc alias set local ${MINIO_ENDPOINT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY}
+          docker exec minio mc mb local/${MINIO_BUCKET}
 
       - name: Generate code coverage
         env:
