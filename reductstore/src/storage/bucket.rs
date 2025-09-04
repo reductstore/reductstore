@@ -24,6 +24,7 @@ use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
 use std::collections::BTreeMap;
+use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
@@ -56,7 +57,7 @@ impl Bucket {
         settings: BucketSettings,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
-        std::fs::create_dir_all(&path)?;
+        FILE_CACHE.create_dir_all(&path)?;
         let settings = Self::fill_settings(settings, Self::defaults());
 
         let bucket = Bucket {
@@ -82,7 +83,15 @@ impl Bucket {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
-        let buf: Vec<u8> = std::fs::read(path.join(SETTINGS_NAME))?;
+        let buf = {
+            let lock = FILE_CACHE
+                .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
+                .upgrade()?;
+            let mut buf = Vec::new();
+            lock.write()?.read_to_end(&mut buf)?;
+            buf
+        };
+
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf))
             .map_err(|e| internal_server_error!("Failed to decode settings: {}", e))?;
 
@@ -92,8 +101,7 @@ impl Bucket {
         let mut entries = BTreeMap::new();
         let mut task_set = Vec::new();
 
-        for entry in std::fs::read_dir(&path)? {
-            let path = entry?.path();
+        for path in FILE_CACHE.read_dir(&path)? {
             if path.is_dir() {
                 let handler = Entry::restore(
                     path,
@@ -134,8 +142,7 @@ impl Bucket {
     /// * `&mut Entry` - The entry or an HTTPError
     pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
         check_name_convention(key)?;
-        let mut entries = self.entries.write()?;
-        if !entries.contains_key(key) {
+        if !self.entries.read()?.contains_key(key) {
             let settings = self.settings.read()?;
             let entry = Entry::try_new(
                 &key,
@@ -145,10 +152,12 @@ impl Bucket {
                     max_block_records: settings.max_block_records.unwrap(),
                 },
             )?;
-            entries.insert(key.to_string(), Arc::new(entry));
+            self.entries
+                .write()?
+                .insert(key.to_string(), Arc::new(entry));
         }
 
-        Ok(entries.get_mut(key).unwrap().clone().into())
+        Ok(self.entries.read()?.get(key).unwrap().clone().into())
     }
 
     /// Get an entry in the bucket
@@ -178,7 +187,7 @@ impl Bucket {
         let mut latest_record = 0u64;
         let mut entries: Vec<EntryInfo> = vec![];
 
-        let entry_map = self.entries.read().unwrap();
+        let entry_map = self.entries.read()?;
         for entry in entry_map.values() {
             let info = entry.info()?;
             entries.push(info.clone());
@@ -197,7 +206,7 @@ impl Bucket {
                     .is_provisioned
                     .load(std::sync::atomic::Ordering::Relaxed),
             },
-            settings: self.settings.read().unwrap().clone(),
+            settings: self.settings.read()?.clone(),
             entries,
         })
     }
@@ -220,7 +229,7 @@ impl Bucket {
         &self,
         name: &str,
         time: u64,
-        content_size: usize,
+        content_size: u64,
         content_type: String,
         labels: Labels,
     ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
@@ -289,7 +298,7 @@ impl Bucket {
 
             entries.write()?.remove(&old_name);
             FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
-            std::fs::rename(&old_path, &new_path)?;
+            FILE_CACHE.rename(&old_path, &new_path)?;
 
             let entry = Entry::restore(
                 new_path,
@@ -543,7 +552,7 @@ mod tests {
             .begin_write(
                 entry_name,
                 time,
-                content.len(),
+                content.len() as u64,
                 "".to_string(),
                 Labels::new(),
             )

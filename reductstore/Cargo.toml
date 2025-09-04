@@ -17,10 +17,15 @@ categories = ["database-implementations", "command-line-utilities", "database"]
 include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LICENSE"]
 
 [features]
-default = ["web-console"]
+default = ["web-console", "fs-backend"]
 web-console = []
 select-ext = []
 ros-ext = []
+ci = [] # features enables CI-specific tests
+
+
+fs-backend = []
+s3-backend = ["dep:aws-sdk-s3", "dep:aws-config", "dep:aws-credential-types"]
 
 [lib]
 crate-type = ["lib"]
@@ -65,6 +70,12 @@ dlopen2 = "0.8.0"
 log = "0.4"
 prost = "0.14.1"
 
+
+# optional dependencies for remote backend
+aws-sdk-s3 = { version = "1.103.0", optional = true, features = ["rustls"] }
+aws-config = { version = "1.8.5", optional = true, features = ["rustls"] }
+aws-credential-types = { version = "1.2.5", optional = true, features = ["hardcoded-credentials"]}
+
 [build-dependencies]
 prost-build = "0.14.1"
 reqwest = { version = "0.12.23", default-features = false, features = ["rustls-tls", "blocking", "json"] }
@@ -78,6 +89,7 @@ serial_test = "3.2.0"
 test-log = "0.2.18"
 reqwest = { version = "0.12.23", default-features = false, features = ["rustls-tls", "blocking"] }
 assert_matches = "1.5"
+needs_env_var = "1.1.0"
 
 [package.metadata.docs.rs]
 no-default-features = true

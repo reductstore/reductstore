@@ -117,8 +117,7 @@ async fn launch_server() {
     };
 }
 
-// IMPORTANT: Use only current_thread runtime for the main function, we have deadlocks with multi-threaded runtime
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     launch_server().await;
 }
@@ -231,8 +230,12 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_shutdown() {
+        let data_path = tempdir().unwrap().keep();
+        env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+
         let handle = Handle::new();
-        let storage = Arc::new(Storage::load(tempdir().unwrap().keep(), None));
+        let cfg = Cfg::from_env(StdEnvGetter::default()); // init file cache
+        let storage = cfg.build().unwrap().storage;
         shutdown_app(handle.clone(), storage.clone());
     }
 

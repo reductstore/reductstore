@@ -204,7 +204,7 @@ impl BlockManager {
             let file = FILE_CACHE
                 .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))?
                 .upgrade()?;
-            let file = file.write()?;
+            let mut file = file.write()?;
             file.set_len(max_block_size)?;
         }
 
@@ -233,14 +233,14 @@ impl BlockManager {
         let file = FILE_CACHE
             .write_or_create(&path, SeekFrom::Current(0))?
             .upgrade()?;
-        let data_block = file.write()?;
+        let mut data_block = file.write()?;
         data_block.set_len(block.size())?;
         data_block.sync_all()?;
 
         let file = FILE_CACHE
             .write_or_create(&self.path_to_desc(block.block_id()), SeekFrom::Current(0))?
             .upgrade()?;
-        let descr_block = file.write()?;
+        let mut descr_block = file.write()?;
         descr_block.sync_all()?;
 
         Ok(())
@@ -264,11 +264,14 @@ impl BlockManager {
 
         self.block_cache.remove(&block_id);
 
-        let path = self.path_to_data(block_id);
-        FILE_CACHE.remove(&path)?;
+        let data_block_path = self.path_to_data(block_id);
+        FILE_CACHE.remove(&data_block_path)?;
 
-        let path = self.path_to_desc(block_id);
-        FILE_CACHE.remove(&path)?;
+        let desc_block_path = self.path_to_desc(block_id);
+        if FILE_CACHE.try_exists(&desc_block_path)? {
+            // it can be still in WAL only
+            FILE_CACHE.remove(&desc_block_path)?;
+        }
 
         self.wal.remove(block_id)?;
         Ok(())
@@ -608,6 +611,7 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
+    use crate::backend::Backend;
     use crate::storage::entry::RecordWriter;
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rand::distr::Alphanumeric;
@@ -1074,6 +1078,12 @@ mod tests {
     #[fixture]
     fn block_manager(block_id: u64) -> BlockManager {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
 
         let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
         let block_ref = bm.start_new_block(block_id, 1024).unwrap().clone();

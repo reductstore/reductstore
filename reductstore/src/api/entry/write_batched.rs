@@ -199,15 +199,15 @@ async fn write_chunk(
     writer: &mut Box<dyn WriteRecord + Sync + Send>,
     chunk: Bytes,
     written: &mut usize,
-    content_size: usize,
+    content_size: u64,
 ) -> Result<Option<Bytes>, ReductError> {
-    let to_write = content_size - *written;
+    let to_write = content_size - *written as u64;
     *written += chunk.len();
-    let (chunk, rest) = if chunk.len() < to_write {
+    let (chunk, rest) = if (chunk.len() as u64) < to_write {
         (chunk, None)
     } else {
-        let chuck_to_write = chunk.slice(0..to_write);
-        (chuck_to_write, Some(chunk.slice(to_write..)))
+        let chuck_to_write = chunk.slice(0..to_write as usize);
+        (chuck_to_write, Some(chunk.slice(to_write as usize..)))
     };
 
     writer
@@ -220,7 +220,7 @@ fn check_content_length(
     headers: &HeaderMap,
     timed_headers: &Vec<(u64, RecordHeader)>,
 ) -> Result<(), ReductError> {
-    let total_content_length: usize = timed_headers
+    let total_content_length: u64 = timed_headers
         .iter()
         .map(|(_, header)| header.content_length)
         .sum();
@@ -231,7 +231,7 @@ fn check_content_length(
             .ok_or(unprocessable_entity!("content-length header is required",))?
             .to_str()
             .unwrap()
-            .parse::<usize>()
+            .parse::<u64>()
             .map_err(|_| unprocessable_entity!("Invalid content-length header"))?
     {
         return Err(unprocessable_entity!(

@@ -92,7 +92,7 @@ impl TransactionLog {
                     let file = FILE_CACHE
                         .write_or_create(&path, SeekFrom::Start(0))?
                         .upgrade()?;
-                    let file = file.write()?;
+                    let mut file = file.write()?;
 
                     file.set_len(init_capacity_in_bytes as u64)?;
                     init_capacity_in_bytes

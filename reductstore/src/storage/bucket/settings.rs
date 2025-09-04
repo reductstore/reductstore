@@ -1,6 +1,7 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{unique, TaskHandle};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::EntrySettings;
@@ -9,7 +10,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use reduct_base::{conflict, internal_server_error};
-use std::io::Write;
+use std::io::{SeekFrom, Write};
 
 pub(super) const DEFAULT_MAX_RECORDS: u64 = 1024;
 pub(super) const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -117,8 +118,12 @@ impl Bucket {
                 .encode(&mut buf)
                 .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
 
-            let mut file = std::fs::File::create(path)?;
-            file.write(&buf)?;
+            let lock = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Start(0))?
+                .upgrade()?;
+            let mut file = lock.write()?;
+            file.write_all(&buf)?;
+            file.sync_all()?;
             Ok(())
         })
     }

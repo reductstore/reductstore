@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use log::{debug, error, info};
@@ -48,15 +48,14 @@ impl Storage {
     ///
     /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
     pub fn load(data_path: PathBuf, license: Option<License>) -> Storage {
-        if !data_path.try_exists().unwrap_or(false) {
+        if !FILE_CACHE.try_exists(&data_path).unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
-            std::fs::create_dir_all(&data_path).unwrap();
+            FILE_CACHE.create_dir_all(&data_path).unwrap();
         }
 
         // restore buckets
         let mut buckets = BTreeMap::new();
-        for entry in std::fs::read_dir(&data_path).unwrap() {
-            let path = entry.unwrap().path();
+        for path in FILE_CACHE.read_dir(&data_path).unwrap() {
             if path.is_dir() {
                 match Bucket::restore(path.clone()) {
                     Ok(bucket) => {
@@ -236,7 +235,7 @@ impl Storage {
                 Some(_) => {
                     sync_task.wait()?;
                     FILE_CACHE.discard_recursive(&path)?;
-                    std::fs::rename(&path, &new_path)?;
+                    FILE_CACHE.rename(&path, &new_path)?;
                     let bucket = Bucket::restore(new_path)?;
                     buckets.insert(new_name.to_string(), Arc::new(bucket));
                     debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
@@ -273,6 +272,8 @@ impl Storage {
             }
         }
 
+        FILE_CACHE.force_sync_all();
+
         Ok(())
     }
 
@@ -294,6 +295,7 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
@@ -411,12 +413,13 @@ mod tests {
         }
 
         #[rstest]
-        fn test_ignore_broken_buket(storage: Storage) {
+        fn test_ignore_broken_bucket(storage: Storage) {
             let bucket_settings = BucketSettings {
                 quota_size: Some(100),
                 quota_type: Some(QuotaType::FIFO),
                 ..Bucket::defaults()
             };
+
             let bucket = storage
                 .create_bucket("test", bucket_settings.clone())
                 .unwrap()
@@ -424,7 +427,7 @@ mod tests {
             assert_eq!(bucket.name(), "test");
 
             let path = storage.data_path.join("test");
-            std::fs::remove_file(path.join(SETTINGS_NAME)).unwrap();
+            FILE_CACHE.remove(&path.join(SETTINGS_NAME)).unwrap();
             let storage = Storage::load(storage.data_path.clone(), None);
             assert_eq!(
                 storage.info().unwrap(),
@@ -659,6 +662,12 @@ mod tests {
 
     #[fixture]
     fn storage(path: PathBuf) -> Storage {
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
         Storage::load(path, None)
     }
 }

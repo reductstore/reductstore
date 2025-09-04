@@ -9,7 +9,7 @@ use reduct_base::msg::bucket_api::QuotaType;
 use reduct_base::{bad_request, internal_server_error};
 
 impl Bucket {
-    pub(super) fn keep_quota_for(&self, content_size: usize) -> Result<(), ReductError> {
+    pub(super) fn keep_quota_for(&self, content_size: u64) -> Result<(), ReductError> {
         let settings = self.settings.read()?;
         let quota_size = settings.quota_size.unwrap_or(0);
         match settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
@@ -25,37 +25,53 @@ impl Bucket {
         }
     }
 
-    fn remove_oldest_block(&self, content_size: usize, quota_size: u64) -> Result<(), ReductError> {
-        let mut size = self.info()?.info.size + content_size as u64;
+    fn remove_oldest_block(&self, content_size: u64, quota_size: u64) -> Result<(), ReductError> {
+        let get_bucket_size = || {
+            self.entries
+                .read()
+                .map(|entries| {
+                    entries
+                        .values()
+                        .map(|e| e.size())
+                        .reduce(|acc, e| acc + e)
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        let mut size = get_bucket_size() + content_size as u64;
         while size > quota_size {
-            debug!(
-                "Need more space. Remove an oldest block from bucket '{}'",
-                self.name()
-            );
-
-            let mut candidates: Vec<(u64, &Entry)> = vec![];
-            let entries = self.entries.read()?;
-            for (_, entry) in entries.iter() {
-                let info = entry.info()?;
-                candidates.push((info.oldest_record, entry));
-            }
-            candidates.sort_by_key(|entry| entry.0);
-
-            let candidates = candidates
-                .iter()
-                .map(|(_, entry)| entry.name().to_string())
-                .collect::<Vec<String>>();
-
             let mut success = false;
-            for name in candidates {
-                debug!("Remove an oldest block from entry '{}'", name);
-                match entries.get(&name).unwrap().try_remove_oldest_block().wait() {
-                    Ok(_) => {
-                        success = true;
-                        break;
-                    }
-                    Err(e) => {
-                        debug!("Failed to remove oldest block from entry '{}': {}", name, e);
+
+            {
+                debug!(
+                    "Need more space. Remove an oldest block from bucket '{}'",
+                    self.name()
+                );
+
+                let mut candidates: Vec<(u64, &Entry)> = vec![];
+                let entries = self.entries.read()?;
+                for (_, entry) in entries.iter() {
+                    let info = entry.info()?;
+                    candidates.push((info.oldest_record, entry));
+                }
+                candidates.sort_by_key(|entry| entry.0);
+
+                let candidates = candidates
+                    .iter()
+                    .map(|(_, entry)| entry.name().to_string())
+                    .collect::<Vec<String>>();
+
+                for name in candidates {
+                    debug!("Remove an oldest block from entry '{}'", name);
+                    match entries.get(&name).unwrap().try_remove_oldest_block().wait() {
+                        Ok(_) => {
+                            success = true;
+                            break;
+                        }
+                        Err(e) => {
+                            debug!("Failed to remove oldest block from entry '{}': {}", name, e);
+                        }
                     }
                 }
             }
@@ -67,7 +83,7 @@ impl Bucket {
                 ));
             }
 
-            size = self.info()?.info.size + content_size as u64;
+            size = get_bucket_size() + content_size as u64;
         }
 
         // Remove empty entries

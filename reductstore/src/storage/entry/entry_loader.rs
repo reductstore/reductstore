@@ -1,9 +1,8 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
+use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -14,6 +13,7 @@ use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
 use prost::Message;
 
+use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -80,9 +80,7 @@ impl EntryLoader {
         options: EntrySettings,
     ) -> Result<Entry, ReductError> {
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
-        for filein in fs::read_dir(path.clone())? {
-            let file = filein?;
-            let path = file.path();
+        for path in FILE_CACHE.read_dir(&path)? {
             if path.is_dir() {
                 continue;
             }
@@ -97,20 +95,23 @@ impl EntryLoader {
                     error!("Failed to decode block {:?}: {}", path, $err);
                     warn!("Removing meta block {:?}", path);
                     let mut data_path = path.clone();
-                    fs::remove_file(path)?;
+                    FILE_CACHE.remove(&path)?;
 
                     data_path.set_extension(DATA_FILE_EXT[1..].to_string());
                     warn!("Removing data block {:?}", data_path);
-                    fs::remove_file(data_path)?;
+                    FILE_CACHE.remove(&data_path)?;
                     continue;
                 }};
             }
 
-            let buf = fs::read(path.clone())?;
+            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+            let mut buf = vec![];
+            file.write()?.read_to_end(&mut buf)?;
             let mut crc = Digest::new();
             crc.write(&buf);
 
-            let mut block = match MinimalBlock::decode(Bytes::from(buf)) {
+            let descriptor_content = Bytes::from(buf);
+            let mut block = match MinimalBlock::decode(descriptor_content.clone()) {
                 Ok(block) => block,
                 Err(err) => {
                     remove_bad_block!(err);
@@ -120,7 +121,7 @@ impl EntryLoader {
             // Migration for old blocks without fields to speed up the restore process
             if block.record_count == 0 {
                 debug!("Record count is 0. Migrate the block");
-                let mut full_block = match Block::decode(Bytes::from(fs::read(path.clone())?)) {
+                let mut full_block = match Block::decode(descriptor_content) {
                     Ok(block) => block,
                     Err(err) => {
                         remove_bad_block!(err);
@@ -133,7 +134,11 @@ impl EntryLoader {
                 block.record_count = full_block.record_count;
                 block.metadata_size = full_block.metadata_size;
 
-                let mut file = fs::File::create(path.clone())?;
+                let lock = FILE_CACHE
+                    .write_or_create(&path, SeekFrom::Start(0))?
+                    .upgrade()?;
+                let mut file = lock.write()?;
+                file.set_len(0)?;
 
                 let buf = full_block.encode_to_vec();
                 crc = Digest::new();
@@ -199,13 +204,12 @@ impl EntryLoader {
     }
 
     fn check_descriptor_count(path: &PathBuf, block_index: &BlockIndex) -> Result<(), ReductError> {
-        let number_of_descriptors = std::fs::read_dir(&path)?
+        let number_of_descriptors = FILE_CACHE
+            .read_dir(&path)?
             .into_iter()
-            .filter(|entry| {
-                let entry = entry.as_ref().unwrap().path();
-                entry.is_file()
-                    && DESCRIPTOR_FILE_EXT.contains(entry.extension().unwrap().to_str().unwrap())
-            })
+            .filter(|entry|
+                // path maybe a virtual from remote storage
+                entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT))
             .count();
 
         if number_of_descriptors != block_index.tree().len() {
@@ -229,14 +233,19 @@ impl EntryLoader {
         let mut inconsistent_data = false;
         for block_id in block_index.tree().iter() {
             let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
-            if !desc_path.exists() {
-                warn!("Block descriptor {:?} not found", path);
+            if FILE_CACHE.try_exists(&desc_path)? {
+                let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
+                if !FILE_CACHE.try_exists(&data_path)? {
+                    warn!(
+                        "Data block {:?} not found. Removing its descriptor",
+                        data_path
+                    );
+                    FILE_CACHE.remove(&desc_path)?;
+                    inconsistent_data = true;
+                }
+            } else {
+                warn!("Block descriptor {:?} not found", desc_path);
                 inconsistent_data = true;
-            }
-
-            let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
-            if !data_path.exists() {
-                warn!("Block descriptor {:?} not found. Removing it", path);
             }
         }
 
@@ -352,9 +361,11 @@ mod tests {
     use crate::storage::block_manager::wal::WalEntry;
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
+    use std::fs;
     use std::io::SeekFrom;
 
     use super::*;
+    use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
@@ -448,8 +459,16 @@ mod tests {
 
     #[rstest]
     fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
+
         let path = path.join("entry");
-        fs::create_dir_all(path.clone()).unwrap();
+        FILE_CACHE.create_dir_all(&path).unwrap();
+
         let mut block_manager = BlockManager::new(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
@@ -483,10 +502,19 @@ mod tests {
             .clone()
             .into();
         block_proto.record_count = 0;
-        fs::write(path.join("1.meta"), block_proto.encode_to_vec()).unwrap();
+
+        let lock = FILE_CACHE
+            .write_or_create(&path.join("1.meta"), SeekFrom::Start(0))
+            .unwrap()
+            .upgrade()
+            .unwrap();
+
+        lock.write()
+            .unwrap()
+            .write_all(&block_proto.encode_to_vec())
+            .unwrap();
 
         // repack the block
-        FILE_CACHE.remove(&path.join(BLOCK_INDEX_FILE)).unwrap();
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings).unwrap();
         let info = entry.info().unwrap();
 
@@ -518,7 +546,7 @@ mod tests {
                 .unwrap()
                 .upgrade()
                 .unwrap();
-            let file = rc.write().unwrap();
+            let mut file = rc.write().unwrap();
             file.set_len(0).unwrap();
             file.sync_all().unwrap();
         }
@@ -640,6 +668,7 @@ mod tests {
     mod wal_recovery {
         use crate::storage::proto::Record;
         use reduct_base::error::ErrorCode::InternalServerError;
+        use std::fs;
         use std::fs::File;
 
         use super::*;

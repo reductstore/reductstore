@@ -176,6 +176,8 @@ impl QueryWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
+    use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
@@ -224,7 +226,7 @@ mod tests {
             block_manager.clone(),
         );
         assert!(rx.is_empty());
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(handle.is_finished());
     }
 
@@ -318,6 +320,13 @@ mod tests {
             .keep()
             .join("bucket")
             .join("entry");
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
 
         let mut block_manager =
             BlockManager::new(path.clone(), BlockIndex::new(path.join("index")));

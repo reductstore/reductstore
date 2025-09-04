@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Integrate S3 Storage Backend, [PR-919](https://github.com/reductstore/reductstore/pull/919)
 
 ## [1.16.3] - 2025-08-22
 

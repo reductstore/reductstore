@@ -473,7 +473,7 @@ mod tests {
             .begin_write(
                 "test",
                 20,
-                MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1,
+                (MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1) as u64,
                 "".to_string(),
                 Labels::new(),
             )
@@ -562,7 +562,7 @@ mod tests {
         let sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, (MAX_PAYLOAD_SIZE + 1) as usize);
+        imitate_write_record(&sender, &transaction, MAX_PAYLOAD_SIZE + 1);
 
         assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
         assert!(
@@ -583,7 +583,7 @@ mod tests {
         assert_eq!(diagnostics.errored, 0, "no errors happened");
     }
 
-    fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction, size: usize) {
+    fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction, size: u64) {
         sender
             .log_map
             .read()

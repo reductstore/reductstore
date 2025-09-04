@@ -3,14 +3,18 @@
 
 pub mod io;
 mod provision;
+mod remote_storage;
 pub mod replication;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
+use crate::backend::Backend;
 use crate::cfg::io::IoConfig;
+use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::env::{Env, GetEnv};
+use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
 use log::info;
 use reduct_base::error::ReductError;
@@ -46,7 +50,8 @@ pub struct Cfg<EnvGetter: GetEnv> {
     pub replications: HashMap<String, ReplicationSettings>,
     pub io_conf: IoConfig,
     pub replication_conf: ReplicationConfig,
-    env: Env<EnvGetter>,
+    pub cs_config: RemoteStorageConfig,
+    pub env: Env<EnvGetter>,
 }
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
@@ -74,6 +79,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             replications: Self::parse_replications(&mut env),
             io_conf: Self::parse_io_config(&mut env),
             replication_conf: Self::parse_replication_config(&mut env, port),
+            cs_config: Self::parse_remote_storage_cfg(&mut env),
             env,
         };
 
@@ -91,6 +97,44 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
+        // Initialize storage backend
+        let mut backend_builder = Backend::builder()
+            .backend_type(self.cs_config.backend_type.clone())
+            .local_data_path(&self.data_path)
+            .cache_size(self.cs_config.cache_size);
+
+        if let Some(bucket) = &self.cs_config.bucket {
+            backend_builder = backend_builder.remote_bucket(bucket);
+        }
+
+        if let Some(region) = &self.cs_config.region {
+            backend_builder = backend_builder.remote_region(region);
+        }
+
+        if let Some(endpoint) = &self.cs_config.endpoint {
+            backend_builder = backend_builder.remote_endpoint(endpoint);
+        }
+
+        if let Some(access_key) = &self.cs_config.access_key {
+            backend_builder = backend_builder.remote_access_key(access_key);
+        }
+
+        if let Some(secret_key) = &self.cs_config.secret_key {
+            backend_builder = backend_builder.remote_secret_key(secret_key);
+        }
+
+        if let Some(cache_path) = &self.cs_config.cache_path {
+            backend_builder = backend_builder.remote_cache_path(cache_path);
+        }
+
+        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
+            internal_server_error!(
+                "Failed to initialize storage backend at {}: {}",
+                self.data_path,
+                e
+            )
+        })?);
+
         let storage = Arc::new(self.provision_buckets());
         let token_repo = self.provision_tokens();
         let console = create_asset_manager(load_console());
@@ -367,10 +411,55 @@ mod tests {
         assert_eq!(cfg.ext_path, Some("/tmp/ext".to_string()));
     }
 
+    #[cfg(feature = "fs-backend")]
+    #[rstest]
+    fn test_remote_storage_s3() {
+        // we cover only s3 parts here, filesystem is used as backend
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_DATA_PATH"))
+            .return_const(Ok("/tmp/data".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_BUCKET"))
+            .return_const(Ok("my-bucket".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ENDPOINT"))
+            .return_const(Ok("https://s3.example.com".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_REGION"))
+            .return_const(Ok("us-east-1".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_ACCESS_KEY"))
+            .return_const(Ok("my-access-key".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_SECRET_KEY"))
+            .return_const(Ok("my-secret-key".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_PATH"))
+            .return_const(Ok("/tmp/cache".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_CACHE_SIZE"))
+            .return_const(Ok("1073741824".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        env_getter.expect_all().returning(|| BTreeMap::new());
+        let cfg = Cfg::from_env(env_getter);
+        cfg.build().unwrap();
+    }
+
     #[fixture]
     fn env_getter() -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();
         mock_getter.expect_all().returning(|| BTreeMap::new());
-        return mock_getter;
+        mock_getter
     }
 }

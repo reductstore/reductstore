@@ -28,7 +28,7 @@ impl Entry {
     pub fn begin_write(
         &self,
         time: u64,
-        content_size: usize,
+        content_size: u64,
         content_type: String,
         labels: Labels,
     ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
@@ -143,7 +143,7 @@ impl Entry {
     fn prepare_block_for_writing(
         block: &mut BlockRef,
         time: u64,
-        content_size: usize,
+        content_size: u64,
         content_type: String,
         labels: Labels,
     ) -> Result<(), ReductError> {
@@ -151,7 +151,7 @@ impl Entry {
         let record = Record {
             timestamp: Some(us_to_ts(&time)),
             begin: block.size(),
-            end: block.size() + content_size as u64,
+            end: block.size() + content_size,
             content_type,
             state: record::State::Started as i32,
             labels: labels
