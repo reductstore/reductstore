@@ -562,6 +562,17 @@ mod tests {
 
         #[rstest]
         #[serial]
+        fn rename_object(connector: S3Connector) {
+            let from = "test/uploaded_test.txt";
+            let to = "test/renamed_test.txt";
+
+            (connector.rename_object(from, to).unwrap());
+            assert!(!connector.head_object(from).unwrap());
+            assert!(connector.head_object(to).unwrap());
+        }
+
+        #[rstest]
+        #[serial]
         fn remove_object(connector: S3Connector) {
             let key = "test/uploaded_test.txt";
 
