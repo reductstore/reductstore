@@ -209,7 +209,7 @@ jobs:
       - name: Generate code coverage
         env:
           ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
-        run: cargo llvm-cov --features s3-backend,fs-backend  --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --features s3-backend,fs-backend,ci  --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         continue-on-error: true
