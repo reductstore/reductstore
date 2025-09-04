@@ -190,8 +190,10 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_LOG: debug # expand logging
-      CI_S3_ACCESS_KEY: ${{ secrets.CI_S3_ACCESS_KEY }}
-      CI_S3_SECRET_KEY: ${{ secrets.CI_S3_SECRET_KEY }}
+      MINIO_S3_ACCESS_KEY: minioadmin
+      MINIO_S3_SECRET_KEY: minioadmin
+      MINIO_S3_BUCKET: test
+      MINIO_S3_ENDPOINT: http://127.0.0.1:9000
     steps:
       - uses: actions/checkout@v4
 
@@ -205,6 +207,14 @@ jobs:
         with:
           version: "26.x"
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+
+      - name: Run minio for backend tests
+        uses: mamal72/minio-perfect-deploy-action@main
+        with:
+          endpoint: ${MINIO_S3_ENDPOINT}
+          access_key: ${MINIO_S3_ACCESS_KEY}
+          secret_key: ${MINIO_S3_SECRET_KEY}
+          bucket: ${MINIO_S3_BUCKET}
 
       - name: Generate code coverage
         env:

@@ -36,10 +36,13 @@ impl S3Connector {
                 .unwrap(),
         );
 
-        let mut base_config = aws_config::defaults(BehaviorVersion::latest());
-        if let Some(region) = settings.region.as_ref() {
-            base_config = base_config.region(Region::new(region.clone()));
-        }
+        let base_config = aws_config::defaults(BehaviorVersion::latest()).region(
+            settings
+                .region
+                .as_ref()
+                .map(|r| Region::new(r.clone()))
+                .unwrap_or_else(|| Region::new("notset".to_string())),
+        );
 
         info!("Initializing S3 client for bucket: {}", settings.bucket);
         let base = block_in_place(|| rt.block_on(base_config.load()));
@@ -497,9 +500,11 @@ mod tests {
         use crate::backend::BackendType;
         use crate::core::env;
         use crate::core::env::StdEnvGetter;
+        use serial_test::serial;
         use tempfile::tempdir;
 
         #[rstest]
+        #[serial]
         fn download_object(connector: S3Connector, path: PathBuf) {
             let key = "test/test.txt";
             let dest = path.join("downloaded_test.txt");
@@ -512,6 +517,7 @@ mod tests {
         }
 
         #[rstest]
+        #[serial]
         fn upload_object(connector: S3Connector, path: PathBuf) {
             let key = "test/uploaded_test.txt";
             let src = path.join("uploaded_test.txt");
@@ -522,6 +528,7 @@ mod tests {
         }
 
         #[rstest]
+        #[serial]
         fn create_dir_all(connector: S3Connector) {
             let key = "test/new_dir/";
 
@@ -530,6 +537,7 @@ mod tests {
         }
 
         #[rstest]
+        #[serial]
         fn list_objects(connector: S3Connector) {
             let key = "test/";
             let recursive = true;
@@ -539,6 +547,7 @@ mod tests {
         }
 
         #[rstest]
+        #[serial]
         fn remove_object(connector: S3Connector) {
             let key = "test/uploaded_test.txt";
 
@@ -547,6 +556,7 @@ mod tests {
         }
 
         #[rstest]
+        #[serial]
         fn head_object(connector: S3Connector) {
             let existing_key = "test/test.txt";
             let non_existing_key = "test/non_existing.txt";
@@ -586,15 +596,20 @@ mod tests {
             RemoteBackendSettings {
                 connector_type: BackendType::S3,
                 cache_path: tempdir().unwrap().keep(),
-                bucket: "reducttest".to_string(),
-                region: Some("eu-north-1".to_string()),
-                endpoint: None,
+                bucket: env
+                    .get_optional("MINIO_BUCKET")
+                    .expect("MINIO_BUCKET must be set"),
+                region: None,
+                endpoint: Some(
+                    env.get_optional("MINIO_ENDPOINT")
+                        .unwrap_or("http://127.0.0.1:9000".to_string()),
+                ),
                 access_key: env
-                    .get_optional("CI_S3_ACCESS_KEY")
-                    .expect("CI_S3_ACCESS_KEY must be set"),
+                    .get_optional("MINIO_ACCESS_KEY")
+                    .unwrap_or("minioadmin".to_string()),
                 secret_key: env
-                    .get_optional("CI_S3_SECRET_KEY")
-                    .expect("CI_S3_SECRET_KEY must be set"),
+                    .get_optional("MINIO_SECRET_KEY>")
+                    .unwrap_or("minioadmin".to_string()),
                 cache_size: 1000,
             }
         }
