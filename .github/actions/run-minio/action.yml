@@ -1,0 +1,36 @@
+name: run-minio
+author: atimin
+description: "Run MinIO server and provision a bucket"
+inputs:
+  access_key:
+    description: "MinIO access key"
+    required: true
+    default: "minioadmin"
+  secret_key:
+    description: "MinIO secret key"
+    required: true
+    default: "minioadmin"
+  bucket_name:
+    description: "Name of the bucket to create"
+    required: true
+    default: "test-bucket"
+runs:
+  using: "composite"
+  steps:
+    - name: Set up MinIO server
+      run: |
+        docker run -d --name minio-server -p 9000:9000 \
+            -e "MINIO_ROOT_USER=${{ inputs.access_key }}" \
+            -e "MINIO_ROOT_PASSWORD=${{ inputs.secret_key }}" \
+            minio/minio server /data
+        sleep 5  # Wait for the server to start
+        docker logs minio-server
+      shell: bash
+
+    - name: Create bucket
+      run: |
+        echo "Create bucket ${{ inputs.bucket_name }}"
+
+        docker exec minio mc alias set local http://localhost:9000 ${{ inputs.access_key }} ${{ inputs.secret_key }}
+        docker exec minio mc mb local/${{ inputs.bucket_name }}
+      shell: bash

@@ -159,9 +159,16 @@ jobs:
     env:
       RUST_BACKTRACE: 1
       RUST_LOG: debug
-      CI_S3_ACCESS_KEY: ${{ secrets.CI_S3_ACCESS_KEY }}
-      CI_S3_SECRET_KEY: ${{ secrets.CI_S3_SECRET_KEY }}
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: test
     steps:
+      - uses: ./.github/actions/run-minio
+        with:
+          access_key: ${{ env.MINIO_ACCESS_KEY }}
+          secret_key: ${{ env.MINIO_SECRET_KEY }}
+          bucket_name: ${{ env.MINIO_BUCKET }}
+
       - uses: actions/download-artifact@v4
         with:
           name: reductstore-tests-${{ matrix.target }}
@@ -208,22 +215,11 @@ jobs:
           version: "26.x"
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
 
-      - name: Run minio
-        run: |
-          docker run -d -p 9000:9000 --name minio --rm \
-            -e "MINIO_ROOT_USER=${MINIO_ACCESS_KEY}" \
-            -e "MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}" \
-            -v /mnt/data:/data \
-            minio/minio server /data
-
-          sleep 1
-
-          docker logs minio
-
-          echo "Create bucket ${MINIO_BUCKET_NAME}"
-
-          docker exec minio mc alias set local ${MINIO_ENDPOINT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY}
-          docker exec minio mc mb local/${MINIO_BUCKET}
+      - uses: ./.github/actions/run-minio
+        with:
+          access_key: ${{ env.MINIO_ACCESS_KEY }}
+          secret_key: ${{ env.MINIO_SECRET_KEY }}
+          bucket_name: ${{ env.MINIO_BUCKET }}
 
       - name: Generate code coverage
         env:
