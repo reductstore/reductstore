@@ -297,6 +297,7 @@ jobs:
             --env RS_REMOTE_ACCESS_KEY=${{ env.MINIO_ACCESS_KEY }} \
             --env RS_REMOTE_SECRET_KEY=${{ env.MINIO_SECRET_KEY }} \
             --env RS_REMOTE_BUCKET=${{ env.MINIO_BUCKET }} \
+            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
             --name reduct -d ${{github.repository}}
             sleep 5
 

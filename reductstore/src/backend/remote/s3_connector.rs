@@ -538,12 +538,26 @@ mod tests {
 
         #[rstest]
         #[serial]
-        fn list_objects(connector: S3Connector) {
-            let key = "test/";
-            let recursive = true;
+        fn list_objects_recursive(connector: S3Connector) {
+            connector.create_dir_all("test/subdir1/").unwrap();
+            connector.create_dir_all("test/subdir1/subdir2").unwrap();
 
-            let objects = connector.list_objects(key, recursive).unwrap();
-            assert!(objects.contains(&"test.txt".to_string()));
+            let objects = connector.list_objects("", true).unwrap();
+            assert_eq!(objects.len(), 3);
+            assert!(objects.contains(&"test/test.txt".to_string()));
+            assert!(objects.contains(&"test/subdir1/".to_string()));
+            assert!(objects.contains(&"test/subdir1/subdir2/".to_string()));
+        }
+
+        #[rstest]
+        #[serial]
+        fn list_objects_non_recursive(connector: S3Connector) {
+            connector.create_dir_all("test/subdir1/").unwrap();
+            connector.create_dir_all("test/subdir1/subdir2").unwrap();
+
+            let objects = connector.list_objects("", false).unwrap();
+            assert_eq!(objects.len(), 1);
+            assert!(objects.contains(&"test/".to_string()));
         }
 
         #[rstest]
