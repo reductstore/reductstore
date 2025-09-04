@@ -1,7 +1,7 @@
 name: ci
 on:
   push:
-    branches: [main, stable]
+    branches: [ main, stable ]
     tags:
       - "v*"
     paths-ignore:
@@ -10,7 +10,7 @@ on:
       - CHANGELOG.md
 
   pull_request:
-    branches: [main, stable]
+    branches: [ main, stable ]
     paths-ignore:
       - docs/**
       - README.md
@@ -145,7 +145,7 @@ jobs:
       - build_binaries
     strategy:
       matrix:
-        os: [ubuntu-24.04, windows-2022, macos-14]
+        os: [ ubuntu-24.04, windows-2022, macos-14 ]
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
@@ -211,10 +211,10 @@ jobs:
       - name: Run minio for backend tests
         uses: mamal72/minio-perfect-deploy-action@main
         with:
-          endpoint: ${MINIO_ENDPOINT}
-          access_key: ${MINIO_ACCESS_KEY}
-          secret_key: ${MINIO_SECRET_KEY}
-          bucket: ${MINIO_BUCKET}
+          endpoint: ${{ env.MINIO_ENDPOINT}}
+          access_key: ${{ env.MINIO_ACCESS_KEY}}
+          secret_key: ${{ env.MINIO_SECRET_KEY}}
+          bucket: ${{env.MINIO_BUCKET}}
           source_dir: 'public'
           target_dir: '/'
 
@@ -239,9 +239,9 @@ jobs:
       - build
     strategy:
       matrix:
-        token: ["", "XXXX"]
-        cert_path: ["", "/misc/certificate.crt"]
-        license_path: ["", "/misc/license.lic"]
+        token: [ "", "XXXX" ]
+        cert_path: [ "", "/misc/certificate.crt" ]
+        license_path: [ "", "/misc/license.lic" ]
         include:
           - cert_path: "/misc/certificate.crt"
             url: https://127.0.0.1:8383
@@ -383,7 +383,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        cmd: ["stop", "kill"]
+        cmd: [ "stop", "kill" ]
     needs:
       - unit_tests
       - build
@@ -546,7 +546,7 @@ jobs:
       - unit_tests
     strategy:
       matrix:
-        branch: ["main", "latest"]
+        branch: [ "main", "latest" ]
     timeout-minutes: 5
 
     steps:
@@ -668,7 +668,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [amd64, arm64]
+        arch: [ amd64, arm64 ]
     needs:
       - build_snap
       - api_tests
@@ -701,7 +701,7 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
-        platform: [linux/amd64, linux/arm64]
+        platform: [ linux/amd64, linux/arm64 ]
         include:
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
