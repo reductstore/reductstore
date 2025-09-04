@@ -69,11 +69,8 @@ impl OpenOptions {
         let full_path = self.backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
-            if let Err(err) = self.backend.download(&full_path) {
-                if !self.create {
-                    // it's ok if the file does not exist and we are going to create it
-                    return Err(err);
-                }
+            if self.backend.try_exists(&full_path)? && !self.create {
+                self.backend.download(&full_path)?;
             }
         }
 

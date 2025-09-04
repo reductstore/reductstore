@@ -36,10 +36,10 @@ pub(crate) struct RemoteBackendSettings {
     pub connector_type: BackendType,
     pub cache_path: PathBuf,
     pub cache_size: u64,
-    pub endpoint: String,
+    pub endpoint: Option<String>,
     pub access_key: String,
     pub secret_key: String,
-    pub region: String,
+    pub region: Option<String>,
     pub bucket: String,
 }
 

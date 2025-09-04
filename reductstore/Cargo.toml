@@ -88,6 +88,7 @@ serial_test = "3.2.0"
 test-log = "0.2.18"
 reqwest = { version = "0.12.23", default-features = false, features = ["rustls-tls", "blocking"] }
 assert_matches = "1.5"
+needs_env_var = "1.1.0"
 
 [package.metadata.docs.rs]
 no-default-features = true

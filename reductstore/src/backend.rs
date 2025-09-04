@@ -143,18 +143,6 @@ impl BackpackBuilder {
                     ))?
                 };
 
-                let Some(region) = self.remote_region else {
-                    Err(internal_server_error!(
-                        "remote_region is required for S3 backend"
-                    ))?
-                };
-
-                let Some(endpoint) = self.remote_endpoint else {
-                    Err(internal_server_error!(
-                        "remote_endpoint is required for S3 backend"
-                    ))?
-                };
-
                 let Some(access_key) = self.remote_access_key else {
                     Err(internal_server_error!(
                         "remote_access_key is required for S3 backend"
@@ -173,15 +161,13 @@ impl BackpackBuilder {
                     ))?
                 };
 
-                let url = url::Url::parse(&endpoint)
-                    .map_err(|e| internal_server_error!("Invalid endpoint URL: {}", e))?;
                 let settings = remote::RemoteBackendSettings {
                     connector_type: BackendType::S3,
                     cache_path: PathBuf::from(cache_path),
-                    endpoint: url.to_string(),
+                    endpoint: self.remote_endpoint,
                     access_key,
                     secret_key,
-                    region,
+                    region: self.remote_region,
                     bucket,
                     cache_size,
                 };

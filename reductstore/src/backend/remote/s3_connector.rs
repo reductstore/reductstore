@@ -7,10 +7,10 @@ use crate::backend::remote::RemoteBackendSettings;
 use crate::backend::remote::RemoteStorageConnector;
 use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
-use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_s3::error::{DisplayErrorContext, ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
-use log::{debug, info};
+use log::{debug, error, info};
 use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
@@ -35,14 +35,13 @@ impl S3Connector {
                 .unwrap(),
         );
 
+        let mut base_config = aws_config::defaults(BehaviorVersion::latest());
+        if let Some(region) = settings.region.as_ref() {
+            base_config = base_config.region(Region::new(region.clone()));
+        }
+
         info!("Initializing S3 client for bucket: {}", settings.bucket);
-        let base = block_in_place(|| {
-            rt.block_on(
-                aws_config::defaults(BehaviorVersion::latest())
-                    .region(Region::new(settings.region.clone()))
-                    .load(),
-            )
-        });
+        let base = block_in_place(|| rt.block_on(base_config.load()));
 
         let creds = Credentials::from_keys(
             settings.access_key.clone(),
@@ -50,7 +49,8 @@ impl S3Connector {
             None,
         );
         let conf = aws_sdk_s3::config::Builder::from(&base)
-            .endpoint_url(settings.endpoint)
+            .set_endpoint_url(settings.endpoint)
+            .clone()
             .credentials_provider(creds)
             .force_path_style(true)
             .request_checksum_calculation(
@@ -83,6 +83,7 @@ impl RemoteStorageConnector for S3Connector {
                     .send()
                     .await
                     .map_err(|e| {
+                        error!("S3 get_object error: {}", DisplayErrorContext(&e));
                         io::Error::new(
                             io::ErrorKind::Other,
                             format!(
@@ -122,6 +123,7 @@ impl RemoteStorageConnector for S3Connector {
                     .send()
                     .await
                     .map_err(|e| {
+                        error!("S3 put_object error: {}", DisplayErrorContext(&e));
                         io::Error::new(
                             io::ErrorKind::Other,
                             format!(
@@ -156,6 +158,7 @@ impl RemoteStorageConnector for S3Connector {
                     .send()
                     .await
                     .map_err(|e| {
+                        error!("S3 put_object: {}", DisplayErrorContext(&e));
                         io::Error::new(
                             io::ErrorKind::Other,
                             format!(
@@ -193,6 +196,7 @@ impl RemoteStorageConnector for S3Connector {
                         .send()
                         .await
                         .map_err(|e| {
+                            error!("S3 list_objects_v2 error: {}", DisplayErrorContext(&e));
                             io::Error::new(
                                 io::ErrorKind::Other,
                                 format!(
@@ -252,6 +256,7 @@ impl RemoteStorageConnector for S3Connector {
                     .send()
                     .await
                     .map_err(|e| {
+                        error!("S3 delete_object error: {}", DisplayErrorContext(&e));
                         io::Error::new(
                             io::ErrorKind::Other,
                             format!(
@@ -289,6 +294,8 @@ impl RemoteStorageConnector for S3Connector {
                                 return Ok(false); // Object does not exist
                             }
                         }
+                        error!("S3 head_object error: {}", DisplayErrorContext(&e));
+
                         Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!(

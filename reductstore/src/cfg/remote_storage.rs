@@ -21,6 +21,7 @@ pub struct RemoteStorageConfig {
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
     pub(super) fn parse_remote_storage_cfg(env: &mut Env<EnvGetter>) -> RemoteStorageConfig {
+        let secret_key = env.get_masked("RS_REMOTE_SECRET_KEY", "".to_string());
         RemoteStorageConfig {
             backend_type: env
                 .get_optional::<String>("RS_REMOTE_BACKEND_TYPE")
@@ -35,7 +36,11 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             endpoint: env.get_optional::<String>("RS_REMOTE_ENDPOINT"),
             region: env.get_optional::<String>("RS_REMOTE_REGION"),
             access_key: env.get_optional::<String>("RS_REMOTE_ACCESS_KEY"),
-            secret_key: env.get_optional::<String>("RS_REMOTE_SECRET_KEY"),
+            secret_key: if secret_key.is_empty() {
+                None
+            } else {
+                Some(secret_key)
+            },
             cache_path: env.get_optional::<String>("RS_REMOTE_CACHE_PATH"),
             cache_size: env
                 .get_optional::<ByteSize>("RS_REMOTE_CACHE_SIZE")
