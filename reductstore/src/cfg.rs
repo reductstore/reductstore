@@ -107,10 +107,6 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
             backend_builder = backend_builder.remote_bucket(bucket);
         }
 
-        if let Some(cache_path) = &self.cs_config.endpoint {
-            backend_builder = backend_builder.remote_cache_path(cache_path);
-        }
-
         if let Some(region) = &self.cs_config.region {
             backend_builder = backend_builder.remote_region(region);
         }

@@ -633,7 +633,7 @@ mod tests {
                     .get_optional("MINIO_ACCESS_KEY")
                     .unwrap_or("minioadmin".to_string()),
                 secret_key: env
-                    .get_optional("MINIO_SECRET_KEY>")
+                    .get_optional("MINIO_SECRET_KEY")
                     .unwrap_or("minioadmin".to_string()),
                 cache_size: 1000,
             }
