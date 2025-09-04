@@ -21,6 +21,7 @@ default = ["web-console", "fs-backend"]
 web-console = []
 select-ext = []
 ros-ext = []
+ci = [] # features enables CI-specific tests
 
 
 fs-backend = []
