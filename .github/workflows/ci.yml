@@ -130,7 +130,7 @@ jobs:
           path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
 
       - name: Build and export tests
-        run: cargo export target/${{ matrix.target }}/tests -- test --release --target ${{ matrix.target }} --lib --all-features
+        run: cargo export target/${{ matrix.target }}/tests -- test --release --target ${{ matrix.target }} --lib
 
       - name: Upload tests
         uses: actions/upload-artifact@v4
@@ -159,17 +159,7 @@ jobs:
     env:
       RUST_BACKTRACE: 1
       RUST_LOG: debug
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/run-minio
-        with:
-          access_key: ${{ env.MINIO_ACCESS_KEY }}
-          secret_key: ${{ env.MINIO_SECRET_KEY }}
-          bucket_name: ${{ env.MINIO_BUCKET }}
-
       - uses: actions/download-artifact@v4
         with:
           name: reductstore-tests-${{ matrix.target }}
@@ -246,12 +236,17 @@ jobs:
         token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
         license_path: [ "", "/misc/license.lic" ]
+        backend: [ "fs", "s3" ]
         include:
           - cert_path: "/misc/certificate.crt"
             url: https://127.0.0.1:8383
           - cert_path: ""
             url: http://127.0.0.1:8383
     timeout-minutes: 5
+    env:
+        MINIO_ACCESS_KEY: minioadmin
+        MINIO_SECRET_KEY: minioadmin
+        MINIO_BUCKET: test
     steps:
       - uses: actions/checkout@v4
 
@@ -269,7 +264,8 @@ jobs:
       - name: Create license
         run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
 
-      - name: Run Database
+      - name: Run ReductStore with FileSystem backend
+        if: ${{matrix.backend == 'fs'}}
         run: |
           docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}  \
             --name reduct                                     \
@@ -279,6 +275,30 @@ jobs:
             --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"  \
             -d ${{github.repository}}
           sleep 5
+
+      - name: Run MinIO server and create bucket
+        if : ${{matrix.backend == 's3'}}
+        uses: ./.github/actions/run-minio
+        with:
+          access_key: ${{ env.MINIO_ACCESS_KEY }}
+          secret_key: ${{ env.MINIO_SECRET_KEY }}
+          bucket_name: ${{ env.MINIO_BUCKET }}
+
+      - name: Run ReductStore with S3 backend
+        if: ${{matrix.backend == 's3'}}
+        run: |
+            docker run --network=host -v ${PWD}/misc:/misc \
+            --env RS_API_TOKEN=${{matrix.token}} \
+            --env RS_CERT_PATH=${{matrix.cert_path}} \
+            --env RS_LICENSE_PATH=${{matrix.license_path}} \
+            --env RS_CERT_KEY_PATH=/misc/privateKey.key \
+            --env RS_STORAGE_TYPE=s3 \
+            --env RS_REMOTE_BACKEND_ENDPOINT=${{ env.MINIO_ENDPOINT }} \
+            --env RS_REMOTE_ACCESS_KEY=${{ env.MINIO_ACCESS_KEY }} \
+            --env RS_REMOTE_SECRET_KEY=${{ env.MINIO_SECRET_KEY }} \
+            --env RS_REMOTE_BUCKET=${{ env.MINIO_BUCKET }} \
+            --name reduct -d ${{github.repository}}
+            sleep 5
 
       - name: Build API tests
         run: |
@@ -387,12 +407,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        backend: [ "fs", "s3" ]
         cmd: [ "stop", "kill" ]
     needs:
       - unit_tests
       - build
     env:
       RS_API_TOKEN: XXXX
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -410,11 +434,32 @@ jobs:
           docker load --input /tmp/image.tar
           docker image ls -a
 
-      - name: Run ReductStore
+      - name: Run ReductStore with FileSystem backend
+        if: ${{matrix.backend == 'fs'}}
         run: |
           docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name reductstore -d ${{github.repository}}
           sleep 5
           docker logs reductstore
+
+      - name: Run MiniO server and create bucket
+        if : ${{matrix.backend == 's3'}}
+        uses: ./.github/actions/run-minio
+        with:
+          access_key: ${{ env.MINIO_ACCESS_KEY }}
+          secret_key: ${{ env.MINIO_SECRET_KEY }}
+          bucket_name: ${{ env.MINIO_BUCKET }}
+
+      - name: Run ReductStore with S3 backend
+        if: ${{matrix.backend == 's3'}}
+        run: |
+          docker run --network=host -v ./data:/data \
+            --env RS_API_TOKEN=${RS_API_TOKEN} \
+            --env RS_STORAGE_TYPE=s3 \
+            --env RS_REMOTE_BACKEND_ENDPOINT=http://127.0.0.1:9000 \
+            --env RS_REMOTE_ACCESS_KEY=${MINIO_ACCESS_KEY} \
+            --env RS_REMOTE_SECRET_KEY=${MINIO_SECRET_KEY} \
+            --env RS_REMOTE_BUCKET=${MINIO_BUCKET} \
+            --name reductstore -d ${{github.repository}}
 
       - name: Upload data
         run: |
@@ -570,7 +615,6 @@ jobs:
             --name reductstore \
             --env RS_DATA_PATH=/data \
             --env RS_API_TOKEN=token \
-            --env RS_LOG_LEVEL=DEBUG \
             -p 8383:8383 \
             -v ./data:/data \
             ${{ github.repository }}:latest
