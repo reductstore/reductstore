@@ -208,15 +208,22 @@ jobs:
           version: "26.x"
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
 
-      - name: Run minio for backend tests
-        uses: mamal72/minio-perfect-deploy-action@main
-        with:
-          endpoint: ${{ env.MINIO_ENDPOINT}}
-          access_key: ${{ env.MINIO_ACCESS_KEY}}
-          secret_key: ${{ env.MINIO_SECRET_KEY}}
-          bucket: ${{env.MINIO_BUCKET}}
-          source_dir: 'public'
-          target_dir: '/'
+      - name: Run minio
+        run: |
+          docker run -d -p 9000:9000 --name minio --rm \
+            -e "MINIO_ROOT_USER=${MINIO_ACCESS_KEY}" \
+            -e "MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}" \
+            -v /mnt/data:/data \
+            minio/minio server /data
+
+          sleep 1
+
+          docker logs minio
+
+          echo "Create bucket ${MINIO_BUCKET_NAME}"
+
+          docker exec minio mc alias set local ${MINIO_ENDPOINT} minioadmin minioadmin
+          docker exec minio mc mb local/${MINIO_BUCKET_NAME}
 
       - name: Generate code coverage
         env:
