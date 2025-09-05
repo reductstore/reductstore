@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Integrate S3 Storage Backend, [PR-919](https://github.com/reductstore/reductstore/pull/919)
 
+### Changed
+
+- Update extensions for Rust 1.89: ros-ext v0.3.0, select v0.5.0, [PR-921](https://github.com/reductstore/reductstore/pull/921)
+
 ## [1.16.3] - 2025-08-22
 
 ### Fixed
