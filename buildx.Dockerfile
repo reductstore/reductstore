@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     protobuf-compiler \
     clang \
+    ca-certificates \
     ${GCC_COMPILER}
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -45,6 +46,10 @@ ARG CARGO_TARGET
 COPY --from=builder /src/target/${CARGO_TARGET}/release/reductstore /usr/local/bin/reductstore
 COPY --from=builder /src/target/${CARGO_TARGET}/release/bin/reduct-cli /usr/local/bin/reduct-cli
 COPY --from=builder /data /data
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 HEALTHCHECK --interval=5s --timeout=3s \
   CMD reduct-cli server alive http://localhost:8383 || exit 1

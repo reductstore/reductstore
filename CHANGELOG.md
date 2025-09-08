@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update extensions for Rust 1.89: ros-ext v0.3.0, select v0.5.0, [PR-921](https://github.com/reductstore/reductstore/pull/921)
 
+### Fixed
+
+- Add CA certificates to Docker image for AWS S3 access, [PR-924](https://github.com/reductstore/reductstore/pull/924)
+
 ## [1.16.3] - 2025-08-22
 
 ### Fixed
