@@ -11,9 +11,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
-    pub(in crate::cfg) fn provision_tokens(&self) -> Box<dyn ManageTokens + Send + Sync> {
-        let mut token_repo =
-            create_token_repository(PathBuf::from(self.data_path.clone()), &self.api_token);
+    pub(in crate::cfg) fn provision_tokens(
+        &self,
+        data_path: &PathBuf,
+    ) -> Box<dyn ManageTokens + Send + Sync> {
+        let mut token_repo = create_token_repository(PathBuf::from(data_path), &self.api_token);
 
         for (name, token) in &self.tokens {
             let is_generated = match token_repo

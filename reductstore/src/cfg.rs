@@ -136,7 +136,7 @@ impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
         })?);
 
         let storage = Arc::new(self.provision_buckets());
-        let token_repo = self.provision_tokens();
+        let token_repo = self.provision_tokens(storage.data_path());
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
         let ros_ext = create_asset_manager(load_ros_ext());
