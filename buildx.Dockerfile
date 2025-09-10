@@ -51,8 +51,6 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-HEALTHCHECK --interval=5s --timeout=3s \
-  CMD reduct-cli server alive http://localhost:8383 || exit 1
 
 EXPOSE 8383
 

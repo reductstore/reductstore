@@ -100,6 +100,12 @@ def test__head_alive(base_url, session):
     assert resp.status_code == 200
 
 
+def test__get_alive(base_url, session):
+    """Should provide HEAD /alive method"""
+    resp = session.get(f"{base_url}/alive")
+    assert resp.status_code == 200
+
+
 @requires_env("API_TOKEN")
 def test__anonymous_alive(base_url, session):
     """should access /alive without token"""
