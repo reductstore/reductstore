@@ -15,8 +15,6 @@ pub(crate) async fn alive(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<StatusCode, HttpError> {
-    check_permissions(&components, &headers, AuthenticatedPolicy {}).await?;
-
     components.storage.info()?;
     Ok(StatusCode::OK)
 }
