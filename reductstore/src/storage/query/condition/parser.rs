@@ -505,12 +505,12 @@ mod tests {
         #[rstest]
         fn test_parse_object_directive(parser: Parser) {
             let json = json!({
-                "#ctx_before": {"invalid": "object"}
+                "#ext": {"key": "value"}
             });
-            let result = parser.parse(json);
+            let (_, directives) = parser.parse(json).unwrap();
             assert_eq!(
-                result.err().unwrap().to_string(),
-                "[UnprocessableEntity] Directive '#ctx_before' cannot be an object"
+                directives.get("#ext").unwrap(),
+                &vec![Value::String(r#"{"key":"value"}"#.to_string())]
             );
         }
 
