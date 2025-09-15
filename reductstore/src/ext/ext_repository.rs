@@ -6,7 +6,7 @@ mod load;
 
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::storage::query::base::QueryOptions;
-use crate::storage::query::condition::Parser;
+use crate::storage::query::condition::{Parser, Value};
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
@@ -106,47 +106,78 @@ impl ManageExtensions for ExtRepository {
         mut query_request: QueryEntry,
     ) -> Result<(), ReductError> {
         let mut query_map = self.query_map.write().await;
-        let ext_params = query_request.ext.as_mut();
-        let controllers = if ext_params.is_some() && ext_params.as_ref().unwrap().is_object() {
-            let ext_query = ext_params.unwrap().as_object_mut().unwrap();
 
-            // check if the query has references to computed labels and no extension is found
-            let condition = if let Some(condition) = ext_query.remove("when") {
-                let node = Parser::new().parse(condition)?;
-                Some(node)
+        let ext_directive = {
+            if let Some(when) = &query_request.when {
+                let (_, directives) = Parser::new().parse(when.clone())?;
+                if let Some(ext) = directives.get("#ext") {
+                    Some(
+                        serde_json::from_str(
+                            &ext.get(0)
+                                .unwrap_or(&Value::String("null".to_string()))
+                                .to_string(),
+                        )
+                        .unwrap(), // The parser already checked the syntax
+                    )
+                } else {
+                    None
+                }
             } else {
                 None
-            };
-
-            if ext_query.iter().count() > 1 {
-                return Err(unprocessable_entity!(
-                    "Multiple extensions are not supported in query id={}",
-                    query_id
-                ));
             }
+        };
 
-            let Some(name) = ext_query.keys().next() else {
-                return Err(unprocessable_entity!(
-                    "Extension name is not found in query id={}",
-                    query_id
-                ));
-            };
+        // use ext parameter of the query if no #ext directive is found
+        let mut ext_params = ext_directive.or(query_request.ext.clone());
 
-            if let Some(ext) = self.extension_map.get(name) {
-                let (processor, commiter) =
-                    ext.write()
-                        .await
-                        .query(bucket_name, entry_name, &query_request)?;
-                Some((processor, commiter, condition))
+        let controllers = {
+            if let Some(ext_params) = &mut ext_params {
+                let Some(ext_query) = ext_params.as_object_mut() else {
+                    return Err(unprocessable_entity!(
+                        "Extension parameters must be a JSON object in query id={}",
+                        query_id
+                    ));
+                };
+
+                // check if the query has references to computed labels and no extension is found
+                let condition = if let Some(condition) = ext_query.remove("when") {
+                    let node = Parser::new().parse(condition)?;
+                    Some(node)
+                } else {
+                    None
+                };
+
+                if ext_query.iter().count() > 1 {
+                    return Err(unprocessable_entity!(
+                        "Multiple extensions are not supported in query id={}",
+                        query_id
+                    ));
+                }
+
+                let Some(name) = ext_query.keys().next() else {
+                    return Err(unprocessable_entity!(
+                        "Extension name is not found in query id={}",
+                        query_id
+                    ));
+                };
+
+                if let Some(ext) = self.extension_map.get(name) {
+                    query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
+                    let (processor, commiter) =
+                        ext.write()
+                            .await
+                            .query(bucket_name, entry_name, &query_request)?;
+                    Some((processor, commiter, condition))
+                } else {
+                    return Err(unprocessable_entity!(
+                        "Unknown extension '{}' in query id={}",
+                        name,
+                        query_id
+                    ));
+                }
             } else {
-                return Err(unprocessable_entity!(
-                    "Unknown extension '{}' in query id={}",
-                    name,
-                    query_id
-                ));
+                None
             }
-        } else {
-            None
         };
 
         let query_options: QueryOptions = query_request.into();

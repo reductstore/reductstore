@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::QueryInfoAxum;

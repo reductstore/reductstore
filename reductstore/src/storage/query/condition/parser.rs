@@ -23,7 +23,7 @@ use std::collections::HashMap;
 pub(crate) struct Parser {}
 
 pub(crate) type Directives = HashMap<String, Vec<Value>>;
-static DIRECTIVES: [&str; 3] = ["#ctx_before", "#ctx_after", "#select_labels"];
+static DIRECTIVES: [&str; 4] = ["#ctx_before", "#ctx_after", "#select_labels", "#ext"];
 
 impl Parser {
     /// Parses a JSON object into a condition tree.
@@ -81,10 +81,8 @@ impl Parser {
                 if value.is_null() {
                     return Err(unprocessable_entity!("Directive '{}' cannot be null", key));
                 } else if value.is_object() {
-                    return Err(unprocessable_entity!(
-                        "Directive '{}' cannot be an object",
-                        key
-                    ));
+                    // store the object as a string
+                    parsed_values.push(Value::String(value.to_string()));
                 } else if value.is_array() {
                     for item in value.as_array().unwrap() {
                         parsed_values.push(parse_primitive(item));
@@ -507,12 +505,12 @@ mod tests {
         #[rstest]
         fn test_parse_object_directive(parser: Parser) {
             let json = json!({
-                "#ctx_before": {"invalid": "object"}
+                "#ext": {"key": "value"}
             });
-            let result = parser.parse(json);
+            let (_, directives) = parser.parse(json).unwrap();
             assert_eq!(
-                result.err().unwrap().to_string(),
-                "[UnprocessableEntity] Directive '#ctx_before' cannot be an object"
+                directives.get("#ext").unwrap(),
+                &vec![Value::String(r#"{"key":"value"}"#.to_string())]
             );
         }
 

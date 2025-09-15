@@ -86,9 +86,19 @@ impl HistoricalQuery {
             filters.push(Box::new(EachNFilter::new(each_n)));
         }
 
+        // If extensions are requested, we need to fetch the content.
+        let mut only_metadata = if options.ext.is_none() {
+            options.only_metadata
+        } else {
+            false
+        };
         if let Some(when) = options.when {
             let parser = Parser::new();
             let (condition, directives) = parser.parse(when)?;
+            if directives.contains_key("#ext") {
+                only_metadata = false;
+            }
+
             filters.push(Box::new(WhenFilter::try_new(
                 condition,
                 directives,
@@ -102,7 +112,7 @@ impl HistoricalQuery {
             records_from_current_block: VecDeque::new(),
             current_block: None,
             filters,
-            only_metadata: options.only_metadata,
+            only_metadata,
             is_interrupted: false,
         })
     }
@@ -209,6 +219,38 @@ mod tests {
     use reduct_base::io::ReadRecord;
     use reduct_base::{no_content, not_found};
 
+    mod new {
+        use super::*;
+        use serde_json::json;
+
+        #[rstest]
+        fn override_only_metadata_if_ext_set() {
+            let options = QueryOptions {
+                only_metadata: true,
+                ext: Some(json!({})),
+                ..Default::default()
+            };
+            let query = HistoricalQuery::try_new(0, 1000, options).unwrap();
+            assert!(
+                !query.only_metadata,
+                "only_metadata should be false if ext is set to get content of records"
+            );
+        }
+
+        #[rstest]
+        fn when_directive_ext_overrides_only_metadata() {
+            let options = QueryOptions {
+                only_metadata: true,
+                when: Some(json!({"$and": ["&flag"], "#ext": {}})),
+                ..Default::default()
+            };
+            let query = HistoricalQuery::try_new(0, 1000, options).unwrap();
+            assert!(
+                !query.only_metadata,
+                "only_metadata should be false if #ext directive is set in when condition"
+            );
+        }
+    }
     #[test]
     fn test_set_labels() {
         let mut record = Record {
