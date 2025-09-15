@@ -103,10 +103,11 @@ impl Default for QueryOptions {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::backend::Backend;
+    use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::record::{Label, State as RecordState};
     use crate::storage::proto::Record;
-
-    use crate::storage::block_manager::block_index::BlockIndex;
     use prost_wkt_types::Timestamp;
     use rstest::fixture;
     use std::io::Write;
@@ -118,6 +119,12 @@ pub(crate) mod tests {
         // the first block has two records: 0, 5
         // the second block has a record: 1000
         let dir = tempdir().unwrap().keep().join("bucket").join("entry");
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(dir.to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
         let mut block_manager = BlockManager::new(dir.clone(), BlockIndex::new(dir.join("index")));
         let block_ref = block_manager.start_new_block(0, 10).unwrap();
 

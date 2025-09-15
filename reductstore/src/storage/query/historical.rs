@@ -219,6 +219,38 @@ mod tests {
     use reduct_base::io::ReadRecord;
     use reduct_base::{no_content, not_found};
 
+    mod new {
+        use super::*;
+        use serde_json::json;
+
+        #[rstest]
+        fn override_only_metadata_if_ext_set() {
+            let options = QueryOptions {
+                only_metadata: true,
+                ext: Some(json!({})),
+                ..Default::default()
+            };
+            let query = HistoricalQuery::try_new(0, 1000, options).unwrap();
+            assert!(
+                !query.only_metadata,
+                "only_metadata should be false if ext is set to get content of records"
+            );
+        }
+
+        #[rstest]
+        fn when_directive_ext_overrides_only_metadata() {
+            let options = QueryOptions {
+                only_metadata: true,
+                when: Some(json!({"$and": ["&flag"], "#ext": {}})),
+                ..Default::default()
+            };
+            let query = HistoricalQuery::try_new(0, 1000, options).unwrap();
+            assert!(
+                !query.only_metadata,
+                "only_metadata should be false if #ext directive is set in when condition"
+            );
+        }
+    }
     #[test]
     fn test_set_labels() {
         let mut record = Record {

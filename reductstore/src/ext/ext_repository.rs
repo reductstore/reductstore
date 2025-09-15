@@ -107,7 +107,7 @@ impl ManageExtensions for ExtRepository {
     ) -> Result<(), ReductError> {
         let mut query_map = self.query_map.write().await;
 
-        let mut ext_directive = {
+        let ext_directive = {
             if let Some(when) = &query_request.when {
                 let (_, directives) = Parser::new().parse(when.clone())?;
                 if let Some(ext) = directives.get("#ext") {
@@ -117,13 +117,7 @@ impl ManageExtensions for ExtRepository {
                                 .unwrap_or(&Value::String("null".to_string()))
                                 .to_string(),
                         )
-                        .map_err(|e| {
-                            unprocessable_entity!(
-                                "Failed to parse #ext directive in query id={}: {}",
-                                query_id,
-                                e
-                            )
-                        })?,
+                        .unwrap(), // The parser already checked the syntax
                     )
                 } else {
                     None
