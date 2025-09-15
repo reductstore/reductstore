@@ -1,0 +1,28 @@
+// Copyright 2025 ReductSoftware UG
+// This Source Code Form is subject to the terms of the Mozilla Public
+//    License, v. 2.0. If a copy of the MPL was not distributed with this
+//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::msg::entry_api::QueryEntry;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+/// Request to create a query link for sharing
+pub struct QueryLinkCreateRequest {
+    /// Expiration time
+    pub expire_at: Option<DateTime<Utc>>,
+    /// Bucket name
+    pub bucket: String,
+    /// Entry name
+    pub entry: String,
+    /// Query to share
+    pub query: QueryEntry,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+/// Response with created query link
+pub struct QueryLinkCreateResponse {
+    /// Link to access the query
+    pub link: String,
+}

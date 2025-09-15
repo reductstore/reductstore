@@ -4,6 +4,7 @@
 mod bucket;
 mod entry;
 mod middleware;
+mod query_link;
 mod replication;
 mod server;
 mod token;
