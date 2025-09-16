@@ -77,6 +77,7 @@ aws-config = { version = "1.8.5", optional = true, features = ["rustls"] }
 aws-credential-types = { version = "1.2.5", optional = true, features = ["hardcoded-credentials"]}
 argon2 = "0.6.0-rc.1"
 aes-siv = "0.8.0-rc.1"
+reader = "0.1.4"
 
 [build-dependencies]
 prost-build = "0.14.1"

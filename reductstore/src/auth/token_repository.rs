@@ -377,7 +377,6 @@ impl ManageTokens for TokenRepository {
             Some(token) => {
                 // for security reasons, we don't return the value
                 let mut token = token.clone();
-                token.value = "".to_string();
                 Ok(token)
             }
             None => Err(unauthorized!("Invalid token")),

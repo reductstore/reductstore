@@ -9,6 +9,7 @@ mod replication;
 mod server;
 mod token;
 mod ui;
+mod utils;
 
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;

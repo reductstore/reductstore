@@ -20,9 +20,9 @@ pub(in crate::api) async fn me(
         Some(header) => header.to_str().ok(),
         None => None,
     };
-    Ok(TokenAxum::from(
-        components.token_repo.read().await.validate_token(header)?,
-    ))
+    let mut token = components.token_repo.read().await.validate_token(header)?;
+    token.value.clear();
+    Ok(TokenAxum::from(token))
 }
 
 #[cfg(test)]
