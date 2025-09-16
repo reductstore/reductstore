@@ -18,7 +18,7 @@ use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry?ts=<number>
-pub(crate) async fn update_record(
+pub(super) async fn update_record(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,

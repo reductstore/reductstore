@@ -13,7 +13,7 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
 // DELETE /:bucket/:entry?ts=<number>
-pub(crate) async fn remove_record(
+pub(super) async fn remove_record(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,

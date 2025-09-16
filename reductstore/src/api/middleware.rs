@@ -12,7 +12,7 @@ use reduct_base::error::ErrorCode;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::Policy;
 
-pub async fn default_headers(
+pub(super) async fn default_headers(
     request: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, HttpError> {

@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
-pub(crate) async fn read_query(
+pub(super) async fn read_query(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,

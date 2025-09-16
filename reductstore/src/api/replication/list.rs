@@ -12,7 +12,7 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 
 // GET /api/v1/replications/
-pub(crate) async fn list_replications(
+pub(super) async fn list_replications(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<ReplicationListAxum, HttpError> {

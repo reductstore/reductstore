@@ -10,7 +10,7 @@ use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // PUT /api/v1/replications/:replication_name
-pub(crate) async fn update_replication(
+pub(super) async fn update_replication(
     State(components): State<Arc<Components>>,
     Path(replication_name): Path<String>,
     headers: HeaderMap,

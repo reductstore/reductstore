@@ -30,7 +30,7 @@ use std::task::{Context, Poll};
 use tokio::sync::RwLock as AsyncRwLock;
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
-pub(crate) async fn read_record(
+pub(super) async fn read_record(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,

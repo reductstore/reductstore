@@ -21,7 +21,7 @@ use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry/batch
 
-pub(crate) async fn update_batched_records(
+pub(super) async fn update_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,

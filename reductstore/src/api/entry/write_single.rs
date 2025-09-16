@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tokio::time::timeout;
 
 // POST /:bucket/:entry?ts=<number>
-pub(crate) async fn write_record(
+pub(super) async fn write_record(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,

@@ -17,7 +17,7 @@ use mime_guess::mime;
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
-pub(crate) async fn redirect_to_index(
+pub(super) async fn redirect_to_index(
     State(components): State<Arc<Components>>,
 ) -> impl IntoResponse {
     let base_path = components.base_path.clone();
@@ -26,7 +26,7 @@ pub(crate) async fn redirect_to_index(
     (StatusCode::FOUND, headers, Bytes::new()).into_response()
 }
 
-pub(crate) async fn show_ui(
+pub(super) async fn show_ui(
     State(components): State<Arc<Components>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {

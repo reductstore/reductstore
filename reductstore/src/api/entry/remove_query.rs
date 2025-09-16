@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // DELETE /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
-pub(crate) async fn remove_query(
+pub(super) async fn remove_query(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,

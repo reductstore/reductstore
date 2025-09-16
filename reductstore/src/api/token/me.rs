@@ -11,7 +11,7 @@ use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // // GET /me
-pub(crate) async fn me(
+pub(in crate::api) async fn me(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<TokenAxum, HttpError> {

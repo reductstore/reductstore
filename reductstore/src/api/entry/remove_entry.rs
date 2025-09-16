@@ -12,7 +12,7 @@ use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // DELETE /b/:bucket_name/:entry_name
-pub(crate) async fn remove_entry(
+pub(super) async fn remove_entry(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     headers: HeaderMap,

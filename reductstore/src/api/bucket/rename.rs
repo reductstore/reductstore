@@ -11,7 +11,7 @@ use reduct_base::msg::bucket_api::RenameBucket;
 use std::sync::Arc;
 
 // PUT /b/:bucket_name/rename
-pub(crate) async fn rename_bucket(
+pub(super) async fn rename_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,

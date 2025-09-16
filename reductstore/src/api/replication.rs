@@ -51,12 +51,12 @@ where
 }
 
 #[derive(IntoResponse, Twin, Default)]
-pub struct ReplicationListAxum(ReplicationList);
+pub(super) struct ReplicationListAxum(ReplicationList);
 
 #[derive(IntoResponse, Twin)]
-pub struct ReplicationFullInfoAxum(FullReplicationInfo);
+pub(super) struct ReplicationFullInfoAxum(FullReplicationInfo);
 
-pub(crate) fn create_replication_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_replication_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/", get(list_replications))
         .route("/{replication_name}", get(get_replication))
