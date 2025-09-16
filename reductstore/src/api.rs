@@ -144,6 +144,10 @@ pub fn create_axum_app(cfg: &Cfg<StdEnvGetter>, components: Arc<Components>) -> 
             &format!("{}api/v1/replications", cfg.api_base_path),
             create_replication_api_routes(),
         )
+        .nest(
+            &format!("{}api/v1/query_links", cfg.api_base_path),
+            query_link::create_query_link_api_routes(),
+        )
         // UI
         .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
         .fallback(get(show_ui))
