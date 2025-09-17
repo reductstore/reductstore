@@ -11,23 +11,16 @@ use reduct_base::error::ReductError;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
-use axum_extra::headers::{HeaderMap, HeaderName};
-use bytes::Bytes;
-use futures_util::Stream;
+use axum_extra::headers::HeaderMap;
 
 use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
-use futures_util::Future;
-use hyper::http::HeaderValue;
 use reduct_base::bad_request;
-use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
-use std::pin::{pin, Pin};
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use tokio::sync::RwLock as AsyncRwLock;
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|

@@ -2,32 +2,23 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::middleware::check_permissions;
-use crate::api::query_link::{
-    derive_key_from_secret, QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum,
-};
+use crate::api::query_link::derive_key_from_secret;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use aes_siv::aead::{Aead, KeyInit};
-use aes_siv::{Aes128SivAead, Aes256SivAead, Nonce};
+use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::Body;
-use axum::debug_handler;
 use axum::extract::{Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use flate2::read::{GzDecoder, ZlibDecoder};
-use flate2::write::ZlibEncoder;
-use flate2::Compression;
-use futures_util::StreamExt;
-use log::info;
-use rand::rngs::OsRng;
-use rand::TryRngCore;
+use flate2::read::ZlibDecoder;
 use reduct_base::error::ReductError;
-use reduct_base::msg::query_link_api::{QueryLinkCreateRequest, QueryLinkCreateResponse};
-use reduct_base::{internal_server_error, unprocessable_entity};
+use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
+use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::Arc;

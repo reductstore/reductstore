@@ -8,8 +8,7 @@ use crate::api::query_link::{
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use aes_siv::aead::{Aead, KeyInit};
-use aes_siv::{Aes128SivAead, Aes256SivAead};
-use axum::debug_handler;
+use aes_siv::Aes128SivAead;
 use axum::extract::State;
 use axum::http::header::AUTHORIZATION;
 use axum_extra::headers::HeaderMap;
@@ -17,15 +16,13 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
-use log::info;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::msg::query_link_api::QueryLinkCreateResponse;
-use std::io::{Cursor, Read, Write};
+use std::io::Write;
 use std::sync::Arc;
-use zip::ZipArchive;
 
 // POST /api/v1/query_links/
 pub(super) async fn create(

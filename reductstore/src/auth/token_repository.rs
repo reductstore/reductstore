@@ -376,7 +376,7 @@ impl ManageTokens for TokenRepository {
         match self.repo.values().find(|token| token.value == value) {
             Some(token) => {
                 // for security reasons, we don't return the value
-                let mut token = token.clone();
+                let token = token.clone();
                 Ok(token)
             }
             None => Err(unauthorized!("Invalid token")),

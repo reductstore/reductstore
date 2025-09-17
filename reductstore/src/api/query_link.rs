@@ -2,13 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::query_link::create::create;
-use crate::api::replication::ReplicationSettingsAxum;
 use crate::api::{Components, HttpError};
 use axum::extract::FromRequest;
 use axum::routing::{get, post};
 use axum_extra::headers::HeaderMapExt;
 use bytes::Bytes;
-use log::info;
 use reduct_base::msg::query_link_api::{QueryLinkCreateRequest, QueryLinkCreateResponse};
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
