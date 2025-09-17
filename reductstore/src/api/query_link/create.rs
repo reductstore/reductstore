@@ -15,13 +15,17 @@ use axum::http::header::AUTHORIZATION;
 use axum_extra::headers::HeaderMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 use log::info;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::msg::query_link_api::QueryLinkCreateResponse;
+use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
+use zip::ZipArchive;
 
 // POST /api/v1/query_links/
 pub(super) async fn create(
@@ -45,28 +49,34 @@ pub(super) async fn create(
             .map(|header| header.to_str().unwrap_or("invalid-token")),
     )?;
 
-    // use token to encrypt the query
+    // compress the query to make the link shorter
     let query_string = serde_json::to_string(&params.0)?;
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder
+        .write_all(query_string.as_bytes())
+        .map_err(|e| internal_server_error!("Failed to compress query for query link: {}", e))?;
+
+    // use token to encrypt the query
     let mut salt = [0u8; 16];
-    OsRng.try_fill_bytes(&mut salt).map_err(|e| {
-        internal_server_error!(&format!("Failed to generate salt for query link: {}", e))
-    })?;
+    OsRng
+        .try_fill_bytes(&mut salt)
+        .map_err(|e| internal_server_error!("Failed to generate salt for query link: {}", e))?;
 
     let key = derive_key_from_secret(token.value.as_bytes(), &salt);
     let cipher = Aes128SivAead::new_from_slice(&key).unwrap();
 
     let mut nonce_bytes = [0u8; 16];
-    OsRng.try_fill_bytes(&mut nonce_bytes).map_err(|e| {
-        internal_server_error!(&format!("Failed to generate nonce for query link: {}", e))
+    OsRng
+        .try_fill_bytes(&mut nonce_bytes)
+        .map_err(|e| internal_server_error!("Failed to generate nonce for query link: {}", e))?;
+
+    let compressed_query = encoder.finish().map_err(|e| {
+        internal_server_error!("Failed to finish compression for query link: {}", e)
     })?;
 
-    info!("Creating query link with nonce: {:?}", nonce_bytes);
-
     let ct = cipher
-        .encrypt(&nonce_bytes.into(), query_string.as_bytes())
-        .map_err(|e| -> ReductError {
-            internal_server_error!(&format!("Failed to encrypt query: {}", e))
-        })?;
+        .encrypt(&nonce_bytes.into(), compressed_query.as_slice())
+        .map_err(|e| -> ReductError { internal_server_error!("Failed to encrypt query: {}", e) })?;
 
     // encode to base64
     let ct_b64 = URL_SAFE_NO_PAD.encode(&ct);

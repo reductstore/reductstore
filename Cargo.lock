@@ -2910,6 +2910,7 @@ dependencies = [
  "crc64fast",
  "crossbeam-channel",
  "dlopen2",
+ "flate2",
  "futures-util",
  "hex",
  "hyper 1.7.0",

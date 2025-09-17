@@ -18,6 +18,9 @@ use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use flate2::read::{GzDecoder, ZlibDecoder};
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 use futures_util::StreamExt;
 use log::info;
 use rand::rngs::OsRng;
@@ -26,6 +29,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::query_link_api::{QueryLinkCreateRequest, QueryLinkCreateResponse};
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
+use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 // GET /api/v1/query_links&ct=...&s=...&i=...&r=...
@@ -69,12 +73,20 @@ pub(super) async fn get(
         .decode(nonce_b64)
         .map_err(|e| unprocessable_entity!("Invalid base64 in 'n' parameter: {}", e))?;
 
-    let plaintext = cipher
+    let compressed_text = cipher
         .decrypt(&Nonce::from_iter(nonce_bytes), ciphertxt.as_ref())
         .map_err(|e| unprocessable_entity!("Failed to decrypt query: {}", e))?;
 
-    let query: QueryLinkCreateRequest = serde_json::from_slice(&plaintext)
-        .map_err(|e| unprocessable_entity!("Failed to parse decrypted query: {}", e))?;
+    // decompress the query
+    let mut decoder = ZlibDecoder::new(Cursor::new(compressed_text));
+    let mut query = Vec::new();
+    decoder
+        .read_to_end(&mut query)
+        .map_err(|e| unprocessable_entity!("Failed to decompress query: {}", e))?;
+
+    // parse the query
+    let query: QueryLinkCreateRequest = serde_json::from_slice(&query)
+        .map_err(|e| unprocessable_entity!("Failed to parse query: {}", e))?;
 
     check_permissions(
         &components,
