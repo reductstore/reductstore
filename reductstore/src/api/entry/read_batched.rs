@@ -68,7 +68,7 @@ pub(super) async fn read_batched_records(
         entry_name,
         query_id,
         method.name == "HEAD",
-        &components.io_settings,
+        &components.cfg.io_conf,
         &components.ext_repo,
     )
     .await

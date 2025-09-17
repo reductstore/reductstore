@@ -103,10 +103,10 @@ async fn next_record_reader(
 mod tests {
     use super::*;
 
-    use axum::body::to_bytes;
-
     use crate::api::entry::tests::query;
     use crate::api::tests::{components, headers, path_to_entry_1};
+    use axum::body::to_bytes;
+    use bytes::Bytes;
 
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ErrorCode::NotFound;
@@ -313,14 +313,15 @@ mod tests {
     mod steam_wrapper {
         use super::*;
         use crate::storage::proto::Record;
+        use futures_util::Stream;
         use prost_wkt_types::Timestamp;
 
         #[rstest]
         fn test_size_hint() {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
 
-            let wrapper = RecordStream {
-                reader: RecordReader::form_record_with_rx(
+            let wrapper = RecordStream::new(
+                RecordReader::form_record_with_rx(
                     rx,
                     Record {
                         timestamp: Some(Timestamp::default()),
@@ -331,8 +332,8 @@ mod tests {
                         content_type: "".to_string(),
                     },
                 ),
-                empty_body: false,
-            };
+                false,
+            );
             assert_eq!(wrapper.size_hint(), (0, None));
         }
     }

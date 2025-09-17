@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::backend::BackendType;
-use crate::cfg::Cfg;
+use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use crate::license::parse_license;
 use crate::storage::storage::Storage;
@@ -13,20 +13,21 @@ use reduct_base::msg::bucket_api::BucketSettings;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
+impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(in crate::cfg) fn provision_buckets(&self) -> Storage {
-        let license = parse_license(self.license_path.clone());
-        let data_path = if self.cs_config.backend_type == BackendType::Filesystem {
-            self.data_path.clone()
+        let license = parse_license(self.cfg.license_path.clone());
+        let data_path = if self.cfg.cs_config.backend_type == BackendType::Filesystem {
+            self.cfg.data_path.clone()
         } else {
-            self.cs_config
+            self.cfg
+                .cs_config
                 .cache_path
                 .clone()
                 .expect("Cache path must be set for remote storage")
         };
 
         let storage = Storage::load(PathBuf::from(data_path), license);
-        for (name, settings) in &self.buckets {
+        for (name, settings) in &self.cfg.buckets {
             let settings = match storage.create_bucket(&name, settings.clone()) {
                 Ok(bucket) => {
                     let bucket = bucket.upgrade().unwrap();
@@ -131,7 +132,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_buckets);
+        let cfg = CfgParser::from_env(env_with_buckets);
         let components = cfg.build().unwrap();
 
         let bucket1 = components
@@ -159,7 +160,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_buckets);
+        let cfg = CfgParser::from_env(env_with_buckets);
         let components = cfg.build().unwrap();
         let bucket1 = components
             .storage
@@ -186,7 +187,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_buckets);
+        let cfg = CfgParser::from_env(env_with_buckets);
         let components = cfg.build().unwrap();
 
         assert_eq!(

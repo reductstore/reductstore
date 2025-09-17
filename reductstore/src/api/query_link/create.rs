@@ -23,6 +23,7 @@ use reduct_base::internal_server_error;
 use reduct_base::msg::query_link_api::QueryLinkCreateResponse;
 use std::io::Write;
 use std::sync::Arc;
+use url::Url;
 
 // POST /api/v1/query_links/
 pub(super) async fn create(
@@ -80,10 +81,9 @@ pub(super) async fn create(
     let salt_b64 = URL_SAFE_NO_PAD.encode(&salt);
     let nonce_b64 = URL_SAFE_NO_PAD.encode(&nonce_bytes);
 
-    let hostname = "http://localhost:8383";
     let link = format!(
         "{}/api/v1/query_links?ct={}&s={}&i={}&n={}",
-        hostname,
+        components.cfg.public_url,
         ct_b64,
         salt_b64,
         token.name.as_str(),

@@ -2,12 +2,12 @@
 // Licensed under the Business Source License 1.1
 
 use crate::backend::BackendType;
-use crate::cfg::Cfg;
+use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
 
 /// Cloud storage settings
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct RemoteStorageConfig {
     pub backend_type: BackendType,
     pub bucket: Option<String>,
@@ -19,7 +19,7 @@ pub struct RemoteStorageConfig {
     pub cache_size: u64,
 }
 
-impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
+impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(super) fn parse_remote_storage_cfg(env: &mut Env<EnvGetter>) -> RemoteStorageConfig {
         let secret_key = env.get_masked("RS_REMOTE_SECRET_KEY", "".to_string());
         RemoteStorageConfig {
@@ -97,7 +97,7 @@ mod tests {
 
         let mut env = Env::new(env_getter);
 
-        let cfg = Cfg::parse_remote_storage_cfg(&mut env);
+        let cfg = CfgParser::parse_remote_storage_cfg(&mut env);
         assert_eq!(
             cfg,
             RemoteStorageConfig {
@@ -151,7 +151,7 @@ mod tests {
             .return_const(Ok("2GB".to_string()));
         let mut env = Env::new(env_getter);
 
-        let cfg = Cfg::parse_remote_storage_cfg(&mut env);
+        let cfg = CfgParser::parse_remote_storage_cfg(&mut env);
         assert_eq!(
             cfg,
             RemoteStorageConfig {

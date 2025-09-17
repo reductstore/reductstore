@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::Cfg;
+use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
 use std::time::Duration;
@@ -39,7 +39,7 @@ impl Default for IoConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
+impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(super) fn parse_io_config(env: &mut Env<EnvGetter>) -> IoConfig {
         IoConfig {
             batch_max_size: env
@@ -108,7 +108,7 @@ mod tests {
 
         assert_eq!(
             io_settings,
-            Cfg::<MockEnvGetter>::parse_io_config(&mut Env::new(env_getter))
+            CfgParser::<MockEnvGetter>::parse_io_config(&mut Env::new(env_getter))
         );
     }
 
@@ -124,7 +124,7 @@ mod tests {
 
         assert_eq!(
             io_settings,
-            Cfg::<MockEnvGetter>::parse_io_config(&mut Env::new(env_getter))
+            CfgParser::<MockEnvGetter>::parse_io_config(&mut Env::new(env_getter))
         );
     }
 }

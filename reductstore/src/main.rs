@@ -9,7 +9,7 @@ use axum_server::Handle;
 use log::info;
 use reduct_base::logger::Logger;
 use reductstore::api::create_axum_app;
-use reductstore::cfg::Cfg;
+use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
 use reductstore::storage::storage::Storage;
 use std::str::FromStr;
@@ -33,11 +33,11 @@ async fn launch_server() {
         format!("v{}", version)
     };
 
-    let cfg = Cfg::from_env(StdEnvGetter::default());
-    Logger::init(&cfg.log_level);
-    info!("Configuration: \n {}", cfg);
+    let parser = CfgParser::from_env(StdEnvGetter::default());
+    Logger::init(&parser.cfg.log_level);
+    info!("Configuration: \n {}", parser);
 
-    let components = cfg.build().expect("Failed to build components");
+    let components = parser.build().expect("Failed to build components");
     let info = components
         .storage
         .info()
@@ -51,16 +51,14 @@ async fn launch_server() {
         );
     }
 
+    let cfg = parser.cfg;
     let scheme = if cfg.cert_path.is_empty() {
         "http"
     } else {
         "https"
     };
 
-    info!(
-        "Run HTTP reductstore on {}://{}:{}{}",
-        scheme, cfg.host, cfg.port, cfg.api_base_path
-    );
+    info!("Public URL: {}", cfg.public_url);
 
     let handle = Handle::new();
     tokio::spawn(shutdown_ctrl_c(handle.clone(), components.storage.clone()));
@@ -234,7 +232,7 @@ mod tests {
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
 
         let handle = Handle::new();
-        let cfg = Cfg::from_env(StdEnvGetter::default()); // init file cache
+        let cfg = CfgParser::from_env(StdEnvGetter::default()); // init file cache
         let storage = cfg.build().unwrap().storage;
         shutdown_app(handle.clone(), storage.clone());
     }

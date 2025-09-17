@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::auth::token_repository::{create_token_repository, ManageTokens};
-use crate::cfg::Cfg;
+use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use log::{error, info, warn};
 use reduct_base::error::ErrorCode;
@@ -10,14 +10,14 @@ use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
+impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(in crate::cfg) fn provision_tokens(
         &self,
         data_path: &PathBuf,
     ) -> Box<dyn ManageTokens + Send + Sync> {
-        let mut token_repo = create_token_repository(PathBuf::from(data_path), &self.api_token);
+        let mut token_repo = create_token_repository(PathBuf::from(data_path), &self.cfg.api_token);
 
-        for (name, token) in &self.tokens {
+        for (name, token) in &self.cfg.tokens {
             let is_generated = match token_repo
                 .generate_token(&name, token.permissions.clone().unwrap_or_default())
             {
@@ -137,7 +137,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_tokens);
+        let cfg = CfgParser::from_env(env_with_tokens);
         let components = cfg.build().unwrap();
 
         let repo = components.token_repo.read().await;
@@ -162,7 +162,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_tokens);
+        let cfg = CfgParser::from_env(env_with_tokens);
         let components = cfg.build().unwrap();
 
         let repo = components.token_repo.read().await;
@@ -187,7 +187,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = Cfg::from_env(env_with_tokens);
+        let cfg = CfgParser::from_env(env_with_tokens);
         let components = cfg.build().unwrap();
 
         let repo = components.token_repo.read().await;
