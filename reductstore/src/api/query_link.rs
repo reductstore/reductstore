@@ -58,3 +58,35 @@ pub(super) fn create_query_link_api_routes() -> axum::Router<Arc<Components>> {
         .route("/", post(create))
         .route("/", get(get::get))
 }
+
+#[cfg(test)]
+pub(super) mod tests {
+    use crate::api::query_link::create::create;
+    use crate::api::query_link::{QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum};
+    use crate::api::{Components, HttpError};
+    use axum::extract::State;
+    use axum::http::HeaderMap;
+    use chrono::{DateTime, Utc};
+    use reduct_base::msg::entry_api::QueryEntry;
+    use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
+    use std::sync::Arc;
+
+    pub(super) async fn create_query_link(
+        headers: HeaderMap,
+        components: Arc<Components>,
+        query: QueryEntry,
+        expire_at: Option<DateTime<Utc>>,
+    ) -> Result<QueryLinkCreateResponseAxum, HttpError> {
+        create(
+            State(Arc::clone(&components)),
+            headers,
+            QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
+                expire_at,
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                query,
+            }),
+        )
+        .await
+    }
+}

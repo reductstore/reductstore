@@ -52,12 +52,6 @@ async fn launch_server() {
     }
 
     let cfg = parser.cfg;
-    let scheme = if cfg.cert_path.is_empty() {
-        "http"
-    } else {
-        "https"
-    };
-
     info!("Public URL: {}", cfg.public_url);
 
     let handle = Handle::new();

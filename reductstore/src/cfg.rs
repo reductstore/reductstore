@@ -301,6 +301,7 @@ mod tests {
         assert_eq!(parser.cfg.host, "0.0.0.0");
         assert_eq!(parser.cfg.port, 8383);
         assert_eq!(parser.cfg.api_base_path, "/");
+        assert_eq!(parser.cfg.public_url, "http://0.0.0.0:8383/");
         assert_eq!(parser.cfg.data_path, "/data");
         assert_eq!(parser.cfg.api_token, "");
         assert_eq!(parser.cfg.cert_path, "");
@@ -369,6 +370,82 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter);
         assert_eq!(parser.cfg.api_base_path, "/api/");
+    }
+
+    mod public_url {
+        use super::*;
+        use rstest::rstest;
+        #[rstest]
+        fn from_env(mut env_getter: MockEnvGetter) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_PUBLIC_URL"))
+                .times(1)
+                .return_const(Ok("https://example.com/".to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let parser = CfgParser::from_env(env_getter);
+            assert_eq!(parser.cfg.public_url, "https://example.com/");
+        }
+
+        #[rstest]
+        fn default_http(mut env_getter: MockEnvGetter) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_HOST"))
+                .times(1)
+                .return_const(Ok("example.com".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_PORT"))
+                .times(1)
+                .return_const(Ok("80".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_API_BASE_PATH"))
+                .times(1)
+                .return_const(Ok("/api/".to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let parser = CfgParser::from_env(env_getter);
+            assert_eq!(parser.cfg.public_url, "http://example.com/api/");
+        }
+
+        #[rstest]
+        fn default_https(mut env_getter: MockEnvGetter) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_HOST"))
+                .times(1)
+                .return_const(Ok("example.com".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_PORT"))
+                .times(1)
+                .return_const(Ok("443".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_API_BASE_PATH"))
+                .times(1)
+                .return_const(Ok("/api/".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_CERT_PATH"))
+                .times(1)
+                .return_const(Ok("/tmp/cert.pem".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_CERT_KEY_PATH"))
+                .times(1)
+                .return_const(Ok("/tmp/cert.key".to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let parser = CfgParser::from_env(env_getter);
+            assert_eq!(parser.cfg.public_url, "https://example.com/api/");
+        }
     }
 
     #[rstest]

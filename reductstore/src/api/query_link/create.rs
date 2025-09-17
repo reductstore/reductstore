@@ -19,8 +19,8 @@ use flate2::Compression;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 use reduct_base::msg::query_link_api::QueryLinkCreateResponse;
+use reduct_base::{internal_server_error, unprocessable_entity};
 use std::io::Write;
 use std::sync::Arc;
 use url::Url;
@@ -39,6 +39,10 @@ pub(super) async fn create(
         },
     )
     .await?;
+
+    if params.0.query.query_type != reduct_base::msg::entry_api::QueryType::Query {
+        return Err(unprocessable_entity!("Only 'Query' type is supported for query links").into());
+    }
 
     // find current token
     let token = components.token_repo.write().await.validate_token(
@@ -82,7 +86,7 @@ pub(super) async fn create(
     let nonce_b64 = URL_SAFE_NO_PAD.encode(&nonce_bytes);
 
     let link = format!(
-        "{}/api/v1/query_links?ct={}&s={}&i={}&n={}",
+        "{}api/v1/query_links?ct={}&s={}&i={}&n={}",
         components.cfg.public_url,
         ct_b64,
         salt_b64,
@@ -90,4 +94,66 @@ pub(super) async fn create(
         nonce_b64,
     );
     Ok(QueryLinkCreateResponse { link }.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::query_link::tests::create_query_link;
+    use crate::api::tests::{components, headers};
+    use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use rstest::rstest;
+    use std::sync::Arc;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_query_link(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let components = components.await;
+
+        let response = create_query_link(
+            headers,
+            components,
+            QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let url = Url::parse(&response.link).unwrap();
+        let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+
+        assert!(params.contains_key("ct"));
+        assert!(params.contains_key("s"));
+        assert!(params.contains_key("i"));
+        assert!(params.contains_key("n"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_query_link_invalid_type(
+        #[future] components: Arc<Components>,
+        headers: HeaderMap,
+    ) {
+        let components = components.await;
+        let err = create_query_link(
+            headers,
+            components,
+            QueryEntry {
+                query_type: QueryType::Remove,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(
+            err.0,
+            unprocessable_entity!("Only 'Query' type is supported for query links")
+        );
+    }
 }
