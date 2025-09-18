@@ -86,10 +86,8 @@ pub(super) async fn get(
         .map_err(|e| unprocessable_entity!("Failed to parse query: {}", e))?;
 
     // Check expiration
-    if let Some(exp) = query.expire_at {
-        if exp < chrono::Utc::now() {
-            return Err(unprocessable_entity!("Query link has expired").into());
-        }
+    if query.expire_at < chrono::Utc::now() {
+        return Err(unprocessable_entity!("Query link has expired").into());
     }
 
     check_permissions(
