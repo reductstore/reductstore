@@ -1,5 +1,7 @@
 import json
 
+import requests
+
 from .conftest import auth_headers, requires_env
 
 
@@ -26,7 +28,7 @@ def test__create_and_download_link(base_url, session, token_name, bucket_name):
     assert resp.headers["content-type"] == "application/json"
     link = json.loads(resp.content)["link"]
 
-    resp = session.get(link)
+    resp = requests.get(link)
     assert resp.status_code == 200
     assert resp.content == b"Hello, World!"
 
