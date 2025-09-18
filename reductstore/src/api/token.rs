@@ -59,7 +59,7 @@ where
     }
 }
 
-pub(crate) fn create_token_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_token_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/", get(list_tokens))
         .route("/{token_name}", post(create_token))

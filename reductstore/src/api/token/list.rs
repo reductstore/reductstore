@@ -11,7 +11,7 @@ use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET /tokens
-pub(crate) async fn list_tokens(
+pub(super) async fn list_tokens(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<TokenListAxum, HttpError> {
@@ -19,8 +19,10 @@ pub(crate) async fn list_tokens(
     let token_repo = components.token_repo.read().await;
 
     let mut list = TokenListAxum::default();
-    for x in token_repo.get_token_list()?.iter() {
-        list.0.tokens.push((*x).clone());
+    for token in token_repo.get_token_list()?.iter() {
+        let mut x = token.clone();
+        x.value.clear();
+        list.0.tokens.push(x);
     }
     list.0.tokens.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(list)

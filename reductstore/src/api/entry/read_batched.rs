@@ -33,7 +33,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::timeout;
 
 // GET /:bucket/:entry/batch?q=<number>
-pub(crate) async fn read_batched_records(
+pub(super) async fn read_batched_records(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -68,7 +68,7 @@ pub(crate) async fn read_batched_records(
         entry_name,
         query_id,
         method.name == "HEAD",
-        &components.io_settings,
+        &components.cfg.io_conf,
         &components.ext_repo,
     )
     .await

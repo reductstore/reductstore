@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // PUT /b/:bucket_name/:entry_name
-pub(crate) async fn rename_entry(
+pub(super) async fn rename_entry(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     headers: HeaderMap,

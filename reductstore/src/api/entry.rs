@@ -49,7 +49,7 @@ use reduct_macros::{IntoResponse, Twin};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub struct MethodExtractor {
+pub(super) struct MethodExtractor {
     name: String,
 }
 
@@ -79,13 +79,13 @@ where
 }
 
 #[derive(IntoResponse, Twin)]
-pub struct QueryInfoAxum(QueryInfo);
+pub(super) struct QueryInfoAxum(QueryInfo);
 
 #[derive(IntoResponse, Twin)]
-pub struct RemoveQueryInfoAxum(RemoveQueryInfo);
+pub(super) struct RemoveQueryInfoAxum(RemoveQueryInfo);
 
 #[derive(IntoResponse, Twin)]
-pub struct QueryEntryAxum(QueryEntry);
+pub(super) struct QueryEntryAxum(QueryEntry);
 
 impl<S> FromRequest<S> for QueryEntryAxum
 where
@@ -136,7 +136,7 @@ async fn query_entry_router(
     }
 }
 
-pub(crate) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_entry_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/{bucket_name}/{entry_name}", post(write_record))
         .route(

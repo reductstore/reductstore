@@ -36,7 +36,7 @@ struct WriteContext {
 type ErrorMap = BTreeMap<u64, ReductError>;
 
 // POST /:bucket/:entry/batch
-pub(crate) async fn write_batched_records(
+pub(super) async fn write_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,

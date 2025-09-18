@@ -11,7 +11,7 @@ use reduct_base::msg::server_api::BucketInfoList;
 use std::sync::Arc;
 
 // GET /list
-pub(crate) async fn list(
+pub(super) async fn list(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
 ) -> Result<BucketInfoListAxum, HttpError> {

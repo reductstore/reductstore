@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // GET /b/:bucket_name
 
-pub(crate) async fn get_bucket(
+pub(super) async fn get_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,

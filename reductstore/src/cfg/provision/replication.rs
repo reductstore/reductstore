@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::Cfg;
+use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use crate::replication::{create_replication_repo, ManageReplications};
 use crate::storage::storage::Storage;
@@ -12,13 +12,14 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
+impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(in crate::cfg) fn provision_replication_repo(
         &self,
         storage: Arc<Storage>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_repo(Arc::clone(&storage), self.replication_conf.clone());
-        for (name, settings) in &self.replications {
+        let mut repo =
+            create_replication_repo(Arc::clone(&storage), self.cfg.replication_conf.clone());
+        for (name, settings) in &self.cfg.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {
                     repo.update_replication(&name, settings.clone())?;
@@ -185,7 +186,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         let replication = repo.get_replication("replication1").unwrap();
 
@@ -225,7 +226,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -252,7 +253,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -278,7 +279,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -304,7 +305,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -330,7 +331,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -388,7 +389,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = Cfg::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications).build().unwrap();
         let repo = components.replication_repo.read().await;
         let replication = repo.get_replication("replication1").unwrap();
         assert_eq!(

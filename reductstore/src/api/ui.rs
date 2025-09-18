@@ -17,20 +17,20 @@ use mime_guess::mime;
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
-pub(crate) async fn redirect_to_index(
+pub(super) async fn redirect_to_index(
     State(components): State<Arc<Components>>,
 ) -> impl IntoResponse {
-    let base_path = components.base_path.clone();
+    let base_path = components.cfg.api_base_path.clone();
     let mut headers = HeaderMap::new();
     headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
     (StatusCode::FOUND, headers, Bytes::new()).into_response()
 }
 
-pub(crate) async fn show_ui(
+pub(super) async fn show_ui(
     State(components): State<Arc<Components>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let base_path = components.base_path.clone();
+    let base_path = components.cfg.api_base_path.clone();
 
     let path = request.uri().path();
     if !path.starts_with(&format!("{}ui/", base_path)) {

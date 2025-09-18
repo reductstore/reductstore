@@ -8,7 +8,7 @@ use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // GET | HEAD /alive
-pub(crate) async fn alive(
+pub(super) async fn alive(
     State(components): State<Arc<Components>>,
     _http_error: HeaderMap,
 ) -> Result<StatusCode, HttpError> {

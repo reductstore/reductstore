@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // POST /:bucket/:entry/q
-pub(crate) async fn read_query_json(
+pub(super) async fn read_query_json(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     request: QueryEntry,

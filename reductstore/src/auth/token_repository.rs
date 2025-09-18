@@ -376,8 +376,7 @@ impl ManageTokens for TokenRepository {
         match self.repo.values().find(|token| token.value == value) {
             Some(token) => {
                 // for security reasons, we don't return the value
-                let mut token = token.clone();
-                token.value = "".to_string();
+                let token = token.clone();
                 Ok(token)
             }
             None => Err(unauthorized!("Invalid token")),
@@ -517,7 +516,7 @@ mod tests {
     fn test_init_token(repo: Box<dyn ManageTokens>) {
         let token = repo.validate_token(Some("Bearer init-token")).unwrap();
         assert_eq!(token.name, "init-token");
-        assert_eq!(token.value, "");
+        assert_eq!(token.value, "init-token");
         assert!(token.is_provisioned);
 
         let token_list = repo.get_token_list().unwrap();
@@ -728,7 +727,7 @@ mod tests {
                 Token {
                     name: "test-1".to_string(),
                     created_at: token.created_at.clone(),
-                    value: "".to_string(),
+                    value: token.value.clone(), // generated value
                     permissions: Some(Permissions {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],

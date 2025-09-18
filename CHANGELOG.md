@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integrate S3 Storage Backend, [PR-919](https://github.com/reductstore/reductstore/pull/919)
 - `GET /api/v1/alive` endpoint, [PR-926](https://github.com/reductstore/reductstore/pull/926)
 - `#ext` directive to interact with extensions in conditional query, [PR-932](https://github.com/reductstore/reductstore/pull/932)
+- Implement Query Link API, [PR-938](https://github.com/reductstore/reductstore/pull/938)
 
 ### Changed
 

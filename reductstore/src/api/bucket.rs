@@ -30,7 +30,7 @@ use std::sync::Arc;
 // BucketSettings wrapper
 //
 #[derive(IntoResponse, Twin)]
-pub struct BucketSettingsAxum(BucketSettings);
+pub(super) struct BucketSettingsAxum(BucketSettings);
 
 impl Default for BucketSettingsAxum {
     fn default() -> Self {
@@ -39,7 +39,7 @@ impl Default for BucketSettingsAxum {
 }
 
 #[derive(IntoResponse, Twin)]
-pub struct FullBucketInfoAxum(FullBucketInfo);
+pub(super) struct FullBucketInfoAxum(FullBucketInfo);
 
 impl<S> FromRequest<S> for BucketSettingsAxum
 where
@@ -63,7 +63,7 @@ where
     }
 }
 
-pub(crate) fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
         .route("/{bucket_name}", get(get_bucket))
         .route("/{bucket_name}", head(head_bucket))

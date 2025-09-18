@@ -3,19 +3,19 @@
 //
 mod bucket;
 mod entry;
+mod links;
 mod middleware;
 mod replication;
 mod server;
 mod token;
 mod ui;
+mod utils;
 
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
-use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
-use crate::core::env::StdEnvGetter;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
@@ -47,8 +47,7 @@ pub struct Components {
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub(crate) replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
-    pub(crate) base_path: String,
-    pub(crate) io_settings: IoConfig,
+    pub(crate) cfg: Cfg,
 }
 
 #[derive(Twin, PartialEq)]
@@ -121,7 +120,7 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(cfg: &Cfg<StdEnvGetter>, components: Arc<Components>) -> Router {
+pub fn create_axum_app(cfg: &Cfg, components: Arc<Components>) -> Router {
     let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
     let cors = configure_cors(&cfg.cors_allow_origin);
 
@@ -142,6 +141,10 @@ pub fn create_axum_app(cfg: &Cfg<StdEnvGetter>, components: Arc<Components>) -> 
         .nest(
             &format!("{}api/v1/replications", cfg.api_base_path),
             create_replication_api_routes(),
+        )
+        .nest(
+            &format!("{}api/v1/links", cfg.api_base_path),
+            links::create_query_link_api_routes(),
         )
         // UI
         .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
@@ -333,9 +336,7 @@ mod tests {
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
             console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
-            base_path: "/".to_string(),
             replication_repo: RwLock::new(replication_repo),
-            io_settings: IoConfig::default(),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -344,6 +345,7 @@ mod tests {
                     .build(),
             )
             .expect("Failed to create extension repo"),
+            cfg: Cfg::default(),
         };
 
         Arc::new(components)

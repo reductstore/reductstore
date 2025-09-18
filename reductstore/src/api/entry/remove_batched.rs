@@ -16,7 +16,7 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
 // DELETE /:bucket/:entry/batch
-pub(crate) async fn remove_batched_records(
+pub(super) async fn remove_batched_records(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,

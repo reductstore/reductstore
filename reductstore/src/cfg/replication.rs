@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::{Cfg, DEFAULT_PORT};
+use crate::cfg::{CfgParser, DEFAULT_PORT};
 use crate::core::env::{Env, GetEnv};
 use std::time::Duration;
 const DEFAULT_CONNECTION_TIMEOUT_S: u64 = 5;
@@ -28,7 +28,7 @@ impl Default for ReplicationConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> Cfg<EnvGetter> {
+impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(super) fn parse_replication_config(
         env: &mut Env<EnvGetter>,
         listening_port: u16,
@@ -76,7 +76,7 @@ mod tests {
 
         assert_eq!(
             replication_settings,
-            Cfg::<MockEnvGetter>::parse_replication_config(&mut Env::new(env_getter), 8000)
+            CfgParser::<MockEnvGetter>::parse_replication_config(&mut Env::new(env_getter), 8000)
         );
     }
 
@@ -92,7 +92,10 @@ mod tests {
 
         assert_eq!(
             replication_settings,
-            Cfg::<MockEnvGetter>::parse_replication_config(&mut Env::new(env_getter), DEFAULT_PORT)
+            CfgParser::<MockEnvGetter>::parse_replication_config(
+                &mut Env::new(env_getter),
+                DEFAULT_PORT
+            )
         );
     }
 }

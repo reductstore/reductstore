@@ -69,7 +69,9 @@ crossbeam-channel = "0.5.15"
 dlopen2 = "0.8.0"
 log = "0.4"
 prost = "0.14.1"
-
+flate2 = "1.1.2"
+argon2 = "0.6.0-rc.1"
+aes-siv = "0.8.0-rc.1"
 
 # optional dependencies for remote backend
 aws-sdk-s3 = { version = "1.105.0", optional = true, features = ["rustls"] }
@@ -88,8 +90,6 @@ rstest = "0.26.1"
 serial_test = "3.2.0"
 test-log = "0.2.18"
 reqwest = { version = "0.12.23", default-features = false, features = ["rustls-tls", "blocking"] }
-assert_matches = "1.5"
-needs_env_var = "1.1.0"
 
 [package.metadata.docs.rs]
 no-default-features = true

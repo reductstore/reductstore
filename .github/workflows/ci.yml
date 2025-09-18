@@ -274,7 +274,8 @@ jobs:
             --env RS_CERT_KEY_PATH=/misc/privateKey.key       \
             --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"  \
             -d ${{github.repository}}
-          sleep 5
+          sleep 2
+          docker logs reduct
 
       - name: Run MinIO server and create bucket
         if : ${{matrix.backend == 's3'}}

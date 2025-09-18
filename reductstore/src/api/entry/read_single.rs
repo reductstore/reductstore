@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
@@ -11,26 +11,20 @@ use reduct_base::error::ReductError;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
-use axum_extra::headers::{HeaderMap, HeaderName};
-use bytes::Bytes;
-use futures_util::Stream;
+use axum_extra::headers::HeaderMap;
 
 use crate::api::entry::common::check_and_extract_ts_or_query_id;
+use crate::api::utils::{make_headers_from_reader, RecordStream};
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
-use futures_util::Future;
-use hyper::http::HeaderValue;
 use reduct_base::bad_request;
-use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
-use std::pin::{pin, Pin};
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use tokio::sync::RwLock as AsyncRwLock;
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
-pub(crate) async fn read_record(
+pub(super) async fn read_record(
     State(components): State<Arc<Components>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
@@ -60,34 +54,18 @@ pub(crate) async fn read_record(
     fetch_and_response_single_record(entry, ts, query_id, method.name() == "HEAD").await
 }
 
+/// Fetches a single record either by timestamp or from a query, and prepares the HTTP response.
+///
+/// - `entry`: A weak reference to the entry from which to fetch the record.
+/// - `ts`: An optional timestamp to fetch a specific record.
+/// - `query_id`: An optional query ID to fetch the next record from an ongoing query.
+/// - `empty_body`: If true, the response body will be empty (used for HEAD requests
 async fn fetch_and_response_single_record(
     entry: Weak<Entry>,
     ts: Option<u64>,
     query_id: Option<u64>,
     empty_body: bool,
 ) -> Result<impl IntoResponse, HttpError> {
-    let make_headers = |record_reader: &RecordReader| {
-        let mut headers = HeaderMap::new();
-
-        let meta = record_reader.meta();
-        for (k, v) in meta.labels() {
-            headers.insert(
-                format!("x-reduct-label-{}", k)
-                    .parse::<HeaderName>()
-                    .unwrap(),
-                v.parse().unwrap(),
-            );
-        }
-
-        headers.insert(
-            "content-type",
-            HeaderValue::from_str(meta.content_type()).unwrap(),
-        );
-        headers.insert("content-length", HeaderValue::from(meta.content_length()));
-        headers.insert("x-reduct-time", HeaderValue::from(meta.timestamp()));
-        headers
-    };
-
     let entry = entry.upgrade()?;
     let reader = if let Some(ts) = ts {
         entry.begin_read(ts).await?
@@ -98,11 +76,11 @@ async fn fetch_and_response_single_record(
         next_record_reader(rx, &query_path).await?
     };
 
-    let headers = make_headers(&reader);
+    let headers = make_headers_from_reader(&reader);
 
     Ok((
         headers,
-        Body::from_stream(ReaderWrapper { reader, empty_body }),
+        Body::from_stream(RecordStream::new(reader, empty_body)),
     ))
 }
 
@@ -121,47 +99,14 @@ async fn next_record_reader(
     }
 }
 
-struct ReaderWrapper {
-    reader: RecordReader,
-    empty_body: bool,
-}
-
-/// A wrapper around a `RecordReader` that implements `Stream` with RwLock
-impl Stream for ReaderWrapper {
-    type Item = Result<Bytes, HttpError>;
-
-    fn poll_next(
-        mut self: Pin<&mut ReaderWrapper>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        if self.empty_body {
-            return Poll::Ready(None);
-        }
-
-        let pinned_future = pin!(self.reader.read());
-        if let Poll::Ready(data) = pinned_future.poll(cx) {
-            match data {
-                Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
-                Some(Err(e)) => Poll::Ready(Some(Err(HttpError::from(e)))),
-                None => Poll::Ready(None),
-            }
-        } else {
-            Poll::Pending
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use axum::body::to_bytes;
-
     use crate::api::entry::tests::query;
     use crate::api::tests::{components, headers, path_to_entry_1};
+    use axum::body::to_bytes;
+    use bytes::Bytes;
 
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ErrorCode::NotFound;
@@ -368,14 +313,15 @@ mod tests {
     mod steam_wrapper {
         use super::*;
         use crate::storage::proto::Record;
+        use futures_util::Stream;
         use prost_wkt_types::Timestamp;
 
         #[rstest]
         fn test_size_hint() {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
 
-            let wrapper = ReaderWrapper {
-                reader: RecordReader::form_record_with_rx(
+            let wrapper = RecordStream::new(
+                RecordReader::form_record_with_rx(
                     rx,
                     Record {
                         timestamp: Some(Timestamp::default()),
@@ -386,8 +332,8 @@ mod tests {
                         content_type: "".to_string(),
                     },
                 ),
-                empty_body: false,
-            };
+                false,
+            );
             assert_eq!(wrapper.size_hint(), (0, None));
         }
     }

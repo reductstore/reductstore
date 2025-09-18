@@ -11,7 +11,7 @@ use axum_extra::headers::HeaderMap;
 use std::sync::Arc;
 
 // POST /b/:bucket_name
-pub(crate) async fn create_bucket(
+pub(super) async fn create_bucket(
     State(components): State<Arc<Components>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
