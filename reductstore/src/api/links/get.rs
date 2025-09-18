@@ -19,7 +19,7 @@ use flate2::read::ZlibDecoder;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
-use reduct_base::{no_content, not_found, unprocessable_entity};
+use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::Arc;

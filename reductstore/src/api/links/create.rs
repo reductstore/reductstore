@@ -23,7 +23,6 @@ use reduct_base::msg::query_link_api::QueryLinkCreateResponse;
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::io::Write;
 use std::sync::Arc;
-use url::Url;
 
 // POST /api/v1/links/
 pub(super) async fn create(
