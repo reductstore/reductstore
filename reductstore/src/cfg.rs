@@ -94,12 +94,16 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         let host = env.get("RS_HOST", DEFAULT_HOST.to_string());
         let port = env.get("RS_PORT", DEFAULT_PORT);
-        let cert_path = env.get_optional::<String>("RS_CERT_PATH");
-        let cert_key_path = env.get_optional::<String>("RS_CERT_KEY_PATH");
-        let protocol = if cert_path.is_some() && cert_key_path.is_some() {
-            "https"
-        } else {
+        let cert_path = env
+            .get_optional::<String>("RS_CERT_PATH")
+            .unwrap_or_default();
+        let cert_key_path = env
+            .get_optional::<String>("RS_CERT_KEY_PATH")
+            .unwrap_or_default();
+        let protocol = if cert_path.is_empty() {
             "http"
+        } else {
+            "https"
         };
 
         let default_public_url = if port == 80 || port == 443 {
@@ -117,8 +121,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 api_base_path,
                 data_path: env.get("RS_DATA_PATH", "/data".to_string()),
                 api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
-                cert_path: cert_path.unwrap_or_default(),
-                cert_key_path: cert_key_path.unwrap_or_default(),
+                cert_path,
+                cert_key_path,
                 license_path: env.get_optional("RS_LICENSE_PATH"),
                 ext_path: env.get_optional("RS_EXT_PATH"),
                 cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
