@@ -79,7 +79,7 @@ pub(super) mod tests {
             .header("content-type", "application/json")
             .body(axum::body::Body::from(
                 r#"{
-            "expire_at": null,
+            "expire_at": 1000000000,
             "bucket": "bucket-1",
             "entry": "entry-1",
             "query": {
@@ -96,7 +96,7 @@ pub(super) mod tests {
         assert_eq!(
             req.0,
             QueryLinkCreateRequest {
-                expire_at: None,
+                expire_at: DateTime::<Utc>::from_timestamp_secs(1000000000).unwrap(),
                 bucket: "bucket-1".to_string(),
                 entry: "entry-1".to_string(),
                 query: QueryEntry {
@@ -115,7 +115,7 @@ pub(super) mod tests {
             .header("content-type", "application/json")
             .body(axum::body::Body::from(
                 r#"{
-            "expire_at": null,
+            "expire_at": 1000000000,
             "bucket": "bucket-1",
             "entry": "entry-1",
             "query": {
@@ -142,7 +142,7 @@ pub(super) mod tests {
             State(Arc::clone(&components)),
             headers,
             QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
-                expire_at,
+                expire_at: expire_at.unwrap_or_else(|| Utc::now() + chrono::Duration::hours(1)),
                 bucket: "bucket-1".to_string(),
                 entry: "entry-1".to_string(),
                 query,
