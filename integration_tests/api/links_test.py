@@ -51,6 +51,9 @@ def test__create_link_with_permissions(
         "query": {
             "query_type": "QUERY",
         },
+        "expire_at": int(
+            (datetime.datetime.now() + datetime.timedelta(minutes=10)).timestamp()
+        ),
     }
 
     resp = session.post(f"{base_url}/links", json=query_link, headers=auth_headers(""))
