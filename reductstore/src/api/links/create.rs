@@ -103,6 +103,7 @@ mod tests {
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
     use std::sync::Arc;
+    use url::Url;
 
     #[rstest]
     #[tokio::test]

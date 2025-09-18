@@ -137,7 +137,6 @@ mod tests {
     use crate::api::tests::{components, headers};
     use axum::body::to_bytes;
     use chrono::Utc;
-    use mockall::Any;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
 
@@ -256,7 +255,7 @@ mod tests {
             headers: HeaderMap,
             #[case] key: &str,
             #[case] value: &str,
-            #[case] error_msg: &str,
+            #[case] _error_msg: &str,
         ) {
             let components = components.await;
             let link = create_query_link(
