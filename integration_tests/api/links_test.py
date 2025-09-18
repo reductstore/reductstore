@@ -1,3 +1,4 @@
+import datetime
 import json
 
 import requests
@@ -21,6 +22,9 @@ def test__create_and_download_link(base_url, session, token_name, bucket_name):
         "query": {
             "query_type": "QUERY",
         },
+        "expire_at": int(
+            (datetime.datetime.now() + datetime.timedelta(minutes=10)).timestamp()
+        ),
     }
 
     resp = session.post(f"{base_url}/links", json=query_link)
