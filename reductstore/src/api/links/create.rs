@@ -85,12 +85,13 @@ pub(super) async fn create(
     let nonce_b64 = URL_SAFE_NO_PAD.encode(&nonce_bytes);
 
     let link = format!(
-        "{}api/v1/links?ct={}&s={}&i={}&n={}",
+        "{}api/v1/links?ct={}&s={}&i={}&n={}&r={}",
         components.cfg.public_url,
         ct_b64,
         salt_b64,
         token.name.as_str(),
         nonce_b64,
+        params.0.index.unwrap_or(0)
     );
     Ok(QueryLinkCreateResponse { link }.into())
 }
@@ -130,6 +131,7 @@ mod tests {
         assert!(params.contains_key("s"));
         assert!(params.contains_key("i"));
         assert!(params.contains_key("n"));
+        assert_eq!(params.get("r").unwrap(), "0");
     }
 
     #[rstest]

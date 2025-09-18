@@ -16,6 +16,8 @@ pub struct QueryLinkCreateRequest {
     pub bucket: String,
     /// Entry name
     pub entry: String,
+    /// Record index
+    pub index: Option<u64>,
     /// Query to share
     pub query: QueryEntry,
 }

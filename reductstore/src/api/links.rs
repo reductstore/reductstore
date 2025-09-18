@@ -103,6 +103,7 @@ pub(super) mod tests {
                     query_type: reduct_base::msg::entry_api::QueryType::Query,
                     ..Default::default()
                 },
+                index: None,
             }
         );
     }
@@ -145,6 +146,7 @@ pub(super) mod tests {
                 bucket: "bucket-1".to_string(),
                 entry: "entry-1".to_string(),
                 query,
+                index: None,
             }),
         )
         .await
