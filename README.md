@@ -40,6 +40,8 @@ It guarantees that your data will not overflow your hard disk and batches record
 - Real-time FIFO bucket quota based on size to avoid disk space shortage
 - Embedded Web Console
 - Token authorization for managing data access
+- Native support for S3-compatible storage backends (MinIO, AWS S3, etc.)
+- Query Links for easy data sharing
 
 ## Get Started
 
