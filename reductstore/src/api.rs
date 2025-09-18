@@ -3,8 +3,8 @@
 //
 mod bucket;
 mod entry;
+mod links;
 mod middleware;
-mod query_link;
 mod replication;
 mod server;
 mod token;
@@ -145,8 +145,8 @@ pub fn create_axum_app(cfg: &Cfg, components: Arc<Components>) -> Router {
             create_replication_api_routes(),
         )
         .nest(
-            &format!("{}api/v1/query_links", cfg.api_base_path),
-            query_link::create_query_link_api_routes(),
+            &format!("{}api/v1/links", cfg.api_base_path),
+            links::create_query_link_api_routes(),
         )
         // UI
         .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))

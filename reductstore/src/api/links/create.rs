@@ -1,10 +1,10 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
-use crate::api::query_link::{
+use crate::api::links::{
     derive_key_from_secret, QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum,
 };
+use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use aes_siv::aead::{Aead, KeyInit};
@@ -25,7 +25,7 @@ use std::io::Write;
 use std::sync::Arc;
 use url::Url;
 
-// POST /api/v1/query_links/
+// POST /api/v1/links/
 pub(super) async fn create(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
@@ -86,7 +86,7 @@ pub(super) async fn create(
     let nonce_b64 = URL_SAFE_NO_PAD.encode(&nonce_bytes);
 
     let link = format!(
-        "{}api/v1/query_links?ct={}&s={}&i={}&n={}",
+        "{}api/v1/links?ct={}&s={}&i={}&n={}",
         components.cfg.public_url,
         ct_b64,
         salt_b64,
@@ -99,7 +99,7 @@ pub(super) async fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::query_link::tests::create_query_link;
+    use crate::api::links::tests::create_query_link;
     use crate::api::tests::{components, headers};
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;

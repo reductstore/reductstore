@@ -1,8 +1,8 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::links::derive_key_from_secret;
 use crate::api::middleware::check_permissions;
-use crate::api::query_link::derive_key_from_secret;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
-// GET /api/v1/query_links&ct=...&s=...&i=...&r=...
+// GET /api/v1/links&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
     State(components): State<Arc<Components>>,
     Query(params): Query<HashMap<String, String>>,
@@ -133,7 +133,7 @@ pub(super) async fn get(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::query_link::tests::create_query_link;
+    use crate::api::links::tests::create_query_link;
     use crate::api::tests::{components, headers};
     use axum::body::to_bytes;
     use chrono::Utc;
