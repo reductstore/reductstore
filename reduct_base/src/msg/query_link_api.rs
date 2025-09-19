@@ -12,9 +12,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 /// Request to create a query link for sharing
 pub struct QueryLinkCreateRequest {
-    /// Expiration time
-    #[serde(deserialize_with = "as_ts", serialize_with = "to_ts")]
-    pub expire_at: DateTime<Utc>,
     /// Bucket name
     pub bucket: String,
     /// Entry name
@@ -23,6 +20,9 @@ pub struct QueryLinkCreateRequest {
     pub index: Option<u64>,
     /// Query to share
     pub query: QueryEntry,
+    /// Expiration time
+    #[serde(deserialize_with = "as_ts", serialize_with = "to_ts")]
+    pub expire_at: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]

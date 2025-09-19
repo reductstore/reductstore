@@ -2,18 +2,16 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::HttpError;
-use crate::storage::entry::RecordReader;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Future;
 use futures_util::Stream;
-use reduct_base::io::ReadRecord;
+use reduct_base::io::{ReadRecord, RecordMeta};
 use std::pin::{pin, Pin};
 use std::task::{Context, Poll};
-pub(super) fn make_headers_from_reader(record_reader: &RecordReader) -> HeaderMap {
+pub(super) fn make_headers_from_reader(meta: &RecordMeta) -> HeaderMap {
     let mut headers = HeaderMap::new();
 
-    let meta = record_reader.meta();
     for (k, v) in meta.labels() {
         headers.insert(
             format!("x-reduct-label-{}", k)
@@ -33,12 +31,12 @@ pub(super) fn make_headers_from_reader(record_reader: &RecordReader) -> HeaderMa
 }
 
 pub(super) struct RecordStream {
-    reader: RecordReader,
+    reader: Box<dyn ReadRecord + Send>,
     empty_body: bool,
 }
 
 impl RecordStream {
-    pub fn new(reader: RecordReader, empty_body: bool) -> Self {
+    pub fn new(reader: Box<dyn ReadRecord + Send>, empty_body: bool) -> Self {
         Self { reader, empty_body }
     }
 }

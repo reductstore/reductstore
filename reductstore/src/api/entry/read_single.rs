@@ -19,6 +19,7 @@ use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
 use reduct_base::bad_request;
+use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -76,11 +77,11 @@ async fn fetch_and_response_single_record(
         next_record_reader(rx, &query_path).await?
     };
 
-    let headers = make_headers_from_reader(&reader);
+    let headers = make_headers_from_reader(reader.meta());
 
     Ok((
         headers,
-        Body::from_stream(RecordStream::new(reader, empty_body)),
+        Body::from_stream(RecordStream::new(Box::new(reader), empty_body)),
     ))
 }
 
@@ -321,7 +322,7 @@ mod tests {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
 
             let wrapper = RecordStream::new(
-                RecordReader::form_record_with_rx(
+                Box::new(RecordReader::form_record_with_rx(
                     rx,
                     Record {
                         timestamp: Some(Timestamp::default()),
@@ -331,7 +332,7 @@ mod tests {
                         labels: vec![],
                         content_type: "".to_string(),
                     },
-                ),
+                )),
                 false,
             );
             assert_eq!(wrapper.size_hint(), (0, None));

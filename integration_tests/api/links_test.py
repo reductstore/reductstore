@@ -27,7 +27,7 @@ def test__create_and_download_link(base_url, session, token_name, bucket_name):
         ),
     }
 
-    resp = session.post(f"{base_url}/links", json=query_link)
+    resp = session.post(f"{base_url}/links/file.text", json=query_link)
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/json"
     link = json.loads(resp.content)["link"]
@@ -56,11 +56,13 @@ def test__create_link_with_permissions(
         ),
     }
 
-    resp = session.post(f"{base_url}/links", json=query_link, headers=auth_headers(""))
+    resp = session.post(
+        f"{base_url}/links/file.txt", json=query_link, headers=auth_headers("")
+    )
     assert resp.status_code == 401
 
     resp = session.post(
-        f"{base_url}/links",
+        f"{base_url}/links/file.txt",
         json=query_link,
         headers=auth_headers(token_without_permissions.value),
     )
