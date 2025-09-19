@@ -22,6 +22,7 @@ use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
+use std::ops::Deref;
 use std::sync::Arc;
 
 // GET /api/v1/links&ct=...&s=...&i=...&r=...
@@ -106,26 +107,37 @@ pub(super) async fn get(
         .get_entry(&query.entry)?
         .upgrade()?;
 
-    let id = entry.query(query.query).await?;
-    let rx = entry.get_query_receiver(id.clone())?;
+    let repo_ext = &components.ext_repo;
+
+    let id = entry.query(query.query.clone()).await?;
+    repo_ext
+        .register_query(id, &query.bucket, &query.entry, query.query)
+        .await?;
+
+    let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
 
     let mut count = 0;
-    while let Some(reader) = rx.upgrade()?.write().await.recv().await {
-        let reader = match reader {
-            Ok(r) => r,
-            Err(ReductError {
-                status: NoContent, ..
-            }) => break, // end of stream without data
-            Err(e) => return Err(e.into()),
+    loop {
+        let Some(readers) = repo_ext.fetch_and_process_record(id, rx.clone()).await else {
+            continue;
         };
-        if count == record_num {
-            let headers = make_headers_from_reader(&reader);
-            return Ok((headers, Body::from_stream(RecordStream::new(reader, false))));
-        }
-        count += 1;
-    }
 
-    Err(not_found!("Record number out of range").into())
+        for reader in readers {
+            let reader = match reader {
+                Ok(r) => r,
+                Err(ReductError {
+                    status: NoContent, ..
+                }) => return Err(not_found!("Record number out of range").into()),
+                Err(e) => return Err(e.into()),
+            };
+            if count == record_num {
+                let headers = make_headers_from_reader(reader.meta());
+                return Ok((headers, Body::from_stream(RecordStream::new(reader, false))));
+            }
+
+            count += 1;
+        }
+    }
 }
 
 #[cfg(test)]
