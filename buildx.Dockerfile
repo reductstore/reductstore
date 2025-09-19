@@ -44,7 +44,7 @@ RUN CARGO_TARGET_DIR=target/${CARGO_TARGET}/release \
     GIT_COMMIT=${GIT_COMMIT} \
     ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} \
     cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
-RUN cargo install reduct-cli --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release
+RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release
 
 RUN mkdir /data
 
