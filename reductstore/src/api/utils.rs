@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::HttpError;
-use crate::storage::entry::RecordReader;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Future;
