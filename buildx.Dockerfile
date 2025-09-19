@@ -7,6 +7,7 @@ ARG BUILDPLATFORM
 ARG CARGO_TARGET
 ARG GCC_COMPILER=gcc-11
 ARG RUST_VERSION
+ARG BUILD_PROFILE=release
 
 RUN apt-get update && apt-get install -y \
     cmake \
@@ -33,18 +34,25 @@ COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 
 ARG GIT_COMMIT=unspecified
-ARG ARTIFACT_SAS_URL
+
 RUN cargo install --force --locked bindgen-cli
-RUN GIT_COMMIT=${GIT_COMMIT} ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} cargo build --release --target ${CARGO_TARGET} --package reductstore --all-features
-RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release
+
+# Use release directory for all builds
+RUN CARGO_TARGET_DIR=/build/ \
+    GIT_COMMIT=${GIT_COMMIT} \
+    cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
+RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /build
 
 RUN mkdir /data
+RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
+RUN mv /build/bin/reduct-cli /usr/local/bin/reduct-cli
 
 FROM ubuntu:22.04
 
 ARG CARGO_TARGET
-COPY --from=builder /src/target/${CARGO_TARGET}/release/reductstore /usr/local/bin/reductstore
-COPY --from=builder /src/target/${CARGO_TARGET}/release/bin/reduct-cli /usr/local/bin/reduct-cli
+ARG BUILD_PROFILE
+COPY --from=builder /usr/local/bin/reductstore /usr/local/bin/reductstore
+COPY --from=builder /usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
 COPY --from=builder /data /data
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 

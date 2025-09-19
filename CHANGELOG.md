@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add CA certificates to Docker image for AWS S3 access, [PR-924](https://github.com/reductstore/reductstore/pull/924)
 - Fix path for token repository when cache used, [PR-925](https://github.com/reductstore/reductstore/pull/925)
 
+### Internal
+
+- Disable code optimization for pull request builds, [PR-941](https://github.com/reductstore/reductstore/pull/941)
+
 ## [1.16.3] - 2025-08-22
 
 ### Fixed

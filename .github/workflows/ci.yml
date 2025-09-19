@@ -47,6 +47,7 @@ jobs:
           build-args: |
             ARTIFACT_SAS_URL=${{ secrets.ARTIFACT_SAS_URL }}
             RUST_VERSION=${{ vars.MINIMAL_RUST_VERSION }}
+            BUILD_PROFILE=ci
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -117,11 +118,20 @@ jobs:
       - name: Install cargo-export
         run: cargo install cargo-export
 
-      - name: Build binary
+
+      - name: Build binary (PR)
+        if: github.event_name == 'pull_request'
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
-          ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
-        run: cargo build --release -p reductstore --target ${{ matrix.target }} --all-features
+          CARGO_TARGET_DIR: target/release/${{ matrix.target }}
+        run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
+
+      - name: Build binary (Release)
+        if: github.event_name != 'pull_request'
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+          CARGO_TARGET_DIR: target/release/${{ matrix.target }}
+        run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -129,8 +139,14 @@ jobs:
           name: reductstore-${{ matrix.target }}
           path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
 
-      - name: Build and export tests
-        run: cargo export target/${{ matrix.target }}/tests -- test --release --target ${{ matrix.target }} --lib
+
+      - name: Build and export tests (PR)
+        if: github.event_name == 'pull_request'
+        run: cargo export target/${{ matrix.target }}/tests -- test --profile ci --target ${{ matrix.target }} --lib
+
+      - name: Build and export tests (Release)
+        if: github.event_name != 'pull_request'
+        run: cargo export target/${{ matrix.target }}/tests -- test --profile release --target ${{ matrix.target }} --lib
 
       - name: Upload tests
         uses: actions/upload-artifact@v4
@@ -244,9 +260,9 @@ jobs:
             url: http://127.0.0.1:8383
     timeout-minutes: 5
     env:
-        MINIO_ACCESS_KEY: minioadmin
-        MINIO_SECRET_KEY: minioadmin
-        MINIO_BUCKET: test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: test
     steps:
       - uses: actions/checkout@v4
 
@@ -278,7 +294,7 @@ jobs:
           docker logs reduct
 
       - name: Run MinIO server and create bucket
-        if : ${{matrix.backend == 's3'}}
+        if: ${{matrix.backend == 's3'}}
         uses: ./.github/actions/run-minio
         with:
           access_key: ${{ env.MINIO_ACCESS_KEY }}
@@ -288,19 +304,19 @@ jobs:
       - name: Run ReductStore with S3 backend
         if: ${{matrix.backend == 's3'}}
         run: |
-            docker run --network=host -v ${PWD}/misc:/misc \
-            --env RS_API_TOKEN=${{matrix.token}} \
-            --env RS_CERT_PATH=${{matrix.cert_path}} \
-            --env RS_LICENSE_PATH=${{matrix.license_path}} \
-            --env RS_CERT_KEY_PATH=/misc/privateKey.key \
-            --env RS_STORAGE_TYPE=s3 \
-            --env RS_REMOTE_BACKEND_ENDPOINT=${{ env.MINIO_ENDPOINT }} \
-            --env RS_REMOTE_ACCESS_KEY=${{ env.MINIO_ACCESS_KEY }} \
-            --env RS_REMOTE_SECRET_KEY=${{ env.MINIO_SECRET_KEY }} \
-            --env RS_REMOTE_BUCKET=${{ env.MINIO_BUCKET }} \
-            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
-            --name reduct -d ${{github.repository}}
-            sleep 5
+          docker run --network=host -v ${PWD}/misc:/misc \
+          --env RS_API_TOKEN=${{matrix.token}} \
+          --env RS_CERT_PATH=${{matrix.cert_path}} \
+          --env RS_LICENSE_PATH=${{matrix.license_path}} \
+          --env RS_CERT_KEY_PATH=/misc/privateKey.key \
+          --env RS_STORAGE_TYPE=s3 \
+          --env RS_REMOTE_BACKEND_ENDPOINT=${{ env.MINIO_ENDPOINT }} \
+          --env RS_REMOTE_ACCESS_KEY=${{ env.MINIO_ACCESS_KEY }} \
+          --env RS_REMOTE_SECRET_KEY=${{ env.MINIO_SECRET_KEY }} \
+          --env RS_REMOTE_BUCKET=${{ env.MINIO_BUCKET }} \
+          --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
+          --name reduct -d ${{github.repository}}
+          sleep 5
 
       - name: Build API tests
         run: |
@@ -444,7 +460,7 @@ jobs:
           docker logs reductstore
 
       - name: Run MiniO server and create bucket
-        if : ${{matrix.backend == 's3'}}
+        if: ${{matrix.backend == 's3'}}
         uses: ./.github/actions/run-minio
         with:
           access_key: ${{ env.MINIO_ACCESS_KEY }}

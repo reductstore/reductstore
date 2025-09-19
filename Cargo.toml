@@ -12,3 +12,12 @@ version = "1.17.0"
 authors = ["Alexey Timin <atimin@reduct.store>", "ReductSoftware UG <info@reduct.store>"]
 edition = "2021"
 rust-version = "1.89.0"
+
+
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+codegen-units = 256
+debug = 1
+incremental = true
+lto = false
