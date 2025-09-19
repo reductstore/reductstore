@@ -9,7 +9,7 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::Aes128SivAead;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::header::AUTHORIZATION;
 use axum_extra::headers::HeaderMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -28,6 +28,7 @@ use std::sync::Arc;
 pub(super) async fn create(
     State(components): State<Arc<Components>>,
     headers: HeaderMap,
+    Path(file_name): Path<String>,
     params: QueryLinkCreateRequestAxum,
 ) -> Result<QueryLinkCreateResponseAxum, HttpError> {
     check_permissions(
@@ -85,8 +86,9 @@ pub(super) async fn create(
     let nonce_b64 = URL_SAFE_NO_PAD.encode(&nonce_bytes);
 
     let link = format!(
-        "{}api/v1/links?ct={}&s={}&i={}&n={}&r={}",
+        "{}api/v1/links/{}?ct={}&s={}&i={}&n={}&r={}",
         components.cfg.public_url,
+        file_name,
         ct_b64,
         salt_b64,
         token.name.as_str(),

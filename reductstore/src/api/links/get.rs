@@ -9,7 +9,7 @@ use crate::auth::policy::ReadAccessPolicy;
 use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
@@ -25,9 +25,10 @@ use std::io::{Cursor, Read};
 use std::ops::Deref;
 use std::sync::Arc;
 
-// GET /api/v1/links&ct=...&s=...&i=...&r=...
+// GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
     State(components): State<Arc<Components>>,
+    Path(_file_name): Path<String>, // we need the file_name to have a name when downloading
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, HttpError> {
     let ciphertxt_b64 = params
@@ -171,6 +172,7 @@ mod tests {
 
         let response = get(
             State(Arc::clone(&components)),
+            Path("file.txt".to_string()),
             Query(
                 url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                     .into_owned()
@@ -218,7 +220,12 @@ mod tests {
                 .into_owned()
                 .collect();
         params.insert("r".to_string(), "10".to_string()); // out of range
-        let result = get(State(Arc::clone(&components)), Query(params)).await;
+        let result = get(
+            State(Arc::clone(&components)),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await;
         assert_eq!(
             result.err().unwrap().0,
             not_found!("Record number out of range")
@@ -246,10 +253,14 @@ mod tests {
             url::form_urlencoded::parse(link.link.split('?').nth(1).unwrap().as_bytes())
                 .into_owned()
                 .collect();
-        let err = get(State(Arc::clone(&components)), Query(params))
-            .await
-            .err()
-            .unwrap();
+        let err = get(
+            State(Arc::clone(&components)),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .err()
+        .unwrap();
         assert_eq!(err.0, unprocessable_entity!("Query link has expired"));
     }
     mod validation {
@@ -289,7 +300,12 @@ mod tests {
 
             let mut modified_params = params.clone();
             modified_params.insert(key.to_string(), value.to_string());
-            let result = get(State(Arc::clone(&components)), Query(modified_params)).await;
+            let result = get(
+                State(Arc::clone(&components)),
+                Path("file.txt".to_string()),
+                Query(modified_params),
+            )
+            .await;
             assert!(result
                 .err()
                 .unwrap()
@@ -331,7 +347,12 @@ mod tests {
 
             let mut modified_params = params.clone();
             modified_params.remove(key);
-            let result = get(State(Arc::clone(&components)), Query(modified_params)).await;
+            let result = get(
+                State(Arc::clone(&components)),
+                Path("file.txt".to_string()),
+                Query(modified_params),
+            )
+            .await;
             assert_eq!(
                 result.err().unwrap().0,
                 unprocessable_entity!("Missing '{}' parameter", key)

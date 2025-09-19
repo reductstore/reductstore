@@ -112,11 +112,16 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             format!("{}://{}:{}{}", protocol, host, port, api_base_path)
         };
 
+        let mut public_url = env.get("RS_PUBLIC_URL", default_public_url.clone());
+        if !public_url.ends_with('/') {
+            public_url.push('/');
+        }
+
         let cfg = CfgParser {
             cfg: Cfg {
                 log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
                 host,
-                public_url: env.get("RS_PUBLIC_URL", default_public_url),
+                public_url,
                 port,
                 api_base_path,
                 data_path: env.get("RS_DATA_PATH", "/data".to_string()),

@@ -54,8 +54,8 @@ pub(super) fn derive_key_from_secret(secret: &[u8], salt: &[u8]) -> [u8; 32] {
 
 pub(super) fn create_query_link_api_routes() -> axum::Router<Arc<Components>> {
     axum::Router::new()
-        .route("/", post(create))
-        .route("/", get(get::get))
+        .route("/{file_name}", post(create))
+        .route("/{file_name}", get(get::get))
 }
 
 #[cfg(test)]
@@ -64,7 +64,7 @@ pub(super) mod tests {
     use crate::api::links::create::create;
     use crate::api::links::{QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum};
     use crate::api::{Components, HttpError};
-    use axum::extract::State;
+    use axum::extract::{Path, State};
     use axum::http::HeaderMap;
     use chrono::{DateTime, Utc};
     use reduct_base::msg::entry_api::QueryEntry;
@@ -103,7 +103,7 @@ pub(super) mod tests {
                     query_type: reduct_base::msg::entry_api::QueryType::Query,
                     ..Default::default()
                 },
-                index: None,
+                index: None
             }
         );
     }
@@ -141,6 +141,7 @@ pub(super) mod tests {
         create(
             State(Arc::clone(&components)),
             headers,
+            Path("file.txt".to_string()),
             QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
                 expire_at: expire_at.unwrap_or_else(|| Utc::now() + chrono::Duration::hours(1)),
                 bucket: "bucket-1".to_string(),
