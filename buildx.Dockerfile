@@ -7,6 +7,7 @@ ARG BUILDPLATFORM
 ARG CARGO_TARGET
 ARG GCC_COMPILER=gcc-11
 ARG RUST_VERSION
+ARG BULD_PROFILE=release
 
 RUN apt-get update && apt-get install -y \
     cmake \
@@ -34,9 +35,14 @@ COPY Cargo.lock Cargo.lock
 
 ARG GIT_COMMIT=unspecified
 ARG ARTIFACT_SAS_URL
+
+
 RUN cargo install --force --locked bindgen-cli
-RUN GIT_COMMIT=${GIT_COMMIT} ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} cargo build --release --target ${CARGO_TARGET} --package reductstore --all-features
-RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release
+
+# Use release directory for all builds
+ENV CARGO_TARGET_DIR=/src/target/${CARGO_TARGET}/release
+RUN GIT_COMMIT=${GIT_COMMIT} ARTIFACT_SAS_URL=${ARTIFACT_SAS_URL} cargo build --profile ${BULD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
+RUN cargo install reduct-cli --profile ${BULD_PROFILE} --target ${CARGO_TARGET} --root /src/target/${CARGO_TARGET}/release
 
 RUN mkdir /data
 
