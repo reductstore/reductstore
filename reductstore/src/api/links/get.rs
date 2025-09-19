@@ -6,6 +6,8 @@ use crate::api::middleware::check_permissions;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
+use crate::ext::ext_repository::ManageExtensions;
+use crate::storage::query::QueryRx;
 use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::Body;
@@ -22,8 +24,8 @@ use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
-use std::ops::Deref;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 // GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
@@ -110,6 +112,7 @@ pub(super) async fn get(
 
     let repo_ext = &components.ext_repo;
 
+    // Execute the query with extension mechanism
     let id = entry.query(query.query.clone()).await?;
     repo_ext
         .register_query(id, &query.bucket, &query.entry, query.query)
@@ -117,6 +120,15 @@ pub(super) async fn get(
 
     let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
 
+    process_query_and_fetch_record(record_num, repo_ext, id, rx).await
+}
+
+async fn process_query_and_fetch_record(
+    record_num: u64,
+    repo_ext: &Box<dyn ManageExtensions + Send + Sync>,
+    id: u64,
+    rx: Arc<RwLock<QueryRx>>,
+) -> Result<impl IntoResponse, HttpError> {
     let mut count = 0;
     loop {
         let Some(readers) = repo_ext.fetch_and_process_record(id, rx.clone()).await else {
@@ -357,6 +369,29 @@ mod tests {
                 result.err().unwrap().0,
                 unprocessable_entity!("Missing '{}' parameter", key)
             );
+        }
+    }
+
+    mod fetching {
+        use super::*;
+        use reduct_base::internal_server_error;
+        use tokio::sync::mpsc::channel;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_fetch_query_error(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let ext_repo = &components.ext_repo;
+            let (tx, rx) = channel(1);
+            tx.send(Err(internal_server_error!("Oops"))).await.unwrap();
+            let rx = Arc::new(RwLock::new(rx));
+            let id = 1;
+
+            let err = process_query_and_fetch_record(0, ext_repo, id, rx)
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err.0, internal_server_error!("Oops"));
         }
     }
 }

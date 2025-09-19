@@ -399,6 +399,20 @@ mod tests {
         }
 
         #[rstest]
+        fn from_env_without_slash(mut env_getter: MockEnvGetter) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_PUBLIC_URL"))
+                .times(1)
+                .return_const(Ok("https://example.com".to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let parser = CfgParser::from_env(env_getter);
+            assert_eq!(parser.cfg.public_url, "https://example.com/");
+        }
+
+        #[rstest]
         fn default_http(mut env_getter: MockEnvGetter) {
             env_getter
                 .expect_get()
