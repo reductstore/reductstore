@@ -104,9 +104,13 @@ impl EntryLoader {
                 }};
             }
 
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
-            let mut buf = vec![];
-            file.write()?.read_to_end(&mut buf)?;
+            let buf = {
+                let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+                let mut buf = vec![];
+                file.write()?.read_to_end(&mut buf)?;
+                buf
+            };
+
             let mut crc = Digest::new();
             crc.write(&buf);
 

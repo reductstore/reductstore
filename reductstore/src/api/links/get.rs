@@ -14,7 +14,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::response::IntoResponse;
-use axum_extra::headers::{ContentLength, HeaderMap, HeaderMapExt, Range};
+use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, Range};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::read::ZlibDecoder;
@@ -171,11 +171,11 @@ async fn process_query_and_fetch_record(
             };
 
             if count == record_num {
-                let headers = make_headers_from_reader(reader.meta());
+                let mut headers = make_headers_from_reader(reader.meta());
+                headers.typed_insert(AcceptRanges::bytes());
 
                 return if let Some(range) = range {
                     let content_length = reader.meta().content_length();
-                    let mut headers = headers.clone();
                     headers.typed_insert(ContentLength(content_length));
                     headers.typed_insert(range.clone());
 

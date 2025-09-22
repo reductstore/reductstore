@@ -259,10 +259,6 @@ impl BlockManager {
     /// * `ReductError` - If the block is still in use or file system operation failed.
     pub fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
         self.wal.append(block_id, WalEntry::RemoveBlock)?;
-        self.block_index.remove_block(block_id);
-        self.block_index.save()?;
-
-        self.block_cache.remove(&block_id);
 
         let data_block_path = self.path_to_data(block_id);
         FILE_CACHE.remove(&data_block_path)?;
@@ -272,6 +268,11 @@ impl BlockManager {
             // it can be still in WAL only
             FILE_CACHE.remove(&desc_block_path)?;
         }
+
+        self.block_index.remove_block(block_id);
+        self.block_index.save()?;
+
+        self.block_cache.remove(&block_id);
 
         self.wal.remove(block_id)?;
         Ok(())

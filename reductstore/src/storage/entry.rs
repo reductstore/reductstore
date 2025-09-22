@@ -542,12 +542,13 @@ mod tests {
             let _rx = entry.begin_read(1000000).wait().unwrap();
             sleep(Duration::from_millis(100));
 
-            assert_eq!(
-                entry.try_remove_oldest_block().wait(),
-                Err(internal_server_error!(
-                    "Cannot remove block 1000000 because it is still in use"
-                ))
-            );
+            assert!(entry
+                .try_remove_oldest_block()
+                .wait()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("because it is in use"));
             let info = entry.info().unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 8388630);

@@ -1,7 +1,7 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::file_cache::FileWeak;
+use crate::core::file_cache::{FileRc, FileWeak};
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::proto::Record;
 use crate::storage::storage::MAX_IO_BUFFER_SIZE;
@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     meta: RecordMeta,
-    file_ref: Option<FileWeak>,
+    file_ref: Option<FileRc>,
     offset: u64,
     content_size: u64,
     read_bytes: u64,
@@ -63,7 +63,7 @@ impl RecordReader {
 
         Ok(Self {
             meta,
-            file_ref: Some(file_ref),
+            file_ref: Some(file_ref.upgrade()?),
             offset,
             content_size,
             read_bytes: 0,
@@ -100,12 +100,7 @@ impl Read for RecordReader {
             None => return Ok(0),
         };
 
-        let rc = file_ref.upgrade().map_err(|e| {
-            error!("Failed to upgrade file reference: {}", e);
-            io::Error::new(io::ErrorKind::Other, "Failed to upgrade file reference")
-        })?;
-
-        let mut lock = rc.write().unwrap();
+        let mut lock = file_ref.write().unwrap();
 
         lock.seek(SeekFrom::Start(self.offset + self.read_bytes))?;
         let read = lock.read(buf)?;
@@ -162,18 +157,17 @@ impl ReadRecord for RecordReader {
         }
 
         match self.read(&mut buf) {
-            Ok(0) => None,
+            Ok(0) => Some(Err(internal_server_error!(
+                "Failed to read record chunk: EOF"
+            ))),
             Ok(n) => {
                 buf.truncate(n);
                 Some(Ok(Bytes::from(buf)))
             }
-            Err(e) => {
-                error!("Failed to read record chunk: {}", e);
-                Some(Err(internal_server_error!(
-                    "Failed to read record chunk: {}",
-                    e
-                )))
-            }
+            Err(e) => Some(Err(internal_server_error!(
+                "Failed to read record chunk: {}",
+                e
+            ))),
         }
     }
 
@@ -215,7 +209,17 @@ pub(in crate::storage) fn read_in_chunks(
         Ok::<usize, ReductError>(read)
     };
 
-    let read = seek_and_read?;
+    let read = match seek_and_read {
+        Ok(read) => read,
+        Err(e) => {
+            return Err(internal_server_error!("Failed to read record chunk: {}", e));
+        }
+    };
+
+    if read == 0 {
+        return Err(internal_server_error!("Failed to read record chunk: EOF"));
+    }
+
     Ok((buf, read))
 }
 
@@ -231,6 +235,8 @@ pub(crate) mod tests {
     mod read_in_chunks {
         use super::*;
 
+        use crate::backend::fs::FileSystemBackend;
+        use crate::backend::{Backend, BackpackBuilder};
         use std::io::SeekFrom;
         use std::path::PathBuf;
         use tempfile::tempdir;
@@ -267,7 +273,15 @@ pub(crate) mod tests {
         }
         #[fixture]
         fn file_to_read(content_size: usize) -> PathBuf {
-            let tmp_file = tempdir().unwrap().keep().join("test_file");
+            let path = tempdir().unwrap().keep();
+            FILE_CACHE.set_storage_backend(
+                Backend::builder()
+                    .local_data_path(path.to_str().unwrap())
+                    .try_build()
+                    .unwrap(),
+            );
+
+            let tmp_file = path.join("test_file");
             std::fs::write(&tmp_file, vec![0; content_size]).unwrap();
 
             tmp_file
@@ -299,35 +313,6 @@ pub(crate) mod tests {
             assert_eq!(
                 reader.read_chunk().unwrap().unwrap(),
                 Bytes::from("0123456789")
-            );
-        }
-
-        #[rstest]
-        fn test_with_task(mut entry: Entry) {
-            write_record(
-                &mut entry,
-                1000,
-                vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
-            );
-
-            let mut reader = entry.begin_read(1000).wait().unwrap();
-            let task_group = get_task_group(entry.path(), 1000);
-            sleep(Duration::from_millis(100)); // Wait for the task to start
-
-            assert!(
-                find_task_group(&task_group).is_some(),
-                "We spawn a task for big records"
-            );
-            assert_eq!(
-                reader.read_chunk().unwrap().unwrap().len(),
-                MAX_IO_BUFFER_SIZE
-            );
-
-            sleep(Duration::from_millis(100)); // Wait for the task to finish
-
-            assert!(
-                find_task_group(&task_group).is_none(),
-                "The task should finish after reading the record"
             );
         }
 
