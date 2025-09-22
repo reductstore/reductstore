@@ -17,11 +17,12 @@ use futures_util::Stream;
 use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
+use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use futures_util::Future;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::ext::BoxedReadRecord;
-use reduct_base::unprocessable_entity;
+use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
 use std::pin::pin;
 use std::pin::Pin;
@@ -201,10 +202,7 @@ async fn fetch_and_response_batched_records(
 
     Ok((
         headers,
-        Body::from_stream(ReadersWrapper {
-            readers,
-            empty_body,
-        }),
+        Body::from_stream(ReadersWrapper::new(readers, empty_body)),
     ))
 }
 
@@ -236,6 +234,15 @@ struct ReadersWrapper {
     empty_body: bool,
 }
 
+impl ReadersWrapper {
+    fn new(readers: Vec<BoxedReadRecord>, empty_body: bool) -> Self {
+        Self {
+            readers,
+            empty_body,
+        }
+    }
+}
+
 impl Stream for ReadersWrapper {
     type Item = Result<Bytes, HttpError>;
 
@@ -252,20 +259,25 @@ impl Stream for ReadersWrapper {
         }
 
         let mut index = 0;
+        let mut buffer = vec![0u8; MAX_IO_BUFFER_SIZE];
+
         while index < self.readers.len() {
-            let pinned_future = pin!(self.readers[index].read());
-            if let Poll::Ready(data) = pinned_future.poll(ctx) {
-                match data {
-                    Some(Ok(chunk)) => {
-                        return Poll::Ready(Some(Ok(chunk)));
+            match self.readers[index].read(&mut buffer) {
+                Ok(read) => {
+                    if read == 0 {
+                        index += 1;
+                        continue;
+                    } else {
+                        return Poll::Ready(Some(Ok(Bytes::from(buffer[..read].to_vec()))));
                     }
-                    Some(Err(err)) => {
-                        return Poll::Ready(Some(Err(HttpError::from(err))));
-                    }
-                    None => index += 1,
-                };
-            } else {
-                return Poll::Pending;
+                }
+                Err(e) => {
+                    return Poll::Ready(Some(Err(internal_server_error!(
+                        "Error reading record: {}",
+                        e
+                    )
+                    .into())));
+                }
             }
         }
         Poll::Ready(None)

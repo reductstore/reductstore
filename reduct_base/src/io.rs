@@ -3,6 +3,7 @@ use crate::{internal_server_error, Labels};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::io::{Read, Seek};
 use std::time::Duration;
 use tokio::runtime::Handle;
 
@@ -150,38 +151,7 @@ impl RecordMeta {
 
 /// Represents a record in the storage engine that can be read as a stream of bytes.
 #[async_trait]
-pub trait ReadRecord {
-    /// Reads a chunk of the record content.
-    ///
-    /// # Returns
-    ///
-    /// A chunk of the record content. If the chunk is an error or None, the reader should stop.
-    async fn read(&mut self) -> ReadChunk;
-
-    /// Reads a chunk of the record content with a timeout.
-    ///
-    /// # Arguments
-    ///
-    /// * `timeout` - The maximum time to wait for the next chunk.
-    ///
-    /// # Returns
-    ///
-    /// A chunk of the record content. If the chunk is an error or None, the reader should stop.
-    async fn read_timeout(&mut self, timeout: Duration) -> ReadChunk {
-        match tokio::time::timeout(timeout, self.read()).await {
-            Ok(chunk) => chunk,
-            Err(er) => Some(Err(internal_server_error!(
-                "Timeout reading record: {}",
-                er
-            ))),
-        }
-    }
-
-    /// Reads a chunk of the record content synchronously.
-    fn blocking_read(&mut self) -> ReadChunk {
-        Handle::current().block_on(self.read())
-    }
-
+pub trait ReadRecord: Read + Seek {
     /// Returns meta information about the record.
     fn meta(&self) -> &RecordMeta;
 

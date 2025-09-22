@@ -51,6 +51,10 @@ impl FileWeak {
         file.read()?.access()?;
         Ok(file)
     }
+
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
 }
 
 pub(crate) type FileRc = Arc<RwLock<File>>;

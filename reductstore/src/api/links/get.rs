@@ -8,31 +8,86 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
+use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::response::IntoResponse;
-use axum_extra::headers::HeaderMap;
+use axum_extra::headers::{ContentLength, ContentRange, HeaderMap, HeaderMapExt, Range};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::read::ZlibDecoder;
+use futures_util::Stream;
+use log::info;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
+use reduct_base::io::ReadRecord;
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
 use reduct_base::{not_found, unprocessable_entity};
-use std::collections::HashMap;
-use std::io::{Cursor, Read};
+use std::collections::{Bound, HashMap, VecDeque};
+use std::io::SeekFrom::Start;
+use std::io::{Cursor, Read, Seek};
+use std::ops;
+use std::ops::Bound::{Excluded, Included};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use tokio::sync::RwLock;
 
 // GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
     State(components): State<Arc<Components>>,
+    header_map: HeaderMap,
     Path(_file_name): Path<String>, // we need the file_name to have a name when downloading
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let (record_num, token, query) = decrypt_query(&components, params).await?;
+
+    check_permissions(
+        &components,
+        &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
+        ReadAccessPolicy {
+            bucket: &query.bucket,
+        },
+    )
+    .await?;
+
+    let entry = components
+        .storage
+        .get_bucket(&query.bucket)?
+        .upgrade()?
+        .get_entry(&query.entry)?
+        .upgrade()?;
+
+    let repo_ext = &components.ext_repo;
+
+    // Execute the query with extension mechanism
+    let id = entry.query(query.query.clone()).await?;
+    repo_ext
+        .register_query(id, &query.bucket, &query.entry, query.query)
+        .await?;
+
+    let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
+
+    let range = if header_map.contains_key("Range") {
+        Some(
+            header_map
+                .typed_get::<axum_extra::headers::Range>()
+                .unwrap(),
+        )
+    } else {
+        None
+    };
+
+    process_query_and_fetch_record(record_num, repo_ext, id, rx, range).await
+}
+
+async fn decrypt_query(
+    components: &Arc<Components>,
+    params: HashMap<String, String>,
+) -> Result<(u64, String, QueryLinkCreateRequest), ReductError> {
     let ciphertxt_b64 = params
         .get("ct")
         .ok_or_else(|| unprocessable_entity!("Missing 'ct' parameter"))?;
@@ -93,34 +148,7 @@ pub(super) async fn get(
     if query.expire_at < chrono::Utc::now() {
         return Err(unprocessable_entity!("Query link has expired").into());
     }
-
-    check_permissions(
-        &components,
-        &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
-        ReadAccessPolicy {
-            bucket: &query.bucket,
-        },
-    )
-    .await?;
-
-    let entry = components
-        .storage
-        .get_bucket(&query.bucket)?
-        .upgrade()?
-        .get_entry(&query.entry)?
-        .upgrade()?;
-
-    let repo_ext = &components.ext_repo;
-
-    // Execute the query with extension mechanism
-    let id = entry.query(query.query.clone()).await?;
-    repo_ext
-        .register_query(id, &query.bucket, &query.entry, query.query)
-        .await?;
-
-    let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
-
-    process_query_and_fetch_record(record_num, repo_ext, id, rx).await
+    Ok((record_num, token.to_string(), query))
 }
 
 async fn process_query_and_fetch_record(
@@ -128,6 +156,7 @@ async fn process_query_and_fetch_record(
     repo_ext: &Box<dyn ManageExtensions + Send + Sync>,
     id: u64,
     rx: Arc<RwLock<QueryRx>>,
+    range: Option<Range>,
 ) -> Result<impl IntoResponse, HttpError> {
     let mut count = 0;
     loop {
@@ -143,13 +172,82 @@ async fn process_query_and_fetch_record(
                 }) => return Err(not_found!("Record number out of range").into()),
                 Err(e) => return Err(e.into()),
             };
+
             if count == record_num {
                 let headers = make_headers_from_reader(reader.meta());
-                return Ok((headers, Body::from_stream(RecordStream::new(reader, false))));
-            }
 
-            count += 1;
+                return if let Some(range) = range {
+                    let content_length = reader.meta().content_length();
+                    let mut headers = headers.clone();
+                    headers.typed_insert(ContentLength(content_length));
+                    headers.typed_insert(range.clone());
+
+                    Ok((
+                        headers,
+                        Body::from_stream(RangeRecordStream::new(reader, range)),
+                    ))
+                } else {
+                    Ok((headers, Body::from_stream(RecordStream::new(reader, false))))
+                };
+            }
         }
+
+        count += 1;
+    }
+}
+
+struct RangeRecordStream {
+    reader: Box<dyn ReadRecord + Send>,
+    ranges: VecDeque<(Bound<u64>, Bound<u64>)>,
+}
+
+impl RangeRecordStream {
+    pub fn new(reader: Box<dyn ReadRecord + Send>, range: Range) -> Self {
+        let ranges = range
+            .satisfiable_ranges(reader.meta().content_length())
+            .collect();
+        Self { reader, ranges }
+    }
+}
+
+impl Stream for RangeRecordStream {
+    type Item = Result<Bytes, HttpError>;
+
+    fn poll_next(
+        mut self: Pin<&mut RangeRecordStream>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let Some(range) = self.ranges.pop_front() else {
+            return Poll::Ready(None);
+        };
+
+        println!("{:?}", range);
+
+        let (start, end) = match range {
+            (Included(s), Included(e)) => (s, e + 1),
+            (Included(s), Bound::Unbounded) => (s, self.reader.meta().content_length()),
+            (Bound::Unbounded, Included(e)) => (0, e + 1),
+            _ => return Poll::Ready(Some(Err(unprocessable_entity!("Invalid range").into()))),
+        };
+
+        let mut buf = vec![0; (end - start) as usize];
+        self.reader.seek(Start(start)).unwrap();
+        let read = self.reader.read(&mut buf);
+        match read {
+            Ok(0) => {
+                info!("End of record reached");
+                Poll::Ready(None)
+            }
+            Ok(n) => {
+                info!("Serving bytes {}-{} of record", start, start + n as u64 - 1);
+                Poll::Ready(Some(Ok(Bytes::from(buf[..n].to_vec()))))
+            }
+            Err(e) => Poll::Ready(Some(Err(unprocessable_entity!("Read error: {}", e).into()))),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
     }
 }
 

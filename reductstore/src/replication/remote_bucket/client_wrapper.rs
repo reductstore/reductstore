@@ -1,19 +1,20 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::storage::entry::RecordReader;
+use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use async_stream::stream;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
-use std::collections::BTreeMap;
-
-use crate::replication::remote_bucket::ErrorRecordMap;
-use crate::storage::entry::RecordReader;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
 use reduct_base::io::ReadRecord;
-use reduct_base::unprocessable_entity;
+use reduct_base::{internal_server_error, unprocessable_entity};
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
+use std::collections::BTreeMap;
+use std::io::Read;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -157,9 +158,18 @@ impl BucketWrapper {
 
         let stream = stream! {
              while let Some(mut record) = records.pop() {
-                 while let Some(chunk) = record.read().await {
-                     yield chunk;
-                 }
+                let mut buf = vec![0u8; MAX_IO_BUFFER_SIZE];
+                 loop {
+                     match record.read(&mut buf) {
+                         Ok(0) => break,
+                         Ok(n) => {
+                             yield Ok(Bytes::from(buf[..n].to_vec()));
+                            }
+                            Err(err) => {
+                                yield Err(internal_server_error!("Read error: {}", err));
+                                break;
+                     }
+                 }}
              }
         };
 

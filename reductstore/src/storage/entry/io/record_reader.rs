@@ -13,6 +13,7 @@ use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, timeout};
 use std::cmp::min;
+use std::io;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
@@ -24,18 +25,11 @@ use tokio::sync::mpsc::{channel, Sender};
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
-    rx: Option<RecordRx>,
     meta: RecordMeta,
-}
-
-struct ReadContext {
-    bucket_name: String,
-    entry_name: String,
-    record_timestamp: u64,
-    file_ref: FileWeak,
+    file_ref: Option<FileWeak>,
     offset: u64,
     content_size: u64,
-    task_group: String,
+    read_bytes: u64,
 }
 
 impl RecordReader {
@@ -59,62 +53,27 @@ impl RecordReader {
         record_timestamp: u64,
         processed_record: Option<Record>,
     ) -> Result<Self, ReductError> {
-        let (record_from_block, ctx) = {
-            let bm = block_manager.write()?;
-            let block = block_ref.read()?;
+        let bm = block_manager.write()?;
+        let block = block_ref.read()?;
 
-            let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;
+        let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;
 
-            let record = block.get_record(record_timestamp).unwrap();
-            let content_size = record.end - record.begin;
-            let block_id = block.block_id();
-            let bucket_name = bm.bucket_name().to_string();
-            let entry_name = bm.entry_name().to_string();
+        let record = block.get_record(record_timestamp).unwrap();
+        let content_size = record.end - record.begin;
 
-            let storage = bm
-                .path()
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap();
-            let task_group = [storage, &bucket_name, &entry_name, &block_id.to_string()].join("/");
-
-            drop(bm);
-            Ok::<(Record, ReadContext), ReductError>((
-                record.clone(),
-                ReadContext {
-                    bucket_name,
-                    entry_name,
-                    record_timestamp,
-                    file_ref,
-                    offset,
-                    content_size,
-                    task_group,
-                },
-            ))
-        }?;
-
-        let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
-
-        if ctx.content_size <= MAX_IO_BUFFER_SIZE as u64 {
-            Self::read(tx, ctx);
+        let meta: RecordMeta = if let Some(processed_record) = processed_record {
+            processed_record.into()
         } else {
-            shared_child_isolated(&ctx.task_group.clone(), "read record content", move || {
-                Self::read(tx, ctx);
-            });
+            record.clone().into()
         };
 
-        if let Some(processed_record) = processed_record {
-            // the reader can be created after when filter
-            // where labels can be processed or changed
-            Ok(Self::form_record_with_rx(rx, processed_record))
-        } else {
-            Ok(Self::form_record_with_rx(rx, record_from_block))
-        }
+        Ok(Self {
+            meta,
+            file_ref: Some(file_ref),
+            offset,
+            content_size,
+            read_bytes: 0,
+        })
     }
 
     /// Create a new record reader for a record with no content.
@@ -130,49 +89,12 @@ impl RecordReader {
     /// * `RecordReader` - The record reader to read the record content in chunks
     pub fn form_record(record: Record) -> Self {
         let meta: RecordMeta = record.into();
-        RecordReader { rx: None, meta }
-    }
-
-    pub fn form_record_with_rx(rx: RecordRx, record: Record) -> Self {
-        let mut me = Self::form_record(record);
-        me.rx = Some(rx);
-        me
-    }
-
-    fn read(tx: Sender<Result<Bytes, ReductError>>, ctx: ReadContext) {
-        let mut read_bytes = 0;
-        let path = format!(
-            "{}/{}/{}",
-            ctx.bucket_name, ctx.entry_name, ctx.record_timestamp
-        );
-        let mut read_all = || {
-            while read_bytes < ctx.content_size {
-                let (buf, read) =
-                    match read_in_chunks(&ctx.file_ref, ctx.offset, ctx.content_size, read_bytes) {
-                        Ok((buf, read)) => (buf, read),
-                        Err(e) => {
-                            error!("Failed to read record {}: {}", path, e);
-                            Self::blocking_send_with_timeout(&tx, Err(e), IO_OPERATION_TIMEOUT)??;
-                            break;
-                        }
-                    };
-
-                Self::blocking_send_with_timeout(&tx, Ok(Bytes::from(buf)), IO_OPERATION_TIMEOUT)??;
-                read_bytes += read as u64;
-            }
-
-            Ok::<Result<(), SendError<_>>, ReductError>(Ok::<
-                (),
-                SendError<Result<Bytes, ReductError>>,
-            >(()))
-        };
-
-        if let Err(e) = read_all() {
-            // it's debug level because extensions may stop reading records intentionally
-            debug!(
-                "Failed to send record {}/{}/{}: {}",
-                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, e.message
-            )
+        RecordReader {
+            meta,
+            file_ref: None,
+            offset: 0,
+            content_size: 0,
+            read_bytes: 0,
         }
     }
 
@@ -202,34 +124,62 @@ impl RecordReader {
     }
 }
 
+impl Read for RecordReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let file_ref = match &self.file_ref {
+            Some(file_ref) => file_ref,
+            None => return Ok(0),
+        };
+
+        let rc = file_ref.upgrade().map_err(|e| {
+            error!("Failed to upgrade file reference: {}", e);
+            io::Error::new(io::ErrorKind::Other, "Failed to upgrade file reference")
+        })?;
+
+        let mut lock = rc.write().unwrap();
+
+        lock.seek(SeekFrom::Start(self.offset + self.read_bytes))?;
+        let read = lock.read(buf)?;
+
+        self.read_bytes += read as u64;
+        Ok(read)
+    }
+}
+
+impl Seek for RecordReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let new_pos = match pos {
+            SeekFrom::Start(offset) => offset,
+            SeekFrom::End(offset) => {
+                if offset >= 0 {
+                    self.content_size + offset as u64
+                } else {
+                    self.content_size - (-offset) as u64
+                }
+            }
+            SeekFrom::Current(offset) => {
+                if offset >= 0 {
+                    self.read_bytes + offset as u64
+                } else {
+                    self.read_bytes - (-offset) as u64
+                }
+            }
+        };
+
+        if new_pos > self.content_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Seek position out of bounds",
+            ));
+        }
+
+        self.read_bytes = new_pos;
+        Ok(self.read_bytes)
+    }
+}
+
 #[async_trait]
 impl ReadRecord for RecordReader {
-    async fn read(&mut self) -> ReadChunk {
-        if let Some(rx) = &mut self.rx {
-            rx.recv().await
-        } else {
-            None
-        }
-    }
-
-    async fn read_timeout(&mut self, timeout: std::time::Duration) -> ReadChunk {
-        match tokio::time::timeout(timeout, self.read()).await {
-            Ok(chunk) => chunk,
-            Err(er) => Some(Err(internal_server_error!(
-                "Timeout reading record: {}",
-                er
-            ))),
-        }
-    }
-
-    fn blocking_read(&mut self) -> ReadChunk {
-        if let Some(rx) = &mut self.rx {
-            rx.blocking_recv()
-        } else {
-            None
-        }
-    }
-
     fn meta(&self) -> &RecordMeta {
         &self.meta
     }
@@ -246,6 +196,7 @@ impl ReadRecord for RecordReader {
 /// * `file` - The file reference to read from
 /// * `offset` - The offset to start reading from
 /// * `content_size` - The size of the content to read
+/// * `read_bytes` - The number of bytes already read
 ///
 /// # Returns
 ///
@@ -267,16 +218,7 @@ pub(in crate::storage) fn read_in_chunks(
         Ok::<usize, ReductError>(read)
     };
 
-    let read = match seek_and_read {
-        Ok(read) => read,
-        Err(e) => {
-            return Err(internal_server_error!("Failed to read record chunk: {}", e));
-        }
-    };
-
-    if read == 0 {
-        return Err(internal_server_error!("Failed to read record chunk: EOF"));
-    }
+    let read = seek_and_read?;
     Ok((buf, read))
 }
 
