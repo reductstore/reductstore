@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use crate::replication::Transaction;
 use crate::storage::entry::RecordReader;
-use reduct_base::io::ReadRecord;
+use reduct_base::io::{BoxedReadRecord, ReadRecord};
 use std::sync::{Arc, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
@@ -179,7 +179,7 @@ impl ReplicationSender {
         }
     }
 
-    fn read_record(&self, entry_name: &str, transaction: &Transaction) -> Option<RecordReader> {
+    fn read_record(&self, entry_name: &str, transaction: &Transaction) -> Option<BoxedReadRecord> {
         let read_record_from_storage = || {
             let mut atempts = 3;
             loop {
@@ -215,7 +215,7 @@ impl ReplicationSender {
         };
 
         match read_record_from_storage() {
-            Ok(record) => Some(record),
+            Ok(record) => Some(Box::new(record)),
             Err(err) => {
                 error!("Failed to read record: {}", err);
                 self.hourly_diagnostics.write().unwrap().count(Err(err), 1);
@@ -251,7 +251,7 @@ mod tests {
             fn write_batch(
                 &mut self,
                 entry_name: &str,
-                record: Vec<(RecordReader, Transaction)>,
+                record: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn is_active(&self) -> bool;

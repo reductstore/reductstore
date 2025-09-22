@@ -968,7 +968,7 @@ mod tests {
             .unwrap();
 
             let mut received = BytesMut::new();
-            while let Some(Ok(chunk)) = reader.blocking_read() {
+            while let Some(Ok(chunk)) = reader.read_chunk() {
                 received.extend_from_slice(&chunk);
             }
             assert_eq!(received.len(), record_size);

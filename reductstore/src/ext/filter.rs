@@ -1,7 +1,7 @@
 use crate::storage::proto::record::State::Finished;
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::ReductError;
-use reduct_base::ext::BoxedReadRecord;
+use reduct_base::io::BoxedReadRecord;
 use std::collections::HashMap;
 
 // Copyright 2025 ReductSoftware UG

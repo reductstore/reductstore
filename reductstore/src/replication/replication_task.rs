@@ -350,7 +350,7 @@ mod tests {
 
     use crate::core::file_cache::FILE_CACHE;
     use mockall::mock;
-    use reduct_base::io::RecordMeta;
+    use reduct_base::io::{BoxedReadRecord, RecordMeta};
     use rstest::*;
 
     use crate::replication::remote_bucket::ErrorRecordMap;
@@ -367,7 +367,7 @@ mod tests {
             fn write_batch(
                 &mut self,
                 entry_name: &str,
-                record: Vec<(RecordReader, Transaction)>,
+                record: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn is_active(&self) -> bool;

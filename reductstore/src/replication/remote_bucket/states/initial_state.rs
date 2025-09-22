@@ -11,6 +11,7 @@ use crate::storage::entry::RecordReader;
 use async_trait::async_trait;
 use log::error;
 use reduct_base::error::ReductError;
+use reduct_base::io::BoxedReadRecord;
 
 /// Initial state of the remote bucket.
 pub(in crate::replication::remote_bucket) struct InitialState {
@@ -35,7 +36,7 @@ impl RemoteBucketState for InitialState {
     fn write_batch(
         self: Box<Self>,
         entry: &str,
-        records: Vec<(RecordReader, Transaction)>,
+        records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         // Try to get the bucket.
         let bucket = self.client.get_bucket(&self.bucket_name);

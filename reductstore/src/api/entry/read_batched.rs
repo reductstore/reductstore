@@ -21,7 +21,7 @@ use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use futures_util::Future;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::ext::BoxedReadRecord;
+use reduct_base::io::BoxedReadRecord;
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
 use std::pin::pin;
@@ -291,6 +291,7 @@ impl Stream for ReadersWrapper {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::io::{Read, Seek};
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
@@ -299,6 +300,7 @@ mod tests {
     use crate::api::tests::{components, headers, path_to_entry_1};
 
     use crate::ext::ext_repository::create_ext_repository;
+    use crate::storage::entry::io::record_reader::tests::MockRecord;
     use reduct_base::ext::ExtSettings;
     use reduct_base::io::{ReadRecord, RecordMeta};
     use reduct_base::msg::server_api::ServerInfo;
@@ -555,19 +557,6 @@ mod tests {
                 empty_body: false,
             };
             assert_eq!(wrapper.size_hint(), (0, None));
-        }
-    }
-
-    mock! {
-        Record {}
-
-        #[async_trait]
-        impl ReadRecord for Record {
-            async fn read(&mut self) -> Option<Result<Bytes, ReductError>>;
-
-          fn meta(&self) -> &RecordMeta;
-
-          fn meta_mut(&mut self) -> &mut RecordMeta;
         }
     }
 }

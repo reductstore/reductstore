@@ -215,7 +215,7 @@ mod tests {
     use crate::storage::proto::{us_to_ts, Record};
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
-    use reduct_base::ext::BoxedReadRecord;
+    use reduct_base::io::BoxedReadRecord;
     use reduct_base::io::ReadRecord;
     use reduct_base::{no_content, not_found};
 
@@ -510,7 +510,7 @@ mod tests {
             match query.next(block_manager.clone()) {
                 Ok(mut reader) => {
                     let mut content = String::new();
-                    while let Some(chunk) = reader.blocking_read() {
+                    while let Some(chunk) = reader.read_chunk() {
                         content
                             .push_str(String::from_utf8(chunk.unwrap().to_vec()).unwrap().as_str())
                     }

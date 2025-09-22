@@ -424,7 +424,7 @@ mod tests {
         assert_eq!(rec.meta().content_type(), "text/plain");
 
         assert_eq!(
-            rec.blocking_read().unwrap().unwrap(),
+            rec.read_chunk().unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
 
@@ -434,7 +434,7 @@ mod tests {
         assert_eq!(rec.meta().content_type(), "text/plain");
 
         assert_eq!(
-            rec.blocking_read().unwrap().unwrap(),
+            rec.read_chunk().unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
     }

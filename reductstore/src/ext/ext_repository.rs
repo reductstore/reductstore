@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
-    BoxedCommiter, BoxedProcessor, BoxedReadRecord, BoxedRecordStream, ExtSettings, IoExtension,
+    BoxedCommiter, BoxedProcessor, BoxedRecordStream, ExtSettings, IoExtension,
 };
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, unprocessable_entity};
@@ -328,6 +328,7 @@ impl ManageExtensions for ExtRepository {
 use crate::ext::filter::DummyFilter;
 use crate::storage::query::filters::{RecordFilter, WhenFilter};
 pub(crate) use create::create_ext_repository;
+use reduct_base::io::BoxedReadRecord;
 
 #[cfg(test)]
 pub(super) mod tests {
@@ -335,10 +336,12 @@ pub(super) mod tests {
     use futures_util::Stream;
     use reduct_base::ext::{Commiter, IoExtensionInfo, Processor};
     use rstest::{fixture, rstest};
+    use std::io::{Read, Seek};
 
     use crate::storage::entry::RecordReader;
     use crate::storage::proto::Record;
     use async_stream::stream;
+    use bytes::Bytes;
     use mockall::predicate::eq;
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
@@ -502,8 +505,10 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[case(json!({"test-ext": {}, "test-ext2": {}}),  unprocessable_entity!("Multiple extensions are not supported in query id=1"))]
-        #[case(json!({"unknown-ext": {}}),  unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1"))]
+        #[case(json!({"test-ext": {}, "test-ext2": {}}),  unprocessable_entity!("Multiple extensions are not supported in query id=1")
+        )]
+        #[case(json!({"unknown-ext": {}}),  unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1")
+        )]
         #[case(json!({}),  unprocessable_entity!("Extension name is not found in query id=1"))]
         #[tokio::test]
         async fn test_error_handling(
@@ -706,7 +711,7 @@ pub(super) mod tests {
             assert_eq!(records.len(), 1, "Should return one record");
 
             let record = records.get_mut(0).unwrap().as_mut().unwrap();
-            assert_eq!(record.read().await, None);
+            assert_eq!(record.read_chunk(), None);
 
             assert_eq!(
                 *mocked_ext_repo
@@ -1016,9 +1021,20 @@ pub(super) mod tests {
         }
     }
 
-    #[async_trait]
+    impl Read for MockRecord {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            todo!()
+        }
+    }
+
+    impl Seek for MockRecord {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            todo!()
+        }
+    }
+
     impl ReadRecord for MockRecord {
-        async fn read(&mut self) -> ReadChunk {
+        fn read_chunk(&mut self) -> Option<Result<Bytes, ReductError>> {
             None
         }
 

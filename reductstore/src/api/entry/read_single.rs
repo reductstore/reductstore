@@ -313,28 +313,14 @@ mod tests {
 
     mod steam_wrapper {
         use super::*;
+        use crate::storage::entry::io::record_reader::tests::MockRecord;
         use crate::storage::proto::Record;
         use futures_util::Stream;
         use prost_wkt_types::Timestamp;
 
         #[rstest]
         fn test_size_hint() {
-            let (_tx, rx) = tokio::sync::mpsc::channel(1);
-
-            let wrapper = RecordStream::new(
-                Box::new(RecordReader::form_record_with_rx(
-                    rx,
-                    Record {
-                        timestamp: Some(Timestamp::default()),
-                        begin: 0,
-                        end: 0,
-                        state: 0,
-                        labels: vec![],
-                        content_type: "".to_string(),
-                    },
-                )),
-                false,
-            );
+            let wrapper = RecordStream::new(Box::new(MockRecord::new()), false);
             assert_eq!(wrapper.size_hint(), (0, None));
         }
     }

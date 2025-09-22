@@ -221,8 +221,6 @@ impl Stream for RangeRecordStream {
             return Poll::Ready(None);
         };
 
-        println!("{:?}", range);
-
         let (start, end) = match range {
             (Included(s), Included(e)) => (s, e + 1),
             (Included(s), Bound::Unbounded) => (s, self.reader.meta().content_length()),
@@ -234,14 +232,8 @@ impl Stream for RangeRecordStream {
         self.reader.seek(Start(start)).unwrap();
         let read = self.reader.read(&mut buf);
         match read {
-            Ok(0) => {
-                info!("End of record reached");
-                Poll::Ready(None)
-            }
-            Ok(n) => {
-                info!("Serving bytes {}-{} of record", start, start + n as u64 - 1);
-                Poll::Ready(Some(Ok(Bytes::from(buf[..n].to_vec()))))
-            }
+            Ok(0) => Poll::Ready(None),
+            Ok(n) => Poll::Ready(Some(Ok(Bytes::from(buf[..n].to_vec())))),
             Err(e) => Poll::Ready(Some(Err(unprocessable_entity!("Read error: {}", e).into()))),
         }
     }
@@ -282,6 +274,7 @@ mod tests {
 
         let response = get(
             State(Arc::clone(&components)),
+            HeaderMap::new(),
             Path("file.txt".to_string()),
             Query(
                 url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
@@ -332,6 +325,7 @@ mod tests {
         params.insert("r".to_string(), "10".to_string()); // out of range
         let result = get(
             State(Arc::clone(&components)),
+            HeaderMap::new(),
             Path("file.txt".to_string()),
             Query(params),
         )
@@ -365,6 +359,7 @@ mod tests {
                 .collect();
         let err = get(
             State(Arc::clone(&components)),
+            HeaderMap::new(),
             Path("file.txt".to_string()),
             Query(params),
         )
@@ -412,6 +407,7 @@ mod tests {
             modified_params.insert(key.to_string(), value.to_string());
             let result = get(
                 State(Arc::clone(&components)),
+                HeaderMap::new(),
                 Path("file.txt".to_string()),
                 Query(modified_params),
             )
@@ -459,6 +455,7 @@ mod tests {
             modified_params.remove(key);
             let result = get(
                 State(Arc::clone(&components)),
+                HeaderMap::new(),
                 Path("file.txt".to_string()),
                 Query(modified_params),
             )
@@ -485,7 +482,7 @@ mod tests {
             let rx = Arc::new(RwLock::new(rx));
             let id = 1;
 
-            let err = process_query_and_fetch_record(0, ext_repo, id, rx)
+            let err = process_query_and_fetch_record(0, ext_repo, id, rx, None)
                 .await
                 .err()
                 .unwrap();

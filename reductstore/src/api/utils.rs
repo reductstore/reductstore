@@ -59,26 +59,10 @@ impl Stream for RecordStream {
             return Poll::Ready(None);
         }
 
-        let mut buffer = vec![
-            0u8;
-            min(
-                self.reader.meta().content_length() as usize,
-                MAX_IO_BUFFER_SIZE
-            )
-        ];
-        let read = self.reader.read(&mut buffer);
-
-        match read {
-            Ok(read) => {
-                if read == 0 {
-                    Poll::Ready(None)
-                } else {
-                    Poll::Ready(Some(Ok(Bytes::from(buffer[..read].to_vec()))))
-                }
-            }
-            Err(e) => Poll::Ready(Some(
-                Err(internal_server_error!("Read error: {}", e).into()),
-            )),
+        match self.reader.read_chunk() {
+            Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
+            Some(Err(e)) => Poll::Ready(Some(Err(e.into()))),
+            None => Poll::Ready(None),
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {

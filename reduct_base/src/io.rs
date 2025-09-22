@@ -149,9 +149,13 @@ impl RecordMeta {
     }
 }
 
+pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
+
 /// Represents a record in the storage engine that can be read as a stream of bytes.
-#[async_trait]
 pub trait ReadRecord: Read + Seek {
+    /// Reads a chunk of the record content.
+    fn read_chunk(&mut self) -> ReadChunk;
+
     /// Returns meta information about the record.
     fn meta(&self) -> &RecordMeta;
 
@@ -178,37 +182,9 @@ pub trait WriteRecord {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use std::io;
 
     use rstest::{fixture, rstest};
-
-    use tokio::task::spawn_blocking;
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_blocking_read() {
-        let result = spawn_blocking(move || {
-            let mut record = MockRecord::new();
-            record.blocking_read()
-        });
-        assert_eq!(
-            result.await.unwrap().unwrap(),
-            Ok(Bytes::from_static(b"test"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_default_read_timeout() {
-        let mut record = MockRecord::new();
-        let result = record.read_timeout(Duration::from_secs(1)).await;
-        assert_eq!(result.unwrap(), Ok(Bytes::from_static(b"test")));
-
-        let result = record.read_timeout(Duration::from_millis(5)).await;
-        assert_eq!(
-            result.unwrap().err().unwrap(),
-            internal_server_error!("Timeout reading record: deadline has elapsed")
-        );
-    }
 
     mod meta {
         use super::*;
@@ -277,11 +253,21 @@ pub(crate) mod tests {
         }
     }
 
-    #[async_trait]
+    impl Read for MockRecord {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            todo!()
+        }
+    }
+
+    impl Seek for MockRecord {
+        fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+            todo!()
+        }
+    }
+
     impl ReadRecord for MockRecord {
-        async fn read(&mut self) -> ReadChunk {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            Some(Ok(Bytes::from("test")))
+        fn read_chunk(&mut self) -> ReadChunk {
+            todo!()
         }
 
         fn meta(&self) -> &RecordMeta {

@@ -6,7 +6,8 @@ use crate::ext::ext_repository::{BoxedManageExtensions, ExtRepository, ManageExt
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
-use reduct_base::ext::{BoxedReadRecord, ExtSettings};
+use reduct_base::ext::ExtSettings;
+use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::no_content;
 use std::path::PathBuf;

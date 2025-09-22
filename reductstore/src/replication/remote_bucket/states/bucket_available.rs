@@ -6,10 +6,9 @@ use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavail
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
 use log::{debug, warn};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::ReadRecord;
+use reduct_base::io::{BoxedReadRecord, ReadRecord};
 use std::collections::BTreeMap;
 
 /// A state when the remote bucket is available.
@@ -61,10 +60,10 @@ impl RemoteBucketState for BucketAvailableState {
     fn write_batch(
         mut self: Box<Self>,
         entry_name: &str,
-        records: Vec<(RecordReader, Transaction)>,
+        records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
-        let mut records_to_update = Vec::new();
-        let mut records_to_write = Vec::new();
+        let mut records_to_update = Vec::<BoxedReadRecord>::new();
+        let mut records_to_write = Vec::<BoxedReadRecord>::new();
         for (record, transaction) in records {
             match transaction {
                 Transaction::WriteRecord(_) => {
@@ -156,13 +155,12 @@ impl RemoteBucketState for BucketAvailableState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
     use crate::replication::remote_bucket::tests::{
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
     use crate::storage::proto::{us_to_ts, Record};
     use mockall::predicate;
-
-    use crate::storage::entry::RecordReader;
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::{fixture, rstest};
     use test_log;
@@ -172,7 +170,7 @@ mod tests {
     async fn test_write_record_ok(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_write: (RecordReader, Transaction),
+        record_to_write: (BoxedReadRecord, Transaction),
     ) {
         bucket
             .expect_write_batch()
@@ -199,7 +197,7 @@ mod tests {
     async fn test_update_record_ok(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_update: (RecordReader, Transaction),
+        record_to_update: (BoxedReadRecord, Transaction),
     ) {
         bucket.expect_write_batch().times(0);
         bucket
@@ -229,7 +227,7 @@ mod tests {
         #[case] err: ErrorCode,
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_write: (RecordReader, Transaction),
+        record_to_write: (BoxedReadRecord, Transaction),
     ) {
         bucket
             .expect_write_batch()
@@ -254,7 +252,7 @@ mod tests {
         #[case] err: ErrorCode,
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_update: (RecordReader, Transaction),
+        record_to_update: (BoxedReadRecord, Transaction),
     ) {
         bucket.expect_write_batch().times(0);
         bucket
@@ -279,7 +277,7 @@ mod tests {
         #[case] err: ErrorCode,
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_write: (RecordReader, Transaction),
+        record_to_write: (BoxedReadRecord, Transaction),
     ) {
         bucket
             .expect_write_batch()
@@ -300,7 +298,7 @@ mod tests {
     async fn test_write_record_record_errors(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_write: (RecordReader, Transaction),
+        record_to_write: (BoxedReadRecord, Transaction),
     ) {
         bucket.expect_write_batch().returning(|_, _| {
             Ok(ErrorRecordMap::from_iter(vec![(
@@ -327,7 +325,7 @@ mod tests {
     async fn test_update_record_record_errors(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_update: (RecordReader, Transaction),
+        record_to_update: (BoxedReadRecord, Transaction),
     ) {
         bucket.expect_update_batch().returning(|_, records| {
             assert_eq!(records.len(), 1);
@@ -359,7 +357,7 @@ mod tests {
     async fn test_update_record_entry_not_found(
         client: MockReductClientApi,
         mut bucket: MockReductBucketApi,
-        record_to_update: (RecordReader, Transaction),
+        record_to_update: (BoxedReadRecord, Transaction),
     ) {
         bucket
             .expect_update_batch()
@@ -381,10 +379,10 @@ mod tests {
     }
 
     #[fixture]
-    fn record_to_write() -> (RecordReader, Transaction) {
-        let (_, rx) = tokio::sync::mpsc::channel(1);
+    fn record_to_write() -> (BoxedReadRecord, Transaction) {
+        let (_, rx) = std::sync::mpsc::channel();
         (
-            RecordReader::form_record_with_rx(
+            MockRecordReader::form_record_with_rx(
                 rx,
                 Record {
                     timestamp: Some(us_to_ts(&0)),
@@ -400,10 +398,10 @@ mod tests {
     }
 
     #[fixture]
-    fn record_to_update() -> (RecordReader, Transaction) {
-        let (_, rx) = tokio::sync::mpsc::channel(1);
+    fn record_to_update() -> (BoxedReadRecord, Transaction) {
+        let (_, rx) = std::sync::mpsc::channel();
         (
-            RecordReader::form_record_with_rx(
+            MockRecordReader::form_record_with_rx(
                 rx,
                 Record {
                     timestamp: Some(us_to_ts(&0)),

@@ -180,6 +180,34 @@ impl Seek for RecordReader {
 
 #[async_trait]
 impl ReadRecord for RecordReader {
+    fn read_chunk(&mut self) -> ReadChunk {
+        let mut buf = vec![
+            0;
+            min(
+                self.content_size - self.read_bytes,
+                MAX_IO_BUFFER_SIZE as u64,
+            ) as usize
+        ];
+        if buf.is_empty() {
+            return None;
+        }
+
+        match self.read(&mut buf) {
+            Ok(0) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                Some(Ok(Bytes::from(buf)))
+            }
+            Err(e) => {
+                error!("Failed to read record chunk: {}", e);
+                Some(Err(internal_server_error!(
+                    "Failed to read record chunk: {}",
+                    e
+                )))
+            }
+        }
+    }
+
     fn meta(&self) -> &RecordMeta {
         &self.meta
     }
@@ -223,11 +251,12 @@ pub(in crate::storage) fn read_in_chunks(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
     use crate::storage::storage::MAX_IO_BUFFER_SIZE;
+    use mockall::mock;
     use rstest::{fixture, rstest};
 
     mod read_in_chunks {
@@ -297,7 +326,7 @@ mod tests {
                 "We don't spawn a task for small records"
             );
             assert_eq!(
-                reader.blocking_read().unwrap().unwrap(),
+                reader.read_chunk().unwrap().unwrap(),
                 Bytes::from("0123456789")
             );
         }
@@ -319,7 +348,7 @@ mod tests {
                 "We spawn a task for big records"
             );
             assert_eq!(
-                reader.blocking_read().unwrap().unwrap().len(),
+                reader.read_chunk().unwrap().unwrap().len(),
                 MAX_IO_BUFFER_SIZE
             );
 
@@ -339,7 +368,7 @@ mod tests {
             let mut reader = entry.begin_read(1000).wait().unwrap();
 
             assert_eq!(
-                reader.blocking_read().unwrap().err().unwrap(),
+                reader.read_chunk().unwrap().err().unwrap(),
                 internal_server_error!("Failed to read record chunk: EOF")
             );
         }
@@ -365,21 +394,6 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_read_timeout(record: Record) {
-            let (_tx, rx) = channel(CHANNEL_BUFFER_SIZE);
-            let mut reader = RecordReader::form_record_with_rx(rx, record);
-
-            let result = reader.read_timeout(Duration::from_millis(100)).await;
-            assert_eq!(
-                result,
-                Some(Err(internal_server_error!(
-                    "Timeout reading record: deadline has elapsed"
-                )))
-            );
-        }
-
-        #[rstest]
         fn test_channel_timeout() {
             let msg = Ok(Bytes::from("test"));
             let (tx, _rx) = channel(1);
@@ -399,6 +413,27 @@ mod tests {
                 nanos: 0,
             });
             record
+        }
+    }
+
+    mock! {
+        pub(crate) Record {}
+
+        impl Read for Record {
+          fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error>;
+        }
+
+        impl Seek for Record {
+          fn seek(&mut self, pos: std::io::SeekFrom) -> Result<u64, std::io::Error>;
+            }
+
+        #[async_trait]
+        impl ReadRecord for Record {
+            fn read_chunk(&mut self) -> ReadChunk;
+
+          fn meta(&self) -> &RecordMeta;
+
+          fn meta_mut(&mut self) -> &mut RecordMeta;
         }
     }
 }
