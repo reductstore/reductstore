@@ -355,7 +355,7 @@ mod tests {
 
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
-    use crate::storage::entry::io::record_reader::RecordReader;
+
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;

@@ -345,7 +345,7 @@ pub(super) mod tests {
     use mockall::predicate::eq;
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
-    use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
+    use reduct_base::io::{ReadRecord, RecordMeta};
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
     use serde_json::json;
@@ -1022,13 +1022,13 @@ pub(super) mod tests {
     }
 
     impl Read for MockRecord {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
             todo!()
         }
     }
 
     impl Seek for MockRecord {
-        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        fn seek(&mut self, _pos: std::io::SeekFrom) -> std::io::Result<u64> {
             todo!()
         }
     }

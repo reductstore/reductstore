@@ -288,19 +288,16 @@ impl Stream for ReadersWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use std::io::{Read, Seek};
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
-    use mockall::mock;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
 
     use crate::ext::ext_repository::create_ext_repository;
     use crate::storage::entry::io::record_reader::tests::MockRecord;
     use reduct_base::ext::ExtSettings;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::RecordMeta;
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
     use rstest::*;

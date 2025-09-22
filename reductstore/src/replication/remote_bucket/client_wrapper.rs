@@ -343,7 +343,7 @@ pub(super) mod tests {
     use std::io::{Read, Seek, SeekFrom};
     use std::pin::pin;
     use std::sync::mpsc::{Receiver, Sender};
-    use std::sync::{Mutex, RwLock};
+    use std::sync::Mutex;
 
     #[rstest]
     #[tokio::test]
@@ -482,13 +482,13 @@ pub(super) mod tests {
     }
 
     impl Read for MockRecordReader {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
             todo!()
         }
     }
 
     impl Seek for MockRecordReader {
-        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        fn seek(&mut self, _pos: SeekFrom) -> std::io::Result<u64> {
             todo!()
         }
     }

@@ -79,7 +79,7 @@ pub(super) mod tests {
     use crate::storage::proto::Record;
 
     use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
-    use crate::storage::query::condition::Boxed;
+
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;

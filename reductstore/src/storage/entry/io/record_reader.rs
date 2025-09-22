@@ -9,16 +9,13 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
-use reduct_base::{internal_server_error, timeout};
 use std::cmp::min;
 use std::io;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
-use std::thread::sleep;
-use std::time::Duration;
-use std::time::Instant;
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
@@ -281,7 +278,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::storage::entry::Entry;
         use std::fs;
-        use std::sync::mpsc::channel;
+
         use std::thread::sleep;
 
         use crate::core::thread_pool::find_task_group;

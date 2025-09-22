@@ -314,9 +314,8 @@ mod tests {
     mod steam_wrapper {
         use super::*;
         use crate::storage::entry::io::record_reader::tests::MockRecord;
-        use crate::storage::proto::Record;
+
         use futures_util::Stream;
-        use prost_wkt_types::Timestamp;
 
         #[rstest]
         fn test_size_hint() {
