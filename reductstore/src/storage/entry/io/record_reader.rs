@@ -1,14 +1,13 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
-use crate::core::thread_pool::shared_child_isolated;
-use crate::storage::block_manager::{BlockManager, BlockRef, RecordRx};
+use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::proto::Record;
-use crate::storage::storage::{CHANNEL_BUFFER_SIZE, IO_OPERATION_TIMEOUT, MAX_IO_BUFFER_SIZE};
+use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::{debug, error};
+use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, timeout};
@@ -20,8 +19,6 @@ use std::sync::{Arc, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 use std::time::Instant;
-use tokio::sync::mpsc::error::{SendError, TrySendError};
-use tokio::sync::mpsc::{channel, Sender};
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
@@ -96,31 +93,6 @@ impl RecordReader {
             content_size: 0,
             read_bytes: 0,
         }
-    }
-
-    fn blocking_send_with_timeout(
-        tx: &Sender<Result<Bytes, ReductError>>,
-        mut msg: Result<Bytes, ReductError>,
-        timeout: Duration,
-    ) -> Result<Result<(), SendError<Result<Bytes, ReductError>>>, ReductError> {
-        let now = Instant::now();
-
-        while now.elapsed() < timeout {
-            match tx.try_send(msg) {
-                Ok(_) => {
-                    return Ok(Ok(()));
-                }
-                Err(TrySendError::Full(ret)) => {
-                    sleep(std::time::Duration::from_millis(1));
-                    msg = ret;
-                }
-                Err(TrySendError::Closed(ret)) => {
-                    return Ok(Err(SendError { 0: ret }));
-                }
-            }
-        }
-
-        Err(timeout!("Channel send timeout: {} s", timeout.as_secs()))
     }
 }
 
@@ -309,11 +281,13 @@ pub(crate) mod tests {
         use super::*;
         use crate::storage::entry::Entry;
         use std::fs;
+        use std::sync::mpsc::channel;
         use std::thread::sleep;
 
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
 
+        use crate::storage::storage::CHANNEL_BUFFER_SIZE;
         use prost_wkt_types::Timestamp;
         use std::time::Duration;
 
@@ -391,18 +365,6 @@ pub(crate) mod tests {
                 reader.meta().labels().get("test_key"),
                 Some(&"test_value".to_string())
             );
-        }
-
-        #[rstest]
-        fn test_channel_timeout() {
-            let msg = Ok(Bytes::from("test"));
-            let (tx, _rx) = channel(1);
-
-            tx.blocking_send(msg.clone()).unwrap(); // full
-            let result =
-                RecordReader::blocking_send_with_timeout(&tx, msg, Duration::from_millis(1));
-
-            assert_eq!(result, Err(timeout!("Channel send timeout: 0 s")));
         }
 
         #[fixture]

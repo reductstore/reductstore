@@ -2,17 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::HttpError;
-use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
-use futures_util::Future;
 use futures_util::Stream;
-use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 use reduct_base::io::{ReadRecord, RecordMeta};
-use std::cmp::min;
-use std::io::Read;
-use std::pin::{pin, Pin};
+use std::pin::Pin;
 use std::task::{Context, Poll};
 
 pub(super) fn make_headers_from_reader(meta: &RecordMeta) -> HeaderMap {
@@ -53,7 +47,7 @@ impl Stream for RecordStream {
 
     fn poll_next(
         mut self: Pin<&mut RecordStream>,
-        cx: &mut Context<'_>,
+        _cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.empty_body {
             return Poll::Ready(None);

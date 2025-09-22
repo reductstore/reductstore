@@ -17,8 +17,7 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;
 
 use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
-use reduct_base::io::{BoxedReadRecord, ReadRecord};
+use reduct_base::io::BoxedReadRecord;
 use std::sync::{Arc, RwLock};
 use std::thread::sleep;
 use std::time::Duration;

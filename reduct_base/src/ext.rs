@@ -7,7 +7,7 @@ mod ext_info;
 mod ext_settings;
 
 use crate::error::ReductError;
-use crate::io::{BoxedReadRecord, ReadRecord};
+use crate::io::BoxedReadRecord;
 use crate::msg::entry_api::QueryEntry;
 use async_trait::async_trait;
 pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};

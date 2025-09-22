@@ -8,7 +8,7 @@ use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use log::{debug, warn};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::{BoxedReadRecord, ReadRecord};
+use reduct_base::io::BoxedReadRecord;
 use std::collections::BTreeMap;
 
 /// A state when the remote bucket is available.

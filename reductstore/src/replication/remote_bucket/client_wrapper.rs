@@ -2,24 +2,17 @@
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::ErrorRecordMap;
-use crate::storage::entry::RecordReader;
-use crate::storage::proto::record::Label;
-use crate::storage::proto::{us_to_ts, Record};
-use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use async_stream::stream;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
-use reduct_base::io::{BoxedReadRecord, ReadRecord};
-use reduct_base::{internal_server_error, unprocessable_entity};
+use reduct_base::io::BoxedReadRecord;
+use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
 use std::collections::BTreeMap;
-use std::fmt::Binary;
-use std::io::Read;
 use std::str::FromStr;
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
 // A wrapper around the Reduct client API to make it easier to mock.
@@ -341,11 +334,13 @@ pub(super) fn create_client(url: &str, api_token: &str) -> BoxedClientApi {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::storage::proto::record::Label;
+    use crate::storage::proto::{us_to_ts, Record};
     use futures_util::StreamExt;
     use hyper::http;
-    use reduct_base::io::{ReadChunk, RecordMeta};
+    use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use rstest::*;
-    use std::io::{Seek, SeekFrom};
+    use std::io::{Read, Seek, SeekFrom};
     use std::pin::pin;
     use std::sync::mpsc::{Receiver, Sender};
     use std::sync::{Mutex, RwLock};

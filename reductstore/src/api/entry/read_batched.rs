@@ -18,13 +18,11 @@ use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
 use crate::storage::storage::MAX_IO_BUFFER_SIZE;
-use futures_util::Future;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
-use std::pin::pin;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -248,7 +246,7 @@ impl Stream for ReadersWrapper {
 
     fn poll_next(
         mut self: Pin<&mut ReadersWrapper>,
-        ctx: &mut Context<'_>,
+        _ctx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.empty_body {
             return Poll::Ready(None);

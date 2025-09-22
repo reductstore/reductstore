@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 

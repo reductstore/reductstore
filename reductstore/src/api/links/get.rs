@@ -8,19 +8,17 @@ use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
-use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::response::IntoResponse;
-use axum_extra::headers::{ContentLength, ContentRange, HeaderMap, HeaderMapExt, Range};
+use axum_extra::headers::{ContentLength, HeaderMap, HeaderMapExt, Range};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::read::ZlibDecoder;
 use futures_util::Stream;
-use log::info;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::io::ReadRecord;
@@ -29,8 +27,7 @@ use reduct_base::{not_found, unprocessable_entity};
 use std::collections::{Bound, HashMap, VecDeque};
 use std::io::SeekFrom::Start;
 use std::io::{Cursor, Read, Seek};
-use std::ops;
-use std::ops::Bound::{Excluded, Included};
+use std::ops::Bound::Included;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -215,7 +212,7 @@ impl Stream for RangeRecordStream {
 
     fn poll_next(
         mut self: Pin<&mut RangeRecordStream>,
-        cx: &mut Context<'_>,
+        _cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         let Some(range) = self.ranges.pop_front() else {
             return Poll::Ready(None);

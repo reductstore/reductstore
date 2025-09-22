@@ -9,7 +9,6 @@ use log::error;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use tokio::time::{Duration, Instant};

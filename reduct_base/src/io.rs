@@ -1,11 +1,10 @@
 use crate::error::ReductError;
-use crate::{internal_server_error, Labels};
+use crate::Labels;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 use std::time::Duration;
-use tokio::runtime::Handle;
 
 pub type WriteChunk = Result<Option<Bytes>, ReductError>;
 pub type ReadChunk = Option<Result<Bytes, ReductError>>;
@@ -254,13 +253,13 @@ pub(crate) mod tests {
     }
 
     impl Read for MockRecord {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
             todo!()
         }
     }
 
     impl Seek for MockRecord {
-        fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
             todo!()
         }
     }
