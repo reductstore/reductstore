@@ -13,12 +13,14 @@ use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, Range};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::read::ZlibDecoder;
 use futures_util::Stream;
+use log::info;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::io::ReadRecord;
@@ -69,15 +71,10 @@ pub(super) async fn get(
     let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
 
     let range = if header_map.contains_key("Range") {
-        Some(
-            header_map
-                .typed_get::<axum_extra::headers::Range>()
-                .unwrap(),
-        )
+        Some(header_map.typed_get::<Range>().unwrap())
     } else {
         None
     };
-
     process_query_and_fetch_record(record_num, repo_ext, id, rx, range).await
 }
 
@@ -175,16 +172,32 @@ async fn process_query_and_fetch_record(
                 headers.typed_insert(AcceptRanges::bytes());
 
                 return if let Some(range) = range {
-                    let content_length = reader.meta().content_length();
+                    // TODO: Cash record on backend side to avoid double reading if we have range request
+
+                    let content_length = range
+                        .satisfiable_ranges(reader.meta().content_length())
+                        .map(|(start, end)| match (start, end) {
+                            (Included(s), Included(e)) => e - s + 1,
+                            (Included(s), Bound::Unbounded) => reader.meta().content_length() - s,
+                            (Bound::Unbounded, Included(e)) => e + 1,
+                            _ => 0,
+                        })
+                        .sum();
+
                     headers.typed_insert(ContentLength(content_length));
                     headers.typed_insert(range.clone());
 
                     Ok((
+                        StatusCode::PARTIAL_CONTENT,
                         headers,
                         Body::from_stream(RangeRecordStream::new(reader, range)),
                     ))
                 } else {
-                    Ok((headers, Body::from_stream(RecordStream::new(reader, false))))
+                    Ok((
+                        StatusCode::OK,
+                        headers,
+                        Body::from_stream(RecordStream::new(reader, false)),
+                    ))
                 };
             }
         }
@@ -225,6 +238,7 @@ impl Stream for RangeRecordStream {
             _ => return Poll::Ready(Some(Err(unprocessable_entity!("Invalid range").into()))),
         };
 
+        // TODO: Ranges can be very large, we should read in chunks instead of allocating a big buffer
         let mut buf = vec![0; (end - start) as usize];
         self.reader.seek(Start(start)).unwrap();
         let read = self.reader.read(&mut buf);

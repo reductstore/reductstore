@@ -7,7 +7,6 @@ use crate::storage::proto::Record;
 use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
@@ -235,8 +234,7 @@ pub(crate) mod tests {
     mod read_in_chunks {
         use super::*;
 
-        use crate::backend::fs::FileSystemBackend;
-        use crate::backend::{Backend, BackpackBuilder};
+        use crate::backend::Backend;
         use std::io::SeekFrom;
         use std::path::PathBuf;
         use tempfile::tempdir;
@@ -293,14 +291,10 @@ pub(crate) mod tests {
         use crate::storage::entry::Entry;
         use std::fs;
 
-        use std::thread::sleep;
-
         use crate::core::thread_pool::find_task_group;
         use crate::storage::entry::tests::get_task_group;
 
-        use crate::storage::storage::CHANNEL_BUFFER_SIZE;
         use prost_wkt_types::Timestamp;
-        use std::time::Duration;
 
         #[rstest]
         fn test_no_task(mut entry: Entry) {
