@@ -257,25 +257,12 @@ impl Stream for ReadersWrapper {
         }
 
         let mut index = 0;
-        let mut buffer = vec![0u8; MAX_IO_BUFFER_SIZE];
 
         while index < self.readers.len() {
-            match self.readers[index].read(&mut buffer) {
-                Ok(read) => {
-                    if read == 0 {
-                        index += 1;
-                        continue;
-                    } else {
-                        return Poll::Ready(Some(Ok(Bytes::from(buffer[..read].to_vec()))));
-                    }
-                }
-                Err(e) => {
-                    return Poll::Ready(Some(Err(internal_server_error!(
-                        "Error reading record: {}",
-                        e
-                    )
-                    .into())));
-                }
+            match self.readers[index].read_chunk() {
+                Some(Ok(bytes)) => return Poll::Ready(Some(Ok(bytes))),
+                Some(Err(err)) => return Poll::Ready(Some(Err(HttpError::from(err)))),
+                None => index += 1,
             }
         }
         Poll::Ready(None)
