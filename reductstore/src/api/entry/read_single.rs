@@ -22,7 +22,7 @@ use reduct_base::bad_request;
 use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::sync::{Mutex, RwLock as AsyncRwLock};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub(super) async fn read_record(
@@ -81,7 +81,10 @@ async fn fetch_and_response_single_record(
 
     Ok((
         headers,
-        Body::from_stream(RecordStream::new(Box::new(reader), empty_body)),
+        Body::from_stream(RecordStream::new(
+            Arc::new(Mutex::new(Box::new(reader))),
+            empty_body,
+        )),
     ))
 }
 
@@ -319,7 +322,8 @@ mod tests {
 
         #[rstest]
         fn test_size_hint() {
-            let wrapper = RecordStream::new(Box::new(MockRecord::new()), false);
+            let wrapper =
+                RecordStream::new(Arc::new(Mutex::new(Box::new(MockRecord::new()))), false);
             assert_eq!(wrapper.size_hint(), (0, None));
         }
     }

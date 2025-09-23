@@ -3,7 +3,7 @@
 
 use crate::api::links::derive_key_from_secret;
 use crate::api::middleware::check_permissions;
-use crate::api::utils::{make_headers_from_reader, RecordStream};
+use crate::api::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::ManageExtensions;
@@ -19,21 +19,24 @@ use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::read::ZlibDecoder;
+use flate2::Compression;
+use futures_util::Future;
 use futures_util::Stream;
-use log::info;
+use log::{debug, info};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
-use reduct_base::io::ReadRecord;
+use reduct_base::io::{BoxedReadRecord, ReadRecord};
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::{Bound, HashMap, VecDeque};
 use std::io::SeekFrom::Start;
 use std::io::{Cursor, Read, Seek};
 use std::ops::Bound::Included;
+use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 // GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
@@ -42,7 +45,7 @@ pub(super) async fn get(
     Path(_file_name): Path<String>, // we need the file_name to have a name when downloading
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let (record_num, token, query) = decrypt_query(&components, params).await?;
+    let (record_num, token, query) = decrypt_query(&components, params.clone()).await?;
 
     check_permissions(
         &components,
@@ -53,29 +56,40 @@ pub(super) async fn get(
     )
     .await?;
 
-    let entry = components
-        .storage
-        .get_bucket(&query.bucket)?
-        .upgrade()?
-        .get_entry(&query.entry)?
-        .upgrade()?;
-
-    let repo_ext = &components.ext_repo;
-
-    // Execute the query with extension mechanism
-    let id = entry.query(query.query.clone()).await?;
-    repo_ext
-        .register_query(id, &query.bucket, &query.entry, query.query)
-        .await?;
-
-    let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
-
     let range = if header_map.contains_key("Range") {
         Some(header_map.typed_get::<Range>().unwrap())
     } else {
         None
     };
-    process_query_and_fetch_record(record_num, repo_ext, id, rx, range).await
+
+    let mut cache_lock = components.query_link_cache.write().await;
+    let key = params.get("ct").unwrap();
+
+    if let Some(cached) = cache_lock.get(key) {
+        prepare_response(range, Arc::clone(cached)).await
+    } else {
+        let entry = components
+            .storage
+            .get_bucket(&query.bucket)?
+            .upgrade()?
+            .get_entry(&query.entry)?
+            .upgrade()?;
+
+        let repo_ext = &components.ext_repo;
+
+        // Execute the query with extension mechanism
+        let id = entry.query(query.query.clone()).await?;
+        repo_ext
+            .register_query(id, &query.bucket, &query.entry, query.query)
+            .await?;
+
+        let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
+        let record = process_query_and_fetch_record(record_num, repo_ext, id, rx).await?;
+
+        let record = Arc::new(Mutex::new(record));
+        cache_lock.insert(key.clone(), Arc::clone(&record));
+        prepare_response(range, record).await
+    }
 }
 
 async fn decrypt_query(
@@ -150,9 +164,9 @@ async fn process_query_and_fetch_record(
     repo_ext: &Box<dyn ManageExtensions + Send + Sync>,
     id: u64,
     rx: Arc<RwLock<QueryRx>>,
-    range: Option<Range>,
-) -> Result<impl IntoResponse, HttpError> {
+) -> Result<BoxedReadRecord, ReductError> {
     let mut count = 0;
+
     loop {
         let Some(readers) = repo_ext.fetch_and_process_record(id, rx.clone()).await else {
             continue;
@@ -168,37 +182,7 @@ async fn process_query_and_fetch_record(
             };
 
             if count == record_num {
-                let mut headers = make_headers_from_reader(reader.meta());
-                headers.typed_insert(AcceptRanges::bytes());
-
-                return if let Some(range) = range {
-                    // TODO: Cash record on backend side to avoid double reading if we have range request
-
-                    let content_length = range
-                        .satisfiable_ranges(reader.meta().content_length())
-                        .map(|(start, end)| match (start, end) {
-                            (Included(s), Included(e)) => e - s + 1,
-                            (Included(s), Bound::Unbounded) => reader.meta().content_length() - s,
-                            (Bound::Unbounded, Included(e)) => e + 1,
-                            _ => 0,
-                        })
-                        .sum();
-
-                    headers.typed_insert(ContentLength(content_length));
-                    headers.typed_insert(range.clone());
-
-                    Ok((
-                        StatusCode::PARTIAL_CONTENT,
-                        headers,
-                        Body::from_stream(RangeRecordStream::new(reader, range)),
-                    ))
-                } else {
-                    Ok((
-                        StatusCode::OK,
-                        headers,
-                        Body::from_stream(RecordStream::new(reader, false)),
-                    ))
-                };
+                return Ok(reader);
             }
         }
 
@@ -206,51 +190,44 @@ async fn process_query_and_fetch_record(
     }
 }
 
-struct RangeRecordStream {
-    reader: Box<dyn ReadRecord + Send>,
-    ranges: VecDeque<(Bound<u64>, Bound<u64>)>,
-}
+async fn prepare_response(
+    range: Option<Range>,
+    reader: Arc<Mutex<BoxedReadRecord>>,
+) -> Result<impl IntoResponse, HttpError> {
+    let mut headers = make_headers_from_reader(reader.lock().await.meta());
+    headers.typed_insert(AcceptRanges::bytes());
 
-impl RangeRecordStream {
-    pub fn new(reader: Box<dyn ReadRecord + Send>, range: Range) -> Self {
+    if let Some(range) = range {
+        let initial_content_length = reader.lock().await.meta().content_length();
+
         let ranges = range
-            .satisfiable_ranges(reader.meta().content_length())
-            .collect();
-        Self { reader, ranges }
-    }
-}
+            .satisfiable_ranges(initial_content_length)
+            .collect::<VecDeque<_>>();
 
-impl Stream for RangeRecordStream {
-    type Item = Result<Bytes, HttpError>;
+        let content_length = ranges
+            .iter()
+            .map(|(start, end)| match (start, end) {
+                (Included(s), Included(e)) => e - s + 1,
+                (Included(s), Bound::Unbounded) => initial_content_length - s,
+                (Bound::Unbounded, Included(e)) => e + 1,
+                _ => 0,
+            })
+            .sum();
 
-    fn poll_next(
-        mut self: Pin<&mut RangeRecordStream>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let Some(range) = self.ranges.pop_front() else {
-            return Poll::Ready(None);
-        };
+        headers.typed_insert(ContentLength(content_length));
+        headers.typed_insert(range.clone());
 
-        let (start, end) = match range {
-            (Included(s), Included(e)) => (s, e + 1),
-            (Included(s), Bound::Unbounded) => (s, self.reader.meta().content_length()),
-            (Bound::Unbounded, Included(e)) => (0, e + 1),
-            _ => return Poll::Ready(Some(Err(unprocessable_entity!("Invalid range").into()))),
-        };
-
-        // TODO: Ranges can be very large, we should read in chunks instead of allocating a big buffer
-        let mut buf = vec![0; (end - start) as usize];
-        self.reader.seek(Start(start)).unwrap();
-        let read = self.reader.read(&mut buf);
-        match read {
-            Ok(0) => Poll::Ready(None),
-            Ok(n) => Poll::Ready(Some(Ok(Bytes::from(buf[..n].to_vec())))),
-            Err(e) => Poll::Ready(Some(Err(unprocessable_entity!("Read error: {}", e).into()))),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
+        Ok((
+            StatusCode::PARTIAL_CONTENT,
+            headers,
+            Body::from_stream(RangeRecordStream::new(reader, ranges)),
+        ))
+    } else {
+        Ok((
+            StatusCode::OK,
+            headers,
+            Body::from_stream(RecordStream::new(reader, false)),
+        ))
     }
 }
 
@@ -259,8 +236,10 @@ mod tests {
     use super::*;
     use crate::api::links::tests::create_query_link;
     use crate::api::tests::{components, headers};
+    use crate::storage::entry::io::record_reader::tests::MockRecord;
     use axum::body::to_bytes;
     use chrono::Utc;
+    use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
 
@@ -283,15 +262,15 @@ mod tests {
         .0
         .link;
 
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
         let response = get(
             State(Arc::clone(&components)),
             HeaderMap::new(),
             Path("file.txt".to_string()),
-            Query(
-                url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
-                    .into_owned()
-                    .collect(),
-            ),
+            Query(params),
         )
         .await
         .unwrap();
@@ -306,6 +285,70 @@ mod tests {
             String::from_utf8_lossy(body_bytes.iter().as_slice()),
             "Hey!!!"
         );
+
+        assert!(
+            components
+                .query_link_cache
+                .write()
+                .await
+                .get(
+                    url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                        .into_owned()
+                        .collect::<HashMap<String, String>>()
+                        .get("ct")
+                        .unwrap()
+                )
+                .is_some(),
+            "Query link should be cached"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_query_link_cached(#[future] components: Arc<Components>, headers: HeaderMap) {
+        let components = components.await;
+        let link = create_query_link(
+            headers,
+            components.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let mut mock = MockRecord::new();
+        mock.expect_meta().return_const(
+            RecordMeta::builder()
+                .content_length(0)
+                .content_type("text/plain".to_string())
+                .build(),
+        );
+
+        let params = &url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+            .into_owned()
+            .collect();
+        components.query_link_cache.write().await.insert(
+            get_ct_from_params(params),
+            Arc::new(Mutex::new(Box::new(mock))),
+        );
+
+        let response = get(
+            State(Arc::clone(&components)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params.clone()),
+        )
+        .await
+        .unwrap();
+
+        let resp = response.into_response();
+        assert_eq!(resp.headers()["content-type"], "text/plain");
+        assert_eq!(resp.headers()["content-length"], "0");
     }
 
     #[rstest]
@@ -478,6 +521,10 @@ mod tests {
         }
     }
 
+    fn get_ct_from_params(params: &HashMap<String, String>) -> String {
+        params.get("ct").unwrap().to_string()
+    }
+
     mod fetching {
         use super::*;
         use reduct_base::internal_server_error;
@@ -493,11 +540,11 @@ mod tests {
             let rx = Arc::new(RwLock::new(rx));
             let id = 1;
 
-            let err = process_query_and_fetch_record(0, ext_repo, id, rx, None)
+            let err = process_query_and_fetch_record(0, ext_repo, id, rx)
                 .await
                 .err()
                 .unwrap();
-            assert_eq!(err.0, internal_server_error!("Oops"));
+            assert_eq!(err, internal_server_error!("Oops"));
         }
     }
 }
