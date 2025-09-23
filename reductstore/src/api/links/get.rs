@@ -25,7 +25,7 @@ use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::{Bound, HashMap, VecDeque};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::ops::Bound::Included;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -58,6 +58,12 @@ pub(super) async fn get(
     let key = params.get("ct").unwrap();
 
     if let Some(cached) = cache_lock.get(key) {
+        // reset reader to the beginning if was used before from cache
+        cached
+            .lock()
+            .await
+            .seek(SeekFrom::Start(0))
+            .map_err(|e| ReductError::from(e))?;
         prepare_response(range, Arc::clone(cached)).await
     } else {
         let entry = components

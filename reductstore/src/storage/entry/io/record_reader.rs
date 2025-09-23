@@ -22,7 +22,7 @@ pub(crate) struct RecordReader {
     file_ref: Option<FileRc>,
     offset: u64,
     content_size: u64,
-    read_bytes: u64,
+    pos: u64,
 }
 
 impl RecordReader {
@@ -65,7 +65,7 @@ impl RecordReader {
             file_ref: Some(file_ref.upgrade()?),
             offset,
             content_size,
-            read_bytes: 0,
+            pos: 0,
         })
     }
 
@@ -87,7 +87,7 @@ impl RecordReader {
             file_ref: None,
             offset: 0,
             content_size: 0,
-            read_bytes: 0,
+            pos: 0,
         }
     }
 }
@@ -101,10 +101,10 @@ impl Read for RecordReader {
 
         let mut lock = file_ref.write().unwrap();
 
-        lock.seek(SeekFrom::Start(self.offset + self.read_bytes))?;
+        lock.seek(SeekFrom::Start(self.offset + self.pos))?;
         let read = lock.read(buf)?;
 
-        self.read_bytes += read as u64;
+        self.pos += read as u64;
         Ok(read)
     }
 }
@@ -122,9 +122,9 @@ impl Seek for RecordReader {
             }
             SeekFrom::Current(offset) => {
                 if offset >= 0 {
-                    self.read_bytes + offset as u64
+                    self.pos + offset as u64
                 } else {
-                    self.read_bytes - (-offset) as u64
+                    self.pos - (-offset) as u64
                 }
             }
         };
@@ -136,21 +136,16 @@ impl Seek for RecordReader {
             ));
         }
 
-        self.read_bytes = new_pos;
-        Ok(self.read_bytes)
+        self.pos = new_pos;
+        Ok(self.pos)
     }
 }
 
 #[async_trait]
 impl ReadRecord for RecordReader {
     fn read_chunk(&mut self) -> ReadChunk {
-        let mut buf = vec![
-            0;
-            min(
-                self.content_size - self.read_bytes,
-                MAX_IO_BUFFER_SIZE as u64,
-            ) as usize
-        ];
+        let mut buf =
+            vec![0; min(self.content_size - self.pos, MAX_IO_BUFFER_SIZE as u64,) as usize];
         if buf.is_empty() {
             return None;
         }
