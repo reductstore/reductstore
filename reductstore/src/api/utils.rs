@@ -7,6 +7,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Future;
 use futures_util::{FutureExt, Stream};
+use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::io::{BoxedReadRecord, ReadRecord, RecordMeta};
 use reduct_base::unprocessable_entity;
@@ -120,12 +121,12 @@ impl Stream for RangeRecordStream {
             };
 
             let mut buffer_size = (end - start) as usize;
-            let max_buffer_size = self.buffer_size;
-            let mut keep_range = false;
-            if buffer_size > max_buffer_size {
-                buffer_size = max_buffer_size;
-                keep_range = true;
-            }
+            let overwrite_buffer = if buffer_size > self.buffer_size {
+                buffer_size = self.buffer_size;
+                true
+            } else {
+                false
+            };
 
             let mut buf = vec![0; buffer_size];
             lock.deref_mut().seek(Start(start)).unwrap();
@@ -136,7 +137,14 @@ impl Stream for RangeRecordStream {
                 Err(e) => Poll::Ready(Some(Err(unprocessable_entity!("Read error: {}", e).into()))),
             };
 
-            (result, if keep_range { Some((start, end)) } else { None })
+            (
+                result,
+                if overwrite_buffer {
+                    Some((start, end))
+                } else {
+                    None
+                },
+            )
         };
 
         if let Some((start, end)) = start {
