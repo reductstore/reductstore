@@ -86,13 +86,13 @@ mod tests {
     }
 
     #[rstest]
-    #[should_panic(expected = "unimplemented")]
+    #[should_panic(expected = "not implemented")]
     fn test_seek(mut record: BoxedReadRecord) {
         let _ = record.seek(SeekFrom::Start(5));
     }
 
     #[rstest]
-    #[should_panic(expected = "unimplemented")]
+    #[should_panic(expected = "not implemented")]
     fn test_read(mut record: BoxedReadRecord) {
         let mut buf = [0; 5];
         let _ = record.read(&mut buf);
