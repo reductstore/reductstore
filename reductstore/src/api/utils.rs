@@ -171,6 +171,7 @@ mod tests {
     mod range_record_stream {
         use super::*;
         use futures_util::StreamExt;
+        use reduct_base::io::ReadRecord;
         use std::collections::Bound::{Included, Unbounded};
         use std::io::{Read, Seek, SeekFrom};
 
