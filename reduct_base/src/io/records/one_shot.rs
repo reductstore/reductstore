@@ -12,16 +12,18 @@ use std::io::{Read, Seek, SeekFrom};
 pub struct OneShotRecord {
     content: Option<Bytes>,
     meta: RecordMeta,
-    pos: usize,
 }
 
 impl OneShotRecord {
-    pub fn boxed(content: Bytes, meta: RecordMeta) -> BoxedReadRecord {
-        Box::new(Self {
+    pub fn new(content: Bytes, meta: RecordMeta) -> Self {
+        Self {
             content: Some(content),
             meta,
-            pos: 0,
-        })
+        }
+    }
+
+    pub fn boxed(content: Bytes, meta: RecordMeta) -> BoxedReadRecord {
+        Box::new(Self::new(content, meta))
     }
 }
 

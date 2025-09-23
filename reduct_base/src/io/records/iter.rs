@@ -19,6 +19,13 @@ impl IterRecord {
             meta,
         }
     }
+
+    pub fn boxed<R: Iterator<Item = Result<Bytes, ReductError>> + 'static>(
+        inner: R,
+        meta: RecordMeta,
+    ) -> Box<dyn ReadRecord> {
+        Box::new(Self::new(inner, meta))
+    }
 }
 impl Read for IterRecord {
     fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {

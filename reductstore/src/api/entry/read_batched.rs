@@ -21,7 +21,7 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -227,14 +227,16 @@ async fn next_record_readers(
 }
 
 struct ReadersWrapper {
-    readers: Vec<BoxedReadRecord>,
+    readers: VecDeque<BoxedReadRecord>,
+    current_reader: Option<BoxedReadRecord>,
     empty_body: bool,
 }
 
 impl ReadersWrapper {
     fn new(readers: Vec<BoxedReadRecord>, empty_body: bool) -> Self {
         Self {
-            readers,
+            readers: VecDeque::from(readers),
+            current_reader: None,
             empty_body,
         }
     }
@@ -245,7 +247,7 @@ impl Stream for ReadersWrapper {
 
     fn poll_next(
         mut self: Pin<&mut ReadersWrapper>,
-        _ctx: &mut Context<'_>,
+        ctx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.empty_body {
             return Poll::Ready(None);
@@ -255,16 +257,18 @@ impl Stream for ReadersWrapper {
             return Poll::Ready(None);
         }
 
-        let mut index = 0;
+        loop {
+            let mut reader = self.readers.pop_front().unwrap();
 
-        while index < self.readers.len() {
-            match self.readers[index].read_chunk() {
-                Some(Ok(bytes)) => return Poll::Ready(Some(Ok(bytes))),
+            match reader.read_chunk() {
+                Some(Ok(bytes)) => {
+                    self.readers.push_front(reader);
+                    return Poll::Ready(Some(Ok(bytes)));
+                }
                 Some(Err(err)) => return Poll::Ready(Some(Err(HttpError::from(err)))),
-                None => index += 1,
+                None => continue,
             }
         }
-        Poll::Ready(None)
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
