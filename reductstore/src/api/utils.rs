@@ -8,7 +8,7 @@ use bytes::Bytes;
 use futures_util::Future;
 use futures_util::Stream;
 use reduct_base::error::ReductError;
-use reduct_base::io::{BoxedReadRecord, ReadRecord, RecordMeta};
+use reduct_base::io::{BoxedReadRecord, RecordMeta};
 use reduct_base::unprocessable_entity;
 use std::collections::Bound::Included;
 use std::collections::{Bound, VecDeque};

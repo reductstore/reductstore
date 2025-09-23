@@ -21,7 +21,7 @@ use base64::Engine;
 use flate2::read::ZlibDecoder;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
-use reduct_base::io::{BoxedReadRecord, ReadRecord};
+use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::{Bound, HashMap, VecDeque};
