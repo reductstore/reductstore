@@ -36,7 +36,6 @@ use reduct_macros::Twin;
 use replication::create_replication_api_routes;
 use serde::de::StdError;
 use server::create_server_api_routes;
-use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use token::create_token_api_routes;

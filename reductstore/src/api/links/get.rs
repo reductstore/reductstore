@@ -10,7 +10,7 @@ use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
 use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::StatusCode;
@@ -19,23 +19,15 @@ use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::read::ZlibDecoder;
-use flate2::Compression;
-use futures_util::Future;
-use futures_util::Stream;
-use log::{debug, info};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::io::{BoxedReadRecord, ReadRecord};
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::{Bound, HashMap, VecDeque};
-use std::io::SeekFrom::Start;
-use std::io::{Cursor, Read, Seek};
+use std::io::{Cursor, Read};
 use std::ops::Bound::Included;
-use std::ops::DerefMut;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use tokio::sync::{Mutex, RwLock};
 
 // GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...

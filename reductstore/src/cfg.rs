@@ -27,7 +27,7 @@ use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";
