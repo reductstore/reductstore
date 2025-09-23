@@ -2,5 +2,10 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
-pub mod cursor;
-pub mod in_memory;
+mod cursor;
+mod iter;
+mod one_shot;
+
+pub use cursor::CursorRecord;
+pub use iter::IterRecord;
+pub use one_shot::OneShotRecord;
