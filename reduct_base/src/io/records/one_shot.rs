@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_meta(mut record: BoxedReadRecord, meta: RecordMeta) {
+    fn test_meta(record: BoxedReadRecord, meta: RecordMeta) {
         assert_eq!(record.meta(), &meta);
     }
 
