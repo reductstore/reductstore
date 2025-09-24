@@ -171,9 +171,9 @@ mod tests {
     mod range_record_stream {
         use super::*;
         use futures_util::StreamExt;
-        use reduct_base::io::ReadRecord;
+        use reduct_base::io::records::CursorRecord;
         use std::collections::Bound::{Included, Unbounded};
-        use std::io::{Read, Seek, SeekFrom};
+        use std::io::Cursor;
 
         #[rstest]
         #[tokio::test]
@@ -187,9 +187,8 @@ mod tests {
                 (Included(20), Unbounded),
             ]);
 
-            let data = b"xxxxx-----yyyyy-----zzzzzz".to_vec();
-            let record = InMemoryRecord::new(data.clone());
-            let reader: Arc<Mutex<BoxedReadRecord>> = Arc::new(Mutex::new(Box::new(record)));
+            let record = from_content(b"xxxxx-----yyyyy-----zzzzzz".to_vec());
+            let reader: Arc<Mutex<BoxedReadRecord>> = Arc::new(Mutex::new(record));
 
             let mut stream = RangeRecordStream::new(reader, ranges);
             stream.buffer_size = buffer_size;
@@ -204,62 +203,30 @@ mod tests {
             );
         }
 
-        struct InMemoryRecord {
-            data: Vec<u8>,
-            position: usize,
-            meta: RecordMeta,
+        #[rstest]
+        #[tokio::test]
+        async fn read_invalid_range() {
+            let ranges = VecDeque::from(vec![(Unbounded, Unbounded)]);
+            let record = from_content(b"xxxxx-----yyyyy-----zzzzzz".to_vec());
+            let reader: Arc<Mutex<BoxedReadRecord>> = Arc::new(Mutex::new(record));
+
+            let mut stream = RangeRecordStream::new(reader, ranges);
+            let chunk = stream.next().await;
+            assert_eq!(
+                chunk.unwrap().err().unwrap(),
+                unprocessable_entity!("Invalid range").into()
+            );
         }
 
-        impl InMemoryRecord {
-            fn new(data: Vec<u8>) -> Self {
-                let len = data.len();
+        fn from_content(content: Vec<u8>) -> BoxedReadRecord {
+            let len = content.len();
+            let meta = RecordMeta::builder()
+                .timestamp(0)
+                .content_length(len as u64)
+                .content_type("application/octet-stream".to_string())
+                .build();
 
-                Self {
-                    data,
-                    position: 0,
-                    meta: RecordMeta::builder()
-                        .timestamp(0)
-                        .content_length(len as u64)
-                        .content_type("application/octet-stream".to_string())
-                        .build(),
-                }
-            }
-        }
-
-        impl Seek for InMemoryRecord {
-            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-                match pos {
-                    Start(offset) => {
-                        self.position = offset as usize;
-                        Ok(self.position as u64)
-                    }
-                    _ => unimplemented!(),
-                }
-            }
-        }
-
-        impl Read for InMemoryRecord {
-            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-                let remaining = &self.data[self.position..];
-                let len = remaining.len().min(buf.len());
-                buf[..len].copy_from_slice(&remaining[..len]);
-                self.position += len;
-                Ok(len)
-            }
-        }
-
-        impl ReadRecord for InMemoryRecord {
-            fn read_chunk(&mut self) -> Option<Result<Bytes, ReductError>> {
-                unimplemented!()
-            }
-
-            fn meta(&self) -> &RecordMeta {
-                &self.meta
-            }
-
-            fn meta_mut(&mut self) -> &mut RecordMeta {
-                unimplemented!()
-            }
+            CursorRecord::boxed(Cursor::new(content), meta, 10)
         }
     }
 }

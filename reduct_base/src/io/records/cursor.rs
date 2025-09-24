@@ -25,6 +25,10 @@ impl<R: Read + Seek> CursorRecord<R> {
             pos: 0,
         }
     }
+
+    pub fn boxed(inner: R, meta: RecordMeta, chunk_size: usize) -> Box<Self> {
+        Box::new(Self::new(inner, meta, chunk_size))
+    }
 }
 
 impl<R: Read + Seek> Read for CursorRecord<R> {

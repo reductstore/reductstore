@@ -21,11 +21,25 @@ const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(60_000);
 
 pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
-    FileCache::new(
+    #[allow(unused_mut)]
+    let mut cache = FileCache::new(
         FILE_CACHE_MAX_SIZE,
         FILE_CACHE_TIME_TO_LIVE,
         FILE_CACHE_SYNC_INTERVAL,
-    )
+    );
+
+    #[cfg(test)]
+    {
+        // Use a temporary directory for tests without backend configuration
+        cache.set_storage_backend(
+            Backend::builder()
+                .local_data_path(tempfile::tempdir().unwrap().keep().to_str().unwrap())
+                .try_build()
+                .unwrap(),
+        );
+    }
+
+    cache
 });
 
 pub(crate) struct FileWeak {

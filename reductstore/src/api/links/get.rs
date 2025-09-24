@@ -237,6 +237,7 @@ mod tests {
     use crate::storage::entry::io::record_reader::tests::MockRecord;
     use axum::body::to_bytes;
     use chrono::Utc;
+    use mockall::predicate::eq;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
@@ -326,6 +327,9 @@ mod tests {
                 .content_type("text/plain".to_string())
                 .build(),
         );
+        mock.expect_seek()
+            .with(eq(SeekFrom::Start(0)))
+            .returning(|_| Ok(0));
 
         let params = &url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
             .into_owned()
@@ -420,6 +424,53 @@ mod tests {
         .unwrap();
         assert_eq!(err.0, unprocessable_entity!("Query link has expired"));
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_query_link_range(
+        #[future] components: Arc<Components>,
+        mut headers: HeaderMap,
+    ) {
+        let components = components.await;
+
+        let link = create_query_link(
+            headers.clone(),
+            components.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        headers.typed_insert(Range::bytes(0..3).unwrap()); // Request first
+        let response = get(
+            State(Arc::clone(&components)),
+            headers,
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap();
+
+        let resp = response.into_response();
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(resp.headers()["content-type"], "text/plain");
+        assert_eq!(resp.headers()["content-length"], "3");
+        assert_eq!(resp.headers()["x-reduct-label-x"], "y");
+
+        let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(String::from_utf8_lossy(body_bytes.iter().as_slice()), "Hey");
+    }
+
     mod validation {
         use super::*;
         use rstest::rstest;

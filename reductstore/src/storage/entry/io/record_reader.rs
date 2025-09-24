@@ -284,25 +284,53 @@ pub(crate) mod tests {
     mod reader {
         use super::*;
         use crate::storage::entry::Entry;
+        use prost_wkt_types::Timestamp;
         use std::fs;
 
-        use crate::core::thread_pool::find_task_group;
-        use crate::storage::entry::tests::get_task_group;
-
-        use prost_wkt_types::Timestamp;
-
         #[rstest]
-        fn test_no_task(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000);
-            let mut reader = entry.begin_read(1000).wait().unwrap();
-            assert!(
-                find_task_group(&get_task_group(entry.path(), 1000)).is_none(),
-                "We don't spawn a task for small records"
-            );
+        fn test_read_chunk(mut reader: RecordReader) {
             assert_eq!(
                 reader.read_chunk().unwrap().unwrap(),
                 Bytes::from("0123456789")
             );
+        }
+
+        #[rstest]
+        fn test_read(mut reader: RecordReader) {
+            let mut buf = vec![0; 4];
+            let read = reader.read(&mut buf).unwrap();
+            assert_eq!(read, 4);
+            assert_eq!(buf, b"0123");
+        }
+
+        #[rstest]
+        fn test_empty_body(record: Record) {
+            let mut reader = RecordReader::form_record(record);
+            let mut buf = vec![0; 4];
+            let read = reader.read(&mut buf).unwrap();
+            assert_eq!(read, 0);
+            assert_eq!(buf, [0; 4]);
+            assert_eq!(reader.read_chunk(), None);
+        }
+
+        #[rstest]
+        #[case(SeekFrom::Start(0), 0, 4, b"0123")]
+        #[case(SeekFrom::Start(5), 5, 4, b"5678")]
+        #[case(SeekFrom::End(-5), 5, 4, b"5678")]
+        #[case(SeekFrom::Current(2), 2, 4, b"2345")]
+        fn test_seek(
+            mut reader: RecordReader,
+            #[case] seek_from: SeekFrom,
+            #[case] expected_pos: u64,
+            #[case] read_size: usize,
+            #[case] expected_data: &[u8],
+        ) {
+            let new_pos = reader.seek(seek_from).unwrap();
+            assert_eq!(new_pos, expected_pos);
+            let mut buf = vec![0; read_size];
+            let read = reader.read(&mut buf).unwrap();
+            assert_eq!(read, read_size);
+            assert_eq!(&buf, expected_data);
         }
 
         #[rstest]
@@ -347,9 +375,16 @@ pub(crate) mod tests {
             });
             record
         }
+
+        #[fixture]
+        fn reader(mut entry: Entry) -> RecordReader {
+            write_stub_record(&mut entry, 1000);
+            entry.begin_read(1000).wait().unwrap()
+        }
     }
 
     mock! {
+        // Used in other tests
         pub(crate) Record {}
 
         impl Read for Record {

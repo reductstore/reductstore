@@ -228,7 +228,6 @@ async fn next_record_readers(
 
 struct ReadersWrapper {
     readers: VecDeque<BoxedReadRecord>,
-    current_reader: Option<BoxedReadRecord>,
     empty_body: bool,
 }
 
@@ -236,7 +235,6 @@ impl ReadersWrapper {
     fn new(readers: Vec<BoxedReadRecord>, empty_body: bool) -> Self {
         Self {
             readers: VecDeque::from(readers),
-            current_reader: None,
             empty_body,
         }
     }
@@ -247,7 +245,7 @@ impl Stream for ReadersWrapper {
 
     fn poll_next(
         mut self: Pin<&mut ReadersWrapper>,
-        ctx: &mut Context<'_>,
+        _ctx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.empty_body {
             return Poll::Ready(None);
@@ -538,7 +536,7 @@ mod tests {
         #[rstest]
         fn test_size_hint() {
             let wrapper = ReadersWrapper {
-                readers: vec![],
+                readers: VecDeque::new(),
                 empty_body: false,
             };
             assert_eq!(wrapper.size_hint(), (0, None));
