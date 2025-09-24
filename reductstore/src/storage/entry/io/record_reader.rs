@@ -1,7 +1,7 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::file_cache::{FileRc, FileWeak};
+use crate::core::file_cache::FileWeak;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::proto::Record;
 use crate::storage::storage::MAX_IO_BUFFER_SIZE;
@@ -19,7 +19,7 @@ use std::sync::{Arc, RwLock};
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     meta: RecordMeta,
-    file_ref: Option<FileRc>,
+    file_ref: Option<FileWeak>,
     offset: u64,
     content_size: u64,
     pos: u64,
@@ -62,7 +62,7 @@ impl RecordReader {
 
         Ok(Self {
             meta,
-            file_ref: Some(file_ref.upgrade()?),
+            file_ref: Some(file_ref),
             offset,
             content_size,
             pos: 0,
@@ -99,7 +99,10 @@ impl Read for RecordReader {
             None => return Ok(0),
         };
 
-        let mut lock = file_ref.write().unwrap();
+        let rc = file_ref
+            .upgrade()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.message))?;
+        let mut lock = rc.write().unwrap();
 
         lock.seek(SeekFrom::Start(self.offset + self.pos))?;
         let read = lock.read(buf)?;

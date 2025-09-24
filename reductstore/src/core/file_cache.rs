@@ -267,7 +267,7 @@ impl FileCache {
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
         if let Some(file) = cache.get(path) {
-            if Arc::strong_count(&file) > 1 || Arc::weak_count(&file) > 0 {
+            if Arc::strong_count(&file) > 1 {
                 return Err(internal_server_error!(
                     "Cannot remove file {} because it is in use",
                     path.display()

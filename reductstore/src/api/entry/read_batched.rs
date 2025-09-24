@@ -255,9 +255,7 @@ impl Stream for ReadersWrapper {
             return Poll::Ready(None);
         }
 
-        loop {
-            let mut reader = self.readers.pop_front().unwrap();
-
+        while let Some(mut reader) = self.readers.pop_front() {
             match reader.read_chunk() {
                 Some(Ok(bytes)) => {
                     self.readers.push_front(reader);
@@ -267,6 +265,7 @@ impl Stream for ReadersWrapper {
                 None => continue,
             }
         }
+        Poll::Ready(None)
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
