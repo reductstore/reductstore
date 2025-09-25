@@ -9,8 +9,8 @@ use log::error;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
+use reduct_base::io::BoxedReadRecord;
 use tokio::time::{Duration, Instant};
 
 pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
@@ -25,7 +25,7 @@ impl RemoteBucketState for BucketUnavailableState {
     fn write_batch(
         self: Box<Self>,
         entry: &str,
-        records: Vec<(RecordReader, Transaction)>,
+        records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
             let bucket = self.client.get_bucket(&self.bucket_name);

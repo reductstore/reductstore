@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
+use reduct_base::io::BoxedReadRecord;
 
 struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
@@ -24,7 +24,7 @@ pub(crate) trait RemoteBucket {
     fn write_batch(
         &mut self,
         entry_name: &str,
-        records: Vec<(RecordReader, Transaction)>,
+        records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
     fn is_active(&self) -> bool;
@@ -43,7 +43,7 @@ impl RemoteBucket for RemoteBucketImpl {
     fn write_batch(
         &mut self,
         entry_name: &str,
-        records: Vec<(RecordReader, Transaction)>,
+        records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError> {
         self.state = Some(self.state.take().unwrap().write_batch(entry_name, records));
 
@@ -78,9 +78,12 @@ pub(super) mod tests {
 
     use crate::storage::proto::Record;
 
+    use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
+
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;
+    use reduct_base::io::BoxedReadRecord;
     use rstest::{fixture, rstest};
 
     mock! {
@@ -103,13 +106,13 @@ pub(super) mod tests {
             fn write_batch(
                 &self,
                 entry: &str,
-                records: Vec<RecordReader>,
+                records: Vec<BoxedReadRecord>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn update_batch(
                 &self,
                 entry: &str,
-                records: &Vec<RecordReader>,
+                records: &Vec<BoxedReadRecord>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
             fn server_url(&self) -> &str;
@@ -125,7 +128,7 @@ pub(super) mod tests {
             fn write_batch(
                 self: Box<Self>,
                 entry: &str,
-                records: Vec<(RecordReader, Transaction)>,
+                records: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
             fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
@@ -200,10 +203,10 @@ pub(super) mod tests {
     }
 
     fn write_record(remote_bucket: &mut RemoteBucketImpl) -> Result<ErrorRecordMap, ReductError> {
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let (_tx, rx) = std::sync::mpsc::channel();
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
-        let record = RecordReader::form_record_with_rx(rx, rec);
+        let record = MockRecordReader::form_record_with_rx(rx, rec);
         remote_bucket.write_batch("test", vec![(record, Transaction::WriteRecord(0))])
     }
 }

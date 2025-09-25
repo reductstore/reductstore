@@ -4,9 +4,9 @@ mod initial_state;
 
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
-use crate::storage::entry::RecordReader;
 pub(super) use initial_state::InitialState;
 use reduct_base::error::ReductError;
+use reduct_base::io::BoxedReadRecord;
 
 /// A state of the remote bucket.
 pub(super) trait RemoteBucketState {
@@ -14,7 +14,7 @@ pub(super) trait RemoteBucketState {
     fn write_batch(
         self: Box<Self>,
         entry_name: &str,
-        records: Vec<(RecordReader, Transaction)>,
+        records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
     /// Is the bucket available?

@@ -1,10 +1,17 @@
+// Copyright 2025 ReductSoftware UG
+// This Source Code Form is subject to the terms of the Mozilla Public
+//    License, v. 2.0. If a copy of the MPL was not distributed with this
+//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+pub mod records;
+
 use crate::error::ReductError;
-use crate::{internal_server_error, Labels};
+use crate::Labels;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::io::{Read, Seek};
 use std::time::Duration;
-use tokio::runtime::Handle;
 
 pub type WriteChunk = Result<Option<Bytes>, ReductError>;
 pub type ReadChunk = Option<Result<Bytes, ReductError>>;
@@ -148,39 +155,12 @@ impl RecordMeta {
     }
 }
 
+pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
+
 /// Represents a record in the storage engine that can be read as a stream of bytes.
-#[async_trait]
-pub trait ReadRecord {
+pub trait ReadRecord: Read + Seek {
     /// Reads a chunk of the record content.
-    ///
-    /// # Returns
-    ///
-    /// A chunk of the record content. If the chunk is an error or None, the reader should stop.
-    async fn read(&mut self) -> ReadChunk;
-
-    /// Reads a chunk of the record content with a timeout.
-    ///
-    /// # Arguments
-    ///
-    /// * `timeout` - The maximum time to wait for the next chunk.
-    ///
-    /// # Returns
-    ///
-    /// A chunk of the record content. If the chunk is an error or None, the reader should stop.
-    async fn read_timeout(&mut self, timeout: Duration) -> ReadChunk {
-        match tokio::time::timeout(timeout, self.read()).await {
-            Ok(chunk) => chunk,
-            Err(er) => Some(Err(internal_server_error!(
-                "Timeout reading record: {}",
-                er
-            ))),
-        }
-    }
-
-    /// Reads a chunk of the record content synchronously.
-    fn blocking_read(&mut self) -> ReadChunk {
-        Handle::current().block_on(self.read())
-    }
+    fn read_chunk(&mut self) -> ReadChunk;
 
     /// Returns meta information about the record.
     fn meta(&self) -> &RecordMeta;
@@ -211,35 +191,6 @@ pub(crate) mod tests {
 
     use rstest::{fixture, rstest};
 
-    use tokio::task::spawn_blocking;
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_blocking_read() {
-        let result = spawn_blocking(move || {
-            let mut record = MockRecord::new();
-            record.blocking_read()
-        });
-        assert_eq!(
-            result.await.unwrap().unwrap(),
-            Ok(Bytes::from_static(b"test"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_default_read_timeout() {
-        let mut record = MockRecord::new();
-        let result = record.read_timeout(Duration::from_secs(1)).await;
-        assert_eq!(result.unwrap(), Ok(Bytes::from_static(b"test")));
-
-        let result = record.read_timeout(Duration::from_millis(5)).await;
-        assert_eq!(
-            result.unwrap().err().unwrap(),
-            internal_server_error!("Timeout reading record: deadline has elapsed")
-        );
-    }
-
     mod meta {
         use super::*;
 
@@ -262,19 +213,6 @@ pub(crate) mod tests {
             assert_eq!(new_meta.content_length(), 1024);
         }
 
-        #[rstest]
-        fn test_meta_mut() {
-            let mut record = MockRecord::new();
-            let meta_mut = record.meta_mut();
-            meta_mut
-                .labels_mut()
-                .insert("test_key".to_string(), "test_value".to_string());
-            assert_eq!(
-                record.meta().labels().get("test_key"),
-                Some(&"test_value".to_string())
-            );
-        }
-
         #[fixture]
         fn meta() -> RecordMeta {
             RecordMeta::builder()
@@ -285,41 +223,6 @@ pub(crate) mod tests {
                 .content_length(1024)
                 .computed_labels(Labels::new())
                 .build()
-        }
-    }
-
-    pub struct MockRecord {
-        metadata: RecordMeta,
-    }
-
-    impl MockRecord {
-        pub fn new() -> Self {
-            Self {
-                metadata: RecordMeta::builder()
-                    .timestamp(0)
-                    .state(0)
-                    .labels(Labels::new())
-                    .content_type("application/octet-stream".to_string())
-                    .content_length(0)
-                    .computed_labels(Labels::new())
-                    .build(),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl ReadRecord for MockRecord {
-        async fn read(&mut self) -> ReadChunk {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            Some(Ok(Bytes::from("test")))
-        }
-
-        fn meta(&self) -> &RecordMeta {
-            &self.metadata
-        }
-
-        fn meta_mut(&mut self) -> &mut RecordMeta {
-            &mut self.metadata
         }
     }
 }

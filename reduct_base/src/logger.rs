@@ -1,5 +1,7 @@
-// Copyright 2023 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2025 ReductSoftware UG
+// This Source Code Form is subject to the terms of the Mozilla Public
+//    License, v. 2.0. If a copy of the MPL was not distributed with this
+//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::prelude::{DateTime, Utc};
 use log::{info, Level, Log, Metadata, Record};

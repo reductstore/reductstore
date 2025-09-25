@@ -16,6 +16,7 @@ use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::cfg::Cfg;
+use crate::core::cache::Cache;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::replication::ManageReplications;
 use crate::storage::storage::Storage;
@@ -30,6 +31,7 @@ use log::{error, warn};
 use middleware::{default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError as BaseHttpError;
+use reduct_base::io::BoxedReadRecord;
 use reduct_macros::Twin;
 use replication::create_replication_api_routes;
 use serde::de::StdError;
@@ -37,7 +39,7 @@ use server::create_server_api_routes;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use token::create_token_api_routes;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
 pub struct Components {
@@ -47,6 +49,8 @@ pub struct Components {
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub(crate) replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
+    pub(crate) query_link_cache: RwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
+
     pub(crate) cfg: Cfg,
 }
 
@@ -194,6 +198,7 @@ mod tests {
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     mod http_error {
         use super::*;
@@ -346,6 +351,7 @@ mod tests {
             )
             .expect("Failed to create extension repo"),
             cfg: Cfg::default(),
+            query_link_cache: RwLock::new(Cache::new(8, Duration::from_secs(60))),
         };
 
         Arc::new(components)

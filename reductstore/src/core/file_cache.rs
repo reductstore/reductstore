@@ -21,11 +21,25 @@ const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(60_000);
 
 pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
-    FileCache::new(
+    #[allow(unused_mut)]
+    let mut cache = FileCache::new(
         FILE_CACHE_MAX_SIZE,
         FILE_CACHE_TIME_TO_LIVE,
         FILE_CACHE_SYNC_INTERVAL,
-    )
+    );
+
+    // #[cfg(test)]
+    // {
+    //     // Use a temporary directory for tests without backend configuration
+    //     cache.set_storage_backend(
+    //         Backend::builder()
+    //             .local_data_path(tempfile::tempdir().unwrap().keep().to_str().unwrap())
+    //             .try_build()
+    //             .unwrap(),
+    //     );
+    // }
+
+    cache
 });
 
 pub(crate) struct FileWeak {
@@ -252,7 +266,16 @@ impl FileCache {
     /// removing the file from the file system.
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
-        cache.remove(path);
+        if let Some(file) = cache.remove(path) {
+            if Arc::strong_count(&file) > 1 {
+                cache.insert(path.clone(), file);
+                return Err(internal_server_error!(
+                    "Cannot remove file {} because it is in use",
+                    path.display()
+                ));
+            }
+        }
+
         self.backpack.read()?.remove(path)?;
 
         Ok(())
@@ -448,6 +471,25 @@ mod tests {
 
         cache.remove(&file_path).unwrap();
         assert_eq!(file_path.exists(), false);
+    }
+
+    #[rstest]
+    fn test_remove_used(cache: FileCache, tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("test_remove_used.txt");
+        let _file_ref = cache
+            .write_or_create(&file_path, SeekFrom::Start(0))
+            .unwrap()
+            .upgrade();
+
+        let err = cache.remove(&file_path).unwrap_err();
+        assert_eq!(
+            err,
+            internal_server_error!(
+                "Cannot remove file {} because it is in use",
+                file_path.display()
+            )
+        );
+        assert_eq!(file_path.exists(), true);
     }
 
     #[rstest]

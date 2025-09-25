@@ -13,6 +13,7 @@ use crate::backend::Backend;
 use crate::cfg::io::IoConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
+use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
@@ -27,10 +28,14 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8383;
+
+pub const DEFAULT_CACHED_QUERIES: usize = 8;
+pub const DEFAULT_CACHED_QUERIES_TTL: u64 = 600; // seconds
 
 #[derive(Clone)]
 pub struct Cfg {
@@ -224,6 +229,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     .server_info(server_info)
                     .build(),
             )?,
+            query_link_cache: tokio::sync::RwLock::new(Cache::new(
+                DEFAULT_CACHED_QUERIES,
+                Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
+            )),
             cfg: self.cfg.clone(),
         })
     }

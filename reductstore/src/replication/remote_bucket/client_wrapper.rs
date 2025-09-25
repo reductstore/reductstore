@@ -1,19 +1,17 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::replication::remote_bucket::ErrorRecordMap;
 use async_stream::stream;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
-use std::collections::BTreeMap;
-
-use crate::replication::remote_bucket::ErrorRecordMap;
-use crate::storage::entry::RecordReader;
 use reduct_base::error::{ErrorCode, IntEnum, ReductError};
-use reduct_base::io::ReadRecord;
+use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -31,13 +29,13 @@ pub(super) trait ReductBucketApi {
     fn write_batch(
         &self,
         entry: &str,
-        records: Vec<RecordReader>,
+        records: Vec<BoxedReadRecord>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
     fn update_batch(
         &self,
         entry: &str,
-        records: &Vec<RecordReader>,
+        records: &Vec<BoxedReadRecord>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
     fn server_url(&self) -> &str;
@@ -98,7 +96,7 @@ struct BucketWrapper {
 }
 
 impl BucketWrapper {
-    fn build_headers(records: &Vec<RecordReader>, update_only: bool) -> HeaderMap {
+    fn build_headers(records: &Vec<BoxedReadRecord>, update_only: bool) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let content_length: u64 = if update_only {
             0
@@ -150,23 +148,23 @@ impl BucketWrapper {
     }
 
     fn prepare_batch_to_write(
-        mut records: Vec<RecordReader>,
+        mut records: Vec<BoxedReadRecord>,
     ) -> (HeaderMap, impl Stream<Item = Result<Bytes, ReductError>>) {
         Self::sort_by_timestamp(&mut records);
         let headers = Self::build_headers(&mut records, false);
 
         let stream = stream! {
-             while let Some(mut record) = records.pop() {
-                 while let Some(chunk) = record.read().await {
+            while let Some(mut record) = records.pop() {
+                while let Some(chunk) = record.read_chunk() {
                      yield chunk;
-                 }
-             }
+                }
+            }
         };
 
         (headers, stream)
     }
 
-    fn prepare_batch_to_update(records: &Vec<RecordReader>) -> HeaderMap {
+    fn prepare_batch_to_update(records: &Vec<BoxedReadRecord>) -> HeaderMap {
         let headers = Self::build_headers(&records, true);
         headers
     }
@@ -202,7 +200,7 @@ impl BucketWrapper {
         Ok(failed_records)
     }
 
-    fn sort_by_timestamp(records_to_update: &mut Vec<RecordReader>) {
+    fn sort_by_timestamp(records_to_update: &mut Vec<BoxedReadRecord>) {
         records_to_update.sort_by(|a, b| b.meta().timestamp().cmp(&a.meta().timestamp()));
     }
 }
@@ -273,7 +271,7 @@ impl ReductBucketApi for BucketWrapper {
     fn write_batch(
         &self,
         entry: &str,
-        records: Vec<RecordReader>,
+        records: Vec<BoxedReadRecord>,
     ) -> Result<ErrorRecordMap, ReductError> {
         let (headers, stream) = Self::prepare_batch_to_write(records);
         let request = self.client.request(
@@ -300,7 +298,7 @@ impl ReductBucketApi for BucketWrapper {
     fn update_batch(
         &self,
         entry: &str,
-        records: &Vec<RecordReader>,
+        records: &Vec<BoxedReadRecord>,
     ) -> Result<ErrorRecordMap, ReductError> {
         let headers = Self::prepare_batch_to_update(records);
         let request = self.client.request(
@@ -334,19 +332,22 @@ pub(super) fn create_client(url: &str, api_token: &str) -> BoxedClientApi {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
     use futures_util::StreamExt;
     use hyper::http;
+    use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use rstest::*;
+    use std::io::{Read, Seek, SeekFrom};
     use std::pin::pin;
-    use tokio::sync::mpsc::Sender;
+    use std::sync::mpsc::{Receiver, Sender};
+    use std::sync::Mutex;
 
     #[rstest]
     #[tokio::test]
-    async fn test_prepare_batch_to_write(records: (Vec<RecordReader>, Vec<Tx>)) {
+    async fn test_prepare_batch_to_write(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
         let (records, mut txs) = records;
         let (headers, stream) = BucketWrapper::prepare_batch_to_write(records);
 
@@ -367,10 +368,10 @@ mod tests {
 
         let mut stream = pin!(stream);
 
-        txs[0].send(Ok(Bytes::from("record1"))).await.unwrap();
+        txs[0].send(Ok(Bytes::from("record1"))).unwrap();
         drop(txs.remove(0));
 
-        txs[0].send(Ok(Bytes::from("record2"))).await.unwrap();
+        txs[0].send(Ok(Bytes::from("record2"))).unwrap();
         drop(txs.remove(0));
 
         let chunk = stream.next().await.unwrap().unwrap();
@@ -380,7 +381,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_prepare_batch_to_update(records: (Vec<RecordReader>, Vec<Tx>)) {
+    fn test_prepare_batch_to_update(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
         let (records, _) = records;
         let headers = BucketWrapper::prepare_batch_to_update(&records);
 
@@ -463,8 +464,90 @@ mod tests {
         }
     }
 
+    mod mock_record_reader {
+        use super::*;
+        #[rstest]
+        fn test_meta(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
+            let (records, _) = records;
+            let mut record = records.into_iter().next().unwrap();
+            assert_eq!(record.meta().timestamp(), 1);
+            assert_eq!(record.meta().content_type(), "text/plain");
+            assert_eq!(record.meta().content_length(), 10);
+            assert_eq!(record.meta().labels().len(), 2);
+
+            let _ = record.meta_mut();
+        }
+
+        #[rstest]
+        #[should_panic(expected = "not implemented")]
+        fn test_seek_unimplemented(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
+            let (records, _) = records;
+            records
+                .into_iter()
+                .next()
+                .unwrap()
+                .seek(SeekFrom::Start(0))
+                .unwrap();
+        }
+
+        #[rstest]
+        #[should_panic(expected = "not implemented")]
+        fn test_read_unimplemented(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
+            let (records, _) = records;
+            let mut record = records.into_iter().next().unwrap();
+            let mut buf = [0; 10];
+            let _ = record.read(&mut buf);
+        }
+    }
+
+    pub struct MockRecordReader {
+        meta: RecordMeta,
+        rx: Mutex<Receiver<Result<Bytes, ReductError>>>,
+    }
+
+    impl MockRecordReader {
+        pub(crate) fn form_record_with_rx(
+            rx: Receiver<Result<Bytes, ReductError>>,
+            record: Record,
+        ) -> BoxedReadRecord {
+            Box::new(Self {
+                meta: record.into(),
+                rx: Mutex::new(rx),
+            })
+        }
+    }
+
+    impl Read for MockRecordReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            unimplemented!()
+        }
+    }
+
+    impl Seek for MockRecordReader {
+        fn seek(&mut self, _pos: SeekFrom) -> std::io::Result<u64> {
+            unimplemented!()
+        }
+    }
+
+    impl ReadRecord for MockRecordReader {
+        fn read_chunk(&mut self) -> ReadChunk {
+            match self.rx.lock().unwrap().recv() {
+                Ok(chunk) => Some(chunk),
+                Err(_) => None,
+            }
+        }
+
+        fn meta(&self) -> &RecordMeta {
+            &self.meta
+        }
+
+        fn meta_mut(&mut self) -> &mut RecordMeta {
+            &mut self.meta
+        }
+    }
+
     #[fixture]
-    fn records() -> (Vec<RecordReader>, Vec<Tx>) {
+    fn records() -> (Vec<BoxedReadRecord>, Vec<Tx>) {
         let rec1 = Record {
             timestamp: Some(us_to_ts(&1)),
             labels: vec![
@@ -495,13 +578,13 @@ mod tests {
             state: 0,
         };
 
-        let (tx1, rx1) = tokio::sync::mpsc::channel(1);
-        let (tx2, rx2) = tokio::sync::mpsc::channel(1);
+        let (tx1, rx1) = std::sync::mpsc::channel();
+        let (tx2, rx2) = std::sync::mpsc::channel();
 
         (
             vec![
-                RecordReader::form_record_with_rx(rx1, rec1),
-                RecordReader::form_record_with_rx(rx2, rec2),
+                MockRecordReader::form_record_with_rx(rx1, rec1),
+                MockRecordReader::form_record_with_rx(rx2, rec2),
             ],
             vec![tx1, tx2],
         )

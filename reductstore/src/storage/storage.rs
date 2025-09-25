@@ -576,7 +576,7 @@ mod tests {
             assert_eq!(bucket.name(), "new");
 
             let mut reader = bucket.begin_read("entry-1", 0).wait().unwrap();
-            let record = reader.read().await.unwrap().unwrap();
+            let record = reader.read_chunk().unwrap().unwrap();
             assert_eq!(record, Bytes::from("0123456789"));
         }
 

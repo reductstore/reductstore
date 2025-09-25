@@ -385,7 +385,7 @@ mod tests {
             assert_eq!(&reader.meta().labels()["a"], "b");
             assert_eq!(reader.meta().content_type(), "text/plain");
             assert_eq!(reader.meta().content_length(), 10);
-            assert_eq!(reader.read().await.unwrap(), Ok(Bytes::from("1234567890")));
+            assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("1234567890")));
         }
         {
             let mut reader = bucket
@@ -399,7 +399,7 @@ mod tests {
             assert_eq!(reader.meta().content_type(), "text/plain");
             assert_eq!(reader.meta().content_length(), 20);
             assert_eq!(
-                reader.read().await.unwrap(),
+                reader.read_chunk().unwrap(),
                 Ok(Bytes::from("abcdef1234567890abcd"))
             );
         }
@@ -415,7 +415,7 @@ mod tests {
             assert_eq!(reader.meta().content_type(), "text/plain");
             assert_eq!(reader.meta().content_length(), 18);
             assert_eq!(
-                reader.read().await.unwrap(),
+                reader.read_chunk().unwrap(),
                 Ok(Bytes::from("ef1234567890abcdef"))
             );
         }
@@ -486,13 +486,13 @@ mod tests {
         {
             let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
             assert_eq!(reader.meta().content_length(), 10);
-            assert_eq!(reader.read().await.unwrap(), Ok(Bytes::from("1234567890")));
+            assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("1234567890")));
         }
         {
             let mut reader = bucket.begin_read("entry-1", 3).await.unwrap();
             assert_eq!(reader.meta().content_length(), 18);
             assert_eq!(
-                reader.read().await.unwrap(),
+                reader.read_chunk().unwrap(),
                 Ok(Bytes::from("ef1234567890abcdef"))
             );
         }

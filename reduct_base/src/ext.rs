@@ -7,14 +7,13 @@ mod ext_info;
 mod ext_settings;
 
 use crate::error::ReductError;
-use crate::io::ReadRecord;
+use crate::io::BoxedReadRecord;
 use crate::msg::entry_api::QueryEntry;
 use async_trait::async_trait;
 pub use ext_info::{IoExtensionInfo, IoExtensionInfoBuilder};
 use futures::stream::Stream;
 
 pub use ext_settings::{ExtSettings, ExtSettingsBuilder};
-pub type BoxedReadRecord = Box<dyn ReadRecord + Send + Sync>;
 pub type BoxedRecordStream =
     Box<dyn Stream<Item = Result<BoxedReadRecord, ReductError>> + Send + Sync>;
 

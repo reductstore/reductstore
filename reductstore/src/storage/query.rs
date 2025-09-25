@@ -226,7 +226,7 @@ mod tests {
             block_manager.clone(),
         );
         assert!(rx.is_empty());
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         assert!(handle.is_finished());
     }
 

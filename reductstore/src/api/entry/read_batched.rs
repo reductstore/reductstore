@@ -17,13 +17,11 @@ use futures_util::Stream;
 use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
-use futures_util::Future;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::ext::BoxedReadRecord;
+use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
-use std::collections::HashMap;
-use std::pin::pin;
+use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -201,10 +199,7 @@ async fn fetch_and_response_batched_records(
 
     Ok((
         headers,
-        Body::from_stream(ReadersWrapper {
-            readers,
-            empty_body,
-        }),
+        Body::from_stream(ReadersWrapper::new(readers, empty_body)),
     ))
 }
 
@@ -232,8 +227,17 @@ async fn next_record_readers(
 }
 
 struct ReadersWrapper {
-    readers: Vec<BoxedReadRecord>,
+    readers: VecDeque<BoxedReadRecord>,
     empty_body: bool,
+}
+
+impl ReadersWrapper {
+    fn new(readers: Vec<BoxedReadRecord>, empty_body: bool) -> Self {
+        Self {
+            readers: VecDeque::from(readers),
+            empty_body,
+        }
+    }
 }
 
 impl Stream for ReadersWrapper {
@@ -241,7 +245,7 @@ impl Stream for ReadersWrapper {
 
     fn poll_next(
         mut self: Pin<&mut ReadersWrapper>,
-        ctx: &mut Context<'_>,
+        _ctx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.empty_body {
             return Poll::Ready(None);
@@ -251,21 +255,14 @@ impl Stream for ReadersWrapper {
             return Poll::Ready(None);
         }
 
-        let mut index = 0;
-        while index < self.readers.len() {
-            let pinned_future = pin!(self.readers[index].read());
-            if let Poll::Ready(data) = pinned_future.poll(ctx) {
-                match data {
-                    Some(Ok(chunk)) => {
-                        return Poll::Ready(Some(Ok(chunk)));
-                    }
-                    Some(Err(err)) => {
-                        return Poll::Ready(Some(Err(HttpError::from(err))));
-                    }
-                    None => index += 1,
-                };
-            } else {
-                return Poll::Pending;
+        while let Some(mut reader) = self.readers.pop_front() {
+            match reader.read_chunk() {
+                Some(Ok(bytes)) => {
+                    self.readers.push_front(reader);
+                    return Poll::Ready(Some(Ok(bytes)));
+                }
+                Some(Err(err)) => return Poll::Ready(Some(Err(HttpError::from(err)))),
+                None => continue,
             }
         }
         Poll::Ready(None)
@@ -278,17 +275,16 @@ impl Stream for ReadersWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
-    use mockall::mock;
 
     use crate::api::tests::{components, headers, path_to_entry_1};
 
     use crate::ext::ext_repository::create_ext_repository;
+    use crate::storage::entry::io::record_reader::tests::MockRecord;
     use reduct_base::ext::ExtSettings;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::io::RecordMeta;
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
     use rstest::*;
@@ -539,23 +535,10 @@ mod tests {
         #[rstest]
         fn test_size_hint() {
             let wrapper = ReadersWrapper {
-                readers: vec![],
+                readers: VecDeque::new(),
                 empty_body: false,
             };
             assert_eq!(wrapper.size_hint(), (0, None));
-        }
-    }
-
-    mock! {
-        Record {}
-
-        #[async_trait]
-        impl ReadRecord for Record {
-            async fn read(&mut self) -> Option<Result<Bytes, ReductError>>;
-
-          fn meta(&self) -> &RecordMeta;
-
-          fn meta_mut(&mut self) -> &mut RecordMeta;
         }
     }
 }

@@ -519,7 +519,7 @@ mod tests {
             );
 
             let mut reader = bucket.begin_read("test-2", 1).await.unwrap();
-            assert_eq!(reader.read().await.unwrap().unwrap(), Bytes::from("test"));
+            assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from("test"));
         }
     }
 
@@ -574,7 +574,7 @@ mod tests {
         time: u64,
     ) -> Result<Vec<u8>, ReductError> {
         let mut reader = bucket.begin_read(entry_name, time).await?;
-        let data = reader.read().await.unwrap().unwrap();
+        let data = reader.read_chunk().unwrap().unwrap();
         Ok(data.to_vec())
     }
 

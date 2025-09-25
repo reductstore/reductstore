@@ -152,10 +152,7 @@ mod tests {
     fn test_begin_read_ok1(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000);
         let mut reader = entry.begin_read(1000000).wait().unwrap();
-        assert_eq!(
-            reader.blocking_read().unwrap(),
-            Ok(Bytes::from("0123456789"))
-        );
+        assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
     #[rstest]
@@ -164,10 +161,7 @@ mod tests {
         write_stub_record(&mut entry, 1010000);
 
         let mut reader = entry.begin_read(1010000).wait().unwrap();
-        assert_eq!(
-            reader.blocking_read().unwrap(),
-            Ok(Bytes::from("0123456789"))
-        );
+        assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
     #[rstest]
@@ -180,14 +174,14 @@ mod tests {
 
         let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(
-            reader.blocking_read().unwrap().unwrap().to_vec(),
+            reader.read_chunk().unwrap().unwrap().to_vec(),
             data[0..MAX_IO_BUFFER_SIZE]
         );
         assert_eq!(
-            reader.blocking_read().unwrap().unwrap().to_vec(),
+            reader.read_chunk().unwrap().unwrap().to_vec(),
             data[MAX_IO_BUFFER_SIZE..]
         );
-        assert_eq!(reader.blocking_read(), None);
+        assert_eq!(reader.read_chunk(), None);
     }
 
     #[rstest]
