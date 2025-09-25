@@ -39,7 +39,9 @@ impl<R: Read + Seek> Read for CursorRecord<R> {
 
 impl<R: Read + Seek> Seek for CursorRecord<R> {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        self.inner.seek(pos)
+        let pos = self.inner.seek(pos)?;
+        self.pos = pos;
+        Ok(pos)
     }
 }
 
@@ -72,6 +74,7 @@ mod tests {
     use crate::io::ReadRecord;
     use bytes::Bytes;
     use rstest::{fixture, rstest};
+    use std::io::SeekFrom;
 
     #[rstest]
     fn test_read_chunk(mut record: CursorRecord<std::io::Cursor<Vec<u8>>>) {
@@ -83,6 +86,33 @@ mod tests {
         // Second read_chunk should return None
         let chunk = record.read_chunk();
         assert!(chunk.is_none());
+    }
+
+    #[rstest]
+    #[case(SeekFrom::Start(1), 1)]
+    #[case(SeekFrom::Current(6), 6)]
+    #[case(SeekFrom::End(-5), 6)]
+    fn test_seek(
+        mut record: CursorRecord<std::io::Cursor<Vec<u8>>>,
+        #[case] seek_from: SeekFrom,
+        #[case] expected_pos: u64,
+    ) {
+        let pos = record.seek(seek_from).unwrap();
+        assert_eq!(pos, expected_pos);
+        assert_eq!(record.pos, expected_pos);
+    }
+
+    #[rstest]
+    fn test_meta(record: CursorRecord<std::io::Cursor<Vec<u8>>>) {
+        assert_eq!(record.meta().timestamp(), 1234567890);
+        assert_eq!(record.meta().content_type(), "text/plain");
+        assert_eq!(record.meta().content_length(), 11);
+    }
+
+    #[rstest]
+    fn test_meta_mut(mut record: CursorRecord<std::io::Cursor<Vec<u8>>>) {
+        record.meta_mut().state = 1;
+        assert_eq!(record.meta().state(), 1);
     }
 
     #[fixture]

@@ -6,9 +6,9 @@
 use crate::internal_server_error;
 use crate::io::ReductError;
 use crate::io::{BoxedReadRecord, ReadChunk, ReadRecord, RecordMeta};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Error, Read, Seek, SeekFrom};
 
-// Dummy record that always returns an error on seek
+/// Dummy record that always returns an error on seek
 pub struct ErroredSeekRecord {
     meta: RecordMeta,
 }
@@ -72,11 +72,7 @@ impl Read for ErroredReadRecord {
 
 impl Seek for ErroredReadRecord {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        Ok(match pos {
-            SeekFrom::Start(n) => n,
-            SeekFrom::End(n) => n as u64,
-            SeekFrom::Current(n) => n as u64,
-        })
+        dummy_seek(pos)
     }
 }
 
@@ -93,16 +89,18 @@ impl ReadRecord for ErroredReadRecord {
     }
 }
 
-// Dummy record that always returns an error on read_chunk
+/// Dummy record that always returns an error on read_chunk
 pub struct ErroredChunkRecord {
     meta: RecordMeta,
 }
 
 impl ErroredChunkRecord {
+    #[allow(dead_code)]
     pub fn new(meta: RecordMeta) -> Self {
         Self { meta }
     }
 
+    #[allow(dead_code)]
     pub fn boxed(meta: RecordMeta) -> BoxedReadRecord {
         Box::new(Self::new(meta))
     }
@@ -116,11 +114,7 @@ impl Read for ErroredChunkRecord {
 
 impl Seek for ErroredChunkRecord {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        Ok(match pos {
-            SeekFrom::Start(n) => n,
-            SeekFrom::End(n) => n as u64,
-            SeekFrom::Current(n) => n as u64,
-        })
+        dummy_seek(pos)
     }
 }
 
@@ -136,6 +130,10 @@ impl ReadRecord for ErroredChunkRecord {
     fn meta_mut(&mut self) -> &mut RecordMeta {
         &mut self.meta
     }
+}
+
+fn dummy_seek(_pos: SeekFrom) -> Result<u64, Error> {
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -183,18 +181,64 @@ mod tests {
             let read_result = record.read(buf);
             assert!(read_result.is_err());
 
-            // seek should work
-            let seek_result = record.seek(SeekFrom::Start(0));
-            assert!(seek_result.is_ok());
+            // just for coverage
+            let _ = record.meta();
+            let _ = record.meta_mut();
+        }
+
+        #[rstest]
+        #[case(SeekFrom::Start(0), 0)]
+        #[case(SeekFrom::Current(1), 0)]
+        #[case(SeekFrom::End(-1), 0)]
+        fn test_seek(
+            mut record: BoxedReadRecord,
+            #[case] seek_from: SeekFrom,
+            #[case] expected_pos: u64,
+        ) {
+            let pos = record.seek(seek_from).unwrap();
+            assert_eq!(pos, expected_pos);
+        }
+
+        #[fixture]
+        fn record() -> BoxedReadRecord {
+            ErroredReadRecord::boxed(RecordMeta::builder().build())
+        }
+    }
+
+    mod errored_chunk_record {
+        use super::*;
+
+        #[rstest]
+        fn test_errored_chunk_record(mut record: BoxedReadRecord) {
+            // read_chunk should return an error
+            let chunk = record.read_chunk();
+            assert!(chunk.is_some());
+            assert!(chunk.unwrap().is_err());
+
+            let buf = &mut [0u8; 10];
+            assert_eq!(record.read(buf).unwrap(), 0);
 
             // just for coverage
             let _ = record.meta();
             let _ = record.meta_mut();
         }
 
+        #[rstest]
+        #[case(SeekFrom::Start(0), 0)]
+        #[case(SeekFrom::Current(1), 0)]
+        #[case(SeekFrom::End(-1), 0)]
+        fn test_seek(
+            mut record: BoxedReadRecord,
+            #[case] seek_from: SeekFrom,
+            #[case] expected_pos: u64,
+        ) {
+            let pos = record.seek(seek_from).unwrap();
+            assert_eq!(pos, expected_pos);
+        }
+
         #[fixture]
         fn record() -> BoxedReadRecord {
-            ErroredReadRecord::boxed(RecordMeta::builder().build())
+            ErroredChunkRecord::boxed(RecordMeta::builder().build())
         }
     }
 }
