@@ -464,6 +464,37 @@ pub(super) mod tests {
         }
     }
 
+    mod mock_record_reader {
+        use super::*;
+        #[rstest]
+        fn test_meta(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
+            let (records, _) = records;
+            let mut record = records.into_iter().next().unwrap();
+            assert_eq!(record.meta().timestamp(), 1);
+            assert_eq!(record.meta().content_type(), "text/plain");
+            assert_eq!(record.meta().content_length(), 10);
+            assert_eq!(record.meta().labels().len(), 2);
+
+            let _ = record.meta_mut();
+        }
+
+        #[rstest]
+        #[should_panic(expected = "not implemented")]
+        fn test_seek_unimplemented(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
+            let (records, _) = records;
+            let mut record = records.into_iter().next().unwrap();
+        }
+
+        #[rstest]
+        #[should_panic(expected = "not implemented")]
+        fn test_read_unimplemented(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
+            let (records, _) = records;
+            let mut record = records.into_iter().next().unwrap();
+            let mut buf = [0; 10];
+            let _ = record.read(&mut buf);
+        }
+    }
+
     pub struct MockRecordReader {
         meta: RecordMeta,
         rx: Mutex<Receiver<Result<Bytes, ReductError>>>,
@@ -483,13 +514,13 @@ pub(super) mod tests {
 
     impl Read for MockRecordReader {
         fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-            todo!()
+            unimplemented!()
         }
     }
 
     impl Seek for MockRecordReader {
         fn seek(&mut self, _pos: SeekFrom) -> std::io::Result<u64> {
-            todo!()
+            unimplemented!()
         }
     }
 

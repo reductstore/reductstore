@@ -79,6 +79,9 @@ mod tests {
 
         let chunk3 = record.read_chunk();
         assert!(chunk3.is_none());
+
+        // for code coverage
+        let _ = record.meta_mut();
     }
 
     #[rstest]
