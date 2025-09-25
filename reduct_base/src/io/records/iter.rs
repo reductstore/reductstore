@@ -1,5 +1,5 @@
 use crate::error::ReductError;
-use crate::io::{ReadRecord, RecordMeta};
+use crate::io::{BoxedReadRecord, ReadRecord, RecordMeta};
 use bytes::Bytes;
 use std::collections::VecDeque;
 use std::io::{Read, Seek, SeekFrom};
@@ -23,7 +23,7 @@ impl IterRecord {
     pub fn boxed<R: Iterator<Item = Result<Bytes, ReductError>> + 'static>(
         inner: R,
         meta: RecordMeta,
-    ) -> Box<dyn ReadRecord> {
+    ) -> BoxedReadRecord {
         Box::new(Self::new(inner, meta))
     }
 }
@@ -54,5 +54,57 @@ impl ReadRecord for IterRecord {
 
     fn meta_mut(&mut self) -> &mut RecordMeta {
         &mut self.meta
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::BoxedReadRecord;
+    use rstest::*;
+
+    #[rstest]
+    fn test_iter_record(mut record: BoxedReadRecord) {
+        assert_eq!(record.meta().timestamp(), 123);
+        assert_eq!(record.meta().content_type(), "text/plain");
+        assert_eq!(record.meta().content_length(), 11);
+
+        let chunk1 = record.read_chunk();
+        assert!(chunk1.is_some());
+        assert_eq!(chunk1.unwrap().unwrap(), Bytes::from("Hello "));
+
+        let chunk2 = record.read_chunk();
+        assert!(chunk2.is_some());
+        assert_eq!(chunk2.unwrap().unwrap(), Bytes::from("World"));
+
+        let chunk3 = record.read_chunk();
+        assert!(chunk3.is_none());
+    }
+
+    #[rstest]
+    #[should_panic(expected = "not implemented")]
+    fn test_seek(record: BoxedReadRecord) {
+        let mut record = record;
+        let _ = record.seek(SeekFrom::Start(0));
+    }
+
+    #[rstest]
+    #[should_panic(expected = "not implemented")]
+    fn test_read(record: BoxedReadRecord) {
+        let mut record = record;
+        let mut buf = [0; 10];
+        let _ = record.read(&mut buf);
+    }
+
+    #[fixture]
+    fn record() -> BoxedReadRecord {
+        let chunks = vec![Ok(Bytes::from("Hello ")), Ok(Bytes::from("World"))];
+        let meta = RecordMeta::builder()
+            .timestamp(123)
+            .state(1)
+            .content_type("text/plain".to_string())
+            .content_length(11)
+            .build();
+        IterRecord::boxed(chunks.into_iter(), meta)
     }
 }

@@ -188,7 +188,6 @@ pub trait WriteRecord {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use std::io;
 
     use rstest::{fixture, rstest};
 
@@ -214,19 +213,6 @@ pub(crate) mod tests {
             assert_eq!(new_meta.content_length(), 1024);
         }
 
-        #[rstest]
-        fn test_meta_mut() {
-            let mut record = MockRecord::new();
-            let meta_mut = record.meta_mut();
-            meta_mut
-                .labels_mut()
-                .insert("test_key".to_string(), "test_value".to_string());
-            assert_eq!(
-                record.meta().labels().get("test_key"),
-                Some(&"test_value".to_string())
-            );
-        }
-
         #[fixture]
         fn meta() -> RecordMeta {
             RecordMeta::builder()
@@ -237,51 +223,6 @@ pub(crate) mod tests {
                 .content_length(1024)
                 .computed_labels(Labels::new())
                 .build()
-        }
-    }
-
-    pub struct MockRecord {
-        metadata: RecordMeta,
-    }
-
-    impl MockRecord {
-        pub fn new() -> Self {
-            Self {
-                metadata: RecordMeta::builder()
-                    .timestamp(0)
-                    .state(0)
-                    .labels(Labels::new())
-                    .content_type("application/octet-stream".to_string())
-                    .content_length(0)
-                    .computed_labels(Labels::new())
-                    .build(),
-            }
-        }
-    }
-
-    impl Read for MockRecord {
-        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-            todo!()
-        }
-    }
-
-    impl Seek for MockRecord {
-        fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
-            todo!()
-        }
-    }
-
-    impl ReadRecord for MockRecord {
-        fn read_chunk(&mut self) -> ReadChunk {
-            todo!()
-        }
-
-        fn meta(&self) -> &RecordMeta {
-            &self.metadata
-        }
-
-        fn meta_mut(&mut self) -> &mut RecordMeta {
-            &mut self.metadata
         }
     }
 }

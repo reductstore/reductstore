@@ -325,6 +325,16 @@ pub(crate) mod tests {
         }
 
         #[rstest]
+        #[case(SeekFrom::Start(20))]
+        #[case(SeekFrom::End(1))]
+        #[case(SeekFrom::Current(-1))]
+        fn test_seek_wrong(mut reader: RecordReader, #[case] seek_from: SeekFrom) {
+            let err = reader.seek(seek_from).err().unwrap();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+            assert_eq!(err.to_string(), "Seek position out of bounds");
+        }
+
+        #[rstest]
         fn test_read_with_error(mut entry: Entry) {
             write_record(&mut entry, 1000, vec![0; 100]);
 
