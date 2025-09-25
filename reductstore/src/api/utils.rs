@@ -9,7 +9,7 @@ use futures_util::Future;
 use futures_util::Stream;
 use reduct_base::error::ReductError;
 use reduct_base::io::{BoxedReadRecord, RecordMeta};
-use reduct_base::unprocessable_entity;
+use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::Bound::Included;
 use std::collections::{Bound, VecDeque};
 use std::io::SeekFrom::Start;
@@ -128,12 +128,19 @@ impl Stream for RangeRecordStream {
             };
 
             let mut buf = vec![0; buffer_size];
-            lock.deref_mut().seek(Start(start)).unwrap();
+            if let Err(err) = lock.deref_mut().seek(Start(start)) {
+                return Poll::Ready(Some(Err(
+                    internal_server_error!("Seek error: {}", err).into()
+                )));
+            }
+
             let read = lock.read(&mut buf);
             let result = match read {
                 Ok(0) => Poll::Ready(None),
                 Ok(n) => Poll::Ready(Some(Ok(Bytes::from(buf[..n].to_vec())))),
-                Err(e) => Poll::Ready(Some(Err(unprocessable_entity!("Read error: {}", e).into()))),
+                Err(e) => Poll::Ready(Some(
+                    Err(internal_server_error!("Read error: {}", e).into()),
+                )),
             };
 
             (

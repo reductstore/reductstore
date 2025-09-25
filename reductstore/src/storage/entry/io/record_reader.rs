@@ -114,32 +114,20 @@ impl Read for RecordReader {
 
 impl Seek for RecordReader {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        let new_pos = match pos {
-            SeekFrom::Start(offset) => offset,
-            SeekFrom::End(offset) => {
-                if offset >= 0 {
-                    self.content_size + offset as u64
-                } else {
-                    self.content_size - (-offset) as u64
-                }
-            }
-            SeekFrom::Current(offset) => {
-                if offset >= 0 {
-                    self.pos + offset as u64
-                } else {
-                    self.pos - (-offset) as u64
-                }
-            }
+        let new_pos: i64 = match pos {
+            SeekFrom::Start(offset) => offset as i64,
+            SeekFrom::End(offset) => self.content_size as i64 + offset,
+            SeekFrom::Current(offset) => self.pos as i64 + offset,
         };
 
-        if new_pos > self.content_size {
+        if new_pos > self.content_size as i64 || new_pos < 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Seek position out of bounds",
             ));
         }
 
-        self.pos = new_pos;
+        self.pos = new_pos as u64;
         Ok(self.pos)
     }
 }
@@ -148,7 +136,7 @@ impl Seek for RecordReader {
 impl ReadRecord for RecordReader {
     fn read_chunk(&mut self) -> ReadChunk {
         let mut buf =
-            vec![0; min(self.content_size - self.pos, MAX_IO_BUFFER_SIZE as u64,) as usize];
+            vec![0; min(self.content_size - self.pos, MAX_IO_BUFFER_SIZE as u64) as usize];
         if buf.is_empty() {
             return None;
         }
