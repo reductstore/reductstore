@@ -333,21 +333,20 @@ use reduct_base::io::BoxedReadRecord;
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use futures_util::Stream;
-    use reduct_base::ext::{Commiter, IoExtensionInfo, Processor};
-    use rstest::{fixture, rstest};
-    use std::io::{Read, Seek};
-
     use crate::storage::entry::RecordReader;
     use crate::storage::proto::Record;
     use async_stream::stream;
     use bytes::Bytes;
+    use futures_util::Stream;
     use mockall::predicate::eq;
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
-    use reduct_base::io::{ReadRecord, RecordMeta};
+    use reduct_base::ext::{Commiter, IoExtensionInfo, Processor};
+    use reduct_base::io::records::OneShotRecord;
+    use reduct_base::io::RecordMeta;
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
+    use rstest::{fixture, rstest};
     use serde_json::json;
     use std::task::{Context, Poll};
     use tempfile::tempdir;
@@ -443,7 +442,7 @@ pub(super) mod tests {
             assert_eq!(
                 query_context
                     .condition_filter
-                    .filter(Box::new(MockRecord::new("not-in-when", "val")))
+                    .filter(record_with_labels("not-in-when", "val"))
                     .err()
                     .unwrap(),
                 not_found!("Reference '@label' not found"),
@@ -658,16 +657,14 @@ pub(super) mod tests {
             mut commiter: Box<MockCommiter>,
         ) {
             processor.expect_process_record().return_once(|_| {
-                Ok(MockStream::boxed(Poll::Ready(Some(Ok(MockRecord::boxed(
-                    "key", "val",
-                ))))))
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                    record_with_labels("key", "val"),
+                )))))
             });
 
-            commiter.expect_commit_record().return_once(|_| {
-                Some(Ok(
-                    Box::new(MockRecord::new("key", "val")) as BoxedReadRecord
-                ))
-            });
+            commiter
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_labels("key", "val"))));
             commiter.expect_flush().return_once(|| None).times(1);
 
             mock_ext
@@ -711,7 +708,7 @@ pub(super) mod tests {
             assert_eq!(records.len(), 1, "Should return one record");
 
             let record = records.get_mut(0).unwrap().as_mut().unwrap();
-            assert_eq!(record.read_chunk(), None);
+            assert_eq!(record.read_chunk(), Some(Ok(Bytes::new())));
 
             assert_eq!(
                 *mocked_ext_repo
@@ -734,20 +731,17 @@ pub(super) mod tests {
             mut commiter: Box<MockCommiter>,
         ) {
             processor.expect_process_record().return_once(|_| {
-                Ok(MockStream::boxed(Poll::Ready(Some(Ok(MockRecord::boxed(
-                    "key", "val",
-                ))))))
+                Ok(
+                    MockStream::boxed(Poll::Ready(Some(Ok(record_with_labels("key", "val")))))
+                        as BoxedRecordStream,
+                )
             });
 
             commiter.expect_commit_record().return_once(|_| None);
 
             commiter
                 .expect_flush()
-                .return_once(|| {
-                    Some(Ok(
-                        Box::new(MockRecord::new("key", "val")) as BoxedReadRecord
-                    ))
-                })
+                .return_once(|| Some(Ok(record_with_labels("key", "val"))))
                 .times(1);
 
             mock_ext
@@ -821,17 +815,15 @@ pub(super) mod tests {
     ) {
         processor.expect_process_record().return_once(|_| {
             let stream = stream! {
-                yield Ok(MockRecord::boxed("key", "val"));
-                yield Ok(MockRecord::boxed("key", "val"));
+                yield Ok(record_with_labels("key", "val"));
+                yield Ok(record_with_labels("key", "val"));
             };
             Ok(Box::new(stream) as BoxedRecordStream)
         });
 
-        commiter.expect_commit_record().return_once(|_| {
-            Some(Ok(
-                Box::new(MockRecord::new("key", "val")) as BoxedReadRecord
-            ))
-        });
+        commiter
+            .expect_commit_record()
+            .return_once(|_| Some(Ok(record_with_labels("key", "val"))));
         commiter.expect_flush().return_once(|| None).times(1);
 
         mock_ext
@@ -920,8 +912,8 @@ pub(super) mod tests {
     }
 
     #[fixture]
-    pub fn mocked_record() -> Box<MockRecord> {
-        Box::new(MockRecord::new("key1", "val1"))
+    pub fn mocked_record() -> BoxedReadRecord {
+        record_with_labels("key1", "val1")
     }
 
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
@@ -1000,50 +992,13 @@ pub(super) mod tests {
         }
     }
 
-    #[derive(Clone, PartialEq, Debug)]
-    pub struct MockRecord {
-        meta: RecordMeta,
-    }
-
-    impl MockRecord {
-        pub fn new(key: &str, val: &str) -> Self {
-            let meta = RecordMeta::builder()
-                .timestamp(0)
-                .computed_labels(Labels::from_iter(
-                    vec![(key.to_string(), val.to_string())].into_iter(),
-                ))
-                .build();
-            MockRecord { meta }
-        }
-
-        pub fn boxed(key: &str, val: &str) -> BoxedReadRecord {
-            Box::new(MockRecord::new(key, val))
-        }
-    }
-
-    impl Read for MockRecord {
-        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-            todo!()
-        }
-    }
-
-    impl Seek for MockRecord {
-        fn seek(&mut self, _pos: std::io::SeekFrom) -> std::io::Result<u64> {
-            todo!()
-        }
-    }
-
-    impl ReadRecord for MockRecord {
-        fn read_chunk(&mut self) -> Option<Result<Bytes, ReductError>> {
-            None
-        }
-
-        fn meta(&self) -> &RecordMeta {
-            &self.meta
-        }
-
-        fn meta_mut(&mut self) -> &mut RecordMeta {
-            &mut self.meta
-        }
+    pub fn record_with_labels(key: &str, val: &str) -> BoxedReadRecord {
+        let meta = RecordMeta::builder()
+            .timestamp(0)
+            .computed_labels(Labels::from_iter(
+                vec![(key.to_string(), val.to_string())].into_iter(),
+            ))
+            .build();
+        OneShotRecord::boxed(Bytes::new(), meta)
     }
 }
