@@ -482,7 +482,12 @@ pub(super) mod tests {
         #[should_panic(expected = "not implemented")]
         fn test_seek_unimplemented(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
             let (records, _) = records;
-            let mut record = records.into_iter().next().unwrap();
+            records
+                .into_iter()
+                .next()
+                .unwrap()
+                .seek(SeekFrom::Start(0))
+                .unwrap();
         }
 
         #[rstest]
