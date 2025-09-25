@@ -128,10 +128,13 @@ impl Stream for RangeRecordStream {
             };
 
             let mut buf = vec![0; buffer_size];
-            if let Err(err) = lock.deref_mut().seek(Start(start)) {
-                return Poll::Ready(Some(Err(
-                    internal_server_error!("Seek error: {}", err).into()
-                )));
+            match lock.deref_mut().seek(Start(start)) {
+                Err(err) => {
+                    return Poll::Ready(Some(Err(
+                        internal_server_error!("Seek error: {}", err).into()
+                    )))
+                }
+                _ => {}
             }
 
             let read = lock.read(&mut buf);
@@ -178,7 +181,7 @@ mod tests {
     mod range_record_stream {
         use super::*;
         use futures_util::StreamExt;
-        use reduct_base::io::records::CursorRecord;
+        use reduct_base::io::records::{CursorRecord, ErroredReadRecord, ErroredSeekRecord};
         use std::collections::Bound::{Included, Unbounded};
         use std::io::Cursor;
 
@@ -189,7 +192,7 @@ mod tests {
         #[case(100)]
         async fn read_ranges(#[case] buffer_size: usize) {
             let ranges = VecDeque::from(vec![
-                (Included(0), Included(4)),
+                (Unbounded, Included(4)),
                 (Included(10), Included(14)),
                 (Included(20), Unbounded),
             ]);
@@ -222,6 +225,50 @@ mod tests {
             assert_eq!(
                 chunk.unwrap().err().unwrap(),
                 unprocessable_entity!("Invalid range").into()
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn read_zero_content() {
+            let ranges = VecDeque::from(vec![(Included(0), Included(0))]);
+            let record = from_content(b"".to_vec());
+            let reader: Arc<Mutex<BoxedReadRecord>> = Arc::new(Mutex::new(record));
+
+            let mut stream = RangeRecordStream::new(reader, ranges);
+            let chunk = stream.next().await;
+            assert!(chunk.is_none());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn read_error() {
+            let ranges = VecDeque::from(vec![(Included(1), Included(2))]);
+            let reader: Arc<Mutex<BoxedReadRecord>> = Arc::new(Mutex::new(
+                ErroredReadRecord::boxed(RecordMeta::builder().build()),
+            ));
+
+            let mut stream = RangeRecordStream::new(reader, ranges);
+            let chunk = stream.next().await;
+            assert_eq!(
+                chunk.unwrap().err().unwrap(),
+                internal_server_error!("Read error: Read error").into()
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn seek_error() {
+            let ranges = VecDeque::from(vec![(Included(1), Included(2))]);
+            let reader: Arc<Mutex<BoxedReadRecord>> = Arc::new(Mutex::new(
+                ErroredSeekRecord::boxed(RecordMeta::builder().build()),
+            ));
+
+            let mut stream = RangeRecordStream::new(reader, ranges);
+            let chunk = stream.next().await;
+            assert_eq!(
+                chunk.unwrap().err().unwrap(),
+                internal_server_error!("Seek error: Seek error").into()
             );
         }
 
