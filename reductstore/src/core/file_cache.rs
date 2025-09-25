@@ -474,6 +474,25 @@ mod tests {
     }
 
     #[rstest]
+    fn test_remove_used(cache: FileCache, tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("test_remove_used.txt");
+        let _file_ref = cache
+            .write_or_create(&file_path, SeekFrom::Start(0))
+            .unwrap()
+            .upgrade();
+
+        let err = cache.remove(&file_path).unwrap_err();
+        assert_eq!(
+            err,
+            internal_server_error!(
+                "Cannot remove file {} because it is in use",
+                file_path.display()
+            )
+        );
+        assert_eq!(file_path.exists(), true);
+    }
+
+    #[rstest]
     fn test_cache_max_size(cache: FileCache, tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
