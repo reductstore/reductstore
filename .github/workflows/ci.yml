@@ -873,6 +873,21 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: "us-east-1"
+
+      - name: Login to ECR Public
+        run: |
+          aws ecr-public get-login-password --region "us-east-1" \
+            | docker login --username AWS --password-stdin public.ecr.aws
+      - name: Tag and push to ECR Public
+        run: |
+          docker tag ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} public.ecr.aws/${{ secrets.ECR_PUBLIC_REPOSITORY }}:${{ steps.meta.outputs.version }}
+          docker push public.ecr.aws/${{ secrets.ECR_PUBLIC_REPOSITORY }}:${{ steps.meta.outputs.version }}
+
   publish_crate:
     runs-on: ubuntu-latest
     name: Publish crate
