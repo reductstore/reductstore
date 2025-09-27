@@ -16,7 +16,7 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Push to DockerHub Registry
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    #if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
         platform: [ linux/amd64, linux/arm64 ]
