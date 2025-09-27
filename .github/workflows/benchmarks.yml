@@ -5,8 +5,13 @@ on:
       - "Build, Test and Release"
     types:
       - completed
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   benchmark:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     name: Run benchmarks
     runs-on: ubuntu-latest
     strategy:
