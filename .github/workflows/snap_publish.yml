@@ -1,32 +1,53 @@
-name: publish snap
+name: publish crates
 on:
   workflow_run:
     workflows:
       - ci
     types:
       - completed
-
 jobs:
-  publish_crate:
+  build_snap:
     runs-on: ubuntu-latest
-    name: Publish crate
-    if: startsWith(github.ref, 'refs/tags/')
+    name: Build snap package
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - uses: snapcore/action-build@v1
+        id: build-snap
         with:
-          toolchain: ${{ vars.MINIMAL_RUST_VERSION }}
-      - uses: arduino/setup-protoc@v1
+          snapcraft-args: "--enable-experimental-extensions --verbose"
+
+      # Make sure the snap is installable
+      - run: |
+          sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
+      # Do some testing with the snap
+      - run: |
+          snap services reductstore
+      - uses: actions/upload-artifact@v4
         with:
-          version: "3.x"
-          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-      - name: Login
+          name: reductstore
+          path: "*.snap"
+
+
+  publish_snap:
+    name: Publish snap package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    needs:
+      - build_snap
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reductstore
+          path: .
+      - name: Save snap name in environment variable
         run: |
-          cargo login ${{ secrets.CRATES_IO_TOKEN }}
-      - name: Publish reduct-base
-        run: cargo publish -p reduct-base
-      - name: Publish reduct-macros
-        run: cargo publish -p reduct-macros
-      - name: Publish reductstore
-        run: cargo publish -p reductstore
+          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
+      - uses: snapcore/action-publish@master
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
+        with:
+          snap: ${{env.SNAP_NAME}}
+          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}

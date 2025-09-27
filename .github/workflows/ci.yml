@@ -51,6 +51,7 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
+        id: upload-test-image
         with:
           name: image
           path: /tmp/image.tar
