@@ -30,7 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 
 - Disable code optimization for pull request builds, [PR-941](https://github.com/reductstore/reductstore/pull/941)
-- Refactor CI/CD workflows and publish to AWS ECR, [PR-945](https://github.com/reductstore/reductstore/pull/945)
 
 ## [1.16.3] - 2025-08-22
 
