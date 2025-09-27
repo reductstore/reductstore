@@ -168,5 +168,6 @@ jobs:
 
       - name: Tag and push to ECR Public
         run: |
+          docker pull ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
           docker tag ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} public.ecr.aws/${{ secrets.ECR_PUBLIC_REPOSITORY }}:${{ steps.meta.outputs.version }}
           docker push public.ecr.aws/${{ secrets.ECR_PUBLIC_REPOSITORY }}:${{ steps.meta.outputs.version }}
