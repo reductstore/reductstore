@@ -1,0 +1,61 @@
+name: publish snap
+on:
+  workflow_run:
+    workflows:
+      - ci
+    types:
+      - completed
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  REGISTRY_IMAGE: reduct/store
+
+jobs:
+  build_snap:
+    runs-on: ubuntu-latest
+    name: Build snap package
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: snapcore/action-build@v1
+        id: build-snap
+        with:
+          snapcraft-args: "--enable-experimental-extensions --verbose"
+
+      # Make sure the snap is installable
+      - run: |
+          sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
+      # Do some testing with the snap
+      - run: |
+          snap services reductstore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reductstore
+          path: "*.snap"
+
+
+  publish_snap:
+    name: Publish snap package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    needs:
+      - build_snap
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reductstore
+          path: .
+      - name: Save snap name in environment variable
+        run: |
+          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
+      - uses: snapcore/action-publish@master
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
+        with:
+          snap: ${{env.SNAP_NAME}}
+          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
