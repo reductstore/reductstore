@@ -1,0 +1,29 @@
+name: build_snap.yml
+on:
+  workflow_run:
+    workflows:
+      - "lint and check tag"
+    types:
+      - completed
+jobs:
+  build_snap:
+    runs-on: ubuntu-latest
+    name: Build snap package
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: snapcore/action-build@v1
+        id: build-snap
+        with:
+          snapcraft-args: "--enable-experimental-extensions --verbose"
+
+      # Make sure the snap is installable
+      - run: |
+          sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
+      # Do some testing with the snap
+      - run: |
+          snap services reductstore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reductstore
+          path: "*.snap"

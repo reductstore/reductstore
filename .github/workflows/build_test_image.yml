@@ -1,0 +1,104 @@
+name: build and upload binaries and tests
+on:
+  workflow_run:
+    workflows:
+      - "lint and check tag"
+    types:
+      - completed
+jobs:
+  build_binaries:
+    name: Build Binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        target:
+          [
+            "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-pc-windows-gnu",
+            "x86_64-apple-darwin",
+            "aarch64-apple-darwin",
+          ]
+        include:
+          - target: "x86_64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc"
+          - target: "aarch64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc-aarch64-linux-gnu"
+          - target: "x86_64-pc-windows-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc-mingw-w64-x86-64"
+          - target: "x86_64-apple-darwin"
+            os: macos-14
+            compiler: "gcc-x86_64-apple-darwin"
+          - target: "aarch64-apple-darwin"
+            os: macos-14
+            compiler: "gcc"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: "26.x"
+          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ vars.MINIMAL_RUST_VERSION }}
+
+      - name: Install toolchain
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install gcc
+        if: ${{ matrix.os == 'ubuntu-24.04' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.compiler }}
+
+      - name: Install gcc
+        if: ${{ matrix.os == 'macos-latest' }}
+        run: |
+          brew install ${{ matrix.compiler }}
+
+      - uses: ilammy/setup-nasm@v1
+
+      - name: Install cargo-export
+        run: cargo install cargo-export
+
+
+      - name: Build binary (PR)
+        if: github.event_name == 'pull_request'
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+          CARGO_TARGET_DIR: target/release/${{ matrix.target }}
+        run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
+
+      - name: Build binary (Release)
+        if: github.event_name != 'pull_request'
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+          CARGO_TARGET_DIR: target/release/${{ matrix.target }}
+        run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: reductstore-${{ matrix.target }}
+          path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
+
+
+      - name: Build and export tests (PR)
+        if: github.event_name == 'pull_request'
+        run: cargo export target/${{ matrix.target }}/tests -- test --profile ci --target ${{ matrix.target }} --lib
+
+      - name: Build and export tests (Release)
+        if: github.event_name != 'pull_request'
+        run: cargo export target/${{ matrix.target }}/tests -- test --profile release --target ${{ matrix.target }} --lib
+
+      - name: Upload tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: reductstore-tests-${{ matrix.target }}
+          path: target/${{ matrix.target }}/tests

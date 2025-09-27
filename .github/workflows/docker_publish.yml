@@ -6,6 +6,9 @@ on:
       - docs/**
       - README.md
       - CHANGELOG.md
+permissions:
+    id-token: write
+    contents: read
 #  workflow_run:
 #    workflows:
 #      - ci

@@ -1,4 +1,4 @@
-name: linting and static analysis
+name: lint and check tag
 on:
   push:
     branches: [ main, stable ]
