@@ -1,4 +1,4 @@
-name: publish
+name: publish Docker image
 on:
   pull_request:
     branches: [ main, stable ]
@@ -11,6 +11,9 @@ on:
 #      - ci
 #    types:
 #      - completed
+
+env:
+  REGISTRY_IMAGE: reduct/store
 
 jobs:
   push_image_dockerhub:
