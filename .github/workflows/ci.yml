@@ -1,4 +1,4 @@
-name: ci
+name: Build, Test and Release
 on:
   push:
     branches: [ main, stable ]

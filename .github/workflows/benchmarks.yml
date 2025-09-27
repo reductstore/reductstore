@@ -1,8 +1,8 @@
-name: benchmarks.yml
+name: Run benchmarks
 on:
   workflow_run:
     workflows:
-      - ci
+      - "Build, Test and Release"
     types:
       - completed
 jobs:

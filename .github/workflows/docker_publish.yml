@@ -1,8 +1,8 @@
-name: publish Docker image
+name: Publish Docker images
 on:
   workflow_run:
     workflows:
-      - ci
+      - "Build, Test and Release"
     types:
       - completed
 

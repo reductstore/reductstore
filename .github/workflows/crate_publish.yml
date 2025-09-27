@@ -1,8 +1,8 @@
-name: publish crate
+name: Publish Rust crates
 on:
   workflow_run:
     workflows:
-      - ci
+      - "Build, Test and Release"
     types:
       - completed
 jobs:
