@@ -1,0 +1,90 @@
+name: run benchmarks
+on:
+  workflow_run:
+    workflows:
+      - "build test image"
+    types:
+      - completed
+
+env:
+  REGISTRY_IMAGE: reduct/store
+
+jobs:
+  benchmark:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        branch: [ "main", "latest" ]
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp/
+
+      - name: Load Docker image
+        run: docker load --input /tmp/image.tar
+
+      - name: Run current ReductStore
+        run: |
+          docker run -d \
+            --name reductstore \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            -p 8383:8383 \
+            -v ./data:/data \
+            ${{ github.repository }}:latest
+          sleep 5
+          docker logs reductstore
+
+      - name: Install reduct-py
+        run: |
+          pip install reduct-py>=1.14
+
+      - name: Run python benchmark
+        run: |
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 current.csv
+
+      - name: Stop and remove current container
+        run: |
+          docker stop reductstore
+          docker rm reductstore
+
+      - name: Run ${{matrix.branch}} ReductStore
+        run: |
+          docker run -d \
+            --name reductstore \
+            --env RS_DATA_PATH=/data \
+            --env RS_API_TOKEN=token \
+            --env RS_LOG_LEVEL=INFO \
+            -p 8383:8383 \
+            -v ./data:/data \
+            reduct/store:${{matrix.branch}}
+          sleep 5
+          docker logs reductstore
+
+      - name: Install reduct-py
+        run: |
+          pip install reduct-py>=1.14
+
+      - name: Run python benchmark
+        run: |
+          python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 ${{matrix.branch}}.csv
+
+      - name: Check result
+        run: |
+          python3 integration_tests/benchmarks/check_results.py .github/files/threshold current.csv ${{matrix.branch}}.csv
+
+      - name: Save docker logs
+        if: always()
+        run: docker logs reductstore | zip > /tmp/docker-log.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-log-benchmark-${{matrix.branch}}
+          path: /tmp/docker-log.zip

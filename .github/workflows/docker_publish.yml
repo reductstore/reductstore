@@ -131,6 +131,17 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
+      - name: Show OIDC subject
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            console.log('aud:', claims.aud);
+            console.log('sub:', claims.sub);
+            console.log('ref:', process.env.GITHUB_REF);
+            console.log('event name:', process.env.GITHUB_EVENT_NAME);
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:

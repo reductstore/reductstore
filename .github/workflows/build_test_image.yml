@@ -1,4 +1,4 @@
-name: build and upload binaries and tests
+name: build test image
 on:
   workflow_run:
     workflows:
