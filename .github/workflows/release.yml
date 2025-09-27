@@ -1,11 +1,13 @@
-name: ci
+name: publish snap and crate
 on:
   workflow_run:
     workflows:
-      - "lint and check tag"
+      - "build and upload binaries and tests"
+      - "build snap package"
+      - "run unit tests"
+      - "run integration tests"
     types:
       - completed
-
 env:
   REGISTRY_IMAGE: reduct/store
 
@@ -13,15 +15,10 @@ jobs:
   publish_snap:
     name: Publish snap package
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
     strategy:
       matrix:
         arch: [ amd64, arm64 ]
-    needs:
-      - build_snap
-      - api_tests
-      - migration_test
-      - replication_test
-      - check_tag
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -37,15 +34,9 @@ jobs:
           snap: ${{env.SNAP_NAME}}
           release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
 
-
   publish_crate:
     runs-on: ubuntu-latest
     name: Publish crate
-    needs:
-      - api_tests
-      - migration_test
-      - replication_test
-      - check_tag # Only publish on tags
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v2
@@ -69,11 +60,6 @@ jobs:
 
   make_release:
     runs-on: ubuntu-latest
-    needs:
-      - api_tests
-      - migration_test
-      - replication_test
-      - check_tag # Only publish on tags
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     name: Make release
@@ -107,8 +93,6 @@ jobs:
         ]
     steps:
       - uses: actions/checkout@v4
-
-
       - name: Download ${{ matrix.target }} artifact
         uses: actions/download-artifact@v4
         with:

@@ -1,19 +1,14 @@
 name: publish Docker image
 on:
-  pull_request:
-    branches: [ main, stable ]
-    paths-ignore:
-      - docs/**
-      - README.md
-      - CHANGELOG.md
+    workflow_run:
+      workflows:
+        - ""
+      types:
+        - completed
+
 permissions:
   id-token: write
   contents: read
-#  workflow_run:
-#    workflows:
-#      - ci
-#    types:
-#      - completed
 
 env:
   REGISTRY_IMAGE: reduct/store
@@ -22,7 +17,7 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Build imag and push it to DockerHub Registry
-    #if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
         platform: [ linux/amd64, linux/arm64 ]

@@ -1,8 +1,9 @@
-name: build_snap.yml
+name: build snap package
 on:
   workflow_run:
     workflows:
-      - "lint and check tag"
+      - "run unit tests"
+      - "run integration tests"
     types:
       - completed
 jobs:
