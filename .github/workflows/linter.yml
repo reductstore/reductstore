@@ -7,6 +7,13 @@ on:
     paths-ignore:
       - README.md
       - CHANGELOG.md
+
+  pull_request:
+    branches: [ main, stable ]
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+
 jobs:
   rust_fmt:
     runs-on: ubuntu-latest
