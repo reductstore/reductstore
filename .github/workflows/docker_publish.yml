@@ -7,8 +7,8 @@ on:
       - README.md
       - CHANGELOG.md
 permissions:
-    id-token: write
-    contents: read
+  id-token: write
+  contents: read
 #  workflow_run:
 #    workflows:
 #      - ci
@@ -131,6 +131,12 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
+  push_image_ecr_public:
+    name: Push to ECR Public
+    runs-on: ubuntu-latest
+#    needs:
+#      - push_image_dockerhub
+    steps:
       - name: Show OIDC subject
         uses: actions/github-script@v7
         with:
