@@ -1,0 +1,45 @@
+name: run_unit_tests.yml
+on:
+  workflow_run:
+    workflows:
+      - "build and upload binaries and tests"
+    types:
+      - completed
+jobs:
+  unit_tests:
+    name: Run Unit Tests
+    strategy:
+      matrix:
+        os: [ ubuntu-24.04, windows-2022, macos-14 ]
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            target: x86_64-pc-windows-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    env:
+      RUST_BACKTRACE: 1
+      RUST_LOG: debug
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reductstore-tests-${{ matrix.target }}
+          path: ./tmp/tests
+
+      - name: Run tests
+        shell: bash
+        run: |
+          set -e -x
+          for f in ./tmp/tests/*; do
+            # exclude reduct_macros
+            if [[ $f == *"reduct_macros"* ]]; then
+              continue
+            fi
+
+            chmod +x $f
+            $f --nocapture
+          done

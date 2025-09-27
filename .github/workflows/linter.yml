@@ -1,0 +1,42 @@
+name: lint and check tag
+on:
+  push:
+    branches: [ main, stable ]
+    tags:
+      - "v*"
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+
+  pull_request:
+    branches: [ main, stable ]
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+
+jobs:
+  rust_fmt:
+    runs-on: ubuntu-latest
+    name: Rust Linter
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check code
+        run: cargo fmt --all -- --check
+
+  check_tag:
+    runs-on: ubuntu-latest
+    name: Check tag
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cargo install cargo-get
+          for PKG_NAME in reduct_base reduct_macros reductstore; do
+            version=$(cargo get package.version --entry $PKG_NAME)
+            echo "Version in $PKG_NAME/Cargo.toml: $version"
+            if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+              echo "Tag ${GITHUB_REF_NAME} does not match version in $PKG_NAME/Cargo.toml"
+              exit 1
+            fi
+          done
