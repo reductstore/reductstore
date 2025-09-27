@@ -93,6 +93,7 @@ jobs:
           retention-days: 1
 
   merge_digests:
+    name: Merge digests and create manifest list
     runs-on: ubuntu-latest
     needs:
       - push_image_dockerhub
@@ -134,8 +135,8 @@ jobs:
   push_image_ecr_public:
     name: Push to ECR Public
     runs-on: ubuntu-latest
-#    needs:
-#      - push_image_dockerhub
+    needs:
+      - push_image_dockerhub
     steps:
       - name: Show OIDC subject
         uses: actions/github-script@v7
