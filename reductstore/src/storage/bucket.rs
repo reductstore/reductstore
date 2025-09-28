@@ -351,6 +351,10 @@ impl Bucket {
 
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(e) = self.save_settings().wait() {
+            return Err(e).into();
+        }
+
         let entries = self.entries.read().unwrap().clone();
         // use shared task to avoid locking in graceful shutdown
         shared(&self.task_group(), "sync entries", move || {
