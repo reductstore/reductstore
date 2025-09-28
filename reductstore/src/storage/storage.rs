@@ -63,7 +63,7 @@ impl Storage {
                         buckets.insert(bucket.name().to_string(), bucket);
                     }
                     Err(e) => {
-                        error!("Failed to restore bucket from {:?}: {}", path, e);
+                        panic!("Failed to load bucket from {:?}: {}", path, e);
                     }
                 }
             }
@@ -413,7 +413,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_ignore_broken_bucket(storage: Storage) {
+        #[should_panic(expected = "Failed to load bucket from")]
+        fn test_broken_bucket(storage: Storage) {
             let bucket_settings = BucketSettings {
                 quota_size: Some(100),
                 quota_type: Some(QuotaType::FIFO),

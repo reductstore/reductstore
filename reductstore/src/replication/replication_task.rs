@@ -356,6 +356,7 @@ mod tests {
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
 
+    use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;
@@ -407,6 +408,12 @@ mod tests {
                 "test1",
                 &"test".to_string(),
             );
+
+            // create bucket to avoid error on loading entries
+            FILE_CACHE
+                .remove_dir(&path.join(&settings.src_bucket))
+                .unwrap();
+            Bucket::new(&settings.src_bucket, &path, BucketSettings::default()).unwrap();
 
             fs::create_dir_all(log_path.parent().unwrap()).unwrap();
             let mut log_file = fs::File::create(&log_path).unwrap();
@@ -661,10 +668,13 @@ mod tests {
     ) -> ReplicationTask {
         let storage = Arc::new(Storage::load(path, None));
 
-        let bucket = storage
-            .create_bucket("src", BucketSettings::default())
-            .unwrap()
-            .upgrade_and_unwrap();
+        let bucket = match storage.get_bucket(&settings.src_bucket) {
+            Ok(bucket) => bucket.upgrade().unwrap(),
+            Err(_) => storage
+                .create_bucket("src", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap(),
+        };
 
         let mut time = 10;
         for entry in ["test1", "test2"] {
