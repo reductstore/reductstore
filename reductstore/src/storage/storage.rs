@@ -63,7 +63,7 @@ impl Storage {
                         buckets.insert(bucket.name().to_string(), bucket);
                     }
                     Err(e) => {
-                        error!("Failed to restore bucket from {:?}: {}", path, e);
+                        panic!("Failed to load bucket from {:?}: {}", path, e);
                     }
                 }
             }
