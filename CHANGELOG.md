@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Update Web Console up to v1.11.2, [PR-900](https://github.com/reductstore/reductstore/pull/900)
+- Crash if bucket is unrecoverable, [PR-949](https://github.com/reductstore/reductstore/pull/949)
 
 ## [1.16.0] - 2025-07-31
 
