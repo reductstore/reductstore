@@ -5,16 +5,31 @@
 
 use chrono::prelude::{DateTime, Utc};
 use log::{info, Level, Log, Metadata, Record};
+use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
 use thread_id;
 
 static LOGGER: Logger = Logger;
 
-/// Initialize the logger.
 pub struct Logger;
+static PATHS: LazyLock<RwLock<HashMap<String, Level>>> = LazyLock::new(|| {
+    let m = HashMap::new();
+    RwLock::new(m)
+});
 
 impl Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= log::max_level()
+        let paths = PATHS.read().unwrap();
+        for (path, level) in paths.iter() {
+            if path.is_empty() {
+                return metadata.level() <= *level;
+            }
+            if metadata.target().replace("::", "/").starts_with(path) {
+                return metadata.level() <= *level;
+            }
+        }
+
+        false
     }
 
     fn log(&self, record: &Record) {
@@ -59,19 +74,39 @@ impl Logger {
     /// # Arguments
     ///
     /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
-    pub fn init(level: &str) {
-        log::set_logger(&LOGGER).ok();
-        match level {
-            "TRACE" => log::set_max_level(Level::Trace.to_level_filter()),
-            "DEBUG" => log::set_max_level(Level::Debug.to_level_filter()),
-            "INFO" => log::set_max_level(Level::Info.to_level_filter()),
-            "WARN" => log::set_max_level(Level::Warn.to_level_filter()),
-            "ERROR" => log::set_max_level(Level::Error.to_level_filter()),
-            _ => {
-                log::set_max_level(Level::Info.to_level_filter());
-                info!("Invalid log level: {}, defaulting to INFO", level);
-            }
+    pub fn init(levels: &str) {
+        let mut max_level = Level::Error;
+        for level in levels.split(',') {
+            let mut parts = level.splitn(2, '=');
+            let mut path = parts.next().unwrap().trim();
+            let level = if let Some(lvl) = parts.next() {
+                lvl.trim()
+            } else {
+                // for case INFO,path=DEBUG
+                let lvl = path;
+                path = ""; // root
+                lvl
+            };
+
+            let level = match level.to_uppercase().as_str() {
+                "TRACE" => Level::Trace,
+                "DEBUG" => Level::Debug,
+                "INFO" => Level::Info,
+                "WARN" => Level::Warn,
+                "ERROR" => Level::Error,
+                _ => {
+                    log::set_max_level(Level::Info.to_level_filter());
+                    info!("Invalid log level: {}, defaulting to INFO", level);
+                    Level::Info
+                }
+            };
+
+            max_level = std::cmp::max(max_level, level);
+            PATHS.write().unwrap().insert(path.to_string(), level);
         }
+
+        log::set_logger(&LOGGER).ok();
+        log::set_max_level(max_level.to_level_filter());
     }
 }
 
