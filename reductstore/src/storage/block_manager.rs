@@ -261,7 +261,10 @@ impl BlockManager {
         self.wal.append(block_id, WalEntry::RemoveBlock)?;
 
         let data_block_path = self.path_to_data(block_id);
-        FILE_CACHE.remove(&data_block_path)?;
+        if FILE_CACHE.try_exists(&data_block_path)? {
+            // it can be still in WAL only
+            FILE_CACHE.remove(&data_block_path)?;
+        }
 
         let desc_block_path = self.path_to_desc(block_id);
         if FILE_CACHE.try_exists(&desc_block_path)? {

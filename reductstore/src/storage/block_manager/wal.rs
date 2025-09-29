@@ -145,7 +145,7 @@ const STOP_MARKER: u8 = 255;
 impl Wal for WalImpl {
     fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        let file = if !path.exists() {
+        let file = if !FILE_CACHE.try_exists(&path)? {
             let wk = FILE_CACHE.write_or_create(&path, SeekFrom::Current(0))?;
             let file = wk.upgrade()?;
             // preallocate file to speed up writes
