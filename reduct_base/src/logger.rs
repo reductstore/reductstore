@@ -72,7 +72,7 @@ impl Logger {
     ///
     /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
     pub fn init(levels: &str) {
-        let mut max_level = Level::Error;
+        let mut max_level = Level::Trace;
         {
             let mut paths = PATHS.write().unwrap();
             paths.clear();
