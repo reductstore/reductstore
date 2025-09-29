@@ -5,23 +5,20 @@
 
 use chrono::prelude::{DateTime, Utc};
 use log::{info, Level, Log, Metadata, Record};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{LazyLock, RwLock};
 use thread_id;
 
 static LOGGER: Logger = Logger;
 
 pub struct Logger;
-static PATHS: LazyLock<RwLock<HashMap<String, Level>>> = LazyLock::new(|| {
-    let mut m = HashMap::new();
-    m.insert("".to_string(), Level::Info); // default level
-    RwLock::new(m)
-});
-
+static PATHS: LazyLock<RwLock<BTreeMap<String, Level>>> =
+    LazyLock::new(|| RwLock::new(BTreeMap::new()));
 impl Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
         let paths = PATHS.read().unwrap();
-        for (path, level) in paths.iter() {
+        // Check paths in reverse order (most specific first)
+        for (path, level) in paths.iter().rev() {
             if path.is_empty() {
                 return metadata.level() <= *level;
             }
@@ -29,7 +26,6 @@ impl Log for Logger {
                 return metadata.level() <= *level;
             }
         }
-
         false
     }
 
@@ -77,7 +73,10 @@ impl Logger {
     /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
     pub fn init(levels: &str) {
         let mut max_level = Level::Error;
-        PATHS.write().unwrap().clear();
+        let mut paths = PATHS.write().unwrap();
+        paths.clear();
+        paths.insert("".to_string(), Level::Info); // default level
+
         for level in levels.split(',') {
             let mut parts = level.splitn(2, '=');
             let mut path = parts.next().unwrap().trim();
@@ -104,7 +103,7 @@ impl Logger {
             };
 
             max_level = std::cmp::max(max_level, level);
-            PATHS.write().unwrap().insert(path.to_string(), level);
+            paths.insert(path.to_string(), level);
         }
 
         log::set_logger(&LOGGER).ok();
