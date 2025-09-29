@@ -97,8 +97,7 @@ impl Logger {
                 "WARN" => Level::Warn,
                 "ERROR" => Level::Error,
                 _ => {
-                    log::set_max_level(Level::Info.to_level_filter());
-                    info!("Invalid log level: {}, defaulting to INFO", level);
+                    eprintln!("Invalid log level: {}, defaulting to INFO", level);
                     Level::Info
                 }
             };
