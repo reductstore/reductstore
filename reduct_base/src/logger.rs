@@ -73,10 +73,11 @@ impl Logger {
     /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
     pub fn init(levels: &str) {
         let mut max_level = Level::Error;
-        let mut paths = PATHS.write().unwrap();
-        paths.clear();
-        paths.insert("".to_string(), Level::Info); // default level
-
+        {
+            let mut paths = PATHS.write().unwrap();
+            paths.clear();
+            paths.insert("".to_string(), Level::Info); // default level
+        }
         for level in levels.split(',') {
             let mut parts = level.splitn(2, '=');
             let mut path = parts.next().unwrap().trim();
@@ -103,7 +104,7 @@ impl Logger {
             };
 
             max_level = std::cmp::max(max_level, level);
-            paths.insert(path.to_string(), level);
+            PATHS.write().unwrap().insert(path.to_string(), level);
         }
 
         log::set_logger(&LOGGER).ok();
