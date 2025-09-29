@@ -737,6 +737,11 @@ mod tests {
             let block_ref = block_manager.write().unwrap().load_block(block_id).unwrap();
             assert_eq!(block_ref.read().unwrap().get_record(0).unwrap().state, 2);
         }
+
+        #[rstest]
+        fn test_remove_non_existing_block(mut block_manager: BlockManager) {
+            block_manager.remove_block(999999).err().unwrap();
+        }
     }
 
     mod index_operations {
