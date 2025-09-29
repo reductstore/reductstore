@@ -5,6 +5,10 @@ on:
       - "Build, Test and Release"
     types:
       - completed
+    branches:
+      - main
+      - stable
+
 permissions:
   contents: read
   actions: read

@@ -5,6 +5,11 @@ on:
       - "Build, Test and Release"
     types:
       - completed
+    branches:
+      - main
+      - stable
+    tags:
+      - "v*"
 
 permissions:
   id-token: write
