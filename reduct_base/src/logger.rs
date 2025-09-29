@@ -200,4 +200,29 @@ mod tests {
             false
         );
     }
+
+    #[test]
+    #[serial]
+    fn test_log_wrong_level() {
+        Logger::init("WRONG");
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Info)
+                    .target("crate")
+                    .build()
+            ),
+            true,
+            "Default level is INFO"
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Debug)
+                    .target("crate")
+                    .build()
+            ),
+            false
+        );
+    }
 }
