@@ -5,6 +5,7 @@ on:
       - "Build, Test and Release"
     types:
       - completed
+
 permissions:
   contents: read
   actions: read
