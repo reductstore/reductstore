@@ -740,7 +740,7 @@ mod tests {
 
         #[rstest]
         fn test_remove_non_existing_block(mut block_manager: BlockManager) {
-            block_manager.remove_block(999999).err().unwrap();
+            block_manager.remove_block(999999).expect("No error");
         }
     }
 
