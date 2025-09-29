@@ -13,7 +13,8 @@ static LOGGER: Logger = Logger;
 
 pub struct Logger;
 static PATHS: LazyLock<RwLock<HashMap<String, Level>>> = LazyLock::new(|| {
-    let m = HashMap::new();
+    let mut m = HashMap::new();
+    m.insert("".to_string(), Level::Info); // default level
     RwLock::new(m)
 });
 
@@ -76,6 +77,7 @@ impl Logger {
     /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
     pub fn init(levels: &str) {
         let mut max_level = Level::Error;
+        PATHS.write().unwrap().clear();
         for level in levels.split(',') {
             let mut parts = level.splitn(2, '=');
             let mut path = parts.next().unwrap().trim();
@@ -113,10 +115,90 @@ impl Logger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn it_works() {
         Logger::init("INFO");
         log::info!("Hello, world!");
+    }
+
+    #[test]
+    #[serial]
+    fn test_log_levels() {
+        Logger::init("DEBUG,path=TRACE,crate/module=ERROR");
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Info)
+                    .target("crate")
+                    .build()
+            ),
+            true
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Debug)
+                    .target("crate")
+                    .build()
+            ),
+            true
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Trace)
+                    .target("crate")
+                    .build()
+            ),
+            false
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Error)
+                    .target("crate/module")
+                    .build()
+            ),
+            true
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Warn)
+                    .target("crate/module")
+                    .build()
+            ),
+            false
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Info)
+                    .target("other")
+                    .build()
+            ),
+            true
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Debug)
+                    .target("other")
+                    .build()
+            ),
+            true
+        );
+        assert_eq!(
+            LOGGER.enabled(
+                &Metadata::builder()
+                    .level(Level::Trace)
+                    .target("other")
+                    .build()
+            ),
+            false
+        );
     }
 }
