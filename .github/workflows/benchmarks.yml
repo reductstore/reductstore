@@ -25,6 +25,8 @@ jobs:
       - name: Download image artifact
         uses: actions/download-artifact@v4
         with:
+          run-id: ${{ github.event.workflow_run.id }} # to download artifact from the CI workflow
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           name: image
           path: /tmp/
 
