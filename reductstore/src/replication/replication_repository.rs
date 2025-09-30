@@ -322,8 +322,14 @@ impl ReplicationRepository {
         // check syntax of when condition
         let mut conf = self.config.clone();
         if let Some(when) = &settings.when {
-            let Ok((cond, directives)) = Parser::new().parse(when.clone()) else {
-                return Err(unprocessable_entity!("Invalid replication condition"));
+            let (cond, directives) = match Parser::new().parse(when.clone()) {
+                Ok((cond, dirs)) => (cond, dirs),
+                Err(err) => {
+                    return Err(unprocessable_entity!(
+                        "Invalid replication condition: {}",
+                        err.message
+                    ))
+                }
             };
 
             let filer = WhenFilter::<TransactionNotification>::try_new(
