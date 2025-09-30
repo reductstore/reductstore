@@ -15,7 +15,6 @@ use crate::api::entry::common::err_to_batched_header;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::RecordDrainer;
-use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
@@ -74,7 +73,7 @@ pub(super) async fn write_batched_records(
             .await
             .ok_or(internal_server_error!("No writer found"))?;
 
-        while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
+        while let Some(chunk) = timeout(components.cfg.io_conf.operation_timeout, stream.next())
             .await
             .map_err(|_| internal_server_error!("Timeout while receiving data"))?
         {
@@ -86,6 +85,7 @@ pub(super) async fn write_batched_records(
                     chunk,
                     &mut written,
                     ctx.header.content_length.clone(),
+                    components.cfg.io_conf.operation_timeout,
                 )
                 .await
                 {
@@ -97,7 +97,7 @@ pub(super) async fn write_batched_records(
                         // finish writing the current record and start a new one
                         if let Err(err) = ctx
                             .writer
-                            .send_timeout(Ok(None), IO_OPERATION_TIMEOUT)
+                            .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
                             .await
                         {
                             debug!("Timeout while sending EOF: {}", err);
@@ -200,6 +200,7 @@ async fn write_chunk(
     chunk: Bytes,
     written: &mut usize,
     content_size: u64,
+    io_timeout: std::time::Duration,
 ) -> Result<Option<Bytes>, ReductError> {
     let to_write = content_size - *written as u64;
     *written += chunk.len();
@@ -210,9 +211,7 @@ async fn write_chunk(
         (chuck_to_write, Some(chunk.slice(to_write as usize..)))
     };
 
-    writer
-        .send_timeout(Ok(Some(chunk)), IO_OPERATION_TIMEOUT)
-        .await?;
+    writer.send_timeout(Ok(Some(chunk)), io_timeout).await?;
     Ok(rest)
 }
 
