@@ -1,8 +1,9 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::io::IoConfig;
 use crate::cfg::replication::ReplicationConfig;
-use crate::cfg::DEFAULT_PORT;
+use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
@@ -12,6 +13,7 @@ use crate::replication::proto::{
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::query::condition::Parser;
+use crate::storage::query::filters::WhenFilter;
 use crate::storage::storage::Storage;
 use bytes::Bytes;
 use log::{debug, error};
@@ -107,7 +109,7 @@ pub(crate) struct ReplicationRepository {
     replications: HashMap<String, ReplicationTask>,
     storage: Arc<Storage>,
     repo_path: PathBuf,
-    config: ReplicationConfig,
+    config: Cfg,
 }
 
 impl ManageReplications for ReplicationRepository {
@@ -208,7 +210,7 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) fn load_or_create(storage: Arc<Storage>, config: ReplicationConfig) -> Self {
+    pub(crate) fn load_or_create(storage: Arc<Storage>, config: Cfg) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
 
         let mut repo = Self {
@@ -308,7 +310,7 @@ impl ReplicationRepository {
 
         // check if target and source buckets are the same
         if settings.src_bucket == settings.dst_bucket
-            && self.config.listening_port
+            && self.config.replication_conf.listening_port
                 == dest_url.port_or_known_default().unwrap_or(DEFAULT_PORT)
             && ["127.0.0.1", "localhost", "0.0.0.0"].contains(&dest_url.host_str().unwrap_or(""))
         {
@@ -318,24 +320,26 @@ impl ReplicationRepository {
         }
 
         // check syntax of when condition
+        let mut conf = self.config.clone();
         if let Some(when) = &settings.when {
-            if let Err(e) = Parser::new().parse(when.clone()) {
-                return Err(unprocessable_entity!(
-                    "Invalid replication condition: {}",
-                    e
-                ));
-            }
+            let Ok((cond, directives)) = Parser::new().parse(when.clone()) else {
+                return Err(unprocessable_entity!("Invalid replication condition"));
+            };
+
+            let filer = WhenFilter::<TransactionNotification>::try_new(
+                cond,
+                directives,
+                self.config.io_conf.clone(),
+                true,
+            )?;
+            conf.io_conf = filer.io_config().clone();
         }
 
         // remove old replication because before creating new one
         self.replications.remove(name);
 
-        let replication = ReplicationTask::new(
-            name.to_string(),
-            settings,
-            &self.config,
-            Arc::clone(&self.storage),
-        );
+        let replication =
+            ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage));
         self.replications.insert(name.to_string(), replication);
         self.save_repo()
     }

@@ -8,6 +8,7 @@ pub(crate) mod filters;
 mod historical;
 mod limited;
 
+use crate::cfg::io::IoConfig;
 use crate::core::thread_pool::{shared, shared_isolated, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
@@ -33,17 +34,32 @@ pub(in crate::storage) fn build_query(
     start: u64,
     stop: u64,
     options: QueryOptions,
+    io_defaults: IoConfig,
 ) -> Result<Box<dyn Query + Send + Sync>, ReductError> {
     if start > stop && !options.continuous {
         return Err(unprocessable_entity!("Start time must be before stop time",));
     }
 
     Ok(if let Some(_) = options.limit {
-        Box::new(limited::LimitedQuery::try_new(start, stop, options)?)
+        Box::new(limited::LimitedQuery::try_new(
+            start,
+            stop,
+            options,
+            io_defaults,
+        )?)
     } else if options.continuous {
-        Box::new(continuous::ContinuousQuery::try_new(start, options)?)
+        Box::new(continuous::ContinuousQuery::try_new(
+            start,
+            options,
+            io_defaults,
+        )?)
     } else {
-        Box::new(historical::HistoricalQuery::try_new(start, stop, options)?)
+        Box::new(historical::HistoricalQuery::try_new(
+            start,
+            stop,
+            options,
+            io_defaults,
+        )?)
     })
 }
 

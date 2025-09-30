@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::asset::asset_manager::ManageStaticAsset;
+use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::{ExtRepository, ExtensionApi, IoExtMap};
 use dlopen2::wrapper::Container;
 use log::{error, info};
@@ -18,6 +19,7 @@ impl ExtRepository {
         paths: Vec<PathBuf>,
         embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
         settings: ExtSettings,
+        io_config: IoConfig,
     ) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
@@ -65,6 +67,7 @@ impl ExtRepository {
             query_map,
             ext_wrappers,
             embedded_extensions,
+            io_config,
         })
     }
 }

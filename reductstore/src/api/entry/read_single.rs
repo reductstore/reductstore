@@ -72,7 +72,7 @@ async fn fetch_and_response_single_record(
         entry.begin_read(ts).await?
     } else {
         let query_id = query_id.unwrap();
-        let rx = entry.get_query_receiver(query_id)?;
+        let (rx, _) = entry.get_query_receiver(query_id)?;
         let query_path = format!("{}/{}/{}", entry.bucket_name(), entry.name(), query_id);
         next_record_reader(rx, &query_path).await?
     };

@@ -3,15 +3,22 @@
 
 mod ctx_after;
 mod ctx_before;
+mod io_cfg;
 mod select_labels;
 
-use crate::storage::query::condition::{BoxedNode, Context, Directives};
+use crate::cfg::io::IoConfig;
+use crate::storage::query::condition::{BoxedNode, Context, Directives, Value};
 use crate::storage::query::filters::when::ctx_after::CtxAfter;
 use crate::storage::query::filters::when::ctx_before::CtxBefore;
+use crate::storage::query::filters::when::io_cfg::merge_io_config_from_directives;
 use crate::storage::query::filters::when::select_labels::LabelSelector;
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
+use bytesize::ByteSize;
+use futures_util::future::ok;
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::unprocessable_entity;
 use std::collections::VecDeque;
+use std::str::FromStr;
 
 pub(super) enum Padding {
     Records(usize),
@@ -28,12 +35,14 @@ pub struct WhenFilter<R> {
     ctx_buffer: VecDeque<R>,
 
     label_selector: LabelSelector,
+    io_config: IoConfig,
 }
 
 impl<R> WhenFilter<R> {
     pub fn try_new(
         condition: BoxedNode,
         mut directives: Directives,
+        io_config: IoConfig,
         strict: bool,
     ) -> Result<Self, ReductError> {
         Ok(Self {
@@ -43,7 +52,12 @@ impl<R> WhenFilter<R> {
             ctx_after: CtxAfter::try_new(directives.remove("#ctx_after"))?,
             label_selector: LabelSelector::try_new(directives.remove("#select_labels"))?,
             ctx_buffer: VecDeque::new(),
+            io_config: merge_io_config_from_directives(&mut directives, io_config)?,
         })
+    }
+
+    pub fn io_config(&self) -> &IoConfig {
+        &self.io_config
     }
 }
 

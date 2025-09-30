@@ -1,19 +1,24 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::io::IoConfig;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
-use crate::storage::query::condition::Parser;
+use crate::storage::query::condition::{Directives, Parser, Value};
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
-use reduct_base::error::ReductError;
+use bytesize::ByteSize;
+use reduct_base::error::{IntEnum, ReductError};
+use reduct_base::unprocessable_entity;
 use std::collections::{HashMap, VecDeque};
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 impl FilterRecord for Record {
     fn state(&self) -> i32 {
@@ -57,6 +62,8 @@ pub struct HistoricalQuery {
     only_metadata: bool,
     /// Interrupted query
     is_interrupted: bool,
+    /// Io Config
+    io_config: IoConfig,
 }
 
 impl HistoricalQuery {
@@ -64,6 +71,7 @@ impl HistoricalQuery {
         start_time: u64,
         stop_time: u64,
         options: QueryOptions,
+        io_defaults: IoConfig,
     ) -> Result<Self, ReductError> {
         let mut filters: Vec<Filter> = vec![
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
@@ -92,18 +100,20 @@ impl HistoricalQuery {
         } else {
             false
         };
+        let mut io_config = io_defaults;
+
         if let Some(when) = options.when {
             let parser = Parser::new();
-            let (condition, directives) = parser.parse(when)?;
+            let (condition, mut directives) = parser.parse(when)?;
             if directives.contains_key("#ext") {
                 only_metadata = false;
             }
 
-            filters.push(Box::new(WhenFilter::try_new(
-                condition,
-                directives,
-                options.strict,
-            )?));
+            // get io config from directives and override defaults from configuraion
+            let filter = WhenFilter::try_new(condition, directives, io_config, options.strict)?;
+
+            io_config = filter.io_config().clone();
+            filters.push(Box::new(filter));
         }
 
         Ok(HistoricalQuery {
@@ -114,6 +124,7 @@ impl HistoricalQuery {
             filters,
             only_metadata,
             is_interrupted: false,
+            io_config,
         })
     }
 }
@@ -179,6 +190,10 @@ impl Query for HistoricalQuery {
                 Some(record),
             )
         }
+    }
+
+    fn io_settings(&self) -> &IoConfig {
+        &self.io_config
     }
 }
 

@@ -17,8 +17,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         &self,
         storage: Arc<Storage>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo =
-            create_replication_repo(Arc::clone(&storage), self.cfg.replication_conf.clone());
+        let mut repo = create_replication_repo(Arc::clone(&storage), self.cfg.clone());
         for (name, settings) in &self.cfg.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {

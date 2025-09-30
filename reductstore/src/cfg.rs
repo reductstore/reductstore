@@ -228,6 +228,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     .log_level(&self.cfg.log_level)
                     .server_info(server_info)
                     .build(),
+                self.cfg.io_conf.clone(),
             )?,
             query_link_cache: tokio::sync::RwLock::new(Cache::new(
                 DEFAULT_CACHED_QUERIES,

@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use log::{error, info};
 
+use crate::cfg::io::IoConfig;
 use crate::cfg::replication::ReplicationConfig;
+use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
@@ -18,6 +20,7 @@ use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
+use crate::storage::query::filters::WhenFilter;
 use crate::storage::storage::Storage;
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -36,6 +39,7 @@ pub struct ReplicationTask {
     is_provisioned: bool,
     settings: ReplicationSettings,
     system_options: ReplicationSystemOptions,
+    io_config: IoConfig,
     filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<Storage>,
@@ -60,7 +64,7 @@ impl ReplicationTask {
     pub(super) fn new(
         name: String,
         settings: ReplicationSettings,
-        config: &ReplicationConfig,
+        config: Cfg,
         storage: Arc<Storage>,
     ) -> Self {
         let ReplicationSettings {
@@ -77,8 +81,8 @@ impl ReplicationTask {
         );
 
         let system_options = ReplicationSystemOptions {
-            transaction_log_size: config.replication_log_size,
-            remote_bucket_unavailable_timeout: config.connection_timeout.clone(),
+            transaction_log_size: config.replication_conf.replication_log_size,
+            remote_bucket_unavailable_timeout: config.replication_conf.connection_timeout.clone(),
             ..Default::default()
         };
 
@@ -86,6 +90,7 @@ impl ReplicationTask {
             name,
             settings,
             system_options,
+            config.io_conf,
             remote_bucket,
             Arc::new(RwLock::new(HashMap::new())),
             storage,
@@ -96,6 +101,7 @@ impl ReplicationTask {
         name: String,
         settings: ReplicationSettings,
         system_options: ReplicationSystemOptions,
+        io_config: IoConfig,
         remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
         filter: Arc<RwLock<HashMap<String, TransactionFilter>>>,
         storage: Arc<Storage>,
@@ -107,8 +113,9 @@ impl ReplicationTask {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let is_active = Arc::new(AtomicBool::new(true));
 
-        let config = settings.clone();
         let replication_name = name.clone();
+        let thr_settings = settings.clone();
+        let thr_io_config = io_config.clone();
         let thr_log_map = Arc::clone(&log_map);
         let thr_storage = Arc::clone(&storage);
         let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
@@ -120,14 +127,14 @@ impl ReplicationTask {
             let init_transaction_logs = || {
                 let mut logs = thr_log_map.write()?;
                 for entry in thr_storage
-                    .get_bucket(&config.src_bucket)?
+                    .get_bucket(&thr_settings.src_bucket)?
                     .upgrade()?
                     .info()?
                     .entries
                 {
                     let path = Self::build_path_to_transaction_log(
                         thr_storage.data_path(),
-                        &config.src_bucket,
+                        &thr_settings.src_bucket,
                         &entry.name,
                         &replication_name,
                     );
@@ -163,7 +170,8 @@ impl ReplicationTask {
             let sender = ReplicationSender::new(
                 thr_log_map.clone(),
                 thr_storage.clone(),
-                config.clone(),
+                thr_settings.clone(),
+                thr_io_config.clone(),
                 thr_hourly_diagnostics,
                 remote_bucket,
             );
@@ -188,7 +196,7 @@ impl ReplicationTask {
                         info!("Transaction log is corrupted, dropping the whole log");
                         let path = ReplicationTask::build_path_to_transaction_log(
                             thr_storage.data_path(),
-                            &config.src_bucket,
+                            &thr_settings.src_bucket,
                             &entry_name,
                             &replication_name,
                         );
@@ -223,6 +231,7 @@ impl ReplicationTask {
             is_provisioned: false,
             settings,
             system_options,
+            io_config,
             storage,
             filter_map: filter,
             log_map,
@@ -240,7 +249,11 @@ impl ReplicationTask {
             if !lock.contains_key(&notification.entry) {
                 lock.insert(
                     notification.entry.clone(),
-                    TransactionFilter::try_new(self.name(), self.settings.clone())?,
+                    TransactionFilter::try_new(
+                        self.name(),
+                        self.settings.clone(),
+                        self.io_config.clone(),
+                    )?,
                 );
             }
 

@@ -76,13 +76,16 @@ pub(super) async fn get(
         let repo_ext = &components.ext_repo;
 
         // Execute the query with extension mechanism
-        let id = entry.query(query.query.clone()).await?;
+        let id = entry
+            .query(query.query.clone(), components.cfg.io_conf.clone())
+            .await?;
         repo_ext
             .register_query(id, &query.bucket, &query.entry, query.query)
             .await?;
 
-        let rx = entry.get_query_receiver(id.clone())?.upgrade()?;
-        let record = process_query_and_fetch_record(record_num, repo_ext, id, rx).await?;
+        let (rx, _) = entry.get_query_receiver(id.clone())?;
+        let record =
+            process_query_and_fetch_record(record_num, repo_ext, id, rx.upgrade()?).await?;
 
         let record = Arc::new(Mutex::new(record));
         cache_lock.insert(key.clone(), Arc::clone(&record));

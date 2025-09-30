@@ -66,7 +66,6 @@ pub(super) async fn read_batched_records(
         entry_name,
         query_id,
         method.name == "HEAD",
-        &components.cfg.io_conf,
         &components.ext_repo,
     )
     .await
@@ -109,9 +108,13 @@ async fn fetch_and_response_batched_records(
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
-    io_settings: &IoConfig,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
+    let (rx, io_settings) = bucket
+        .get_entry(entry_name)?
+        .upgrade()?
+        .get_query_receiver(query_id)?;
+
     let mut header_size = 0usize;
     let mut body_size = 0u64;
     let mut headers = HeaderMap::new();
@@ -121,10 +124,6 @@ async fn fetch_and_response_batched_records(
 
     let mut last = false;
     let bucket_name = bucket.name().to_string();
-    let rx = bucket
-        .get_entry(entry_name)?
-        .upgrade()?
-        .get_query_receiver(query_id)?;
 
     let start_time = std::time::Instant::now();
     loop {
@@ -189,8 +188,7 @@ async fn fetch_and_response_batched_records(
         let _ = bucket
             .get_entry(entry_name)?
             .upgrade()?
-            .get_query_receiver(query_id)?
-            .upgrade()?;
+            .get_query_receiver(query_id)?;
     }
 
     headers.insert("content-length", body_size.to_string().parse().unwrap());

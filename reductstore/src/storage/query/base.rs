@@ -6,6 +6,7 @@ use reduct_base::error::ReductError;
 
 use std::collections::HashMap;
 
+use crate::cfg::io::IoConfig;
 use crate::storage::entry::RecordReader;
 use reduct_base::msg::entry_api::QueryEntry;
 use serde_json::Value;
@@ -24,7 +25,6 @@ pub(in crate::storage) trait Query {
     /// # Returns
     ///
     /// * `RecordReader` - The record reader.
-    /// * `bool` - True if it is the last record (should be remove in the future, doesn't work with include/exclude).
     ///
     /// # Errors
     ///
@@ -34,6 +34,17 @@ pub(in crate::storage) trait Query {
         &mut self,
         block_manager: Arc<RwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError>;
+
+    /// Get the IO settings for the query.
+    ///
+    /// # Arguments
+    ///
+    /// * `defaults` - The default IO settings if not specified in the query directives.
+    ///
+    /// # Returns
+    ///
+    /// * `IoConfig` - The IO settings for the query.
+    fn io_settings(&self) -> &IoConfig;
 }
 
 /// QueryOptions is used to specify the options for a query.

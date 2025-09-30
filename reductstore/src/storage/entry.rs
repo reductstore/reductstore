@@ -26,6 +26,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 
+use crate::cfg::io::IoConfig;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
@@ -39,6 +40,7 @@ struct QueryHandle {
     options: QueryOptions,
     last_access: Instant,
     query_task_handle: TaskHandle<()>,
+    io_settings: IoConfig,
 }
 
 type QueryHandleMap = HashMap<u64, QueryHandle>;
@@ -120,7 +122,11 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(&self, query_parameters: QueryEntry) -> TaskHandle<Result<u64, ReductError>> {
+    pub fn query(
+        &self,
+        query_parameters: QueryEntry,
+        io_defaults: IoConfig,
+    ) -> TaskHandle<Result<u64, ReductError>> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let range = self.get_query_time_range(&query_parameters);
@@ -133,11 +139,12 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
 
         let options: QueryOptions = query_parameters.into();
-        let query = build_query(start, stop, options.clone());
+        let query = build_query(start, stop, options.clone(), io_defaults);
         if let Err(e) = query {
             return e.into();
         }
 
+        let io_settings = query.as_ref().unwrap().io_settings().clone();
         let (rx, task_handle) = spawn_query_task(
             id,
             self.task_group(),
@@ -153,6 +160,7 @@ impl Entry {
                 options,
                 last_access: Instant::now(),
                 query_task_handle: task_handle,
+                io_settings,
             },
         );
 
@@ -167,12 +175,12 @@ impl Entry {
     ///
     /// # Returns
     ///
-    /// * `(RecordReader, bool)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
+    /// * `(RecordReader, IoConfig)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
     pub fn get_query_receiver(
         &self,
         query_id: u64,
-    ) -> Result<Weak<AsyncRwLock<QueryRx>>, ReductError> {
+    ) -> Result<(Weak<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
         shared(&self.task_group(), "remove expired queries", move || {
@@ -181,13 +189,15 @@ impl Entry {
         .wait();
 
         let mut queries = self.queries.write()?;
-        let query = queries.get_mut(&query_id)
-            .ok_or_else(||
-                not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value {} sec.",
-                    query_id, QueryOptions::default().ttl.as_secs()))?;
+        let query = queries.get_mut(&query_id).ok_or_else(|| {
+            not_found!(
+                "Query {} not found and it might have expired. Check TTL in your query request.",
+                query_id
+            )
+        })?;
 
         query.last_access = Instant::now();
-        Ok(Weak::new(Arc::clone(&query.rx)))
+        Ok((Weak::new(Arc::clone(&query.rx)), query.io_settings.clone()))
     }
 
     /// Returns stats about the entry.
