@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 
+use crate::backend::BackendType;
+use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
@@ -27,6 +29,7 @@ pub struct Storage {
     start_time: Instant,
     buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
+    cfg: Cfg,
 }
 
 impl Storage {
@@ -35,7 +38,7 @@ impl Storage {
     ///
     /// # Arguments
     ///
-    /// * `data_path` - The path to the data folder
+    /// * `cfg` - The configuration
     /// * `license` - The license info
     ///
     /// # Returns
@@ -45,7 +48,15 @@ impl Storage {
     /// # Panics
     ///
     /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
-    pub fn load(data_path: PathBuf, license: Option<License>) -> Storage {
+    pub fn load(cfg: Cfg, license: Option<License>) -> Storage {
+        let data_path = if cfg.cs_config.backend_type == BackendType::Filesystem {
+            cfg.data_path.clone()
+        } else {
+            cfg.cs_config
+                .cache_path
+                .clone()
+                .expect("Cache path must be set for remote storage")
+        };
         if !FILE_CACHE.try_exists(&data_path).unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
             FILE_CACHE.create_dir_all(&data_path).unwrap();
@@ -55,7 +66,7 @@ impl Storage {
         let mut buckets = BTreeMap::new();
         for path in FILE_CACHE.read_dir(&data_path).unwrap() {
             if path.is_dir() {
-                match Bucket::restore(path.clone()) {
+                match Bucket::restore(path.clone(), cfg.clone()) {
                     Ok(bucket) => {
                         let bucket = Arc::new(bucket);
                         buckets.insert(bucket.name().to_string(), bucket);
@@ -74,6 +85,7 @@ impl Storage {
             start_time: Instant::now(),
             buckets: Arc::new(RwLock::new(buckets)),
             license,
+            cfg,
         }
     }
 
@@ -123,7 +135,12 @@ impl Storage {
             return Err(conflict!("Bucket '{}' already exists", name));
         }
 
-        let bucket = Arc::new(Bucket::new(name, &self.data_path, settings)?);
+        let bucket = Arc::new(Bucket::new(
+            name,
+            &self.data_path,
+            settings,
+            self.cfg.clone(),
+        )?);
         buckets.insert(name.to_string(), Arc::clone(&bucket));
 
         Ok(bucket.into())
@@ -226,6 +243,7 @@ impl Storage {
         let new_path = self.data_path.join(new_name);
         let old_name = old_name.to_string();
         let new_name = new_name.to_string();
+        let cfg = self.cfg.clone();
 
         unique(&task_group, "rename bucket", move || {
             let mut buckets = buckets.write().unwrap();
@@ -234,7 +252,7 @@ impl Storage {
                     sync_task.wait()?;
                     FILE_CACHE.discard_recursive(&path)?;
                     FILE_CACHE.rename(&path, &new_path)?;
-                    let bucket = Bucket::restore(new_path)?;
+                    let bucket = Bucket::restore(new_path, cfg)?;
                     buckets.insert(new_name.to_string(), Arc::new(bucket));
                     debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
                     Ok(())
@@ -298,15 +316,21 @@ mod tests {
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
+    use std::fs::canonicalize;
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_create_folder(path: PathBuf) {
-        let path = path.join("test");
+    fn test_create_folder() {
+        let path = tempdir().unwrap().keep().join("data_path");
+        let cfg = Cfg {
+            data_path: path.clone(),
+            ..Cfg::default()
+        };
+
         assert!(!path.exists());
-        let _ = Storage::load(path.clone(), None);
+        let _ = Storage::load(cfg.clone(), None);
         assert!(path.exists(), "Engine creates a folder if it doesn't exist");
     }
 
@@ -344,7 +368,11 @@ mod tests {
             fingerprint: "fingerprint".to_string(),
         };
 
-        let storage = Storage::load(storage.data_path, Some(license.clone()));
+        let cfg = Cfg {
+            data_path: storage.data_path.clone(),
+            ..Cfg::default()
+        };
+        let storage = Storage::load(cfg, Some(license.clone()));
         assert_eq!(storage.info().unwrap().license, Some(license));
     }
 
@@ -388,7 +416,11 @@ mod tests {
 
             sleep(Duration::from_millis(10)); // to make sure that write tasks are completed
             storage.sync_fs().unwrap();
-            let storage = Storage::load(storage.data_path.clone(), None);
+            let cfg = Cfg {
+                data_path: storage.data_path.clone(),
+                ..Cfg::default()
+            };
+            let storage = Storage::load(cfg, None);
             assert_eq!(
                 storage.info().unwrap(),
                 ServerInfo {
@@ -427,7 +459,11 @@ mod tests {
 
             let path = storage.data_path.join("test");
             FILE_CACHE.remove(&path.join(SETTINGS_NAME)).unwrap();
-            let storage = Storage::load(storage.data_path.clone(), None);
+            let cfg = Cfg {
+                data_path: storage.data_path.clone(),
+                ..Cfg::default()
+            };
+            let storage = Storage::load(cfg, None);
             assert_eq!(
                 storage.info().unwrap(),
                 ServerInfo {
@@ -524,7 +560,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_bucket_persistent(path: PathBuf, storage: Storage) {
+        fn test_remove_bucket_persistent(cfg: Cfg, storage: Storage) {
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
                 .unwrap()
@@ -534,7 +570,7 @@ mod tests {
             let result = storage.remove_bucket("test").wait();
             assert_eq!(result, Ok(()));
 
-            let storage = Storage::load(path, None);
+            let storage = Storage::load(cfg, None);
             let result = storage.get_bucket("test");
             assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
         }
@@ -654,19 +690,21 @@ mod tests {
         );
     }
     #[fixture]
-
-    fn path() -> PathBuf {
-        tempdir().unwrap().keep()
+    fn cfg() -> Cfg {
+        Cfg {
+            data_path: tempdir().unwrap().keep(),
+            ..Cfg::default()
+        }
     }
 
     #[fixture]
-    fn storage(path: PathBuf) -> Storage {
+    fn storage(cfg: Cfg) -> Storage {
         FILE_CACHE.set_storage_backend(
             Backend::builder()
-                .local_data_path(path.to_str().unwrap())
+                .local_data_path(cfg.data_path.clone())
                 .try_build()
                 .unwrap(),
         );
-        Storage::load(path, None)
+        Storage::load(cfg, None)
     }
 }

@@ -56,9 +56,9 @@ pub enum BackendType {
 pub struct BackpackBuilder {
     backend_type: BackendType,
 
-    local_data_path: Option<String>,
+    local_data_path: Option<PathBuf>,
     remote_bucket: Option<String>,
-    remote_cache_path: Option<String>,
+    remote_cache_path: Option<PathBuf>,
     remote_region: Option<String>,
     remote_endpoint: Option<String>,
     remote_access_key: Option<String>,
@@ -76,8 +76,8 @@ impl BackpackBuilder {
         self
     }
 
-    pub fn local_data_path(mut self, path: &str) -> Self {
-        self.local_data_path = Some(path.to_string());
+    pub fn local_data_path(mut self, path: PathBuf) -> Self {
+        self.local_data_path = Some(path);
         self
     }
 
@@ -86,8 +86,8 @@ impl BackpackBuilder {
         self
     }
 
-    pub fn remote_cache_path(mut self, path: &str) -> Self {
-        self.remote_cache_path = Some(path.to_string());
+    pub fn remote_cache_path(mut self, path: PathBuf) -> Self {
+        self.remote_cache_path = Some(path);
         self
     }
 
@@ -252,7 +252,7 @@ mod tests {
             {
                 let backend = Backend::builder()
                     .backend_type(BackendType::Filesystem)
-                    .local_data_path("/tmp/data")
+                    .local_data_path(PathBuf::from("/tmp/data"))
                     .try_build()
                     .expect("Failed to build Filesystem backend");
                 assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/data"));
@@ -269,7 +269,7 @@ mod tests {
                 let backend = Backend::builder()
                     .backend_type(BackendType::S3)
                     .remote_bucket("my-bucket")
-                    .remote_cache_path("/tmp/cache")
+                    .remote_cache_path(PathBuf::from("/tmp/cache"))
                     .remote_region("us-east-1")
                     .remote_endpoint("http://localhost:9000")
                     .remote_access_key("access_key")
@@ -285,7 +285,7 @@ mod tests {
         fn test_backend_builder_s3_bucket_missing() {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
-                .remote_cache_path("/tmp/cache")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
                 .remote_region("us-east-1")
                 .remote_endpoint("http://localhost:9000")
                 .remote_access_key("access_key")
@@ -326,7 +326,7 @@ mod tests {
             let result = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
-                .remote_cache_path("/tmp/cache")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
                 .remote_region("us-east-1")
                 .remote_endpoint("http://localhost:9000")
                 .remote_access_key("access_key")
@@ -345,7 +345,7 @@ mod tests {
             let result = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
-                .remote_cache_path("/tmp/cache")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
                 .remote_region("us-east-1")
                 .remote_access_key("access_key")
                 .remote_secret_key("secret_key")
@@ -363,7 +363,7 @@ mod tests {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
-                .remote_cache_path("/tmp/cache")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
                 .remote_region("us-east-1")
                 .remote_endpoint("http://localhost:9000")
                 .remote_secret_key("secret_key")
@@ -383,7 +383,7 @@ mod tests {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
-                .remote_cache_path("/tmp/cache")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
                 .remote_region("us-east-1")
                 .remote_endpoint("http://localhost:9000")
                 .remote_access_key("access_key")
@@ -404,7 +404,7 @@ mod tests {
                 .backend_type(BackendType::S3)
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
-                .remote_cache_path("/tmp/cache")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
                 .remote_region("us-east-1")
                 .remote_endpoint("http://localhost:9000")
                 .remote_access_key("access_key")

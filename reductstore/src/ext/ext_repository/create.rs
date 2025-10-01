@@ -83,6 +83,8 @@ pub fn create_ext_repository(
 
 #[cfg(test)]
 mod tests {
+    use crate::cfg::io::IoConfig;
+    use crate::cfg::Cfg;
     use crate::ext::ext_repository::create_ext_repository;
     use reduct_base::error::ErrorCode::NoContent;
     use reduct_base::ext::ExtSettings;
@@ -100,6 +102,7 @@ mod tests {
             ExtSettings::builder()
                 .server_info(ServerInfo::default())
                 .build(),
+            IoConfig::default(),
         )
         .unwrap();
 

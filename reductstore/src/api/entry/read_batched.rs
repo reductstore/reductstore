@@ -393,7 +393,10 @@ mod tests {
         let resp_headers = response.headers();
         assert_eq!(
             resp_headers["x-reduct-error"],
-            format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
+            format!(
+                "Query {} not found and it might have expired. Check TTL in your query request.",
+                query_id
+            )
         );
     }
 
@@ -523,6 +526,7 @@ mod tests {
             ExtSettings::builder()
                 .server_info(ServerInfo::default())
                 .build(),
+            IoConfig::default(),
         )
         .unwrap()
     }

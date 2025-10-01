@@ -1089,7 +1089,7 @@ mod tests {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         FILE_CACHE.set_storage_backend(
             Backend::builder()
-                .local_data_path(path.to_str().unwrap())
+                .local_data_path(path.clone())
                 .try_build()
                 .unwrap(),
         );

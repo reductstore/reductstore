@@ -131,6 +131,7 @@ impl Bucket {
 
 #[cfg(test)]
 mod tests {
+    use crate::cfg::Cfg;
     use crate::storage::bucket::tests::{bucket, settings};
     use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -140,7 +141,7 @@ mod tests {
     fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
         assert_eq!(bucket.settings(), settings);
 
-        let bucket = Bucket::restore(bucket.path.clone()).unwrap();
+        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
         assert_eq!(bucket.name(), "test");
         assert_eq!(bucket.settings(), settings);
     }

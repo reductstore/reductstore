@@ -260,7 +260,7 @@ pub(crate) mod tests {
             let path = tempdir().unwrap().keep();
             FILE_CACHE.set_storage_backend(
                 Backend::builder()
-                    .local_data_path(path.to_str().unwrap())
+                    .local_data_path(path.clone())
                     .try_build()
                     .unwrap(),
             );

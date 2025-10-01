@@ -275,16 +275,20 @@ mod tests {
 
     #[fixture]
     pub(crate) async fn components() -> Arc<Components> {
-        let data_path = tempfile::tempdir().unwrap().keep();
+        let cfg = Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            ..Cfg::default()
+        };
+
         FILE_CACHE.set_storage_backend(
             Backend::builder()
-                .local_data_path(data_path.to_str().unwrap())
+                .local_data_path(cfg.data_path.clone())
                 .try_build()
                 .unwrap(),
         );
 
-        let storage = Storage::load(data_path.clone(), None);
-        let mut token_repo = create_token_repository(data_path.clone(), "init-token");
+        let storage = Storage::load(cfg.clone(), None);
+        let mut token_repo = create_token_repository(cfg.data_path.clone(), "init-token");
 
         storage
             .create_bucket("bucket-1", BucketSettings::default())
@@ -316,8 +320,7 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let storage = Arc::new(storage);
-        let mut replication_repo =
-            create_replication_repo(Arc::clone(&storage), ReplicationConfig::default());
+        let mut replication_repo = create_replication_repo(Arc::clone(&storage), cfg.clone());
         replication_repo
             .create_replication(
                 "api-test",
@@ -348,6 +351,7 @@ mod tests {
                 ExtSettings::builder()
                     .server_info(ServerInfo::default())
                     .build(),
+                cfg.io_conf.clone(),
             )
             .expect("Failed to create extension repo"),
             cfg: Cfg::default(),

@@ -61,7 +61,7 @@ impl Entry {
 
         let rx = || {
             // io defaults isn't used in remove queries
-            let query_id = self.query(options, IoConfig::default()).wait()?;
+            let query_id = self.query(options).wait()?;
             self.get_query_receiver(query_id)
         };
 

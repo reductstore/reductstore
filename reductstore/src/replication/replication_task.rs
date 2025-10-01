@@ -426,7 +426,13 @@ mod tests {
             FILE_CACHE
                 .remove_dir(&path.join(&settings.src_bucket))
                 .unwrap();
-            Bucket::new(&settings.src_bucket, &path, BucketSettings::default()).unwrap();
+            Bucket::new(
+                &settings.src_bucket,
+                &path,
+                BucketSettings::default(),
+                Cfg::default(),
+            )
+            .unwrap();
 
             fs::create_dir_all(log_path.parent().unwrap()).unwrap();
             let mut log_file = fs::File::create(&log_path).unwrap();
@@ -679,7 +685,12 @@ mod tests {
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationTask {
-        let storage = Arc::new(Storage::load(path, None));
+        let cfg = Cfg {
+            data_path: path.clone(),
+            ..Default::default()
+        };
+
+        let storage = Arc::new(Storage::load(cfg, None));
 
         let bucket = match storage.get_bucket(&settings.src_bucket) {
             Ok(bucket) => bucket.upgrade().unwrap(),
@@ -713,6 +724,7 @@ mod tests {
                 next_transaction_timeout: Duration::from_millis(50),
                 log_recovery_timeout: Duration::from_millis(100),
             },
+            IoConfig::default(),
             Arc::new(RwLock::new(remote_bucket)),
             Arc::new(RwLock::new(HashMap::new())),
             storage,

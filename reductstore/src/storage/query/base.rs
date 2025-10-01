@@ -73,6 +73,7 @@ pub(crate) struct QueryOptions {
     /// Extension part
     #[allow(dead_code)] // used in extension
     pub ext: Option<Value>,
+    // Io Config
 }
 
 impl From<QueryEntry> for QueryOptions {
@@ -132,7 +133,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap().keep().join("bucket").join("entry");
         FILE_CACHE.set_storage_backend(
             Backend::builder()
-                .local_data_path(dir.to_str().unwrap())
+                .local_data_path(dir.clone())
                 .try_build()
                 .unwrap(),
         );

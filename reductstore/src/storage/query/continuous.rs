@@ -90,6 +90,7 @@ mod tests {
                 continuous: true,
                 ..QueryOptions::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
         {

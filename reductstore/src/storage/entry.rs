@@ -27,6 +27,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 
 use crate::cfg::io::IoConfig;
+use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
@@ -54,6 +55,7 @@ pub(crate) struct Entry {
     block_manager: Arc<RwLock<BlockManager>>,
     queries: QueryHandleMapRef,
     path: PathBuf,
+    cfg: Cfg,
 }
 
 #[derive(PartialEq)]
@@ -75,6 +77,7 @@ impl Entry {
         name: &str,
         path: PathBuf,
         settings: EntrySettings,
+        cfg: Cfg,
     ) -> Result<Self, ReductError> {
         FILE_CACHE.create_dir_all(&path.join(name))?;
         let path = path.join(name);
@@ -95,18 +98,20 @@ impl Entry {
             ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
+            cfg,
         })
     }
 
     pub(crate) fn restore(
         path: PathBuf,
         options: EntrySettings,
+        cfg: Cfg,
     ) -> TaskHandle<Result<Entry, ReductError>> {
         unique_child(
             &group_from_path(&path, GroupDepth::ENTRY),
             "restore entry",
             move || {
-                let entry = EntryLoader::restore_entry(path, options)?;
+                let entry = EntryLoader::restore_entry(path, options, cfg)?;
                 Ok(entry)
             },
         )
@@ -122,11 +127,7 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(
-        &self,
-        query_parameters: QueryEntry,
-        io_defaults: IoConfig,
-    ) -> TaskHandle<Result<u64, ReductError>> {
+    pub fn query(&self, query_parameters: QueryEntry) -> TaskHandle<Result<u64, ReductError>> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let range = self.get_query_time_range(&query_parameters);
@@ -139,7 +140,7 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
 
         let options: QueryOptions = query_parameters.into();
-        let query = build_query(start, stop, options.clone(), io_defaults);
+        let query = build_query(start, stop, options.clone(), self.cfg.io_conf.clone());
         if let Err(e) = query {
             return e.into();
         }
@@ -390,7 +391,7 @@ mod tests {
             );
 
             bm.save_cache_on_disk().unwrap();
-            let entry = Entry::restore(path.join(entry.name), entry_settings)
+            let entry = Entry::restore(path.join(entry.name), entry_settings, Cfg::default())
                 .wait()
                 .unwrap();
 
@@ -425,7 +426,8 @@ mod tests {
             assert!(id >= 1);
 
             {
-                let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
+                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let rx = rx.upgrade_and_unwrap();
                 let mut rx = rx.blocking_write();
 
                 {
@@ -451,7 +453,7 @@ mod tests {
 
             assert_eq!(
                 entry.get_query_receiver(id).err(),
-                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
+                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
             );
         }
 
@@ -469,7 +471,8 @@ mod tests {
             let id = entry.query(params).wait().unwrap();
 
             {
-                let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
+                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let rx = rx.upgrade_and_unwrap();
                 let mut rx = rx.blocking_write();
                 let reader = rx.blocking_recv().unwrap().unwrap();
                 assert_eq!(reader.meta().timestamp(), 1000000);
@@ -481,8 +484,9 @@ mod tests {
 
             write_stub_record(&mut entry, 2000000);
             {
-                let rx = entry.get_query_receiver(id).unwrap().upgrade_and_unwrap();
-                let mut rx = rx.blocking_write();
+                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let rc = rx.upgrade_and_unwrap();
+                let mut rx = rc.blocking_write();
                 let reader = loop {
                     let reader = rx.blocking_recv().unwrap();
                     match reader {
@@ -500,7 +504,7 @@ mod tests {
             sleep(Duration::from_millis(1700));
             assert_eq!(
                 entry.get_query_receiver(id).err(),
-                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", id))
+                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
             );
         }
     }
@@ -601,6 +605,7 @@ mod tests {
                     max_block_size: 100000,
                     max_block_records: 2,
                 },
+                Cfg::default(),
             )
             .unwrap();
 
@@ -635,7 +640,7 @@ mod tests {
 
     #[fixture]
     pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
-        Entry::try_new("entry", path.clone(), entry_settings).unwrap()
+        Entry::try_new("entry", path.clone(), entry_settings, Cfg::default()).unwrap()
     }
 
     #[fixture]

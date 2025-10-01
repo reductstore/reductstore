@@ -33,9 +33,7 @@ pub(super) async fn read_query_json(
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let id = entry
-        .query(request.clone(), components.cfg.io_conf.clone())
-        .await?;
+    let id = entry.query(request.clone()).await?;
 
     components
         .ext_repo
@@ -132,6 +130,7 @@ mod tests {
             .get_entry("entry-1")?
             .upgrade()?;
 
-        entry.get_query_receiver(query.id)
+        let (rx, _) = entry.get_query_receiver(query.id)?;
+        Ok(rx)
     }
 }

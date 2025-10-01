@@ -451,7 +451,7 @@ mod tests {
             assert_eq!(
                 repo.create_replication("test", settings),
                 Err(unprocessable_entity!(
-                    "Invalid replication condition: [UnprocessableEntity] Operator '$UNKNOWN_OP' not supported"
+                    "Invalid replication condition: Operator '$UNKNOWN_OP' not supported"
                 )),
                 "Should not create replication with invalid when condition"
             );
@@ -459,16 +459,11 @@ mod tests {
 
         #[rstest]
         fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
-            let mut repo = ReplicationRepository::load_or_create(
-                Arc::clone(&storage),
-                ReplicationConfig::default(),
-            );
+            let mut repo =
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
             repo.create_replication("test", settings.clone()).unwrap();
 
-            let repo = ReplicationRepository::load_or_create(
-                Arc::clone(&storage),
-                ReplicationConfig::default(),
-            );
+            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
             assert_eq!(repo.replications().len(), 1);
             assert_eq!(
                 repo.get_replication("test").unwrap().settings(),
@@ -588,7 +583,7 @@ mod tests {
             assert_eq!(
                 err,
                 unprocessable_entity!(
-                    "Invalid replication condition: [UnprocessableEntity] Operator '$not-exist' not supported"
+                    "Invalid replication condition: Operator '$not-exist' not supported"
                 ),
                 "Should not update replication with invalid when condition"
             );
@@ -611,10 +606,7 @@ mod tests {
             assert_eq!(repo.replications().len(), 0);
 
             // check if replication is removed from file
-            let repo = ReplicationRepository::load_or_create(
-                Arc::clone(&storage),
-                ReplicationConfig::default(),
-            );
+            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
             assert_eq!(
                 repo.replications().len(),
                 0,
@@ -804,7 +796,11 @@ mod tests {
     #[fixture]
     fn storage() -> Arc<Storage> {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::load(tmp_dir.keep(), None);
+        let cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+        let storage = Storage::load(cfg, None);
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap()
@@ -815,6 +811,6 @@ mod tests {
 
     #[fixture]
     fn repo(storage: Arc<Storage>) -> ReplicationRepository {
-        ReplicationRepository::load_or_create(storage, ReplicationConfig::default())
+        ReplicationRepository::load_or_create(storage, Cfg::default())
     }
 }

@@ -156,6 +156,7 @@ mod tests {
     use super::*;
     use crate::cfg::replication::ReplicationConfig;
     use crate::cfg::tests::MockEnvGetter;
+    use crate::cfg::Cfg;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
@@ -339,7 +340,11 @@ mod tests {
     #[tokio::test]
     async fn test_replications_update_existing(mut env_with_replications: MockEnvGetter) {
         let storage = Storage::load(
-            env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+            Cfg {
+                data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+
+                ..Default::default()
+            },
             None,
         );
         storage
@@ -347,10 +352,13 @@ mod tests {
             .unwrap();
         let mut repo = create_replication_repo(
             Arc::new(storage),
-            ReplicationConfig {
-                connection_timeout: std::time::Duration::from_secs(10),
-                replication_log_size: 500,
-                listening_port: 8080,
+            Cfg {
+                replication_conf: ReplicationConfig {
+                    connection_timeout: std::time::Duration::from_secs(10),
+                    replication_log_size: 500,
+                    listening_port: 8080,
+                },
+                ..Default::default()
             },
         );
         repo.create_replication(

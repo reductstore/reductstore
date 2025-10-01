@@ -178,6 +178,7 @@ mod tests {
                 src_bucket: "bucket".to_string(),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
         assert_eq!(filter.filter(notification).len(), 1);
@@ -191,6 +192,7 @@ mod tests {
                 src_bucket: "other".to_string(),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
         assert_eq!(filter.filter(notification).len(), 0);
@@ -214,6 +216,7 @@ mod tests {
                 entries,
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -240,6 +243,7 @@ mod tests {
                 include: Labels::from_iter(include),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -265,6 +269,7 @@ mod tests {
                 exclude: Labels::from_iter(exclude),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -281,6 +286,7 @@ mod tests {
                 each_n: Some(2),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -298,6 +304,7 @@ mod tests {
                 each_s: Some(1.0),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -319,6 +326,7 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&x", "y"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -331,6 +339,7 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&x", "z"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -346,6 +355,7 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -364,6 +374,7 @@ mod tests {
                 when: Some(serde_json::json!({"$limit": 0})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -382,6 +393,7 @@ mod tests {
                 when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y", "z"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 

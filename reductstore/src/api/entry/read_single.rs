@@ -295,7 +295,13 @@ mod tests {
         .err()
         .unwrap();
 
-        assert_eq!(err, HttpError::new(NotFound, "Query 1 not found and it might have expired. Check TTL in your query request. Default value 60 sec."));
+        assert_eq!(
+            err,
+            HttpError::new(
+                NotFound,
+                "Query 1 not found and it might have expired. Check TTL in your query request."
+            )
+        );
     }
 
     mod next_record_reader {

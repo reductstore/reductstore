@@ -927,8 +927,13 @@ pub(super) mod tests {
         let ext_settings = ExtSettings::builder()
             .server_info(ServerInfo::default())
             .build();
-        let mut ext_repo =
-            ExtRepository::try_load(vec![tempdir().unwrap().keep()], vec![], ext_settings).unwrap();
+        let mut ext_repo = ExtRepository::try_load(
+            vec![tempdir().unwrap().keep()],
+            vec![],
+            ext_settings,
+            IoConfig::default(),
+        )
+        .unwrap();
         ext_repo.extension_map.insert(
             name.to_string(),
             Arc::new(AsyncRwLock::new(Box::new(mock_ext))),

@@ -4,6 +4,7 @@
 mod quotas;
 pub(super) mod settings;
 
+use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
 use crate::core::weak::Weak;
@@ -35,6 +36,7 @@ pub(crate) struct Bucket {
     path: PathBuf,
     entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
     settings: RwLock<BucketSettings>,
+    cfg: Cfg,
     is_provisioned: AtomicBool,
 }
 
@@ -55,6 +57,7 @@ impl Bucket {
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
+        cfg: Cfg,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         FILE_CACHE.create_dir_all(&path)?;
@@ -66,6 +69,7 @@ impl Bucket {
             entries: Arc::new(RwLock::new(BTreeMap::new())),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
+            cfg,
         };
 
         bucket.save_settings().wait()?;
@@ -77,12 +81,12 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `path` - The path to the bucket
-    /// * `repl_agent_builder` - The replica agent builder
+    /// * `cfg` - The global configuration
     ///
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn restore(path: PathBuf) -> Result<Bucket, ReductError> {
+    pub fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
         let buf = {
             let lock = FILE_CACHE
                 .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
@@ -109,6 +113,7 @@ impl Bucket {
                         max_block_size: settings.max_block_size.unwrap(),
                         max_block_records: settings.max_block_records.unwrap(),
                     },
+                    cfg.clone(),
                 );
 
                 task_set.push(handler);
@@ -128,6 +133,7 @@ impl Bucket {
             )),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
+            cfg,
         })
     }
 
@@ -151,6 +157,7 @@ impl Bucket {
                     max_block_size: settings.max_block_size.unwrap(),
                     max_block_records: settings.max_block_records.unwrap(),
                 },
+                self.cfg.clone(),
             )?;
             self.entries
                 .write()?
@@ -275,6 +282,7 @@ impl Bucket {
         let old_name = old_name.to_string();
         let new_name = new_name.to_string();
         let settings = self.settings();
+        let cfg = self.cfg.clone();
 
         unique(&self.task_group(), "rename entry", move || {
             check_name_convention(&new_name)?;
@@ -306,6 +314,7 @@ impl Bucket {
                     max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
                     max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
                 },
+                cfg.clone(),
             )
             .wait()?;
 
@@ -514,7 +523,7 @@ mod tests {
             bucket.sync_fs().await.unwrap();
             bucket.rename_entry("test-1", "test-2").await.unwrap();
 
-            let bucket = Bucket::restore(bucket.path.clone()).unwrap();
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
             assert_eq!(
                 bucket.get_entry("test-1").err(),
                 Some(ReductError::not_found(
@@ -599,12 +608,12 @@ mod tests {
 
     #[fixture]
     pub fn bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
-        Bucket::new("test", &path, settings).unwrap()
+        Bucket::new("test", &path, settings, Cfg::default()).unwrap()
     }
 
     #[fixture]
     pub fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
-        let bucket = Bucket::new("test", &path, settings).unwrap();
+        let bucket = Bucket::new("test", &path, settings, Cfg::default()).unwrap();
         bucket.set_provisioned(true);
         bucket
     }

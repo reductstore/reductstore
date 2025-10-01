@@ -238,6 +238,7 @@ mod tests {
     use mockall::mock;
     use reduct_base::error::ErrorCode;
 
+    use crate::cfg::Cfg;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
     use reduct_base::Labels;
@@ -562,7 +563,11 @@ mod tests {
         let sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, MAX_PAYLOAD_SIZE + 1);
+        imitate_write_record(
+            &sender,
+            &transaction,
+            IoConfig::default().batch_max_size + 1,
+        );
 
         assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
         assert!(
@@ -626,9 +631,11 @@ mod tests {
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationSender {
-        let tmp_dir = tempfile::tempdir().unwrap().keep();
-
-        let storage = Arc::new(Storage::load(tmp_dir, None));
+        let cfg = Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            ..Default::default()
+        };
+        let storage = Arc::new(Storage::load(cfg, None));
 
         let log_map = Arc::new(RwLock::new(HashMap::new()));
         let log = RwLock::new(
@@ -641,7 +648,8 @@ mod tests {
         ReplicationSender {
             log_map,
             storage,
-            settings: settings,
+            settings,
+            io_config: IoConfig::default(),
             hourly_diagnostics: Arc::new(RwLock::new(DiagnosticsCounter::new(
                 Duration::from_secs(3600),
             ))),
