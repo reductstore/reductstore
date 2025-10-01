@@ -1,8 +1,6 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::io::IoConfig;
-use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::Cfg;
 use crate::replication::replication_task::ReplicationTask;
 use crate::storage::storage::Storage;

@@ -11,7 +11,6 @@ use std::time::Duration;
 use log::{error, info};
 
 use crate::cfg::io::IoConfig;
-use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::diagnostics::DiagnosticsCounter;
@@ -20,7 +19,6 @@ use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
-use crate::storage::query::filters::WhenFilter;
 use crate::storage::storage::Storage;
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;

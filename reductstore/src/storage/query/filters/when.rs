@@ -7,18 +7,14 @@ mod io_cfg;
 mod select_labels;
 
 use crate::cfg::io::IoConfig;
-use crate::storage::query::condition::{BoxedNode, Context, Directives, Value};
+use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::ctx_after::CtxAfter;
 use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::io_cfg::merge_io_config_from_directives;
 use crate::storage::query::filters::when::select_labels::LabelSelector;
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
-use bytesize::ByteSize;
-use futures_util::future::ok;
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::unprocessable_entity;
 use std::collections::VecDeque;
-use std::str::FromStr;
 
 pub(super) enum Padding {
     Records(usize),
@@ -383,8 +379,7 @@ mod tests {
         let parser = Parser::new();
         let (condition, directives) = parser.parse(condition).unwrap();
 
-        let mut filter =
-            WhenFilter::try_new(condition, directives, IoConfig::default(), true).unwrap();
+        let filter = WhenFilter::try_new(condition, directives, IoConfig::default(), true).unwrap();
         filter
     }
 

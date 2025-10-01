@@ -52,7 +52,6 @@ impl Query for LimitedQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfg::Cfg;
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;

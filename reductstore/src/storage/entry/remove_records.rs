@@ -1,7 +1,6 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::io::IoConfig;
 use crate::core::thread_pool::{shared, unique, unique_child, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;

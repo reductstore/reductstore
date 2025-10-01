@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
@@ -316,7 +316,6 @@ mod tests {
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
-    use std::fs::canonicalize;
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;

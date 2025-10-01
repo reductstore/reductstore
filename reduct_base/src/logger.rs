@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::prelude::{DateTime, Utc};
-use log::{info, Level, Log, Metadata, Record};
+use log::{Level, Log, Metadata, Record};
 use std::collections::BTreeMap;
 use std::sync::{LazyLock, RwLock};
 use thread_id;

@@ -14,7 +14,6 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
-use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
 use log::debug;
@@ -273,6 +272,7 @@ impl Stream for ReadersWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::io::IoConfig;
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;

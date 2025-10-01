@@ -7,18 +7,14 @@ use crate::storage::entry::RecordReader;
 use crate::storage::proto::record;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
-use crate::storage::query::condition::{Directives, Parser, Value};
+use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
-use bytesize::ByteSize;
-use reduct_base::error::{IntEnum, ReductError};
-use reduct_base::unprocessable_entity;
+use reduct_base::error::ReductError;
 use std::collections::{HashMap, VecDeque};
-use std::str::FromStr;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 impl FilterRecord for Record {
     fn state(&self) -> i32 {

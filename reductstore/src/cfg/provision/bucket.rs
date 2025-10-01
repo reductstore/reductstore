@@ -1,7 +1,6 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::backend::BackendType;
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use crate::license::parse_license;
@@ -11,7 +10,6 @@ use log::{error, info};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::bucket_api::BucketSettings;
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(in crate::cfg) fn provision_buckets(&self) -> Storage {

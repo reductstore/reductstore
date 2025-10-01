@@ -1,8 +1,6 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::io::IoConfig;
-use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::proto::replication_repo::Item;

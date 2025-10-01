@@ -183,7 +183,6 @@ mod tests {
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::create_token_repository;
     use crate::backend::Backend;
-    use crate::cfg::replication::ReplicationConfig;
     use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::replication::create_replication_repo;
