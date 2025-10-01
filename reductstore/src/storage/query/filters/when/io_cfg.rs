@@ -23,11 +23,11 @@ pub(super) fn merge_io_config_from_directives(
      */
     df.batch_max_size = parse_size("#batch_size", dirs, df.batch_max_size)?;
     df.batch_max_records = parse_number("#batch_records", dirs, df.batch_max_records)?;
-    df.batch_max_size = parse_size(
+    df.batch_max_metadata_size = parse_size(
         "#batch_metadata_size",
         dirs,
         df.batch_max_metadata_size as u64,
-    )?;
+    )? as usize;
     df.batch_timeout = parse_duration("#batch_timeout", dirs, df.batch_timeout)?;
     df.batch_records_timeout = parse_duration("#record_timeout", dirs, df.batch_records_timeout)?;
     df.operation_timeout = parse_duration("#io_timeout", dirs, df.operation_timeout)?;
