@@ -688,6 +688,30 @@ mod tests {
             ReductError::conflict("Can't remove provisioned bucket 'test'")
         );
     }
+
+    #[cfg(feature = "s3-backend")]
+    #[rstest]
+    #[should_panic(expected = "Cache path must be set for remote storage")]
+    fn test_no_cache_for_s3_backend() {
+        let path = tempdir().unwrap().keep().join("data_path");
+        let cfg = Cfg {
+            data_path: path.clone(),
+            cs_config: RemoteStorageConfig {
+                backend_type: BackendType::S3,
+                cache_path: None,
+                ..Default::default()
+            },
+            ..Cfg::default()
+        };
+        let storage = Storage::load(cfg.clone(), None);
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .unwrap()
+            .upgrade_and_unwrap();
+        bucket.set_provisioned(true);
+        let _ = storage.remove_bucket("test").wait().err().unwrap();
+    }
+
     #[fixture]
     fn cfg() -> Cfg {
         Cfg {

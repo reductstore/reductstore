@@ -172,7 +172,7 @@ async fn fetch_and_response_batched_records(
 
         if header_size > io_settings.batch_max_metadata_size
             || body_size > io_settings.batch_max_size
-            || readers.len() > io_settings.batch_max_records
+            || readers.len() > io_settings.batch_max_records - 1
             || start_time.elapsed() > io_settings.batch_timeout
         {
             break;
@@ -516,6 +516,110 @@ mod tests {
         let (name, value) = make_batch_header(&record);
         assert_eq!(name, HeaderName::from_static("x-reduct-time-1000"));
         assert_eq!(value.to_str().unwrap(), "100,text/plain,@x=y,a=b");
+    }
+
+    mod batch_parameters {
+        use super::*;
+        use crate::cfg::Cfg;
+        use reduct_base::msg::entry_api::QueryEntry;
+        use serde_json::{json, Value};
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_records_from_query(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp =
+                build_bucket_and_query(components.clone(), json!({"#batch_records": 10})).await;
+
+            let count = resp
+                .into_response()
+                .headers()
+                .iter()
+                .filter(|(name, _)| name.as_str().starts_with("x-reduct-time-"))
+                .count();
+            assert_eq!(count, 10);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_records_from_settings(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp = build_bucket_and_query(components.clone(), json!({})).await;
+            let count = resp
+                .into_response()
+                .headers()
+                .iter()
+                .filter(|(name, _)| name.as_str().starts_with("x-reduct-time-"))
+                .count();
+            assert_eq!(count, Cfg::default().io_conf.batch_max_records);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_metadata_size_from_query(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp =
+                build_bucket_and_query(components.clone(), json!({"#batch_metadata_size": 100}))
+                    .await;
+            let body = to_bytes(resp.into_response().into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(body.len() <= 100);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_size_from_settings(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp = build_bucket_and_query(components.clone(), json!({})).await;
+            let body = to_bytes(resp.into_response().into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(body.len() <= Cfg::default().io_conf.batch_max_size as usize);
+        }
+
+        async fn build_bucket_and_query(
+            components: Arc<Components>,
+            condition: Value,
+        ) -> impl IntoResponse {
+            let bucket = components
+                .storage
+                .get_bucket("bucket-1")
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let entry = bucket.get_entry("entry-1").unwrap().upgrade().unwrap();
+
+            for time in 10..100 {
+                let mut writer = entry
+                    .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
+                    .await
+                    .unwrap();
+                writer.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
+                writer.send(Ok(None)).await.unwrap();
+            }
+
+            let query_id = entry
+                .query(
+                    QueryEntry {
+                        when: Some(condition),
+                        ..QueryEntry::default()
+                    }
+                    .into(),
+                )
+                .await
+                .unwrap();
+
+            fetch_and_response_batched_records(
+                bucket,
+                "entry-1",
+                query_id,
+                false,
+                &components.ext_repo,
+            )
+            .await
+            .unwrap()
+        }
     }
 
     #[fixture]

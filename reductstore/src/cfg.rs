@@ -3,7 +3,7 @@
 
 pub mod io;
 mod provision;
-mod remote_storage;
+pub mod remote_storage;
 pub mod replication;
 
 use crate::api::Components;
