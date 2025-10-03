@@ -59,9 +59,9 @@ fn parse_size(
             }
             _ => {
                 return Err(unprocessable_entity!(
-                "{} must be a positive integer or string representing a positive integer",
-                directive
-            ))
+                    "{} must be a positive integer or string representing a positive integer",
+                    directive
+                ))
             }
         };
 
