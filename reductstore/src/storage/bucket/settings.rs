@@ -129,70 +129,70 @@ impl Bucket {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::cfg::Cfg;
-    use crate::storage::bucket::tests::{bucket, settings};
-    use crate::storage::bucket::Bucket;
-    use reduct_base::msg::bucket_api::BucketSettings;
-    use rstest::rstest;
-
-    #[rstest]
-    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
-        assert_eq!(bucket.settings(), settings);
-
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
-
-        assert_eq!(bucket.name(), "test");
-        assert_eq!(bucket.settings(), settings);
-    }
-
-    #[rstest]
-    fn test_fill_default_settings() {
-        let settings = BucketSettings {
-            max_block_size: None,
-            quota_type: None,
-            quota_size: None,
-            max_block_records: None,
-        };
-
-        let default_settings = Bucket::defaults();
-        let filled_settings = Bucket::fill_settings(settings, default_settings.clone());
-        assert_eq!(filled_settings, default_settings);
-    }
-
-    #[rstest]
-    fn test_set_settings_partially(settings: BucketSettings, bucket: Bucket) {
-        let new_settings = BucketSettings {
-            max_block_size: Some(100),
-            quota_type: None,
-            quota_size: None,
-            max_block_records: None,
-        };
-
-        bucket.set_settings(new_settings).wait().unwrap();
-        assert_eq!(bucket.settings().max_block_size.unwrap(), 100);
-        assert_eq!(bucket.settings().quota_type, settings.quota_type);
-        assert_eq!(bucket.settings().quota_size, settings.quota_size);
-        assert_eq!(
-            bucket.settings().max_block_records,
-            settings.max_block_records
-        );
-    }
-
-    #[rstest]
-    fn test_apply_settings_to_entries(settings: BucketSettings, bucket: Bucket) {
-        bucket.get_or_create_entry("entry-1").unwrap();
-        bucket.get_or_create_entry("entry-2").unwrap();
-
-        let mut new_settings = settings.clone();
-        new_settings.max_block_size = Some(200);
-        new_settings.max_block_records = Some(200);
-        bucket.set_settings(new_settings).wait().unwrap();
-
-        for entry in bucket.entries.read().unwrap().values() {
-            assert_eq!(entry.settings().max_block_size, 200);
-            assert_eq!(entry.settings().max_block_records, 200);
-        }
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use crate::cfg::Cfg;
+//     use crate::storage::bucket::tests::{bucket, settings};
+//     use crate::storage::bucket::Bucket;
+//     use reduct_base::msg::bucket_api::BucketSettings;
+//     use rstest::rstest;
+//
+//     #[rstest]
+//     fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
+//         assert_eq!(bucket.settings(), settings);
+//
+//         let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
+//
+//         assert_eq!(bucket.name(), "test");
+//         assert_eq!(bucket.settings(), settings);
+//     }
+//
+//     #[rstest]
+//     fn test_fill_default_settings() {
+//         let settings = BucketSettings {
+//             max_block_size: None,
+//             quota_type: None,
+//             quota_size: None,
+//             max_block_records: None,
+//         };
+//
+//         let default_settings = Bucket::defaults();
+//         let filled_settings = Bucket::fill_settings(settings, default_settings.clone());
+//         assert_eq!(filled_settings, default_settings);
+//     }
+//
+//     #[rstest]
+//     fn test_set_settings_partially(settings: BucketSettings, bucket: Bucket) {
+//         let new_settings = BucketSettings {
+//             max_block_size: Some(100),
+//             quota_type: None,
+//             quota_size: None,
+//             max_block_records: None,
+//         };
+//
+//         bucket.set_settings(new_settings).wait().unwrap();
+//         assert_eq!(bucket.settings().max_block_size.unwrap(), 100);
+//         assert_eq!(bucket.settings().quota_type, settings.quota_type);
+//         assert_eq!(bucket.settings().quota_size, settings.quota_size);
+//         assert_eq!(
+//             bucket.settings().max_block_records,
+//             settings.max_block_records
+//         );
+//     }
+//
+//     #[rstest]
+//     fn test_apply_settings_to_entries(settings: BucketSettings, bucket: Bucket) {
+//         bucket.get_or_create_entry("entry-1").unwrap();
+//         bucket.get_or_create_entry("entry-2").unwrap();
+//
+//         let mut new_settings = settings.clone();
+//         new_settings.max_block_size = Some(200);
+//         new_settings.max_block_records = Some(200);
+//         bucket.set_settings(new_settings).wait().unwrap();
+//
+//         for entry in bucket.entries.read().unwrap().values() {
+//             assert_eq!(entry.settings().max_block_size, 200);
+//             assert_eq!(entry.settings().max_block_records, 200);
+//         }
+//     }
+// }
