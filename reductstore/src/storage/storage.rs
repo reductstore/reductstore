@@ -312,6 +312,7 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::cfg::remote_storage::RemoteStorageConfig;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
