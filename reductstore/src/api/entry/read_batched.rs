@@ -348,13 +348,13 @@ mod tests {
             "6,text/plain,b=\"[a,b]\",x=y"
         );
         assert_eq!(resp_headers["content-type"], "application/octet-stream");
-        assert_eq!(resp_headers["content-length"], "516");
+        assert_eq!(resp_headers["content-length"], "510");
         assert_eq!(resp_headers["x-reduct-last"], "false");
 
         if method == "GET" {
             assert_eq!(
                 to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-                Bytes::from("Hey!!!".repeat(86))
+                Bytes::from("Hey!!!".repeat(85))
             );
         } else {
             assert_eq!(
@@ -368,7 +368,7 @@ mod tests {
 
         let response = read_batched_records!();
         let resp_headers = response.headers();
-        assert_eq!(resp_headers["content-length"], "30", "{:?}", resp_headers);
+        assert_eq!(resp_headers["content-length"], "36", "{:?}", resp_headers);
         assert_eq!(resp_headers["content-type"], "application/octet-stream");
         assert_eq!(resp_headers["x-reduct-time-98"], "6,text/plain");
         assert_eq!(resp_headers["x-reduct-last"], "true");
@@ -376,7 +376,7 @@ mod tests {
         if method == "GET" {
             assert_eq!(
                 to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-                Bytes::from("Hey!!!".repeat(5))
+                Bytes::from("Hey!!!".repeat(6))
             );
         } else {
             assert_eq!(
