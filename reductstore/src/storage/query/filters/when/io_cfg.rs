@@ -59,7 +59,8 @@ fn parse_size(
             }
             _ => {
                 return Err(unprocessable_entity!(
-                "#batch_size must be a positive integer or string representing a positive integer"
+                "{} must be a positive integer or string representing a positive integer",
+                directive
             ))
             }
         };
