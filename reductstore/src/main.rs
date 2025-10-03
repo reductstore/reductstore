@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_http() {
         let task = set_env_and_run(HashMap::new()).await;
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_https() {
         let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -223,7 +223,8 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn test_shutdown() {
         let data_path = tempdir().unwrap().keep();
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());

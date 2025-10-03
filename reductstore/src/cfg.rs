@@ -101,9 +101,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         let port = env.get("RS_PORT", DEFAULT_PORT);
         let cert_path = env
             .get_optional::<String>("RS_CERT_PATH")
+            .and_then(|p| if p.is_empty() { None } else { Some(p) })
             .map(PathBuf::from);
         let cert_key_path = env
             .get_optional::<String>("RS_CERT_KEY_PATH")
+            .and_then(|p| if p.is_empty() { None } else { Some(p) })
             .map(PathBuf::from);
 
         let protocol = if cert_path.is_none() { "http" } else { "https" };
