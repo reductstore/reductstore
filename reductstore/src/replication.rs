@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::replication::ReplicationConfig;
+use crate::cfg::Cfg;
 use crate::replication::replication_task::ReplicationTask;
 use crate::storage::storage::Storage;
 use reduct_base::error::ReductError;
@@ -141,7 +141,7 @@ pub trait ManageReplications {
 /// A factory method to create a new replication repository and return it as a trait object.
 pub(crate) fn create_replication_repo(
     storage: Arc<Storage>,
-    config: ReplicationConfig,
+    config: Cfg,
 ) -> Box<dyn ManageReplications + Send + Sync> {
     Box::new(replication_repository::ReplicationRepository::load_or_create(storage, config))
 }

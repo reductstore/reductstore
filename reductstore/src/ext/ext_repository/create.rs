@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::asset::asset_manager::ManageStaticAsset;
+use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::{BoxedManageExtensions, ExtRepository, ManageExtensions};
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
@@ -18,6 +19,7 @@ pub fn create_ext_repository(
     external_path: Option<PathBuf>,
     embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
     settings: ExtSettings,
+    io_config: IoConfig,
 ) -> Result<BoxedManageExtensions, ReductError> {
     if external_path.is_some() || !embedded_extensions.is_empty() {
         let mut paths = if let Some(path) = external_path {
@@ -36,6 +38,7 @@ pub fn create_ext_repository(
             paths,
             embedded_extensions,
             settings,
+            io_config,
         )?))
     } else {
         // Dummy extension repository if
@@ -80,6 +83,7 @@ pub fn create_ext_repository(
 
 #[cfg(test)]
 mod tests {
+    use crate::cfg::io::IoConfig;
     use crate::ext::ext_repository::create_ext_repository;
     use reduct_base::error::ErrorCode::NoContent;
     use reduct_base::ext::ExtSettings;
@@ -97,6 +101,7 @@ mod tests {
             ExtSettings::builder()
                 .server_info(ServerInfo::default())
                 .build(),
+            IoConfig::default(),
         )
         .unwrap();
 

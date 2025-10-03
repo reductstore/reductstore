@@ -11,6 +11,7 @@ const DEFAULT_BATCH_MAX_RECORDS: usize = 85;
 const DEFAULT_BATCH_MAX_METADATA_SIZE: u64 = 512000;
 const DEFAULT_BATCH_TIMEOUT_S: u64 = 5;
 const DEFAULT_BATCH_RECORDS_TIMEOUT_S: u64 = 1;
+const DEFAULT_OPERATION_TIMEOUT_S: u64 = 30;
 
 /// IO configuration
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +26,8 @@ pub struct IoConfig {
     pub batch_timeout: Duration,
     /// Maximum time to wait for a record to be added to a batch before sending it
     pub batch_records_timeout: Duration,
+    /// Maximum time to wait for an IO operation to complete
+    pub operation_timeout: Duration,
 }
 
 impl Default for IoConfig {
@@ -35,6 +38,7 @@ impl Default for IoConfig {
             batch_max_metadata_size: DEFAULT_BATCH_MAX_METADATA_SIZE as usize,
             batch_timeout: Duration::from_secs(DEFAULT_BATCH_TIMEOUT_S),
             batch_records_timeout: Duration::from_secs(DEFAULT_BATCH_RECORDS_TIMEOUT_S),
+            operation_timeout: Duration::from_secs(DEFAULT_OPERATION_TIMEOUT_S),
         }
     }
 }
@@ -60,6 +64,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             batch_records_timeout: Duration::from_secs(
                 env.get_optional("RS_IO_BATCH_RECORDS_TIMEOUT_S")
                     .unwrap_or(DEFAULT_BATCH_RECORDS_TIMEOUT_S),
+            ),
+            operation_timeout: Duration::from_secs(
+                env.get_optional("RS_IO_OPERATION_TIMEOUT")
+                    .unwrap_or(DEFAULT_OPERATION_TIMEOUT_S),
             ),
         }
     }
@@ -97,6 +105,10 @@ mod tests {
             .expect_get()
             .with(eq("RS_IO_BATCH_RECORDS_TIMEOUT_S"))
             .return_const(Ok("5".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_IO_OPERATION_TIMEOUT"))
+            .return_const(Ok("60".to_string()));
 
         let io_settings = IoConfig {
             batch_max_size: 1000000,
@@ -104,6 +116,7 @@ mod tests {
             batch_max_metadata_size: 1000,
             batch_timeout: Duration::from_secs(10),
             batch_records_timeout: Duration::from_secs(5),
+            operation_timeout: Duration::from_secs(60),
         };
 
         assert_eq!(

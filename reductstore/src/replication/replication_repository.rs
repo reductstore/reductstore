@@ -1,8 +1,7 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::replication::ReplicationConfig;
-use crate::cfg::DEFAULT_PORT;
+use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
@@ -12,6 +11,7 @@ use crate::replication::proto::{
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::query::condition::Parser;
+use crate::storage::query::filters::WhenFilter;
 use crate::storage::storage::Storage;
 use bytes::Bytes;
 use log::{debug, error};
@@ -107,7 +107,7 @@ pub(crate) struct ReplicationRepository {
     replications: HashMap<String, ReplicationTask>,
     storage: Arc<Storage>,
     repo_path: PathBuf,
-    config: ReplicationConfig,
+    config: Cfg,
 }
 
 impl ManageReplications for ReplicationRepository {
@@ -208,7 +208,7 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) fn load_or_create(storage: Arc<Storage>, config: ReplicationConfig) -> Self {
+    pub(crate) fn load_or_create(storage: Arc<Storage>, config: Cfg) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
 
         let mut repo = Self {
@@ -308,7 +308,7 @@ impl ReplicationRepository {
 
         // check if target and source buckets are the same
         if settings.src_bucket == settings.dst_bucket
-            && self.config.listening_port
+            && self.config.replication_conf.listening_port
                 == dest_url.port_or_known_default().unwrap_or(DEFAULT_PORT)
             && ["127.0.0.1", "localhost", "0.0.0.0"].contains(&dest_url.host_str().unwrap_or(""))
         {
@@ -318,24 +318,32 @@ impl ReplicationRepository {
         }
 
         // check syntax of when condition
+        let mut conf = self.config.clone();
         if let Some(when) = &settings.when {
-            if let Err(e) = Parser::new().parse(when.clone()) {
-                return Err(unprocessable_entity!(
-                    "Invalid replication condition: {}",
-                    e
-                ));
-            }
+            let (cond, directives) = match Parser::new().parse(when.clone()) {
+                Ok((cond, dirs)) => (cond, dirs),
+                Err(err) => {
+                    return Err(unprocessable_entity!(
+                        "Invalid replication condition: {}",
+                        err.message
+                    ))
+                }
+            };
+
+            let filer = WhenFilter::<TransactionNotification>::try_new(
+                cond,
+                directives,
+                self.config.io_conf.clone(),
+                true,
+            )?;
+            conf.io_conf = filer.io_config().clone();
         }
 
         // remove old replication because before creating new one
         self.replications.remove(name);
 
-        let replication = ReplicationTask::new(
-            name.to_string(),
-            settings,
-            &self.config,
-            Arc::clone(&self.storage),
-        );
+        let replication =
+            ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage));
         self.replications.insert(name.to_string(), replication);
         self.save_repo()
     }
@@ -441,7 +449,7 @@ mod tests {
             assert_eq!(
                 repo.create_replication("test", settings),
                 Err(unprocessable_entity!(
-                    "Invalid replication condition: [UnprocessableEntity] Operator '$UNKNOWN_OP' not supported"
+                    "Invalid replication condition: Operator '$UNKNOWN_OP' not supported"
                 )),
                 "Should not create replication with invalid when condition"
             );
@@ -449,16 +457,11 @@ mod tests {
 
         #[rstest]
         fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
-            let mut repo = ReplicationRepository::load_or_create(
-                Arc::clone(&storage),
-                ReplicationConfig::default(),
-            );
+            let mut repo =
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
             repo.create_replication("test", settings.clone()).unwrap();
 
-            let repo = ReplicationRepository::load_or_create(
-                Arc::clone(&storage),
-                ReplicationConfig::default(),
-            );
+            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
             assert_eq!(repo.replications().len(), 1);
             assert_eq!(
                 repo.get_replication("test").unwrap().settings(),
@@ -578,7 +581,7 @@ mod tests {
             assert_eq!(
                 err,
                 unprocessable_entity!(
-                    "Invalid replication condition: [UnprocessableEntity] Operator '$not-exist' not supported"
+                    "Invalid replication condition: Operator '$not-exist' not supported"
                 ),
                 "Should not update replication with invalid when condition"
             );
@@ -601,10 +604,7 @@ mod tests {
             assert_eq!(repo.replications().len(), 0);
 
             // check if replication is removed from file
-            let repo = ReplicationRepository::load_or_create(
-                Arc::clone(&storage),
-                ReplicationConfig::default(),
-            );
+            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
             assert_eq!(
                 repo.replications().len(),
                 0,
@@ -794,7 +794,11 @@ mod tests {
     #[fixture]
     fn storage() -> Arc<Storage> {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::load(tmp_dir.keep(), None);
+        let cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+        let storage = Storage::load(cfg, None);
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap()
@@ -805,6 +809,6 @@ mod tests {
 
     #[fixture]
     fn repo(storage: Arc<Storage>) -> ReplicationRepository {
-        ReplicationRepository::load_or_create(storage, ReplicationConfig::default())
+        ReplicationRepository::load_or_create(storage, Cfg::default())
     }
 }

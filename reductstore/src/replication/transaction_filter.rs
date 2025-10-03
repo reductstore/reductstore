@@ -1,17 +1,17 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use log::warn;
-use reduct_base::error::ReductError;
-use reduct_base::msg::replication_api::ReplicationSettings;
-use std::collections::HashMap;
-
+use crate::cfg::io::IoConfig;
 use crate::replication::TransactionNotification;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, WhenFilter,
 };
+use log::warn;
+use reduct_base::error::ReductError;
+use reduct_base::msg::replication_api::ReplicationSettings;
+use std::collections::HashMap;
 
 type Filter = Box<dyn RecordFilter<TransactionNotification> + Send + Sync>;
 /// Filter for transaction notifications.
@@ -58,7 +58,11 @@ impl TransactionFilter {
     /// * `entries` - Entries to filter. Supports wildcards. If empty, all entries are matched.
     /// * `include` - Labels to include. All must match. If empty, all labels are matched.
     /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
-    pub(super) fn try_new(name: &str, settings: ReplicationSettings) -> Result<Self, ReductError> {
+    pub(super) fn try_new(
+        name: &str,
+        settings: ReplicationSettings,
+        io_config: IoConfig,
+    ) -> Result<Self, ReductError> {
         let mut query_filters: Vec<Filter> = vec![];
         if !settings.include.is_empty() {
             query_filters.push(Box::new(IncludeLabelFilter::new(settings.include)));
@@ -79,7 +83,9 @@ impl TransactionFilter {
         if let Some(when) = settings.when {
             match Parser::new().parse(when.clone()) {
                 Ok((condition, directives)) => {
-                    query_filters.push(Box::new(WhenFilter::try_new(condition, directives, true)?));
+                    query_filters.push(Box::new(WhenFilter::try_new(
+                        condition, directives, io_config, true,
+                    )?));
                 }
                 Err(err) => warn!(
                     "Error parsing when condition in {} replication task: {}",
@@ -172,6 +178,7 @@ mod tests {
                 src_bucket: "bucket".to_string(),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
         assert_eq!(filter.filter(notification).len(), 1);
@@ -185,6 +192,7 @@ mod tests {
                 src_bucket: "other".to_string(),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
         assert_eq!(filter.filter(notification).len(), 0);
@@ -208,6 +216,7 @@ mod tests {
                 entries,
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -234,6 +243,7 @@ mod tests {
                 include: Labels::from_iter(include),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -259,6 +269,7 @@ mod tests {
                 exclude: Labels::from_iter(exclude),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -275,6 +286,7 @@ mod tests {
                 each_n: Some(2),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -292,6 +304,7 @@ mod tests {
                 each_s: Some(1.0),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -313,6 +326,7 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&x", "y"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -325,6 +339,7 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&x", "z"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -340,6 +355,7 @@ mod tests {
                 when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -358,6 +374,7 @@ mod tests {
                 when: Some(serde_json::json!({"$limit": 0})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 
@@ -376,6 +393,7 @@ mod tests {
                 when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y", "z"]})),
                 ..ReplicationSettings::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 

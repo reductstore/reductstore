@@ -3,11 +3,14 @@
 
 mod ctx_after;
 mod ctx_before;
+mod io_cfg;
 mod select_labels;
 
+use crate::cfg::io::IoConfig;
 use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::ctx_after::CtxAfter;
 use crate::storage::query::filters::when::ctx_before::CtxBefore;
+use crate::storage::query::filters::when::io_cfg::merge_io_config_from_directives;
 use crate::storage::query::filters::when::select_labels::LabelSelector;
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
@@ -28,12 +31,14 @@ pub struct WhenFilter<R> {
     ctx_buffer: VecDeque<R>,
 
     label_selector: LabelSelector,
+    io_config: IoConfig,
 }
 
 impl<R> WhenFilter<R> {
     pub fn try_new(
         condition: BoxedNode,
         mut directives: Directives,
+        io_config: IoConfig,
         strict: bool,
     ) -> Result<Self, ReductError> {
         Ok(Self {
@@ -43,7 +48,12 @@ impl<R> WhenFilter<R> {
             ctx_after: CtxAfter::try_new(directives.remove("#ctx_after"))?,
             label_selector: LabelSelector::try_new(directives.remove("#select_labels"))?,
             ctx_buffer: VecDeque::new(),
+            io_config: merge_io_config_from_directives(&mut directives, io_config)?,
         })
+    }
+
+    pub fn io_config(&self) -> &IoConfig {
+        &self.io_config
     }
 }
 
@@ -106,16 +116,13 @@ mod tests {
     use reduct_base::io::RecordMeta;
     use rstest::{fixture, rstest};
     use serde_json::json;
+    use serde_json::Value as JsonValue;
 
     #[rstest]
-    fn filter(parser: Parser, record_true: TestFilterRecord) {
-        let (condition, directives) = parser
-            .parse(json!({
-                "$and": [true, "&label"]
-            }))
-            .unwrap();
-
-        let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+    fn filter(record_true: TestFilterRecord) {
+        let mut filter = build_filter(json!({
+            "$and": [true, "&label"]
+        }));
 
         let result = filter.filter(record_true.clone()).unwrap();
         assert_eq!(result, Some(vec![record_true]));
@@ -125,19 +132,11 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn filter_ctx_before_n(
-            parser: Parser,
-            record_true: TestFilterRecord,
-            record_false: TestFilterRecord,
-        ) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "#ctx_before": 2,
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+        fn filter_ctx_before_n(record_true: TestFilterRecord, record_false: TestFilterRecord) {
+            let mut filter = build_filter(json!({
+                "#ctx_before": 2,
+                "$and": [true, "&label"]
+            }));
 
             let result = filter.filter(record_false.clone()).unwrap();
             assert_eq!(result, Some(vec![]));
@@ -164,19 +163,14 @@ mod tests {
 
         #[rstest]
         fn filter_ctx_before_with_limit(
-            parser: Parser,
             record_true: TestFilterRecord,
             record_false: TestFilterRecord,
         ) {
-            let (condition, directives) = parser
-                .parse(json!({
+            let mut filter = build_filter(json!({
                 "#ctx_before": 2,
                 "$and": [true, "&label"],
                 "$limit": [1]
-                }))
-                .unwrap();
-
-            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+            }));
 
             let result = filter.filter(record_false.clone()).unwrap();
             assert_eq!(result, Some(vec![]));
@@ -202,19 +196,11 @@ mod tests {
         }
 
         #[rstest]
-        fn filter_ctx_after_n(
-            parser: Parser,
-            record_true: TestFilterRecord,
-            record_false: TestFilterRecord,
-        ) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "#ctx_after": 2,
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+        fn filter_ctx_after_n(record_true: TestFilterRecord, record_false: TestFilterRecord) {
+            let mut filter = build_filter(json!({
+                "#ctx_after": 2,
+                "$and": [true, "&label"]
+            }));
 
             let result = filter.filter(record_true.clone()).unwrap();
             assert_eq!(result, Some(vec![record_true.clone()]));
@@ -243,19 +229,15 @@ mod tests {
 
         #[rstest]
         fn filter_ctx_before_duration(
-            parser: Parser,
             record_false_3: TestFilterRecord,
             record_false_4: TestFilterRecord,
             record_true_5: TestFilterRecord,
         ) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "#ctx_before": "2ms",
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
+            let mut filter = build_filter(json!({
+                "#ctx_before": "2ms",
+                "$and": [true, "&label"]
+            }));
 
-            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
             let result = filter.filter(record_false_3.clone()).unwrap();
             assert_eq!(result, Some(vec![]));
 
@@ -271,19 +253,14 @@ mod tests {
 
         #[rstest]
         fn filter_ctx_after_duration(
-            parser: Parser,
             record_true_5: TestFilterRecord,
             record_false_6: TestFilterRecord,
             record_false_7: TestFilterRecord,
         ) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "#ctx_after": "2ms",
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+            let mut filter = build_filter(json!({
+                "#ctx_after": "2ms",
+                "$and": [true, "&label"]
+            }));
 
             let result = filter.filter(record_true_5.clone()).unwrap();
             assert_eq!(result, Some(vec![record_true_5]));
@@ -345,15 +322,11 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn filter_with_select_labels(parser: Parser, record_select_labels: TestFilterRecord) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "#select_labels": ["label1", "label3"],
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+        fn filter_with_select_labels(record_select_labels: TestFilterRecord) {
+            let mut filter = build_filter(json!({
+                "#select_labels": ["label1", "label3"],
+                "$and": [true, "&label"]
+            }));
 
             let result = filter.filter(record_select_labels).unwrap();
             assert!(result.is_some());
@@ -370,14 +343,10 @@ mod tests {
         }
 
         #[rstest]
-        fn filter_without_select_labels(parser: Parser, record_select_labels: TestFilterRecord) {
-            let (condition, directives) = parser
-                .parse(json!({
-                    "$and": [true, "&label"]
-                }))
-                .unwrap();
-
-            let mut filter = WhenFilter::try_new(condition, directives, true).unwrap();
+        fn filter_without_select_labels(record_select_labels: TestFilterRecord) {
+            let mut filter = build_filter(json!({
+                "$and": [true, "&label"]
+            }));
 
             let result = filter.filter(record_select_labels).unwrap();
             assert!(result.is_some());
@@ -406,9 +375,12 @@ mod tests {
         }
     }
 
-    #[fixture]
-    fn parser() -> Parser {
-        Parser::new()
+    fn build_filter(condition: JsonValue) -> WhenFilter<TestFilterRecord> {
+        let parser = Parser::new();
+        let (condition, directives) = parser.parse(condition).unwrap();
+
+        let filter = WhenFilter::try_new(condition, directives, IoConfig::default(), true).unwrap();
+        filter
     }
 
     #[fixture]

@@ -5,6 +5,7 @@ use crate::backend::BackendType;
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
+use std::path::PathBuf;
 
 /// Cloud storage settings
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -15,7 +16,7 @@ pub struct RemoteStorageConfig {
     pub region: Option<String>,
     pub access_key: Option<String>,
     pub secret_key: Option<String>,
-    pub cache_path: Option<String>,
+    pub cache_path: Option<PathBuf>,
     pub cache_size: u64,
 }
 
@@ -41,7 +42,9 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             } else {
                 Some(secret_key)
             },
-            cache_path: env.get_optional::<String>("RS_REMOTE_CACHE_PATH"),
+            cache_path: env
+                .get_optional::<String>("RS_REMOTE_CACHE_PATH")
+                .map(PathBuf::from),
             cache_size: env
                 .get_optional::<ByteSize>("RS_REMOTE_CACHE_SIZE")
                 .unwrap_or(ByteSize::gb(1))
@@ -161,7 +164,7 @@ mod tests {
                 region: Some("us-west-1".to_string()),
                 access_key: Some("my-access-key".to_string()),
                 secret_key: Some("my-secret-key".to_string()),
-                cache_path: Some("/tmp/cache".to_string()),
+                cache_path: Some(PathBuf::from("/tmp/cache")),
                 cache_size: ByteSize::gb(2).as_u64(),
             }
         );

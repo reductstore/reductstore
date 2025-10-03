@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::asset::asset_manager::ManageStaticAsset;
+use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::{ExtRepository, ExtensionApi, IoExtMap};
 use dlopen2::wrapper::Container;
 use log::{error, info};
@@ -18,6 +19,7 @@ impl ExtRepository {
         paths: Vec<PathBuf>,
         embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
         settings: ExtSettings,
+        io_config: IoConfig,
     ) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
@@ -65,6 +67,7 @@ impl ExtRepository {
             query_map,
             ext_wrappers,
             embedded_extensions,
+            io_config,
         })
     }
 }
@@ -106,14 +109,16 @@ mod tests {
         let path = tempdir().unwrap().keep();
         fs::create_dir_all(&path).unwrap();
         fs::write(&path.join("libtest.so"), b"test").unwrap();
-        let ext_repo = ExtRepository::try_load(vec![path], vec![], ext_settings).unwrap();
+        let ext_repo =
+            ExtRepository::try_load(vec![path], vec![], ext_settings, IoConfig::default()).unwrap();
         assert_eq!(ext_repo.extension_map.len(), 0);
     }
 
     #[log_test(rstest)]
     fn test_failed_open_dir(ext_settings: ExtSettings) {
         let path = PathBuf::from("non_existing_dir");
-        let ext_repo = ExtRepository::try_load(vec![path], vec![], ext_settings);
+        let ext_repo =
+            ExtRepository::try_load(vec![path], vec![], ext_settings, IoConfig::default());
         assert_eq!(
             ext_repo.err().unwrap(),
             internal_server_error!("Extension directory \"non_existing_dir\" does not exist")
@@ -180,6 +185,12 @@ mod tests {
             .expect("Failed to write extension");
 
         let empty_ext_path = tempdir().unwrap().keep();
-        ExtRepository::try_load(vec![ext_path, empty_ext_path], vec![], ext_settings).unwrap()
+        ExtRepository::try_load(
+            vec![ext_path, empty_ext_path],
+            vec![],
+            ext_settings,
+            IoConfig::default(),
+        )
+        .unwrap()
     }
 }

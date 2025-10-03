@@ -14,7 +14,6 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
-use crate::cfg::io::IoConfig;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
 use log::debug;
@@ -66,7 +65,6 @@ pub(super) async fn read_batched_records(
         entry_name,
         query_id,
         method.name == "HEAD",
-        &components.cfg.io_conf,
         &components.ext_repo,
     )
     .await
@@ -109,9 +107,13 @@ async fn fetch_and_response_batched_records(
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
-    io_settings: &IoConfig,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
+    let (rx, io_settings) = bucket
+        .get_entry(entry_name)?
+        .upgrade()?
+        .get_query_receiver(query_id)?;
+
     let mut header_size = 0usize;
     let mut body_size = 0u64;
     let mut headers = HeaderMap::new();
@@ -121,10 +123,6 @@ async fn fetch_and_response_batched_records(
 
     let mut last = false;
     let bucket_name = bucket.name().to_string();
-    let rx = bucket
-        .get_entry(entry_name)?
-        .upgrade()?
-        .get_query_receiver(query_id)?;
 
     let start_time = std::time::Instant::now();
     loop {
@@ -174,7 +172,7 @@ async fn fetch_and_response_batched_records(
 
         if header_size > io_settings.batch_max_metadata_size
             || body_size > io_settings.batch_max_size
-            || readers.len() > io_settings.batch_max_records
+            || readers.len() >= io_settings.batch_max_records
             || start_time.elapsed() > io_settings.batch_timeout
         {
             break;
@@ -189,8 +187,7 @@ async fn fetch_and_response_batched_records(
         let _ = bucket
             .get_entry(entry_name)?
             .upgrade()?
-            .get_query_receiver(query_id)?
-            .upgrade()?;
+            .get_query_receiver(query_id)?;
     }
 
     headers.insert("content-length", body_size.to_string().parse().unwrap());
@@ -275,6 +272,7 @@ impl Stream for ReadersWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::io::IoConfig;
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
@@ -350,13 +348,13 @@ mod tests {
             "6,text/plain,b=\"[a,b]\",x=y"
         );
         assert_eq!(resp_headers["content-type"], "application/octet-stream");
-        assert_eq!(resp_headers["content-length"], "516");
+        assert_eq!(resp_headers["content-length"], "510");
         assert_eq!(resp_headers["x-reduct-last"], "false");
 
         if method == "GET" {
             assert_eq!(
                 to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-                Bytes::from("Hey!!!".repeat(86))
+                Bytes::from("Hey!!!".repeat(85))
             );
         } else {
             assert_eq!(
@@ -370,7 +368,7 @@ mod tests {
 
         let response = read_batched_records!();
         let resp_headers = response.headers();
-        assert_eq!(resp_headers["content-length"], "30", "{:?}", resp_headers);
+        assert_eq!(resp_headers["content-length"], "36", "{:?}", resp_headers);
         assert_eq!(resp_headers["content-type"], "application/octet-stream");
         assert_eq!(resp_headers["x-reduct-time-98"], "6,text/plain");
         assert_eq!(resp_headers["x-reduct-last"], "true");
@@ -378,7 +376,7 @@ mod tests {
         if method == "GET" {
             assert_eq!(
                 to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-                Bytes::from("Hey!!!".repeat(5))
+                Bytes::from("Hey!!!".repeat(6))
             );
         } else {
             assert_eq!(
@@ -395,7 +393,10 @@ mod tests {
         let resp_headers = response.headers();
         assert_eq!(
             resp_headers["x-reduct-error"],
-            format!("Query {} not found and it might have expired. Check TTL in your query request. Default value 60 sec.", query_id)
+            format!(
+                "Query {} not found and it might have expired. Check TTL in your query request.",
+                query_id
+            )
         );
     }
 
@@ -517,6 +518,110 @@ mod tests {
         assert_eq!(value.to_str().unwrap(), "100,text/plain,@x=y,a=b");
     }
 
+    mod batch_parameters {
+        use super::*;
+        use crate::cfg::Cfg;
+        use reduct_base::msg::entry_api::QueryEntry;
+        use serde_json::{json, Value};
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_records_from_query(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp =
+                build_bucket_and_query(components.clone(), json!({"#batch_records": 10})).await;
+
+            let count = resp
+                .into_response()
+                .headers()
+                .iter()
+                .filter(|(name, _)| name.as_str().starts_with("x-reduct-time-"))
+                .count();
+            assert_eq!(count, 10);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_records_from_settings(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp = build_bucket_and_query(components.clone(), json!({})).await;
+            let count = resp
+                .into_response()
+                .headers()
+                .iter()
+                .filter(|(name, _)| name.as_str().starts_with("x-reduct-time-"))
+                .count();
+            assert_eq!(count, Cfg::default().io_conf.batch_max_records);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_metadata_size_from_query(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp =
+                build_bucket_and_query(components.clone(), json!({"#batch_metadata_size": 100}))
+                    .await;
+            let body = to_bytes(resp.into_response().into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(body.len() <= 100);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn max_size_from_settings(#[future] components: Arc<Components>) {
+            let components = components.await;
+            let resp = build_bucket_and_query(components.clone(), json!({})).await;
+            let body = to_bytes(resp.into_response().into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(body.len() <= Cfg::default().io_conf.batch_max_size as usize);
+        }
+
+        async fn build_bucket_and_query(
+            components: Arc<Components>,
+            condition: Value,
+        ) -> impl IntoResponse {
+            let bucket = components
+                .storage
+                .get_bucket("bucket-1")
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let entry = bucket.get_entry("entry-1").unwrap().upgrade().unwrap();
+
+            for time in 10..100 {
+                let mut writer = entry
+                    .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
+                    .await
+                    .unwrap();
+                writer.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
+                writer.send(Ok(None)).await.unwrap();
+            }
+
+            let query_id = entry
+                .query(
+                    QueryEntry {
+                        when: Some(condition),
+                        ..QueryEntry::default()
+                    }
+                    .into(),
+                )
+                .await
+                .unwrap();
+
+            fetch_and_response_batched_records(
+                bucket,
+                "entry-1",
+                query_id,
+                false,
+                &components.ext_repo,
+            )
+            .await
+            .unwrap()
+        }
+    }
+
     #[fixture]
     fn ext_repository() -> BoxedManageExtensions {
         create_ext_repository(
@@ -525,6 +630,7 @@ mod tests {
             ExtSettings::builder()
                 .server_info(ServerInfo::default())
                 .build(),
+            IoConfig::default(),
         )
         .unwrap()
     }

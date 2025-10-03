@@ -16,6 +16,7 @@ use crate::replication::diagnostics::DiagnosticsCounter;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;
 
+use crate::cfg::io::IoConfig;
 use crate::replication::Transaction;
 use reduct_base::io::BoxedReadRecord;
 use std::sync::{Arc, RwLock};
@@ -26,7 +27,8 @@ use std::time::Duration;
 pub(super) struct ReplicationSender {
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<Storage>,
-    config: ReplicationSettings,
+    settings: ReplicationSettings,
+    io_config: IoConfig,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
 }
@@ -39,21 +41,20 @@ pub(super) enum SyncState {
     BrokenLog(String),
 }
 
-const MAX_PAYLOAD_SIZE: u64 = 4_000_000;
-const MAX_BATCH_SIZE: usize = 80;
-
 impl ReplicationSender {
     pub fn new(
         log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
         storage: Arc<Storage>,
         config: ReplicationSettings,
+        io_config: IoConfig,
         hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
         bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
     ) -> Self {
         Self {
             log_map,
             storage,
-            config,
+            settings: config,
+            io_config,
             hourly_diagnostics,
             bucket,
         }
@@ -73,7 +74,7 @@ impl ReplicationSender {
             let transactions = {
                 // we can't hold the lock while we read the log
                 if let Some(log) = self.log_map.read().unwrap().get(entry_name) {
-                    log.write().unwrap().front(MAX_BATCH_SIZE)
+                    log.write().unwrap().front(self.io_config.batch_max_records)
                 } else {
                     // log might be removed
                     continue;
@@ -91,7 +92,7 @@ impl ReplicationSender {
                         for transaction in vec {
                             debug!(
                                 "Replicating transaction {}/{}/{:?}",
-                                self.config.src_bucket, entry_name, transaction
+                                self.settings.src_bucket, entry_name, transaction
                             );
 
                             let record_to_sync = self.read_record(entry_name, &transaction);
@@ -102,7 +103,7 @@ impl ReplicationSender {
                                 total_size += record_size;
                                 batch.push((record_to_sync, transaction));
 
-                                if total_size >= MAX_PAYLOAD_SIZE {
+                                if total_size >= self.io_config.batch_max_size {
                                     break;
                                 }
                             }
@@ -120,7 +121,7 @@ impl ReplicationSender {
                                     for (timestamp, err) in map {
                                         debug!(
                                             "Failed to replicate record {}/{}/{}: {:?}",
-                                            self.config.src_bucket, entry_name, timestamp, err
+                                            self.settings.src_bucket, entry_name, timestamp, err
                                         );
                                         self.hourly_diagnostics.write().unwrap().count(Err(err), 1);
                                     }
@@ -129,7 +130,7 @@ impl ReplicationSender {
                             Err(err) => {
                                 debug!(
                                     "Failed to replicate batch of records from {}/{} {:?}",
-                                    self.config.src_bucket, entry_name, err
+                                    self.settings.src_bucket, entry_name, err
                                 );
                                 self.hourly_diagnostics
                                     .write()
@@ -184,7 +185,7 @@ impl ReplicationSender {
             loop {
                 let read_record = || {
                     self.storage
-                        .get_bucket(&self.config.src_bucket)?
+                        .get_bucket(&self.settings.src_bucket)?
                         .upgrade()?
                         .get_entry(&entry_name)?
                         .upgrade()?
@@ -237,6 +238,7 @@ mod tests {
     use mockall::mock;
     use reduct_base::error::ErrorCode;
 
+    use crate::cfg::Cfg;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
     use reduct_base::Labels;
@@ -561,7 +563,11 @@ mod tests {
         let sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, MAX_PAYLOAD_SIZE + 1);
+        imitate_write_record(
+            &sender,
+            &transaction,
+            IoConfig::default().batch_max_size + 1,
+        );
 
         assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
         assert!(
@@ -625,9 +631,11 @@ mod tests {
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationSender {
-        let tmp_dir = tempfile::tempdir().unwrap().keep();
-
-        let storage = Arc::new(Storage::load(tmp_dir, None));
+        let cfg = Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            ..Default::default()
+        };
+        let storage = Arc::new(Storage::load(cfg, None));
 
         let log_map = Arc::new(RwLock::new(HashMap::new()));
         let log = RwLock::new(
@@ -640,7 +648,8 @@ mod tests {
         ReplicationSender {
             log_map,
             storage,
-            config: settings,
+            settings,
+            io_config: IoConfig::default(),
             hourly_diagnostics: Arc::new(RwLock::new(DiagnosticsCounter::new(
                 Duration::from_secs(3600),
             ))),

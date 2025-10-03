@@ -76,6 +76,7 @@ pub(crate) struct QueryContext {
 struct ExtRepository {
     extension_map: IoExtMap,
     query_map: AsyncRwLock<HashMap<u64, QueryContext>>,
+    io_config: IoConfig,
 
     #[allow(dead_code)]
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
@@ -197,7 +198,12 @@ impl ManageExtensions for ExtRepository {
         if let Some((processor, commiter, condition)) = controllers {
             let condition_filter = if let Some(condition) = condition {
                 let (node, directives) = condition;
-                Box::new(WhenFilter::try_new(node, directives, true)?)
+                Box::new(WhenFilter::try_new(
+                    node,
+                    directives,
+                    self.io_config.clone(),
+                    true,
+                )?)
             } else {
                 DummyFilter::boxed()
             };
@@ -325,6 +331,7 @@ impl ManageExtensions for ExtRepository {
     }
 }
 
+use crate::cfg::io::IoConfig;
 use crate::ext::filter::DummyFilter;
 use crate::storage::query::filters::{RecordFilter, WhenFilter};
 pub(crate) use create::create_ext_repository;
@@ -920,8 +927,13 @@ pub(super) mod tests {
         let ext_settings = ExtSettings::builder()
             .server_info(ServerInfo::default())
             .build();
-        let mut ext_repo =
-            ExtRepository::try_load(vec![tempdir().unwrap().keep()], vec![], ext_settings).unwrap();
+        let mut ext_repo = ExtRepository::try_load(
+            vec![tempdir().unwrap().keep()],
+            vec![],
+            ext_settings,
+            IoConfig::default(),
+        )
+        .unwrap();
         ext_repo.extension_map.insert(
             name.to_string(),
             Arc::new(AsyncRwLock::new(Box::new(mock_ext))),

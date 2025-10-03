@@ -11,7 +11,6 @@ use axum_extra::headers::{Expect, Header, HeaderMap};
 use crate::api::entry::common::{parse_content_length_from_header, parse_timestamp_from_query};
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
-use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -75,15 +74,16 @@ pub(super) async fn write_record(
         Ok((ts, labels, sender))
     };
 
+    let io_timeout = components.cfg.io_conf.operation_timeout;
     match check_request_and_get_sender.await {
         Ok((ts, labels, mut writer)) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
-                    writer.send_timeout($chunk, IO_OPERATION_TIMEOUT).await?;
+                    writer.send_timeout($chunk, io_timeout).await?;
                 };
             }
 
-            while let Some(chunk) = timeout(IO_OPERATION_TIMEOUT, stream.next())
+            while let Some(chunk) = timeout(io_timeout, stream.next())
                 .await
                 .map_err(|_| bad_request!("Timeout while receiving data"))?
             {
@@ -100,7 +100,7 @@ pub(super) async fn write_record(
                 send_chunk!(chunk);
             }
 
-            if let Err(err) = writer.send_timeout(Ok(None), IO_OPERATION_TIMEOUT).await {
+            if let Err(err) = writer.send_timeout(Ok(None), io_timeout).await {
                 debug!("Timeout while sending EOF: {}", err);
             }
 

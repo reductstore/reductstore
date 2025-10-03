@@ -3,7 +3,7 @@
 
 pub mod io;
 mod provision;
-mod remote_storage;
+pub mod remote_storage;
 pub mod replication;
 
 use crate::api::Components;
@@ -44,12 +44,12 @@ pub struct Cfg {
     pub port: u16,
     pub public_url: String,
     pub api_base_path: String,
-    pub data_path: String,
+    pub data_path: PathBuf,
     pub api_token: String,
-    pub cert_path: String,
-    pub cert_key_path: String,
+    pub cert_path: Option<PathBuf>,
+    pub cert_key_path: Option<PathBuf>,
     pub license_path: Option<String>,
-    pub ext_path: Option<String>,
+    pub ext_path: Option<PathBuf>,
     pub cors_allow_origin: Vec<String>,
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
@@ -67,10 +67,10 @@ impl Default for Cfg {
             port: DEFAULT_PORT,
             public_url: format!("http://{}:{}/", DEFAULT_HOST, DEFAULT_PORT),
             api_base_path: "/".to_string(),
-            data_path: "/data".to_string(),
+            data_path: PathBuf::from("/data"),
             api_token: "".to_string(),
-            cert_path: "".to_string(),
-            cert_key_path: "".to_string(),
+            cert_path: None,
+            cert_key_path: None,
             license_path: None,
             ext_path: None,
             cors_allow_origin: vec![],
@@ -101,15 +101,14 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         let port = env.get("RS_PORT", DEFAULT_PORT);
         let cert_path = env
             .get_optional::<String>("RS_CERT_PATH")
-            .unwrap_or_default();
+            .and_then(|p| if p.is_empty() { None } else { Some(p) })
+            .map(PathBuf::from);
         let cert_key_path = env
             .get_optional::<String>("RS_CERT_KEY_PATH")
-            .unwrap_or_default();
-        let protocol = if cert_path.is_empty() {
-            "http"
-        } else {
-            "https"
-        };
+            .and_then(|p| if p.is_empty() { None } else { Some(p) })
+            .map(PathBuf::from);
+
+        let protocol = if cert_path.is_none() { "http" } else { "https" };
 
         let default_public_url = if port == 80 || port == 443 {
             format!("{}://{}{}", protocol, host, api_base_path)
@@ -129,12 +128,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 public_url,
                 port,
                 api_base_path,
-                data_path: env.get("RS_DATA_PATH", "/data".to_string()),
+                data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
                 api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
                 cert_path,
                 cert_key_path,
                 license_path: env.get_optional("RS_LICENSE_PATH"),
-                ext_path: env.get_optional("RS_EXT_PATH"),
+                ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
                 cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
                 buckets: Self::parse_buckets(&mut env),
                 tokens: Self::parse_tokens(&mut env),
@@ -163,7 +162,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         // Initialize storage backend
         let mut backend_builder = Backend::builder()
             .backend_type(self.cfg.cs_config.backend_type.clone())
-            .local_data_path(&self.cfg.data_path)
+            .local_data_path(self.cfg.data_path.clone())
             .cache_size(self.cfg.cs_config.cache_size);
 
         if let Some(bucket) = &self.cfg.cs_config.bucket {
@@ -187,13 +186,13 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
 
         if let Some(cache_path) = &self.cfg.cs_config.cache_path {
-            backend_builder = backend_builder.remote_cache_path(cache_path);
+            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
         }
 
         FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
             internal_server_error!(
                 "Failed to initialize storage backend at {}: {}",
-                self.cfg.data_path,
+                self.cfg.data_path.to_str().unwrap(),
                 e
             )
         })?);
@@ -207,7 +206,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
-                internal_server_error!("Failed to resolve extension path {}: {}", ext_path, e)
+                internal_server_error!(
+                    "Failed to resolve extension path {}: {}",
+                    ext_path.to_str().unwrap(),
+                    e
+                )
             })?)
         } else {
             None
@@ -228,6 +231,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     .log_level(&self.cfg.log_level)
                     .server_info(server_info)
                     .build(),
+                self.cfg.io_conf.clone(),
             )?,
             query_link_cache: tokio::sync::RwLock::new(Cache::new(
                 DEFAULT_CACHED_QUERIES,
@@ -320,10 +324,10 @@ mod tests {
         assert_eq!(parser.cfg.port, 8383);
         assert_eq!(parser.cfg.api_base_path, "/");
         assert_eq!(parser.cfg.public_url, "http://0.0.0.0:8383/");
-        assert_eq!(parser.cfg.data_path, "/data");
+        assert_eq!(parser.cfg.data_path, PathBuf::from("/data"));
         assert_eq!(parser.cfg.api_token, "");
-        assert_eq!(parser.cfg.cert_path, "");
-        assert_eq!(parser.cfg.cert_key_path, "");
+        assert_eq!(parser.cfg.cert_path, None);
+        assert_eq!(parser.cfg.cert_key_path, None);
         assert_eq!(parser.cfg.cors_allow_origin.len(), 0);
 
         assert_eq!(parser.cfg.buckets.len(), 0);
@@ -491,7 +495,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter);
-        assert_eq!(parser.cfg.data_path, "/tmp");
+        assert_eq!(parser.cfg.data_path, PathBuf::from("/tmp"));
     }
 
     #[rstest]
@@ -519,7 +523,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter);
-        assert_eq!(parser.cfg.cert_path, "/tmp/cert.pem");
+        assert_eq!(parser.cfg.cert_path, Some(PathBuf::from("/tmp/cert.pem")));
     }
 
     #[rstest]
@@ -533,7 +537,10 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter);
-        assert_eq!(parser.cfg.cert_key_path, "/tmp/cert.key");
+        assert_eq!(
+            parser.cfg.cert_key_path,
+            Some(PathBuf::from("/tmp/cert.key"))
+        );
     }
 
     #[rstest]
@@ -564,7 +571,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter);
-        assert_eq!(parser.cfg.ext_path, Some("/tmp/ext".to_string()));
+        assert_eq!(parser.cfg.ext_path, Some(PathBuf::from("/tmp/ext")));
     }
 
     #[cfg(feature = "fs-backend")]

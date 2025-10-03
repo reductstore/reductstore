@@ -8,6 +8,7 @@ pub(crate) mod filters;
 mod historical;
 mod limited;
 
+use crate::cfg::io::IoConfig;
 use crate::core::thread_pool::{shared, shared_isolated, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
@@ -33,17 +34,32 @@ pub(in crate::storage) fn build_query(
     start: u64,
     stop: u64,
     options: QueryOptions,
+    io_defaults: IoConfig,
 ) -> Result<Box<dyn Query + Send + Sync>, ReductError> {
     if start > stop && !options.continuous {
         return Err(unprocessable_entity!("Start time must be before stop time",));
     }
 
     Ok(if let Some(_) = options.limit {
-        Box::new(limited::LimitedQuery::try_new(start, stop, options)?)
+        Box::new(limited::LimitedQuery::try_new(
+            start,
+            stop,
+            options,
+            io_defaults,
+        )?)
     } else if options.continuous {
-        Box::new(continuous::ContinuousQuery::try_new(start, options)?)
+        Box::new(continuous::ContinuousQuery::try_new(
+            start,
+            options,
+            io_defaults,
+        )?)
     } else {
-        Box::new(historical::HistoricalQuery::try_new(start, stop, options)?)
+        Box::new(historical::HistoricalQuery::try_new(
+            start,
+            stop,
+            options,
+            io_defaults,
+        )?)
     })
 }
 
@@ -190,12 +206,14 @@ mod tests {
     fn test_bad_start_stop() {
         let options = QueryOptions::default();
         assert_eq!(
-            build_query(10, 5, options.clone()).err().unwrap(),
+            build_query(10, 5, options.clone(), IoConfig::default())
+                .err()
+                .unwrap(),
             ReductError::unprocessable_entity("Start time must be before stop time")
         );
 
-        assert!(build_query(10, 10, options.clone()).is_ok());
-        assert!(build_query(10, 11, options.clone()).is_ok());
+        assert!(build_query(10, 10, options.clone(), IoConfig::default()).is_ok());
+        assert!(build_query(10, 11, options.clone(), IoConfig::default()).is_ok());
     }
 
     #[rstest]
@@ -204,7 +222,7 @@ mod tests {
             continuous: true,
             ..Default::default()
         };
-        assert!(build_query(10, 5, options.clone()).is_ok());
+        assert!(build_query(10, 5, options.clone(), IoConfig::default()).is_ok());
     }
 
     #[log_test(rstest)]
@@ -215,7 +233,7 @@ mod tests {
             ..Default::default()
         };
 
-        let query = build_query(0, 5, options.clone()).unwrap();
+        let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let (rx, handle) = spawn_query_task(
@@ -234,7 +252,7 @@ mod tests {
     #[tokio::test]
     async fn test_query_task_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
-        let query = build_query(0, 5, options.clone()).unwrap();
+        let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
 
         let (mut rx, handle) = spawn_query_task(
             0,
@@ -257,7 +275,7 @@ mod tests {
             continuous: true,
             ..Default::default()
         };
-        let query = build_query(0, 5, options.clone()).unwrap();
+        let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
         let (mut rx, handle) = spawn_query_task(
             0,
             "bucket/entry".to_string(),
@@ -300,7 +318,7 @@ mod tests {
     #[tokio::test]
     async fn test_query_task_err(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
-        let query = build_query(0, 10, options.clone()).unwrap();
+        let query = build_query(0, 10, options.clone(), IoConfig::default()).unwrap();
 
         let (rx, handle) = spawn_query_task(
             0,
@@ -323,7 +341,7 @@ mod tests {
 
         FILE_CACHE.set_storage_backend(
             Backend::builder()
-                .local_data_path(path.to_str().unwrap())
+                .local_data_path(path.clone())
                 .try_build()
                 .unwrap(),
         );

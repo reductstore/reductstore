@@ -59,12 +59,13 @@ impl Entry {
         options.continuous = None; // force non-continuous query
 
         let rx = || {
+            // io defaults isn't used in remove queries
             let query_id = self.query(options).wait()?;
             self.get_query_receiver(query_id)
         };
 
         let rx = match rx() {
-            Ok(rx) => rx,
+            Ok((rx, _)) => rx,
             Err(e) => return Err(e).into(),
         };
 

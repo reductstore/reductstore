@@ -90,7 +90,7 @@ async fn launch_server() {
         }};
     }
 
-    if cfg.cert_path.is_empty() {
+    if cfg.cert_path.is_none() {
         apply_http_settings!(axum_server::bind(addr))
             .serve(app.into_make_service())
             .await
@@ -99,9 +99,12 @@ async fn launch_server() {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .expect("Failed to install rustls crypto provider");
-        let config = RustlsConfig::from_pem_file(cfg.cert_path, cfg.cert_key_path)
-            .await
-            .expect("Failed to load TLS certificate");
+        let config = RustlsConfig::from_pem_file(
+            cfg.cert_path.expect("Cert path must be set"),
+            cfg.cert_key_path.expect("Cert key path must be set"),
+        )
+        .await
+        .expect("Failed to load TLS certificate");
         apply_http_settings!(axum_server::bind_rustls(addr, config))
             .serve(app.into_make_service())
             .await
@@ -161,7 +164,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_http() {
         let task = set_env_and_run(HashMap::new()).await;
@@ -178,7 +181,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_https() {
         let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -220,7 +223,8 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn test_shutdown() {
         let data_path = tempdir().unwrap().keep();
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());

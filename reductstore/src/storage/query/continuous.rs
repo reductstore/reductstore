@@ -1,6 +1,7 @@
 // Copyright 2023 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::io::IoConfig;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -14,19 +15,25 @@ pub struct ContinuousQuery {
     next_start: u64,
     count: usize,
     options: QueryOptions,
+    io_defaults: IoConfig,
 }
 
 impl ContinuousQuery {
-    pub fn try_new(start: u64, options: QueryOptions) -> Result<Self, ReductError> {
+    pub fn try_new(
+        start: u64,
+        options: QueryOptions,
+        io_defaults: IoConfig,
+    ) -> Result<Self, ReductError> {
         if !options.continuous {
             panic!("Continuous query must be continuous");
         }
 
         Ok(ContinuousQuery {
-            query: HistoricalQuery::try_new(start, u64::MAX, options.clone())?,
+            query: HistoricalQuery::try_new(start, u64::MAX, options.clone(), io_defaults.clone())?,
             next_start: start,
             count: 0,
             options,
+            io_defaults,
         })
     }
 }
@@ -45,8 +52,12 @@ impl Query for ContinuousQuery {
                 status: ErrorCode::NoContent,
                 ..
             }) => {
-                self.query =
-                    HistoricalQuery::try_new(self.next_start, u64::MAX, self.options.clone())?;
+                self.query = HistoricalQuery::try_new(
+                    self.next_start,
+                    u64::MAX,
+                    self.options.clone(),
+                    self.io_defaults.clone(),
+                )?;
                 Err(ReductError {
                     status: ErrorCode::NoContent,
                     message: "No content".to_string(),
@@ -54,6 +65,10 @@ impl Query for ContinuousQuery {
             }
             Err(err) => Err(err),
         }
+    }
+
+    fn io_settings(&self) -> &IoConfig {
+        &self.query.io_settings()
     }
 }
 
@@ -75,6 +90,7 @@ mod tests {
                 continuous: true,
                 ..QueryOptions::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
         {

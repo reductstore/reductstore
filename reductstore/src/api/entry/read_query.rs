@@ -78,11 +78,8 @@ mod tests {
             .upgrade()
             .unwrap();
 
-        let rx = entry
-            .get_query_receiver(query.id)
-            .unwrap()
-            .upgrade()
-            .unwrap();
+        let (rx, _) = entry.get_query_receiver(query.id).unwrap();
+        let rx = rx.upgrade().unwrap();
         let mut rx = rx.write().await;
         assert!(rx.recv().await.unwrap().is_ok());
 

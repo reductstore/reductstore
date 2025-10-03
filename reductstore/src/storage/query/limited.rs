@@ -5,6 +5,7 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 
+use crate::cfg::io::IoConfig;
 use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
 use reduct_base::no_content;
@@ -17,9 +18,14 @@ pub(crate) struct LimitedQuery {
 }
 
 impl LimitedQuery {
-    pub fn try_new(start: u64, stop: u64, options: QueryOptions) -> Result<Self, ReductError> {
+    pub fn try_new(
+        start: u64,
+        stop: u64,
+        options: QueryOptions,
+        io_config: IoConfig,
+    ) -> Result<Self, ReductError> {
         Ok(LimitedQuery {
-            query: HistoricalQuery::try_new(start, stop, options.clone())?,
+            query: HistoricalQuery::try_new(start, stop, options.clone(), io_config)?,
             limit_count: options.limit.unwrap(),
         })
     }
@@ -36,6 +42,10 @@ impl Query for LimitedQuery {
 
         self.limit_count -= 1;
         self.query.next(block_manager)
+    }
+
+    fn io_settings(&self) -> &IoConfig {
+        self.query.io_settings()
     }
 }
 
@@ -56,6 +66,7 @@ mod tests {
                 limit: Some(1),
                 ..Default::default()
             },
+            IoConfig::default(),
         )
         .unwrap();
 

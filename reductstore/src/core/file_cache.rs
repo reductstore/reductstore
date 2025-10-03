@@ -632,7 +632,7 @@ mod tests {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
         cache.set_storage_backend(
             Backend::builder()
-                .local_data_path(tempfile::tempdir().unwrap().keep().to_str().unwrap())
+                .local_data_path(tempfile::tempdir().unwrap().keep())
                 .try_build()
                 .unwrap(),
         );

@@ -16,7 +16,6 @@ use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
-use crate::storage::storage::IO_OPERATION_TIMEOUT;
 use block_index::BlockIndex;
 use crc64fast::Digest;
 use reduct_base::error::ReductError;
@@ -24,6 +23,7 @@ use reduct_base::internal_server_error;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub(crate) type BlockRef = Arc<RwLock<Block>>;
@@ -73,7 +73,7 @@ impl BlockManager {
             block_cache: BlockCache::new(
                 WRITE_BLOCK_CACHE_SIZE,
                 READ_BLOCK_CACHE_SIZE,
-                IO_OPERATION_TIMEOUT,
+                Duration::from_secs(30),
             ),
             wal: wal::create_wal(path.clone()),
         }
@@ -1089,7 +1089,7 @@ mod tests {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         FILE_CACHE.set_storage_backend(
             Backend::builder()
-                .local_data_path(path.to_str().unwrap())
+                .local_data_path(path.clone())
                 .try_build()
                 .unwrap(),
         );

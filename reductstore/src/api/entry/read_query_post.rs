@@ -130,6 +130,7 @@ mod tests {
             .get_entry("entry-1")?
             .upgrade()?;
 
-        entry.get_query_receiver(query.id)
+        let (rx, _) = entry.get_query_receiver(query.id)?;
+        Ok(rx)
     }
 }

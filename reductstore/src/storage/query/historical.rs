@@ -1,6 +1,7 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::io::IoConfig;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record;
@@ -57,6 +58,8 @@ pub struct HistoricalQuery {
     only_metadata: bool,
     /// Interrupted query
     is_interrupted: bool,
+    /// Io Config
+    io_config: IoConfig,
 }
 
 impl HistoricalQuery {
@@ -64,6 +67,7 @@ impl HistoricalQuery {
         start_time: u64,
         stop_time: u64,
         options: QueryOptions,
+        io_defaults: IoConfig,
     ) -> Result<Self, ReductError> {
         let mut filters: Vec<Filter> = vec![
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
@@ -92,6 +96,8 @@ impl HistoricalQuery {
         } else {
             false
         };
+        let mut io_config = io_defaults;
+
         if let Some(when) = options.when {
             let parser = Parser::new();
             let (condition, directives) = parser.parse(when)?;
@@ -99,11 +105,11 @@ impl HistoricalQuery {
                 only_metadata = false;
             }
 
-            filters.push(Box::new(WhenFilter::try_new(
-                condition,
-                directives,
-                options.strict,
-            )?));
+            // get io config from directives and override defaults from configuraion
+            let filter = WhenFilter::try_new(condition, directives, io_config, options.strict)?;
+
+            io_config = filter.io_config().clone();
+            filters.push(Box::new(filter));
         }
 
         Ok(HistoricalQuery {
@@ -114,6 +120,7 @@ impl HistoricalQuery {
             filters,
             only_metadata,
             is_interrupted: false,
+            io_config,
         })
     }
 }
@@ -180,6 +187,10 @@ impl Query for HistoricalQuery {
             )
         }
     }
+
+    fn io_settings(&self) -> &IoConfig {
+        &self.io_config
+    }
 }
 
 impl HistoricalQuery {
@@ -211,6 +222,7 @@ mod tests {
 
     use super::*;
 
+    use crate::cfg::io::IoConfig;
     use crate::storage::proto::record;
     use crate::storage::proto::{us_to_ts, Record};
     use crate::storage::query::base::tests::block_manager;
@@ -218,6 +230,14 @@ mod tests {
     use reduct_base::io::BoxedReadRecord;
     use reduct_base::io::ReadRecord;
     use reduct_base::{no_content, not_found};
+
+    fn build_query(
+        start_time: u64,
+        stop_time: u64,
+        options: QueryOptions,
+    ) -> Result<HistoricalQuery, ReductError> {
+        HistoricalQuery::try_new(start_time, stop_time, options, IoConfig::default())
+    }
 
     mod new {
         use super::*;
@@ -230,7 +250,7 @@ mod tests {
                 ext: Some(json!({})),
                 ..Default::default()
             };
-            let query = HistoricalQuery::try_new(0, 1000, options).unwrap();
+            let query = build_query(0, 1000, options).unwrap();
             assert!(
                 !query.only_metadata,
                 "only_metadata should be false if ext is set to get content of records"
@@ -244,7 +264,7 @@ mod tests {
                 when: Some(json!({"$and": ["&flag"], "#ext": {}})),
                 ..Default::default()
             };
-            let query = HistoricalQuery::try_new(0, 1000, options).unwrap();
+            let query = build_query(0, 1000, options).unwrap();
             assert!(
                 !query.only_metadata,
                 "only_metadata should be false if #ext directive is set in when condition"
@@ -276,7 +296,7 @@ mod tests {
 
     #[rstest]
     fn test_query_ok_1_rec(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(0, 5, QueryOptions::default()).unwrap();
+        let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 1);
@@ -286,7 +306,7 @@ mod tests {
 
     #[rstest]
     fn test_query_ok_2_recs(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(0, 1000, QueryOptions::default()).unwrap();
+        let mut query = build_query(0, 1000, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 2);
@@ -298,7 +318,7 @@ mod tests {
 
     #[rstest]
     fn test_query_ok_3_recs(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(0, 1001, QueryOptions::default()).unwrap();
+        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
         assert_eq!(records.len(), 3);
@@ -312,7 +332,7 @@ mod tests {
 
     #[rstest]
     fn test_query_include(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
@@ -340,7 +360,7 @@ mod tests {
 
     #[rstest]
     fn test_query_exclude(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
@@ -370,7 +390,7 @@ mod tests {
 
     #[rstest]
     fn test_ignoring_errored_records(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(0, 5, QueryOptions::default()).unwrap();
+        let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         {
             let block_ref = block_manager.write().unwrap().load_block(0).unwrap();
             {
@@ -394,7 +414,7 @@ mod tests {
 
     #[rstest]
     fn test_each_s_filter(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
@@ -412,7 +432,7 @@ mod tests {
 
     #[rstest]
     fn test_each_n_records(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
@@ -430,7 +450,7 @@ mod tests {
 
     #[rstest]
     fn test_when_filter(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
@@ -447,7 +467,7 @@ mod tests {
 
     #[rstest]
     fn test_when_filter_strict(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
@@ -465,7 +485,7 @@ mod tests {
 
     #[rstest]
     fn test_when_with_interruption(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
@@ -484,7 +504,7 @@ mod tests {
 
     #[rstest]
     fn test_when_filter_non_strict(block_manager: Arc<RwLock<BlockManager>>) {
-        let mut query = HistoricalQuery::try_new(
+        let mut query = build_query(
             0,
             1001,
             QueryOptions {
