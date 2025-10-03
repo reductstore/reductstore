@@ -142,6 +142,7 @@ mod tests {
         assert_eq!(bucket.settings(), settings);
 
         let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
+
         assert_eq!(bucket.name(), "test");
         assert_eq!(bucket.settings(), settings);
     }
