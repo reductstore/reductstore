@@ -267,12 +267,12 @@ def test_read_batched_max_header_size(base_url, session, bucket):
 
     resp = session.get(f"{base_url}/b/{bucket}/entry/batch?q={query_id}")
     assert resp.status_code == 200
-    assert sum(header.startswith("x-reduct-time-") for header in resp.headers) == 86
+    assert sum(header.startswith("x-reduct-time-") for header in resp.headers) == 85
     assert resp.headers["x-reduct-last"] == "false"
 
     resp = session.get(f"{base_url}/b/{bucket}/entry/batch?q={query_id}")
     assert resp.status_code == 200
-    assert sum(header.startswith("x-reduct-time-") for header in resp.headers) == 14
+    assert sum(header.startswith("x-reduct-time-") for header in resp.headers) == 15
     assert resp.headers["x-reduct-last"] == "true"
 
 
