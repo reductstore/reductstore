@@ -209,7 +209,7 @@ mod tests {
             .wait()
             .unwrap();
         bucket.set_settings(Bucket::defaults()).wait().unwrap();
-        let bucket = Bucket::restore(bucket.path).unwrap();
+        let bucket = Bucket::restore(bucket.path, Cfg::default()).unwrap();
         assert_eq!(bucket.settings(), Bucket::defaults());
     }
 }
