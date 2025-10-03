@@ -172,7 +172,7 @@ async fn fetch_and_response_batched_records(
 
         if header_size > io_settings.batch_max_metadata_size
             || body_size > io_settings.batch_max_size
-            || readers.len() > io_settings.batch_max_records - 1
+            || readers.len() >= io_settings.batch_max_records
             || start_time.elapsed() > io_settings.batch_timeout
         {
             break;
