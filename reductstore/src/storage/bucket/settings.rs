@@ -122,6 +122,8 @@ impl Bucket {
                 .write_or_create(&path, SeekFrom::Start(0))?
                 .upgrade()?;
             let mut file = lock.write()?;
+
+            file.set_len(0)?;
             file.write_all(&buf)?;
             file.sync_all()?;
             Ok(())
@@ -193,5 +195,21 @@ mod tests {
             assert_eq!(entry.settings().max_block_size, 200);
             assert_eq!(entry.settings().max_block_records, 200);
         }
+    }
+
+    #[rstest]
+    fn test_overwrite_whole_settings_file(bucket: Bucket) {
+        bucket
+            .set_settings(BucketSettings {
+                max_block_size: Some(5000000000000000000),
+                quota_type: Some(reduct_base::msg::bucket_api::QuotaType::FIFO),
+                quota_size: Some(500),
+                max_block_records: Some(50),
+            })
+            .wait()
+            .unwrap();
+        bucket.set_settings(Bucket::defaults()).wait().unwrap();
+        let bucket = Bucket::restore(bucket.path).unwrap();
+        assert_eq!(bucket.settings(), Bucket::defaults());
     }
 }
