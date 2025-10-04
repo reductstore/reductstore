@@ -62,7 +62,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     .unwrap_or(DEFAULT_BATCH_TIMEOUT_S),
             ),
             batch_records_timeout: Duration::from_secs(
-                env.get_optional("RS_IO_BATCH_RECORDS_TIMEOUT_S")
+                env.get_optional("RS_IO_BATCH_RECORDS_TIMEOUT")
                     .unwrap_or(DEFAULT_BATCH_RECORDS_TIMEOUT_S),
             ),
             operation_timeout: Duration::from_secs(
@@ -103,7 +103,7 @@ mod tests {
             .return_const(Ok("10".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_IO_BATCH_RECORDS_TIMEOUT_S"))
+            .with(eq("RS_IO_BATCH_RECORDS_TIMEOUT"))
             .return_const(Ok("5".to_string()));
         env_getter
             .expect_get()

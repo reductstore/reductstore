@@ -106,7 +106,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         env_getter
             .expect_get()
-            .with(eq("RS_REMOTE_SYNC_INTERVAL_MS"))
+            .with(eq("RS_REMOTE_SYNC_INTERVAL"))
             .return_const(Err(VarError::NotPresent));
 
         let mut env = Env::new(env_getter);
@@ -123,7 +123,7 @@ mod tests {
                 secret_key: None,
                 cache_path: None,
                 cache_size: ByteSize::gb(1).as_u64(),
-                sync_interval: Some(Duration::milliseconds(100)),
+                sync_interval: Duration::from_millis(100),
             }
         );
     }
@@ -164,6 +164,11 @@ mod tests {
             .expect_get()
             .with(eq("RS_REMOTE_CACHE_SIZE"))
             .return_const(Ok("2GB".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_SYNC_INTERVAL"))
+            .return_const(Ok("60".to_string()));
+
         let mut env = Env::new(env_getter);
 
         let cfg = CfgParser::parse_remote_storage_cfg(&mut env);
@@ -178,7 +183,7 @@ mod tests {
                 secret_key: Some("my-secret-key".to_string()),
                 cache_path: Some(PathBuf::from("/tmp/cache")),
                 cache_size: ByteSize::gb(2).as_u64(),
-                sync_interval: Some(Duration::minutes(1)),
+                sync_interval: Duration::from_secs(60),
             }
         );
     }
