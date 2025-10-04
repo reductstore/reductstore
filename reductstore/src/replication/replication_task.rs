@@ -72,11 +72,8 @@ impl ReplicationTask {
             ..
         } = settings.clone();
 
-        let remote_bucket = create_remote_bucket(
-            remote_host.as_str(),
-            remote_bucket.as_str(),
-            remote_token.as_str(),
-        );
+        let remote_bucket =
+            create_remote_bucket(remote_host.as_str(), remote_bucket.as_str(), remote_token);
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,
@@ -297,7 +294,7 @@ impl ReplicationTask {
     /// Get the replication settings with the destination token masked.
     pub fn masked_settings(&self) -> ReplicationSettings {
         ReplicationSettings {
-            dst_token: "***".to_string(),
+            dst_token: None,
             ..self.settings.clone()
         }
     }
@@ -754,7 +751,7 @@ mod tests {
             src_bucket: "src".to_string(),
             dst_bucket: "remote".to_string(),
             dst_host: "http://localhost:8383".to_string(),
-            dst_token: "token".to_string(),
+            dst_token: Some("token".to_string()),
             entries: vec!["test1".to_string(), "test2".to_string()],
             include: Labels::new(),
             exclude: Labels::new(),

@@ -48,7 +48,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 src_bucket: "".to_string(),
                 dst_bucket: "".to_string(),
                 dst_host: "http://localhost".to_string(),
-                dst_token: "".to_string(),
+                dst_token: None,
                 entries: vec![],
                 include: Labels::default(),
                 exclude: Labels::default(),
@@ -101,8 +101,9 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 continue;
             }
 
-            replication.dst_token = env
+            let token = env
                 .get_masked::<String>(&format!("RS_REPLICATION_{}_DST_TOKEN", id), "".to_string());
+            replication.dst_token = if token.is_empty() { None } else { Some(token) };
 
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
@@ -193,7 +194,7 @@ mod tests {
         assert_eq!(replication.settings().src_bucket, "bucket1");
         assert_eq!(replication.settings().dst_bucket, "bucket2");
         assert_eq!(replication.settings().dst_host, "http://localhost/");
-        assert_eq!(replication.settings().dst_token, "TOKEN");
+        assert_eq!(replication.settings().dst_token, Some("TOKEN".to_string()));
         assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
         assert_eq!(replication.settings().each_n, Some(10));
         assert_eq!(replication.settings().each_s, Some(0.5));
@@ -367,7 +368,7 @@ mod tests {
                 src_bucket: "bucket1".to_string(),
                 dst_bucket: "bucket2".to_string(),
                 dst_host: "http://localhost".to_string(),
-                dst_token: "".to_string(),
+                dst_token: None,
                 entries: vec![],
                 include: Labels::default(),
                 exclude: Labels::default(),

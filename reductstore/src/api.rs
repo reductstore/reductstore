@@ -327,7 +327,7 @@ mod tests {
                     src_bucket: "bucket-1".to_string(),
                     dst_bucket: "bucket-2".to_string(),
                     dst_host: "http://localhost:8080".to_string(),
-                    dst_token: "".to_string(),
+                    dst_token: None,
                     entries: vec![],
                     include: Default::default(),
                     exclude: Default::default(),
