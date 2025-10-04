@@ -19,7 +19,7 @@ use crate::storage::query::QueryRx;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
-use reduct_base::unprocessable_entity;
+use reduct_base::{no_content, unprocessable_entity};
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::str::FromStr;
@@ -184,10 +184,16 @@ async fn fetch_and_response_batched_records(
     // unfortunately, we can start using a finished query so we need to check if it's still alive again
     if readers.is_empty() {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        let _ = bucket
+        match bucket
             .get_entry(entry_name)?
             .upgrade()?
-            .get_query_receiver(query_id)?;
+            .get_query_receiver(query_id)
+        {
+            Err(err) if err.status() == ErrorCode::NotFound => {
+                return Err(no_content!("No more records").into());
+            }
+            _ => { /* query is still alive */ }
+        }
     }
 
     headers.insert("content-length", body_size.to_string().parse().unwrap());
