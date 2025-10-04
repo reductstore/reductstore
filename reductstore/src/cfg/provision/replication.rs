@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(replication.settings().src_bucket, "bucket1");
         assert_eq!(replication.settings().dst_bucket, "bucket2");
         assert_eq!(replication.settings().dst_host, "http://localhost/");
-        assert_eq!(replication.settings().dst_token, Some("TOKEN"));
+        assert_eq!(replication.settings().dst_token, Some("TOKEN".to_string()));
         assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
         assert_eq!(replication.settings().each_n, Some(10));
         assert_eq!(replication.settings().each_s, Some(0.5));

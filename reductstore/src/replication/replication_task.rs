@@ -751,7 +751,7 @@ mod tests {
             src_bucket: "src".to_string(),
             dst_bucket: "remote".to_string(),
             dst_host: "http://localhost:8383".to_string(),
-            dst_token: "token".to_string(),
+            dst_token: Some("token".to_string()),
             entries: vec!["test1".to_string(), "test2".to_string()],
             include: Labels::new(),
             exclude: Labels::new(),

@@ -794,7 +794,7 @@ mod tests {
             src_bucket: "bucket-1".to_string(),
             dst_bucket: "bucket-2".to_string(),
             dst_host: "http://localhost".to_string(),
-            dst_token: "token".to_string(),
+            dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
             include: Labels::default(),
             exclude: Labels::default(),
