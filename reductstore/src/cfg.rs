@@ -197,6 +197,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             )
         })?);
 
+        FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
+
         let storage = Arc::new(self.provision_buckets());
         let token_repo = self.provision_tokens(storage.data_path());
         let console = create_asset_manager(load_console());
