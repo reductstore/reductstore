@@ -17,8 +17,7 @@ pub struct ReplicationSettings {
     /// Destination host URL (e.g. https://reductstore.com)
     pub dst_host: String,
     /// Destination access token
-    #[serde(default)]
-    pub dst_token: String,
+    pub dst_token: Option<String>,
     /// Entries to replicate. If empty, all entries are replicated. Wildcards are supported.
     #[serde(default)]
     pub entries: Vec<String>,

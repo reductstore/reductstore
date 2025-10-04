@@ -45,7 +45,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "src_bucket": bucket_name,
             "dst_bucket": "dst_bucket",
             "dst_host": "http://localhost:9000",
-            "dst_token": "***",
+            "dst_token": None,
             "entries": ["entry1", "entry2"],
             "exclude": {"key2": "value2"},
             "include": {"key1": "value1"},
@@ -113,7 +113,7 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
         "settings": {
             "dst_bucket": bucket_name,
             "dst_host": "http://localhost:9001",
-            "dst_token": "***",
+            "dst_token": None,
             "entries": [],
             "exclude": {},
             "include": {},

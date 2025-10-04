@@ -60,12 +60,12 @@ impl RemoteBucket for RemoteBucketImpl {
 pub(super) fn create_remote_bucket(
     url: &str,
     bucket_name: &str,
-    api_token: &str,
+    api_token: Option<String>,
 ) -> Arc<RwLock<dyn RemoteBucket + Send + Sync>> {
     Arc::new(RwLock::new(RemoteBucketImpl::new(
         url,
         bucket_name,
-        api_token,
+        api_token.as_deref().unwrap_or(""),
     )))
 }
 
