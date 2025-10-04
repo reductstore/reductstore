@@ -347,11 +347,10 @@ impl ReplicationRepository {
         let removed = self.replications.remove(name);
 
         // we keep the old token if the new one is empty (meaning not updated)
-        let init_token = if let Some(new_token) = settings.dst_token.clone() {
-            Some(new_token)
-        } else {
-            removed.and_then(|r| r.settings().dst_token.clone())
-        };
+        let init_token = settings
+            .dst_token
+            .clone()
+            .or_else(|| removed.and_then(|r| r.settings().dst_token.clone()));
 
         let mut settings = settings;
         settings.dst_token = init_token;
