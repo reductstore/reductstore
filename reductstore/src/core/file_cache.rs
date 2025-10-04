@@ -18,7 +18,7 @@ use std::time::Duration;
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
-const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(60_000);
+const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
     #[allow(unused_mut)]
@@ -79,6 +79,7 @@ pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileRc>>>,
     stop_sync_worker: Arc<AtomicBool>,
     backpack: Arc<RwLock<Backend>>,
+    sync_interval: Arc<RwLock<Duration>>,
 }
 
 impl FileCache {
@@ -96,12 +97,14 @@ impl FileCache {
         let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
         let backpack = Arc::new(RwLock::new(Backend::default()));
         let backpack_clone = Arc::clone(&backpack);
+        let sync_interval = Arc::new(RwLock::new(sync_interval));
+        let sync_interval_clone = Some(Arc::clone(&sync_interval));
 
         spawn(move || {
             // Periodically sync files from cache to disk
             while !stop_sync_worker.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(100));
-                Self::sync_rw_and_unused_files(&backpack_clone, &cache, sync_interval, false);
+                Self::sync_rw_and_unused_files(&backpack_clone, &cache, &sync_interval_clone);
             }
         });
 
@@ -109,16 +112,20 @@ impl FileCache {
             cache: cache_clone,
             stop_sync_worker: stop_sync_worker_clone,
             backpack,
+            sync_interval,
         }
     }
 
     fn sync_rw_and_unused_files(
         backend: &Arc<RwLock<Backend>>,
         cache: &Arc<RwLock<Cache<PathBuf, FileRc>>>,
-        sync_interval: Duration,
-        force: bool,
+        sync_interval: &Option<Arc<RwLock<Duration>>>,
     ) {
         let mut cache = cache.write().unwrap();
+        let force = sync_interval.is_none();
+        let sync_interval = sync_interval
+            .as_ref()
+            .map_or(FILE_CACHE_SYNC_INTERVAL, |si| *si.read().unwrap());
         let invalidated_files = backend.read().unwrap().invalidate_locally_cached_files();
         for path in invalidated_files {
             if let Some(file) = cache.remove(&path) {
@@ -161,8 +168,14 @@ impl FileCache {
         }
     }
 
+    /// Set the storage backend
     pub fn set_storage_backend(&self, backpack: Backend) {
         *self.backpack.write().unwrap() = backpack;
+    }
+
+    /// Set sync interval
+    pub fn set_sync_interval(&self, interval: Duration) {
+        *self.sync_interval.write().unwrap() = interval;
     }
 
     /// Get a file descriptor for reading
@@ -355,7 +368,7 @@ impl FileCache {
     }
 
     pub fn force_sync_all(&self) {
-        Self::sync_rw_and_unused_files(&self.backpack, &self.cache, Duration::from_secs(0), true);
+        Self::sync_rw_and_unused_files(&self.backpack, &self.cache, &None);
     }
 
     /// Saves a file descriptor in the cache and syncs any discarded files.
