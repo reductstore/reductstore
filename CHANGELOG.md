@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix path for token repository when cache used, [PR-925](https://github.com/reductstore/reductstore/pull/925)
 - Prevent storage from crashing if block from WAL doesn't exist, [PR-954](https://github.com/reductstore/reductstore/pull/954)
 - Clear bucket settings before saving them, [PR-957](https://github.com/reductstore/reductstore/pull/957)
+- Fix reusing token in ReplicationSettings, [PR-962](https://github.com/reductstore/reductstore/pull/962)
 
 ### Internal
 
