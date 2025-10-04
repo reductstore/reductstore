@@ -704,7 +704,6 @@ jobs:
           asset_name: reductstore.${{ matrix.target }}.zip
           asset_content_type: application/zip
   benchmark:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     name: Run benchmarks
     runs-on: ubuntu-latest
     needs: build
