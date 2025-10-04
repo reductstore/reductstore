@@ -36,7 +36,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             src_bucket: settings.src_bucket,
             dst_bucket: settings.dst_bucket,
             dst_host: settings.dst_host,
-            dst_token: settings.dst_token,
+            dst_token: settings.dst_token.unwrap_or_default(),
             entries: settings.entries,
             include: settings
                 .include
@@ -61,7 +61,11 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
             src_bucket: settings.src_bucket,
             dst_bucket: settings.dst_bucket,
             dst_host: settings.dst_host,
-            dst_token: settings.dst_token,
+            dst_token: if settings.dst_token.is_empty() {
+                None
+            } else {
+                Some(settings.dst_token)
+            },
             entries: settings.entries,
             include: settings
                 .include
@@ -340,7 +344,17 @@ impl ReplicationRepository {
         }
 
         // remove old replication because before creating new one
-        self.replications.remove(name);
+        let removed = self.replications.remove(name);
+
+        // we keep the old token if the new one is empty (meaning not updated)
+        let init_token = if let Some(new_token) = settings.dst_token.clone() {
+            Some(new_token)
+        } else {
+            removed.and_then(|r| r.settings().dst_token.clone())
+        };
+
+        let mut settings = settings;
+        settings.dst_token = init_token;
 
         let replication =
             ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage));
