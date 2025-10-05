@@ -5,12 +5,12 @@ mod provision;
 use log::{debug, error, info};
 use std::collections::BTreeMap;
 
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::time::Instant;
-
 use crate::storage::bucket::Bucket;
 use reduct_base::error::{ErrorCode, ReductError};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
+use tokio::runtime::Handle;
 
 use crate::backend::BackendType;
 use crate::cfg::Cfg;
@@ -18,9 +18,10 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
+use crate::storage::lock_file::LockFile;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
-use reduct_base::{conflict, not_found, unprocessable_entity};
+use reduct_base::{conflict, not_found, service_unavailable, unprocessable_entity};
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -66,8 +67,15 @@ impl StorageEngineBuilder {
             buckets: Arc::new(RwLock::new(BTreeMap::new())),
             license: self.license,
             cfg,
+            state: Mutex::new(State::Initializing),
+            lock_file: Mutex::new(None),
         }
     }
+}
+
+enum State {
+    Initializing,
+    Running,
 }
 
 /// Storage is the main entry point for the storage service.
@@ -77,6 +85,8 @@ pub struct StorageEngine {
     buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
     cfg: Cfg,
+    state: Mutex<State>,
+    lock_file: Mutex<Option<LockFile>>,
 }
 
 impl StorageEngine {
@@ -99,13 +109,17 @@ impl StorageEngine {
     /// # Panics
     ///
     /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
-    pub fn load(&self) {
+    pub async fn load(&self, lock_file: LockFile) {
+        lock_file
+            .acquire()
+            .await
+            .expect("Failed to acquire lock file");
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
         for path in FILE_CACHE.read_dir(&self.data_path).unwrap() {
             if path.is_dir() {
-                match Bucket::restore(path.clone(), self.cfg.clone()) {
+                match Bucket::restore(path.clone(), self.cfg.clone()).await {
                     Ok(bucket) => {
                         let bucket = Arc::new(bucket);
                         buckets.insert(bucket.name().to_string(), bucket);
@@ -119,6 +133,8 @@ impl StorageEngine {
 
         info!("Load {} bucket(s) in {:?}", buckets.len(), time.elapsed());
         self.provision_buckets();
+        *self.state.lock().unwrap() = State::Running;
+        let _ = self.lock_file.lock().unwrap().insert(lock_file);
     }
 
     /// Get the reductstore info.
@@ -161,6 +177,7 @@ impl StorageEngine {
         name: &str,
         settings: BucketSettings,
     ) -> Result<Weak<Bucket>, ReductError> {
+        self.check_state()?;
         check_name_convention(name)?;
         let mut buckets = self.buckets.write()?;
         if buckets.contains_key(name) {
@@ -188,6 +205,7 @@ impl StorageEngine {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
+        self.check_state()?;
         let buckets = self.buckets.read()?;
         match buckets.get(name) {
             Some(bucket) => Ok(Arc::clone(bucket).into()),
@@ -207,6 +225,10 @@ impl StorageEngine {
     ///
     /// * HTTPError - An error if the bucket doesn't exist
     pub(crate) fn remove_bucket(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(err) = self.check_state() {
+            return TaskHandle::from(Err(err));
+        }
+
         let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), name].join("/");
 
         let path = self.data_path.join(name);
@@ -239,6 +261,10 @@ impl StorageEngine {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(err) = self.check_state() {
+            return TaskHandle::from(Err(err));
+        }
+
         let check_and_prepare_bucket = || {
             check_name_convention(new_name)?;
             let buckets = self.buckets.read().unwrap();
@@ -284,7 +310,7 @@ impl StorageEngine {
                     sync_task.wait()?;
                     FILE_CACHE.discard_recursive(&path)?;
                     FILE_CACHE.rename(&path, &new_path)?;
-                    let bucket = Bucket::restore(new_path, cfg)?;
+                    let bucket = Handle::current().block_on(Bucket::restore(new_path, cfg))?;
                     buckets.insert(new_name.to_string(), Arc::new(bucket));
                     debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
                     Ok(())
@@ -327,6 +353,15 @@ impl StorageEngine {
 
     pub fn data_path(&self) -> &PathBuf {
         &self.data_path
+    }
+
+    fn check_state(&self) -> Result<(), ReductError> {
+        if let State::Initializing = *self.state.lock()? {
+            return Err(service_unavailable!(
+                "Storage is initializing. Try again later."
+            ));
+        }
+        Ok(())
     }
 }
 

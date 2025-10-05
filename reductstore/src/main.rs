@@ -1,9 +1,9 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::net::{IpAddr, SocketAddr};
-
 use axum_server::tls_rustls::RustlsConfig;
+use std::net::{IpAddr, SocketAddr};
+use std::ops::Deref;
 
 use axum_server::Handle;
 use log::info;
@@ -12,8 +12,10 @@ use reductstore::api::AxumAppBuilder;
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
 use reductstore::storage::engine::StorageEngine;
+use reductstore::storage::lock_file::LockFile;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use std::thread::spawn;
 use std::time::Duration;
 
 async fn launch_server() {
@@ -63,10 +65,16 @@ async fn launch_server() {
 
     let addr = SocketAddr::new(
         IpAddr::from_str(&cfg.host).expect("Invalid host address"),
-        cfg.port as u16,
+        cfg.port,
     );
 
-    components.storage.load();
+    let storage = components.storage.clone();
+    let lock_file = LockFile::builder()
+        .with_path(cfg.data_path.join(".lock"))
+        .with_timeout(Duration::from_secs(60))
+        .build();
+
+    tokio::spawn(async move { storage.load(lock_file).await });
 
     let app = AxumAppBuilder::new()
         .with_cfg(cfg.clone())

@@ -6,4 +6,5 @@ pub mod entry;
 pub mod proto;
 
 mod block_manager;
+pub mod lock_file;
 pub mod query;

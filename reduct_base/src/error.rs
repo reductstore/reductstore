@@ -362,6 +362,16 @@ macro_rules! unauthorized {
     };
 }
 
+#[macro_export]
+macro_rules! service_unavailable {
+    ($msg:expr, $($arg:tt)*) => {
+        ReductError::new(ErrorCode::ServiceUnavailable, &format!($msg, $($arg)*))
+    };
+    ($msg:expr) => {
+        ReductError::new(ErrorCode::ServiceUnavailable, $msg)
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
