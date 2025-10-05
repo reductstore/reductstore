@@ -4,7 +4,7 @@
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use crate::license::parse_license;
-use crate::storage::storage::Storage;
+use crate::storage::engine::StorageEngine;
 use bytesize::ByteSize;
 use log::{error, info};
 use reduct_base::error::ErrorCode;
@@ -12,41 +12,14 @@ use reduct_base::msg::bucket_api::BucketSettings;
 use std::collections::HashMap;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_buckets(&self) -> Storage {
-        let license = parse_license(self.cfg.license_path.clone());
+    pub(in crate::cfg) fn build_storage_engine(&self) -> StorageEngine {
+        let builder = StorageEngine::builder().with_cfg(self.cfg.clone());
+        let storage = if let Some(license) = parse_license(self.cfg.license_path.clone()) {
+            builder.with_license(license.clone()).build()
+        } else {
+            builder.build()
+        };
 
-        let storage = Storage::load(self.cfg.clone(), license);
-        for (name, settings) in &self.cfg.buckets {
-            let settings = match storage.create_bucket(&name, settings.clone()) {
-                Ok(bucket) => {
-                    let bucket = bucket.upgrade().unwrap();
-                    bucket.set_provisioned(true);
-                    Ok(bucket.settings().clone())
-                }
-                Err(e) => {
-                    if e.status() == ErrorCode::Conflict {
-                        let bucket = storage.get_bucket(&name).unwrap().upgrade().unwrap();
-                        bucket.set_provisioned(false);
-                        bucket.set_settings(settings.clone()).wait().unwrap();
-                        bucket.set_provisioned(true);
-
-                        Ok(bucket.settings().clone())
-                    } else {
-                        Err(e)
-                    }
-                }
-            };
-
-            if let Ok(settings) = settings {
-                info!("Provisioned bucket '{}' with: {:?}", name, settings);
-            } else {
-                error!(
-                    "Failed to provision bucket '{}': {}",
-                    name,
-                    settings.err().unwrap()
-                );
-            }
-        }
         storage
     }
 

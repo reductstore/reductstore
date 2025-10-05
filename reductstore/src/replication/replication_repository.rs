@@ -10,9 +10,9 @@ use crate::replication::proto::{
 };
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
+use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
-use crate::storage::storage::Storage;
 use bytes::Bytes;
 use log::{debug, error};
 use prost::Message;
@@ -109,7 +109,7 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
 
 pub(crate) struct ReplicationRepository {
     replications: HashMap<String, ReplicationTask>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageEngine>,
     repo_path: PathBuf,
     config: Cfg,
 }
@@ -212,7 +212,7 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) fn load_or_create(storage: Arc<Storage>, config: Cfg) -> Self {
+    pub(crate) fn load_or_create(storage: Arc<StorageEngine>, config: Cfg) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
 
         let mut repo = Self {
@@ -469,7 +469,10 @@ mod tests {
         }
 
         #[rstest]
-        fn create_and_load_replications(storage: Arc<Storage>, settings: ReplicationSettings) {
+        fn create_and_load_replications(
+            storage: Arc<StorageEngine>,
+            settings: ReplicationSettings,
+        ) {
             let mut repo =
                 ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
             repo.create_replication("test", settings.clone()).unwrap();
@@ -608,7 +611,7 @@ mod tests {
         #[rstest]
         fn test_remove_replication(
             mut repo: ReplicationRepository,
-            storage: Arc<Storage>,
+            storage: Arc<StorageEngine>,
             settings: ReplicationSettings,
         ) {
             repo.create_replication("test", settings.clone()).unwrap();
@@ -805,13 +808,13 @@ mod tests {
     }
 
     #[fixture]
-    fn storage() -> Arc<Storage> {
+    fn storage() -> Arc<StorageEngine> {
         let tmp_dir = tempfile::tempdir().unwrap();
         let cfg = Cfg {
             data_path: tmp_dir.keep(),
             ..Cfg::default()
         };
-        let storage = Storage::load(cfg, None);
+        let storage = StorageEngine::load(cfg, None);
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap()
@@ -821,7 +824,7 @@ mod tests {
     }
 
     #[fixture]
-    fn repo(storage: Arc<Storage>) -> ReplicationRepository {
+    fn repo(storage: Arc<StorageEngine>) -> ReplicationRepository {
         ReplicationRepository::load_or_create(storage, Cfg::default())
     }
 }

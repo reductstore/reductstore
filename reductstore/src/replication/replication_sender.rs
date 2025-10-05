@@ -5,7 +5,7 @@ use crate::replication::remote_bucket::RemoteBucket;
 
 use crate::replication::transaction_log::TransactionLog;
 
-use crate::storage::storage::Storage;
+use crate::storage::engine::StorageEngine;
 use std::cmp::PartialEq;
 
 use log::{debug, error};
@@ -26,7 +26,7 @@ use std::time::Duration;
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageEngine>,
     settings: ReplicationSettings,
     io_config: IoConfig,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
@@ -44,7 +44,7 @@ pub(super) enum SyncState {
 impl ReplicationSender {
     pub fn new(
         log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
-        storage: Arc<Storage>,
+        storage: Arc<StorageEngine>,
         config: ReplicationSettings,
         io_config: IoConfig,
         hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
@@ -232,7 +232,7 @@ mod tests {
 
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
-    use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+    use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
     use bytes::Bytes;
     use mockall::mock;
@@ -635,7 +635,7 @@ mod tests {
             data_path: tempfile::tempdir().unwrap().keep(),
             ..Default::default()
         };
-        let storage = Arc::new(Storage::load(cfg, None));
+        let storage = Arc::new(StorageEngine::load(cfg, None));
 
         let log_map = Arc::new(RwLock::new(HashMap::new()));
         let log = RwLock::new(

@@ -536,7 +536,7 @@ mod tests {
         use super::*;
         use std::thread::sleep;
 
-        use crate::storage::storage::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+        use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
         #[rstest]
         fn test_empty_entry(entry: Entry) {

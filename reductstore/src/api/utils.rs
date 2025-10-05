@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::HttpError;
-use crate::storage::storage::MAX_IO_BUFFER_SIZE;
+use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Future;

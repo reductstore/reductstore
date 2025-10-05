@@ -8,10 +8,10 @@ use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::info;
 use reduct_base::logger::Logger;
-use reductstore::api::create_axum_app;
+use reductstore::api::AxumAppBuilder;
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
-use reductstore::storage::storage::Storage;
+use reductstore::storage::engine::StorageEngine;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,7 +66,12 @@ async fn launch_server() {
         cfg.port as u16,
     );
 
-    let app = create_axum_app(&cfg, Arc::new(components));
+    components.storage.load();
+
+    let app = AxumAppBuilder::new()
+        .with_cfg(cfg.clone())
+        .with_components(components)
+        .build();
 
     // Ensure that the process exits with a non-zero exit code on panic.
     let default_panic = std::panic::take_hook();
@@ -117,14 +122,14 @@ async fn main() {
     launch_server().await;
 }
 
-async fn shutdown_ctrl_c(handle: Handle, storage: Arc<Storage>) {
+async fn shutdown_ctrl_c(handle: Handle, storage: Arc<StorageEngine>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
     shutdown_app(handle, storage)
 }
 
 #[cfg(unix)]
-async fn shutdown_signal(handle: Handle, storage: Arc<Storage>) {
+async fn shutdown_signal(handle: Handle, storage: Arc<StorageEngine>) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
@@ -133,7 +138,7 @@ async fn shutdown_signal(handle: Handle, storage: Arc<Storage>) {
     shutdown_app(handle, storage);
 }
 
-fn shutdown_app(handle: Handle, storage: Arc<Storage>) {
+fn shutdown_app(handle: Handle, storage: Arc<StorageEngine>) {
     handle.graceful_shutdown(Some(Duration::from_secs(5)));
     storage.sync_fs().expect("Failed to shutdown storage");
 }

@@ -19,7 +19,7 @@ use crate::cfg::Cfg;
 use crate::core::cache::Cache;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::replication::ManageReplications;
-use crate::storage::storage::Storage;
+use crate::storage::engine::StorageEngine;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -43,7 +43,7 @@ use tokio::sync::{Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
 pub struct Components {
-    pub storage: Arc<Storage>,
+    pub storage: Arc<StorageEngine>,
     pub(crate) auth: TokenAuthorization,
     pub(crate) token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
@@ -124,56 +124,86 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(cfg: &Cfg, components: Arc<Components>) -> Router {
-    let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
-    let cors = configure_cors(&cfg.cors_allow_origin);
-
-    let app = Router::new()
-        // Server API
-        .nest(
-            &format!("{}api/v1", cfg.api_base_path),
-            create_server_api_routes(),
-        )
-        // Token API
-        .nest(
-            &format!("{}api/v1/tokens", cfg.api_base_path),
-            create_token_api_routes(),
-        )
-        // Bucket API + Entry API
-        .nest(&format!("{}api/v1/b", cfg.api_base_path), b_route)
-        // Replication API
-        .nest(
-            &format!("{}api/v1/replications", cfg.api_base_path),
-            create_replication_api_routes(),
-        )
-        .nest(
-            &format!("{}api/v1/links", cfg.api_base_path),
-            links::create_query_link_api_routes(),
-        )
-        // UI
-        .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
-        .fallback(get(show_ui))
-        .layer(from_fn(default_headers))
-        .layer(from_fn(print_statuses))
-        .layer(cors)
-        .with_state(components);
-    app
+pub struct AxumAppBuilder {
+    components: Option<Components>,
+    cfg: Option<Cfg>,
 }
 
-fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
-    let cors_layer = CorsLayer::new()
-        .allow_methods(Any)
-        .allow_headers(Any)
-        .expose_headers(Any);
+impl AxumAppBuilder {
+    pub fn new() -> Self {
+        AxumAppBuilder {
+            components: None,
+            cfg: None,
+        }
+    }
 
-    if cors_allow_origin.contains(&"*".to_string()) {
-        cors_layer.allow_origin(Any)
-    } else {
-        let parsed_origins: Vec<HeaderValue> = cors_allow_origin
-            .iter()
-            .filter_map(|origin| origin.parse().ok())
-            .collect();
-        cors_layer.allow_origin(parsed_origins)
+    pub fn with_components(mut self, components: Components) -> Self {
+        self.components = Some(components);
+        self
+    }
+
+    pub fn with_cfg(mut self, cfg: Cfg) -> Self {
+        self.cfg = Some(cfg);
+        self
+    }
+
+    pub fn build(self) -> Router {
+        if self.components.is_none() || self.cfg.is_none() {
+            panic!("Components and Cfg must be set before building the app");
+        }
+
+        let cfg = self.cfg.unwrap();
+        let components = Arc::new(self.components.unwrap());
+        let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
+        let cors = Self::configure_cors(&cfg.cors_allow_origin);
+
+        let app = Router::new()
+            // Server API
+            .nest(
+                &format!("{}api/v1", cfg.api_base_path),
+                create_server_api_routes(),
+            )
+            // Token API
+            .nest(
+                &format!("{}api/v1/tokens", cfg.api_base_path),
+                create_token_api_routes(),
+            )
+            // Bucket API + Entry API
+            .nest(&format!("{}api/v1/b", cfg.api_base_path), b_route)
+            // Replication API
+            .nest(
+                &format!("{}api/v1/replications", cfg.api_base_path),
+                create_replication_api_routes(),
+            )
+            .nest(
+                &format!("{}api/v1/links", cfg.api_base_path),
+                links::create_query_link_api_routes(),
+            )
+            // UI
+            .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
+            .fallback(get(show_ui))
+            .layer(from_fn(default_headers))
+            .layer(from_fn(print_statuses))
+            .layer(cors)
+            .with_state(components);
+        app
+    }
+
+    fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
+        let cors_layer = CorsLayer::new()
+            .allow_methods(Any)
+            .allow_headers(Any)
+            .expose_headers(Any);
+
+        if cors_allow_origin.contains(&"*".to_string()) {
+            cors_layer.allow_origin(Any)
+        } else {
+            let parsed_origins: Vec<HeaderValue> = cors_allow_origin
+                .iter()
+                .filter_map(|origin| origin.parse().ok())
+                .collect();
+            cors_layer.allow_origin(parsed_origins)
+        }
     }
 }
 
@@ -286,7 +316,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let storage = Storage::load(cfg.clone(), None);
+        let storage = StorageEngine::load(cfg.clone(), None);
         let mut token_repo = create_token_repository(cfg.data_path.clone(), "init-token");
 
         storage
