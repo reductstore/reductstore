@@ -39,6 +39,22 @@ async fn launch_server() {
     Logger::init(&parser.cfg.log_level);
     info!("Configuration: \n {}", parser);
 
+    parser
+        .init_storage_backend()
+        .expect("Failed to initialize storage backend");
+
+    // let data_path = if let Some(path) = parser.cfg.data_path.clone() {
+    //     path
+    // } else {
+    //     std::env::current_dir().expect("Failed to get current directory")
+    // };
+    // let lock_file = LockFile::builder()
+    //     .with_path(self.data_path().join(".lock"))
+    //     .with_timeout(Duration::from_secs(1200))
+    //     .try_build()
+    //     .await
+    //     .expect("Failed to lock data directory");
+
     let components = parser.build().expect("Failed to build components");
     let info = components
         .storage
@@ -69,12 +85,7 @@ async fn launch_server() {
     );
 
     let storage = components.storage.clone();
-    let lock_file = LockFile::builder()
-        .with_path(cfg.data_path.join(".lock"))
-        .with_timeout(Duration::from_secs(60))
-        .build();
-
-    tokio::spawn(async move { storage.load(lock_file).await });
+    tokio::spawn(async move { storage.load().await });
 
     let app = AxumAppBuilder::new()
         .with_cfg(cfg.clone())

@@ -159,46 +159,6 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     }
 
     pub fn build(&self) -> Result<Components, ReductError> {
-        // Initialize storage backend
-        let mut backend_builder = Backend::builder()
-            .backend_type(self.cfg.cs_config.backend_type.clone())
-            .local_data_path(self.cfg.data_path.clone())
-            .cache_size(self.cfg.cs_config.cache_size);
-
-        if let Some(bucket) = &self.cfg.cs_config.bucket {
-            backend_builder = backend_builder.remote_bucket(bucket);
-        }
-
-        if let Some(region) = &self.cfg.cs_config.region {
-            backend_builder = backend_builder.remote_region(region);
-        }
-
-        if let Some(endpoint) = &self.cfg.cs_config.endpoint {
-            backend_builder = backend_builder.remote_endpoint(endpoint);
-        }
-
-        if let Some(access_key) = &self.cfg.cs_config.access_key {
-            backend_builder = backend_builder.remote_access_key(access_key);
-        }
-
-        if let Some(secret_key) = &self.cfg.cs_config.secret_key {
-            backend_builder = backend_builder.remote_secret_key(secret_key);
-        }
-
-        if let Some(cache_path) = &self.cfg.cs_config.cache_path {
-            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
-        }
-
-        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
-            internal_server_error!(
-                "Failed to initialize storage backend at {}: {}",
-                self.cfg.data_path.to_str().unwrap(),
-                e
-            )
-        })?);
-
-        FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
-
         let storage = Arc::new(self.build_storage_engine());
         let token_repo = self.provision_tokens(storage.data_path());
         let console = create_asset_manager(load_console());
@@ -241,6 +201,50 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             )),
             cfg: self.cfg.clone(),
         })
+    }
+
+    pub fn init_storage_backend(&self) -> Result<(), ReductError> {
+        // Initialize storage backend
+        let mut backend_builder = Backend::builder()
+            .backend_type(self.cfg.cs_config.backend_type.clone())
+            .local_data_path(self.cfg.data_path.clone())
+            .cache_size(self.cfg.cs_config.cache_size);
+
+        if let Some(bucket) = &self.cfg.cs_config.bucket {
+            backend_builder = backend_builder.remote_bucket(bucket);
+        }
+
+        if let Some(region) = &self.cfg.cs_config.region {
+            backend_builder = backend_builder.remote_region(region);
+        }
+
+        if let Some(endpoint) = &self.cfg.cs_config.endpoint {
+            backend_builder = backend_builder.remote_endpoint(endpoint);
+        }
+
+        if let Some(access_key) = &self.cfg.cs_config.access_key {
+            backend_builder = backend_builder.remote_access_key(access_key);
+        }
+
+        if let Some(secret_key) = &self.cfg.cs_config.secret_key {
+            backend_builder = backend_builder.remote_secret_key(secret_key);
+        }
+
+        if let Some(cache_path) = &self.cfg.cs_config.cache_path {
+            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
+        }
+
+        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
+            internal_server_error!(
+                "Failed to initialize storage backend at {}: {}",
+                self.cfg.data_path.to_str().unwrap(),
+                e
+            )
+        })?);
+
+        FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
+
+        Ok(())
     }
 
     fn parse_cors_allow_origin(env: &mut Env<EnvGetter>) -> Vec<String> {
