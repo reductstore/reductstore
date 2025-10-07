@@ -384,7 +384,6 @@ mod tests {
     mod state_keeper {
         use super::*;
         use crate::auth::policy::FullAccessPolicy;
-        use axum::body::to_bytes;
         use rstest::rstest;
         use tokio;
 
