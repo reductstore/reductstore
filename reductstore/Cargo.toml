@@ -47,7 +47,7 @@ serde_json = { version = "1.0.143", features = ["preserve_order"] }
 regex = "1.11.3"
 bytes = "1.10.1"
 axum = { version = "0.8.6", features = ["default", "macros"] }
-axum-extra = { version = "0.10.0", features = ["default", "typed-header"] }
+axum-extra = { version = "0.10.3", features = ["default", "typed-header"] }
 tokio = { version = "1.47.1", features = ["full"] }
 hyper = { version = "1.7.0", features = ["full"] }
 futures-util = "0.3.31"
