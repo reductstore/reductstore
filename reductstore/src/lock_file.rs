@@ -93,7 +93,7 @@ impl LockFileBuilder {
             while FILE_CACHE.try_exists(&file_path).unwrap()
                 && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
             {
-                if time_start.elapsed() > timeout {
+                if time_start.elapsed() > timeout && timeout.as_secs() > 0 {
                     match failure_action {
                         FailureAction::Proceed => {
                             warn!(

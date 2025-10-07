@@ -14,6 +14,7 @@ pub struct LockFileConfig {
     /// Whether to enable lock file usage
     pub enabled: bool,
     /// Timeout for acquiring the lock file
+    /// if set to 0, it will wait indefinitely
     pub timeout: Duration,
     /// Failure action if lock file cannot be acquired
     pub failure_action: FailureAction,
@@ -36,7 +37,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 .get_optional::<bool>("RS_LOCK_FILE_ENABLED")
                 .unwrap_or(false),
             timeout: Duration::from_secs(
-                env.get_optional::<u64>("RS_LOCK_FILE_ACQUIRE_TIMEOUT")
+                env.get_optional::<u64>("RS_LOCK_FILE_TIMEOUT")
                     .unwrap_or(DEFAULT_ACQUIRE_TIMEOUT_S),
             ),
             failure_action: match env
@@ -73,7 +74,7 @@ mod tests {
             .return_const(Ok("true".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_LOCK_FILE_ACQUIRE_TIMEOUT"))
+            .with(eq("RS_LOCK_FILE_TIMEOUT"))
             .return_const(Ok("20".to_string()));
         env_getter
             .expect_get()
@@ -121,7 +122,7 @@ mod tests {
             .return_const(Ok("true".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_LOCK_FILE_ACQUIRE_TIMEOUT"))
+            .with(eq("RS_LOCK_FILE_TIMEOUT"))
             .return_const(Ok("20".to_string()));
         env_getter
             .expect_get()
