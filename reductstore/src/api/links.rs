@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::links::create::create;
-use crate::api::{Components, HttpError, StateKeeper};
+use crate::api::{HttpError, StateKeeper};
 use axum::extract::FromRequest;
 use axum::routing::{get, post};
 use axum_extra::headers::HeaderMapExt;
@@ -63,7 +63,7 @@ pub(super) mod tests {
     use super::*;
     use crate::api::links::create::create;
     use crate::api::links::{QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum};
-    use crate::api::{Components, HttpError};
+    use crate::api::HttpError;
     use axum::extract::{Path, State};
     use axum::http::HeaderMap;
     use chrono::{DateTime, Utc};

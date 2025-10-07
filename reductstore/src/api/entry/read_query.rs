@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::QueryInfoAxum;
-use crate::api::{Components, HttpError};
+use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
 
 use crate::api::entry::common::parse_query_params;

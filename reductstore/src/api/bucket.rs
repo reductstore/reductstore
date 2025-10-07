@@ -14,7 +14,7 @@ use crate::api::bucket::head::head_bucket;
 use crate::api::bucket::remove::remove_bucket;
 use crate::api::bucket::rename::rename_bucket;
 use crate::api::bucket::update::update_bucket;
-use crate::api::{Components, HttpError, StateKeeper};
+use crate::api::{HttpError, StateKeeper};
 use axum::body::Body;
 use axum::extract::FromRequest;
 use axum::http::Request;

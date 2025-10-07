@@ -11,8 +11,8 @@ use axum_extra::headers::HeaderMap;
 use reduct_base::batch::sort_headers_by_time;
 
 use crate::api::entry::common::err_to_batched_header;
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
 // DELETE /:bucket/:entry/batch

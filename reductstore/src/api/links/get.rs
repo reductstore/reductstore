@@ -4,7 +4,7 @@
 use crate::api::links::derive_key_from_secret;
 use crate::api::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
 use crate::api::{Components, HttpError, StateKeeper};
-use crate::auth::policy::{AnonymousPolicy, ReadAccessPolicy};
+use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
 use aes_siv::aead::{Aead, KeyInit};

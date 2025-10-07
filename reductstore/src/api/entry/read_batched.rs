@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::Bucket;
 
@@ -528,6 +528,7 @@ mod tests {
 
     mod batch_parameters {
         use super::*;
+        use crate::api::Components;
         use crate::cfg::Cfg;
         use reduct_base::msg::entry_api::QueryEntry;
         use serde_json::{json, Value};

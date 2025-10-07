@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
-use crate::api::Components;
 use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
 use reduct_base::error::ReductError;

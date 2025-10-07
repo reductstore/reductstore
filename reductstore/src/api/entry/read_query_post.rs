@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::QueryInfoAxum;
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 
 use axum::extract::{Path, State};

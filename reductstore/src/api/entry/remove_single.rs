@@ -8,8 +8,8 @@ use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
 
 use crate::api::entry::common::parse_timestamp_from_query;
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
 // DELETE /:bucket/:entry?ts=<number>

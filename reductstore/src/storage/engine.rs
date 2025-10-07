@@ -1,23 +1,20 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-use crate::backend::BackendType;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
-use crate::lock_file::LockFile;
 use crate::storage::bucket::Bucket;
 use log::{debug, error, info};
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
-use reduct_base::{conflict, not_found, service_unavailable, unprocessable_entity};
+use reduct_base::{conflict, not_found, unprocessable_entity};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
-use tokio::runtime::Handle;
+use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -323,6 +320,7 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::backend::BackendType;
     use crate::cfg::remote_storage::RemoteStorageConfig;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
@@ -716,32 +714,6 @@ mod tests {
             err,
             ReductError::conflict("Can't remove provisioned bucket 'test'")
         );
-    }
-
-    #[cfg(feature = "s3-backend")]
-    #[rstest]
-    #[should_panic(expected = "Cache path must be set for remote storage")]
-    fn test_no_cache_for_s3_backend() {
-        let path = tempdir().unwrap().keep().join("data_path");
-        let cfg = Cfg {
-            data_path: path.clone(),
-            cs_config: RemoteStorageConfig {
-                backend_type: BackendType::S3,
-                cache_path: None,
-                ..Default::default()
-            },
-            ..Cfg::default()
-        };
-        let storage = StorageEngine::builder()
-            .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg)
-            .build();
-        let bucket = storage
-            .create_bucket("test", BucketSettings::default())
-            .unwrap()
-            .upgrade_and_unwrap();
-        bucket.set_provisioned(true);
-        let _ = storage.remove_bucket("test").wait().err().unwrap();
     }
 
     #[fixture]

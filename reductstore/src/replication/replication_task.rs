@@ -365,7 +365,6 @@ mod tests {
     use crate::replication::Transaction;
 
     use crate::storage::bucket::Bucket;
-    use crate::storage::engine::StorageEngineBuilder;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;

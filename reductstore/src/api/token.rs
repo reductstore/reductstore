@@ -22,7 +22,7 @@ use crate::api::token::create::create_token;
 use crate::api::token::get::get_token;
 use crate::api::token::list::list_tokens;
 use crate::api::token::remove::remove_token;
-use crate::api::{Components, HttpError, StateKeeper};
+use crate::api::{HttpError, StateKeeper};
 
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
 use reduct_macros::{IntoResponse, Twin};

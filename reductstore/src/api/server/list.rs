@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::server::BucketInfoListAxum;
-use crate::api::{Components, HttpError, StateKeeper};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::{AuthenticatedPolicy, ReadAccessPolicy};
 use axum::extract::State;
 use axum_extra::headers::HeaderMap;

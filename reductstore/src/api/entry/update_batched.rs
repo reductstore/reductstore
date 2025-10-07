@@ -13,8 +13,8 @@ use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
 use crate::api::entry::common::err_to_batched_header;
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;

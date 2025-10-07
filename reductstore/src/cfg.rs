@@ -147,7 +147,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         };
 
         let license = parse_license(cfg.license_path.clone());
-        Self { cfg, env, license }
+        let me = Self { cfg, env, license };
+        me.init_storage_backend()
+            .expect("Failed to initialize storage backend");
+        me
     }
 
     fn normalize_url_path(api_base_path: &mut String) {
@@ -233,7 +236,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         Ok(data_path)
     }
 
-    pub fn init_storage_backend(&self) -> Result<(), ReductError> {
+    fn init_storage_backend(&self) -> Result<(), ReductError> {
         // Initialize storage backend
         let mut backend_builder = Backend::builder()
             .backend_type(self.cfg.cs_config.backend_type.clone())

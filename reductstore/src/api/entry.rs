@@ -24,7 +24,7 @@ use crate::api::entry::remove_entry::remove_entry;
 use crate::api::entry::write_batched::write_batched_records;
 use crate::api::entry::write_single::write_record;
 use crate::api::HttpError;
-use crate::api::{Components, StateKeeper};
+use crate::api::StateKeeper;
 use axum::extract::{FromRequest, Path, Query, State};
 
 use axum_extra::headers::HeaderMapExt;
@@ -172,7 +172,7 @@ pub(super) fn create_entry_api_routes() -> axum::Router<Arc<StateKeeper>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{headers, keeper, path_to_entry_1};
+    use crate::api::tests::{headers, path_to_entry_1};
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::entry_api::QueryEntry;
     use rstest::rstest;

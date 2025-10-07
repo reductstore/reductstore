@@ -1,15 +1,13 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::file_cache::{FileWeak, FILE_CACHE};
+use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 use std::io::SeekFrom::Start;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::exit;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread::sleep;
@@ -99,7 +97,7 @@ impl LockFileBuilder {
             while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
                 let recreate = async {
                     let rc = FILE_CACHE.write_or_create(&file_path, Start(0))?;
-                    let mut file = rc.upgrade()?;
+                    let file = rc.upgrade()?;
                     file.write()?.write_all(unique_id.as_bytes())?;
                     file.write()?.sync_all()?;
                     Ok::<(), ReductError>(())

@@ -6,7 +6,7 @@ mod list;
 mod remove;
 mod update;
 
-use crate::api::{Components, HttpError, StateKeeper};
+use crate::api::{HttpError, StateKeeper};
 use axum_extra::headers::HeaderMapExt;
 
 use crate::api::replication::create::create_replication;

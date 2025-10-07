@@ -3,7 +3,6 @@
 
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::{IpAddr, SocketAddr};
-use std::ops::Deref;
 
 use axum_server::Handle;
 use log::info;
@@ -14,8 +13,7 @@ use reductstore::core::env::StdEnvGetter;
 use reductstore::lock_file::BoxedLockFile;
 use reductstore::storage::engine::StorageEngine;
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock};
-use std::thread::spawn;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -55,10 +53,6 @@ async fn launch_server() {
     let parser = CfgParser::from_env(StdEnvGetter::default());
     Logger::init(&parser.cfg.log_level);
     info!("Configuration: \n {}", parser);
-
-    parser
-        .init_storage_backend()
-        .expect("Failed to initialize storage backend");
 
     if let Some(license) = &parser.license {
         info!("License Information: {}", license);

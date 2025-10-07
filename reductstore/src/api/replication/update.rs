@@ -38,11 +38,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_replication_ok(
-        #[future] keeper: Arc<StateKeeper>,
+        #[future] keeper_with_bucket: Arc<StateKeeper>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
     ) {
-        let keeper = keeper.await;
+        let keeper = keeper_with_bucket.await;
         let components = keeper.get_anonymous().await.unwrap();
         settings.dst_bucket = "bucket-3".to_string();
 
@@ -71,14 +71,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_replication_error(
-        #[future] keeper: Arc<StateKeeper>,
+        #[future] keeper_with_bucket: Arc<StateKeeper>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
     ) {
         settings.dst_host = "BROKEN URL".to_string();
 
         let result = update_replication(
-            State(keeper.await),
+            State(keeper_with_bucket.await),
             Path("test".to_string()),
             headers,
             ReplicationSettingsAxum::from(settings),
@@ -88,18 +88,19 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // #[fixture]
-    // async fn components(
-    //     #[future] keeper: Arc<StateKeeper>,
-    //     settings: ReplicationSettings,
-    // ) -> Arc<Components> {
-    //     let components = base_keeper.await.get_anonymous().await.unwrap();
-    //     components
-    //         .replication_repo
-    //         .write()
-    //         .await
-    //         .create_replication("test", settings)
-    //         .unwrap();
-    //     components
-    // }
+    #[fixture]
+    async fn keeper_with_bucket(
+        #[future] keeper: Arc<StateKeeper>,
+        settings: ReplicationSettings,
+    ) -> Arc<StateKeeper> {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        components
+            .replication_repo
+            .write()
+            .await
+            .create_replication("test", settings)
+            .unwrap();
+        keeper
+    }
 }
