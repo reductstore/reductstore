@@ -6,7 +6,7 @@ mod list;
 mod remove;
 mod update;
 
-use crate::api::{Components, HttpError};
+use crate::api::{Components, HttpError, StateKeeper};
 use axum_extra::headers::HeaderMapExt;
 
 use crate::api::replication::create::create_replication;
@@ -56,7 +56,7 @@ pub(super) struct ReplicationListAxum(ReplicationList);
 #[derive(IntoResponse, Twin)]
 pub(super) struct ReplicationFullInfoAxum(FullReplicationInfo);
 
-pub(super) fn create_replication_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_replication_api_routes() -> axum::Router<Arc<StateKeeper>> {
     axum::Router::new()
         .route("/", get(list_replications))
         .route("/{replication_name}", get(get_replication))

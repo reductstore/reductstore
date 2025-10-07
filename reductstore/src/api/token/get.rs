@@ -1,9 +1,8 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
 use crate::api::token::TokenAxum;
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
@@ -11,11 +10,13 @@ use std::sync::Arc;
 
 // GET /tokens/:token_name
 pub(super) async fn get_token(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<TokenAxum, HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
 
     let mut token = components
         .token_repo

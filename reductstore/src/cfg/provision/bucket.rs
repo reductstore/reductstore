@@ -3,18 +3,19 @@
 
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
-use crate::license::parse_license;
 use crate::storage::engine::StorageEngine;
 use bytesize::ByteSize;
-use log::{error, info};
-use reduct_base::error::ErrorCode;
 use reduct_base::msg::bucket_api::BucketSettings;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn build_storage_engine(&self) -> StorageEngine {
-        let builder = StorageEngine::builder().with_cfg(self.cfg.clone());
-        let storage = if let Some(license) = parse_license(self.cfg.license_path.clone()) {
+    pub(in crate::cfg) fn build_storage_engine(&self, data_path: &PathBuf) -> StorageEngine {
+        let builder = StorageEngine::builder()
+            .with_cfg(self.cfg.clone())
+            .with_data_path(data_path.clone());
+
+        let storage = if let Some(license) = &self.license {
             builder.with_license(license.clone()).build()
         } else {
             builder.build()

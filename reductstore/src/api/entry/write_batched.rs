@@ -1,7 +1,6 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
@@ -12,6 +11,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 
 use crate::api::entry::common::err_to_batched_header;
+use crate::api::StateKeeper;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::RecordDrainer;
@@ -36,20 +36,15 @@ type ErrorMap = BTreeMap<u64, ReductError>;
 
 // POST /:bucket/:entry/batch
 pub(super) async fn write_batched_records(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
-    let bucket_name = path.get("bucket_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket_name,
-        },
-    )
-    .await?;
+    let bucket = path.get("bucket_name").unwrap();
+    let components = keeper
+        .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
+        .await?;
 
     let entry_name = path.get("entry_name").unwrap().clone();
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
@@ -67,7 +62,7 @@ pub(super) async fn write_batched_records(
         let mut record_count = timed_headers.len();
         let mut written = 0;
         let (mut rx_writer, prepare_write_stream) =
-            spawn_getting_writers(&components, &bucket_name, &entry_name, timed_headers)?;
+            spawn_getting_writers(&components, &bucket, &entry_name, timed_headers)?;
         let mut ctx = rx_writer
             .recv()
             .await
@@ -105,7 +100,7 @@ pub(super) async fn write_batched_records(
 
                         components.replication_repo.write().await.notify(
                             TransactionNotification {
-                                bucket: bucket_name.clone(),
+                                bucket: bucket.clone(),
                                 entry: entry_name.clone(),
                                 meta: RecordMeta::builder()
                                     .timestamp(ctx.time)

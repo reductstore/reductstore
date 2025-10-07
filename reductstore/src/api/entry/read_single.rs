@@ -1,8 +1,7 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
-use crate::api::middleware::check_permissions;
 use crate::api::Components;
 use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
@@ -15,6 +14,7 @@ use axum_extra::headers::HeaderMap;
 
 use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
+use crate::api::StateKeeper;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
@@ -26,7 +26,7 @@ use tokio::sync::{Mutex, RwLock as AsyncRwLock};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub(super) async fn read_record(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -34,14 +34,14 @@ pub(super) async fn read_record(
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        ReadAccessPolicy {
-            bucket: &bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            ReadAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     let entry = components
         .storage

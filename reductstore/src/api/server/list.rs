@@ -1,9 +1,8 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
 use crate::api::server::BucketInfoListAxum;
-use crate::api::{Components, HttpError};
+use crate::api::{Components, HttpError, StateKeeper};
 use crate::auth::policy::{AuthenticatedPolicy, ReadAccessPolicy};
 use axum::extract::State;
 use axum_extra::headers::HeaderMap;
@@ -12,24 +11,26 @@ use std::sync::Arc;
 
 // GET /list
 pub(super) async fn list(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
 ) -> Result<BucketInfoListAxum, HttpError> {
-    check_permissions(&components, &headers, AuthenticatedPolicy {}).await?;
+    let components = keeper
+        .get_with_permissions(&headers, AuthenticatedPolicy {})
+        .await?;
 
     let mut filtered_by_read_permission = vec![];
 
     for bucket in components.storage.get_bucket_list()?.buckets {
         // Filter out buckets that are not visible to the user
-        if check_permissions(
-            &components,
-            &headers,
-            ReadAccessPolicy {
-                bucket: &bucket.name,
-            },
-        )
-        .await
-        .is_ok()
+        if keeper
+            .get_with_permissions(
+                &headers,
+                ReadAccessPolicy {
+                    bucket: &bucket.name,
+                },
+            )
+            .await
+            .is_ok()
         {
             filtered_by_read_permission.push(bucket);
         }

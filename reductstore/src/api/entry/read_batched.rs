@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
-use crate::api::middleware::check_permissions;
 use crate::api::{Components, ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::Bucket;
@@ -14,6 +13,7 @@ use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
 use bytes::Bytes;
 use futures_util::Stream;
 
+use crate::api::StateKeeper;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
 use log::debug;
@@ -31,23 +31,23 @@ use tokio::time::timeout;
 
 // GET /:bucket/:entry/batch?q=<number>
 pub(super) async fn read_batched_records(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
     method: MethodExtractor,
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
-    let entry_name = path.get("entry_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        ReadAccessPolicy {
-            bucket: &bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            ReadAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
+    let entry_name = path.get("entry_name").unwrap();
     let query_id = match params.get("q") {
         Some(query) => query.parse::<u64>().map_err(|_| {
             HttpError::new(ErrorCode::UnprocessableEntity, "'query' must be a number")

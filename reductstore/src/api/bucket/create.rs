@@ -1,8 +1,8 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::bucket::BucketSettingsAxum;
-use crate::api::middleware::check_permissions;
+use crate::api::StateKeeper;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 
@@ -12,12 +12,14 @@ use std::sync::Arc;
 
 // POST /b/:bucket_name
 pub(super) async fn create_bucket(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     settings: BucketSettingsAxum,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
     components
         .storage
         .create_bucket(&bucket_name, settings.into())?;

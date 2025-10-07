@@ -60,21 +60,3 @@ pub async fn print_statuses(
 
     Ok(response)
 }
-
-pub(crate) async fn check_permissions<P>(
-    components: &Components,
-    headers: &HeaderMap,
-    policy: P,
-) -> Result<(), HttpError>
-where
-    P: Policy,
-{
-    components.auth.check(
-        headers
-            .get("Authorization")
-            .map(|header| header.to_str().unwrap_or("")),
-        components.token_repo.read().await.as_ref(),
-        policy,
-    )?;
-    Ok(())
-}

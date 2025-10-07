@@ -1,7 +1,7 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
+use crate::api::StateKeeper;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
@@ -12,12 +12,14 @@ use std::sync::Arc;
 
 // PUT /b/:bucket_name/rename
 pub(super) async fn rename_bucket(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     request: Json<RenameBucket>,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
     components
         .storage
         .rename_bucket(&bucket_name, &request.new_name)

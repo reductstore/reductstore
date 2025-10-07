@@ -1,9 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
-
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
@@ -11,12 +9,13 @@ use std::sync::Arc;
 
 // DElETE /api/v1/replications/:replication_name
 pub(super) async fn remove_replication(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(replication_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
-
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
     components
         .replication_repo
         .write()

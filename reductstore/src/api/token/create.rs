@@ -1,9 +1,8 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
 use crate::api::token::{PermissionsAxum, TokenCreateResponseAxum};
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
@@ -11,20 +10,20 @@ use std::sync::Arc;
 
 // POST /tokens/:token_name
 pub(super) async fn create_token(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
     permissions: PermissionsAxum,
 ) -> Result<TokenCreateResponseAxum, HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
-
-    Ok(TokenCreateResponseAxum(
-        components
-            .token_repo
-            .write()
-            .await
-            .generate_token(&token_name, permissions.into())?,
-    ))
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
+    let token = components
+        .token_repo
+        .write()
+        .await
+        .generate_token(&token_name, permissions.into())?;
+    Ok(TokenCreateResponseAxum(token))
 }
 
 #[cfg(test)]

@@ -11,3 +11,4 @@ pub mod replication;
 pub mod storage;
 
 pub(crate) mod backend;
+pub mod lock_file;

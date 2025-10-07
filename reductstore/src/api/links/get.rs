@@ -2,10 +2,9 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::links::derive_key_from_secret;
-use crate::api::middleware::check_permissions;
 use crate::api::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
-use crate::api::{Components, HttpError};
-use crate::auth::policy::ReadAccessPolicy;
+use crate::api::{Components, HttpError, StateKeeper};
+use crate::auth::policy::{AnonymousPolicy, ReadAccessPolicy};
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
 use aes_siv::aead::{Aead, KeyInit};
@@ -32,21 +31,24 @@ use tokio::sync::{Mutex, RwLock};
 
 // GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     header_map: HeaderMap,
     Path(_file_name): Path<String>, // we need the file_name to have a name when downloading
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, HttpError> {
+    // first anonymous access to decrypt the query
+    let components = keeper.get_anonymous().await?;
     let (record_num, token, query) = decrypt_query(&components, params.clone()).await?;
 
-    check_permissions(
-        &components,
-        &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
-        ReadAccessPolicy {
-            bucket: &query.bucket,
-        },
-    )
-    .await?;
+    // then check permissions with the real token
+    let components = keeper
+        .get_with_permissions(
+            &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
+            ReadAccessPolicy {
+                bucket: &query.bucket,
+            },
+        )
+        .await?;
 
     let range = if header_map.contains_key("Range") {
         Some(header_map.typed_get::<Range>().unwrap())

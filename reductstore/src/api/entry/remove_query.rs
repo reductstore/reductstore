@@ -1,8 +1,8 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::RemoveQueryInfoAxum;
-use crate::api::middleware::check_permissions;
+use crate::api::StateKeeper;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
@@ -17,22 +17,21 @@ use std::sync::Arc;
 
 // DELETE /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
 pub(super) async fn remove_query(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Result<RemoveQueryInfoAxum, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            WriteAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_or_create_entry(entry_name)?.upgrade()?;

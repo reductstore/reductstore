@@ -8,19 +8,21 @@ use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
 
 use crate::api::entry::common::parse_timestamp_from_query;
-use crate::api::middleware::check_permissions;
+use crate::api::StateKeeper;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
 // DELETE /:bucket/:entry?ts=<number>
 pub(super) async fn remove_record(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
-    check_permissions(&components, &headers, WriteAccessPolicy { bucket }).await?;
+    let components = keeper
+        .get_with_permissions(&headers, WriteAccessPolicy { bucket })
+        .await?;
 
     let ts = parse_timestamp_from_query(&params)?;
     let entry_name = path.get("entry_name").unwrap();

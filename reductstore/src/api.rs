@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 //
 mod bucket;
@@ -13,14 +13,16 @@ mod utils;
 
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
+use crate::auth::policy::Policy;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::cfg::Cfg;
 use crate::core::cache::Cache;
 use crate::ext::ext_repository::ManageExtensions;
+use crate::lock_file::{BoxedLockFile, LockFile};
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware::from_fn, Router};
@@ -30,15 +32,18 @@ use hyper::http::HeaderValue;
 use log::{error, warn};
 use middleware::{default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
+use reduct_base::error::ReductError;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_base::io::BoxedReadRecord;
+use reduct_base::service_unavailable;
 use reduct_macros::Twin;
 use replication::create_replication_api_routes;
 use serde::de::StdError;
 use server::create_server_api_routes;
 use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
+use std::sync::{Arc, RwLockReadGuard};
 use token::create_token_api_routes;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -52,6 +57,67 @@ pub struct Components {
     pub(crate) query_link_cache: RwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
 
     pub(crate) cfg: Cfg,
+}
+
+pub struct StateKeeper {
+    rx: RwLock<Receiver<Components>>,
+    components: RwLock<Option<Arc<Components>>>,
+    lock_file: Arc<BoxedLockFile>,
+}
+
+impl StateKeeper {
+    pub fn new(lock_file: Arc<BoxedLockFile>, rx: Receiver<Components>) -> Self {
+        StateKeeper {
+            rx: RwLock::new(rx),
+            components: RwLock::new(None),
+            lock_file,
+        }
+    }
+
+    pub async fn get_with_permissions<P>(
+        &self,
+        headers: &HeaderMap,
+        policy: P,
+    ) -> Result<Arc<Components>, HttpError>
+    where
+        P: Policy,
+    {
+        let components = self.wait_components().await?;
+
+        components.auth.check(
+            headers
+                .get("Authorization")
+                .map(|header| header.to_str().unwrap_or("")),
+            components.token_repo.read().await.as_ref(),
+            policy,
+        )?;
+
+        Ok(components)
+    }
+
+    async fn wait_components(&self) -> Result<Arc<Components>, HttpError> {
+        if !self.lock_file.is_locked().await {
+            return Err(
+                service_unavailable!("The server is starting up, please try again later").into(),
+            );
+        }
+
+        if self.components.read().await.is_none() {
+            let components = self
+                .rx
+                .write()
+                .await
+                .recv()
+                .await
+                .expect("Failed to receive components from channel");
+            self.components.write().await.replace(Arc::new(components));
+        }
+        Ok(self.components.read().await.as_ref().unwrap().clone())
+    }
+
+    pub async fn get_anonymous(&self) -> Result<Arc<Components>, HttpError> {
+        self.wait_components().await
+    }
 }
 
 #[derive(Twin, PartialEq)]
@@ -125,20 +191,27 @@ impl From<serde_json::Error> for HttpError {
 }
 
 pub struct AxumAppBuilder {
-    components: Option<Components>,
+    rx: Option<Receiver<Components>>,
     cfg: Option<Cfg>,
+    lc: Option<Arc<BoxedLockFile>>,
 }
 
 impl AxumAppBuilder {
     pub fn new() -> Self {
         AxumAppBuilder {
-            components: None,
+            rx: None,
             cfg: None,
+            lc: None,
         }
     }
 
-    pub fn with_components(mut self, components: Components) -> Self {
-        self.components = Some(components);
+    pub fn with_component_receiver(mut self, components: Receiver<Components>) -> Self {
+        self.rx = Some(components);
+        self
+    }
+
+    pub fn with_lock_file(mut self, lock_file: Arc<BoxedLockFile>) -> Self {
+        self.lc = Some(lock_file);
         self
     }
 
@@ -148,16 +221,15 @@ impl AxumAppBuilder {
     }
 
     pub fn build(self) -> Router {
-        if self.components.is_none() || self.cfg.is_none() {
+        if self.rx.is_none() || self.cfg.is_none() {
             panic!("Components and Cfg must be set before building the app");
         }
 
         let cfg = self.cfg.unwrap();
-        let components = Arc::new(self.components.unwrap());
         let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
         let cors = Self::configure_cors(&cfg.cors_allow_origin);
 
-        let app = Router::new()
+        Router::new()
             // Server API
             .nest(
                 &format!("{}api/v1", cfg.api_base_path),
@@ -185,8 +257,10 @@ impl AxumAppBuilder {
             .layer(from_fn(default_headers))
             .layer(from_fn(print_statuses))
             .layer(cors)
-            .with_state(components);
-        app
+            .with_state(Arc::new(StateKeeper::new(
+                self.lc.expect("Lock file must be set"),
+                self.rx.expect("Components must be set"),
+            )))
     }
 
     fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {

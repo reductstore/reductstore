@@ -1,10 +1,10 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::bucket::FullBucketInfoAxum;
-use crate::api::middleware::check_permissions;
 use crate::api::Components;
 use crate::api::HttpError;
+use crate::api::StateKeeper;
 use crate::auth::policy::ReadAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
@@ -13,18 +13,18 @@ use std::sync::Arc;
 // GET /b/:bucket_name
 
 pub(super) async fn get_bucket(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullBucketInfoAxum, HttpError> {
-    check_permissions(
-        &components,
-        &headers,
-        ReadAccessPolicy {
-            bucket: &bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            ReadAccessPolicy {
+                bucket: &bucket_name,
+            },
+        )
+        .await?;
     let bucket_info = components.storage.get_bucket(&bucket_name)?.upgrade()?;
     Ok(bucket_info.info()?.into())
 }

@@ -1,12 +1,12 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::QueryInfoAxum;
-use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 
 use crate::api::entry::common::parse_query_params;
+use crate::api::StateKeeper;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::msg::entry_api::QueryInfo;
@@ -15,22 +15,21 @@ use std::sync::Arc;
 
 // GET /:bucket/:entry/q?start=<number>&stop=<number>&continue=<number>&exclude-<label>=<value>&include-<label>=<value>&ttl=<number>
 pub(super) async fn read_query(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Result<QueryInfoAxum, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-
-    check_permissions(
-        &components,
-        &headers,
-        ReadAccessPolicy {
-            bucket: &bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            ReadAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;

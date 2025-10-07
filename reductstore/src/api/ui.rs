@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 //
 
-use crate::api::Components;
 use crate::api::HttpError;
+use crate::api::{Components, StateKeeper};
 use axum::extract::State;
 
 use axum::body::Body;
@@ -14,22 +14,36 @@ use axum_extra::headers::HeaderMap;
 use bytes::Bytes;
 use log::debug;
 use mime_guess::mime;
-use reduct_base::error::ErrorCode;
+use reduct_base::error::{ErrorCode, IntEnum};
 use std::sync::Arc;
 
 pub(super) async fn redirect_to_index(
-    State(components): State<Arc<Components>>,
+    State(components): State<Arc<StateKeeper>>,
 ) -> impl IntoResponse {
+    let components = match components.get_anonymous().await {
+        Ok(c) => c,
+        Err(err) => {
+            return (
+                StatusCode::from_u16(err.0.status().int_value() as u16)
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                HeaderMap::new(),
+                err.0.message,
+            )
+                .into_response();
+        }
+    };
+
     let base_path = components.cfg.api_base_path.clone();
     let mut headers = HeaderMap::new();
     headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
-    (StatusCode::FOUND, headers, Bytes::new()).into_response()
+    (StatusCode::FOUND, headers, "".to_string()).into_response()
 }
 
 pub(super) async fn show_ui(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let components = keeper.get_anonymous().await?;
     let base_path = components.cfg.api_base_path.clone();
 
     let path = request.uri().path();

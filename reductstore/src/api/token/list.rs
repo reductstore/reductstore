@@ -1,9 +1,8 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
 use crate::api::token::TokenListAxum;
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::State;
 use axum_extra::headers::HeaderMap;
@@ -12,10 +11,12 @@ use std::sync::Arc;
 
 // GET /tokens
 pub(super) async fn list_tokens(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
 ) -> Result<TokenListAxum, HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
     let token_repo = components.token_repo.read().await;
 
     let mut list = TokenListAxum::default();

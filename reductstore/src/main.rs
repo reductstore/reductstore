@@ -12,11 +12,11 @@ use reductstore::api::AxumAppBuilder;
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
 use reductstore::storage::engine::StorageEngine;
-use reductstore::storage::lock_file::LockFile;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 use std::thread::spawn;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 async fn launch_server() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -43,24 +43,7 @@ async fn launch_server() {
         .init_storage_backend()
         .expect("Failed to initialize storage backend");
 
-    // let data_path = if let Some(path) = parser.cfg.data_path.clone() {
-    //     path
-    // } else {
-    //     std::env::current_dir().expect("Failed to get current directory")
-    // };
-    // let lock_file = LockFile::builder()
-    //     .with_path(self.data_path().join(".lock"))
-    //     .with_timeout(Duration::from_secs(1200))
-    //     .try_build()
-    //     .await
-    //     .expect("Failed to lock data directory");
-
-    let components = parser.build().expect("Failed to build components");
-    let info = components
-        .storage
-        .info()
-        .expect("Failed to get server info");
-    if let Some(license) = &info.license {
+    if let Some(license) = &parser.license {
         info!("License Information: {}", license);
     } else {
         info!(
@@ -69,27 +52,51 @@ async fn launch_server() {
         );
     }
 
-    let cfg = parser.cfg;
-    info!("Public URL: {}", cfg.public_url);
-
+    // Run initialization in a separate thread to avoid blocking HTTP server startup
+    // if waiting for the lock file.
+    let lock_file = Arc::new(parser.build_lock_file().unwrap());
+    let config_lock = Arc::clone(&lock_file);
     let handle = Handle::new();
-    tokio::spawn(shutdown_ctrl_c(handle.clone(), components.storage.clone()));
-    #[cfg(unix)]
-    tokio::spawn(shutdown_signal(handle.clone(), components.storage.clone()));
-    #[cfg(test)]
-    tokio::spawn(tests::shutdown_server(handle.clone()));
+    let signal_handle = handle.clone();
+    let cfg = parser.cfg.clone();
+    let (tx, rx) = mpsc::channel(1);
+    tokio::spawn(async move {
+        while config_lock.is_waiting().await {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        if config_lock.is_timeouted().await {
+            panic!("Another ReductStore instance is holding the lock. Exiting.");
+        }
+
+        let components = parser.build().await.unwrap();
+
+        tokio::spawn(shutdown_ctrl_c(
+            signal_handle.clone(),
+            components.storage.clone(),
+        ));
+        #[cfg(unix)]
+        tokio::spawn(shutdown_signal(
+            signal_handle.clone(),
+            components.storage.clone(),
+        ));
+        #[cfg(test)]
+        tokio::spawn(tests::shutdown_server(signal_handle.clone()));
+
+        tx.send(components).await.unwrap();
+    });
+
+    info!("Public URL: {}", cfg.public_url);
 
     let addr = SocketAddr::new(
         IpAddr::from_str(&cfg.host).expect("Invalid host address"),
         cfg.port,
     );
 
-    let storage = components.storage.clone();
-    tokio::spawn(async move { storage.load().await });
-
     let app = AxumAppBuilder::new()
         .with_cfg(cfg.clone())
-        .with_components(components)
+        .with_component_receiver(rx)
+        .with_lock_file(lock_file)
         .build();
 
     // Ensure that the process exits with a non-zero exit code on panic.

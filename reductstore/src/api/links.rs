@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::links::create::create;
-use crate::api::{Components, HttpError};
+use crate::api::{Components, HttpError, StateKeeper};
 use axum::extract::FromRequest;
 use axum::routing::{get, post};
 use axum_extra::headers::HeaderMapExt;
@@ -52,7 +52,7 @@ pub(super) fn derive_key_from_secret(secret: &[u8], salt: &[u8]) -> [u8; 32] {
     key
 }
 
-pub(super) fn create_query_link_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_query_link_api_routes() -> axum::Router<Arc<StateKeeper>> {
     axum::Router::new()
         .route("/{file_name}", post(create))
         .route("/{file_name}", get(get::get))

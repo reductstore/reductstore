@@ -11,22 +11,23 @@ use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
 use crate::api::entry::common::parse_timestamp_from_query;
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, ErrorCode, HttpError};
+use crate::api::{ErrorCode, HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry?ts=<number>
 pub(super) async fn update_record(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     _: Body,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
-    check_permissions(&components, &headers, WriteAccessPolicy { bucket }).await?;
+    let components = keeper
+        .get_with_permissions(&headers, WriteAccessPolicy { bucket })
+        .await?;
 
     let ts = parse_timestamp_from_query(&params)?;
 
@@ -86,26 +87,23 @@ pub(super) async fn update_record(
 
 #[cfg(test)]
 mod tests {
-    use crate::api::tests::{components, empty_body, path_to_entry_1};
-
+    use super::*;
+    use crate::api::tests::{empty_body, keeper, path_to_entry_1};
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::io::ReadRecord;
     use rstest::*;
 
-    use super::*;
-
     #[rstest]
     #[tokio::test]
     async fn test_update_with_label_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
-
+        let keeper = keeper.await;
         update_record(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -117,6 +115,7 @@ mod tests {
         .await
         .unwrap();
 
+        let components = keeper.components();
         let record = components
             .storage
             .get_bucket("bucket-1")
@@ -145,17 +144,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_bucket_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]));
         let err = update_record(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path,
             Query(HashMap::from_iter(vec![(
@@ -177,17 +176,15 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_no_label_to_delete(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
-
+        let keeper = keeper.await;
         headers.insert("x-reduct-label-not-exist", "".parse().unwrap());
-
         let result = update_record(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -197,21 +194,20 @@ mod tests {
             empty_body.await,
         )
         .await;
-
         assert!(result.is_ok(), "we ignore labels that do not exist");
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_update_bad_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = update_record(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -223,7 +219,6 @@ mod tests {
         .await
         .err()
         .unwrap();
-
         assert_eq!(
             err,
             HttpError::new(
@@ -239,9 +234,7 @@ mod tests {
         headers.insert("x-reduct-label-x", "z".parse().unwrap()); // update
         headers.insert("x-reduct-label-b", "".parse().unwrap()); // remove
         headers.insert("x-reduct-label-1", "2".parse().unwrap()); // add
-
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
-
         headers
     }
 }

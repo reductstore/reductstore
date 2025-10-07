@@ -2,26 +2,24 @@
 // Licensed under the Business Source License 1.1
 mod provision;
 
-use log::{debug, error, info};
-use std::collections::BTreeMap;
-
-use crate::storage::bucket::Bucket;
-use reduct_base::error::{ErrorCode, ReductError};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
-use tokio::runtime::Handle;
-
 use crate::backend::BackendType;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
-use crate::storage::lock_file::LockFile;
+use crate::lock_file::LockFile;
+use crate::storage::bucket::Bucket;
+use log::{debug, error, info};
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 use reduct_base::{conflict, not_found, service_unavailable, unprocessable_entity};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
+use tokio::runtime::Handle;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -29,6 +27,7 @@ pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
 pub struct StorageEngineBuilder {
     cfg: Option<Cfg>,
     license: Option<License>,
+    data_path: Option<PathBuf>,
 }
 
 impl StorageEngineBuilder {
@@ -42,20 +41,15 @@ impl StorageEngineBuilder {
         self
     }
 
-    pub fn build(self) -> StorageEngine {
-        if self.cfg.is_none() {
-            panic!("Config must be set");
-        }
-        let cfg = self.cfg.unwrap();
+    pub fn with_data_path(mut self, data_path: PathBuf) -> Self {
+        self.data_path = Some(data_path);
+        self
+    }
 
-        let data_path = if cfg.cs_config.backend_type == BackendType::Filesystem {
-            cfg.data_path.clone()
-        } else {
-            cfg.cs_config
-                .cache_path
-                .clone()
-                .expect("Cache path must be set for remote storage")
-        };
+    pub fn build(self) -> StorageEngine {
+        let cfg = self.cfg.expect("Config must be set");
+        let data_path = self.data_path.expect("Data path must be set");
+
         if !FILE_CACHE.try_exists(&data_path).unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
             FILE_CACHE.create_dir_all(&data_path).unwrap();
@@ -90,6 +84,7 @@ impl StorageEngine {
         StorageEngineBuilder {
             cfg: None,
             license: None,
+            data_path: None,
         }
     }
 

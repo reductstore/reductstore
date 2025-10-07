@@ -9,7 +9,7 @@ pub mod replication;
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
-use crate::backend::Backend;
+use crate::backend::{Backend, BackendType};
 use crate::cfg::io::IoConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
@@ -17,12 +17,15 @@ use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
+use crate::license::parse_license;
+use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
 use reduct_base::internal_server_error;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::msg::server_api::License;
 use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -87,6 +90,7 @@ impl Default for Cfg {
 /// Database configuration
 pub struct CfgParser<EnvGetter: GetEnv> {
     pub cfg: Cfg,
+    pub license: Option<License>,
     pub env: Env<EnvGetter>,
 }
 
@@ -121,31 +125,29 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url.push('/');
         }
 
-        let cfg = CfgParser {
-            cfg: Cfg {
-                log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
-                host,
-                public_url,
-                port,
-                api_base_path,
-                data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
-                api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
-                cert_path,
-                cert_key_path,
-                license_path: env.get_optional("RS_LICENSE_PATH"),
-                ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
-                cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
-                buckets: Self::parse_buckets(&mut env),
-                tokens: Self::parse_tokens(&mut env),
-                replications: Self::parse_replications(&mut env),
-                io_conf: Self::parse_io_config(&mut env),
-                replication_conf: Self::parse_replication_config(&mut env, port),
-                cs_config: Self::parse_remote_storage_cfg(&mut env),
-            },
-            env,
+        let cfg = Cfg {
+            log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
+            host,
+            public_url,
+            port,
+            api_base_path,
+            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
+            api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
+            cert_path,
+            cert_key_path,
+            license_path: env.get_optional("RS_LICENSE_PATH"),
+            ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
+            cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
+            buckets: Self::parse_buckets(&mut env),
+            tokens: Self::parse_tokens(&mut env),
+            replications: Self::parse_replications(&mut env),
+            io_conf: Self::parse_io_config(&mut env),
+            replication_conf: Self::parse_replication_config(&mut env, port),
+            cs_config: Self::parse_remote_storage_cfg(&mut env),
         };
 
-        cfg
+        let license = parse_license(cfg.license_path.clone());
+        Self { cfg, env, license }
     }
 
     fn normalize_url_path(api_base_path: &mut String) {
@@ -158,9 +160,23 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
     }
 
-    pub fn build(&self) -> Result<Components, ReductError> {
-        let storage = Arc::new(self.build_storage_engine());
-        let token_repo = self.provision_tokens(storage.data_path());
+    pub fn build_lock_file(&self) -> Result<BoxedLockFile, ReductError> {
+        let data_path = self.get_data_path()?;
+
+        let lock_file = LockFileBuilder::new()
+            .with_path(&data_path.join(".lock"))
+            .with_timeout(Duration::from_secs(120))
+            .build();
+
+        Ok(lock_file)
+    }
+
+    pub async fn build(&self) -> Result<Components, ReductError> {
+        let data_path = self.get_data_path()?;
+
+        let storage = Arc::new(self.build_storage_engine(&data_path));
+        storage.load().await;
+        let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
         let ros_ext = create_asset_manager(load_ros_ext());
@@ -201,6 +217,21 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             )),
             cfg: self.cfg.clone(),
         })
+    }
+
+    fn get_data_path(&self) -> Result<PathBuf, ReductError> {
+        let data_path = if self.cfg.cs_config.backend_type == BackendType::Filesystem {
+            self.cfg.data_path.clone()
+        } else {
+            self.cfg
+                .cs_config
+                .cache_path
+                .clone()
+                .ok_or(internal_server_error!(
+                    "Cache path must be set for remote storage"
+                ))?
+        };
+        Ok(data_path)
     }
 
     pub fn init_storage_backend(&self) -> Result<(), ReductError> {

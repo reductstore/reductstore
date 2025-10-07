@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::HashMap;
@@ -11,26 +11,26 @@ use axum_extra::headers::HeaderMap;
 use reduct_base::batch::sort_headers_by_time;
 
 use crate::api::entry::common::err_to_batched_header;
-use crate::api::middleware::check_permissions;
+use crate::api::StateKeeper;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 
 // DELETE /:bucket/:entry/batch
 pub(super) async fn remove_batched_records(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     _: Body,
 ) -> Result<HeaderMap, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            WriteAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     let entry_name = path.get("entry_name").unwrap();
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;

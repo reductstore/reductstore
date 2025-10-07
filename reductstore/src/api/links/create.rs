@@ -4,8 +4,7 @@
 use crate::api::links::{
     derive_key_from_secret, QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum,
 };
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::ReadAccessPolicy;
 use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::Aes128SivAead;
@@ -26,19 +25,19 @@ use std::sync::Arc;
 
 // POST /api/v1/links/
 pub(super) async fn create(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
     Path(file_name): Path<String>,
     params: QueryLinkCreateRequestAxum,
 ) -> Result<QueryLinkCreateResponseAxum, HttpError> {
-    check_permissions(
-        &components,
-        &headers,
-        ReadAccessPolicy {
-            bucket: &params.0.bucket,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            ReadAccessPolicy {
+                bucket: &params.0.bucket,
+            },
+        )
+        .await?;
 
     if params.0.query.query_type != reduct_base::msg::entry_api::QueryType::Query {
         return Err(unprocessable_entity!("Only 'Query' type is supported for query links").into());
@@ -102,7 +101,7 @@ pub(super) async fn create(
 mod tests {
     use super::*;
     use crate::api::links::tests::create_query_link;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
     use std::sync::Arc;
@@ -110,9 +109,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_query_link(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let components = components.await;
-
+    async fn test_create_query_link(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
+        let components = keeper.components();
         let response = create_query_link(
             headers,
             components,
@@ -139,10 +138,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_query_link_invalid_type(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.components();
         let err = create_query_link(
             headers,
             components,
