@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 pub mod io;
+mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
@@ -11,6 +12,7 @@ use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
 use crate::cfg::io::IoConfig;
+use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::cache::Cache;
@@ -60,6 +62,7 @@ pub struct Cfg {
     pub io_conf: IoConfig,
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
+    pub lock_file_config: LockFileConfig,
 }
 
 impl Default for Cfg {
@@ -83,6 +86,7 @@ impl Default for Cfg {
             io_conf: IoConfig::default(),
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
+            lock_file_config: LockFileConfig::default(),
         }
     }
 }
@@ -144,6 +148,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             io_conf: Self::parse_io_config(&mut env),
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: Self::parse_remote_storage_cfg(&mut env),
+            lock_file_config: Self::parse_lock_file_config(&mut env),
         };
 
         let license = parse_license(cfg.license_path.clone());
@@ -166,9 +171,14 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub fn build_lock_file(&self) -> Result<BoxedLockFile, ReductError> {
         let data_path = self.get_data_path()?;
 
+        if !self.cfg.lock_file_config.enabled {
+            return Ok(LockFileBuilder::new().build());
+        }
+
         let lock_file = LockFileBuilder::new()
             .with_path(&data_path.join(".lock"))
-            .with_timeout(Duration::from_secs(120))
+            .with_failure_action(self.cfg.lock_file_config.failure_action.clone())
+            .with_timeout(self.cfg.lock_file_config.timeout.clone())
             .build();
 
         Ok(lock_file)
