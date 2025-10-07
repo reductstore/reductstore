@@ -88,7 +88,7 @@ mod tests {
     use super::*;
     use axum::body::HttpBody;
 
-    use crate::api::tests::keeper;
+    use crate::api::tests::{keeper, waiting_keeper};
     use rstest::rstest;
 
     #[rstest]
@@ -101,5 +101,22 @@ mod tests {
             .into_response();
         assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/png");
         assert_eq!(response.body().size_hint().lower(), 592);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_redirect(#[future] keeper: Arc<StateKeeper>) {
+        let response = redirect_to_index(State(keeper.await)).await.into_response();
+        assert_eq!(response.status(), StatusCode::FOUND);
+        assert_eq!(response.headers().get(LOCATION).unwrap(), "/ui/");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_redirect_unavailable(#[future] waiting_keeper: Arc<StateKeeper>) {
+        let response = redirect_to_index(State(waiting_keeper.await))
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

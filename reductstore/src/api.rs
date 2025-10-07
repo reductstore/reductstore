@@ -289,7 +289,7 @@ mod tests {
     use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
-    use crate::lock_file::LockFileBuilder;
+    use crate::lock_file::{LockFile, LockFileBuilder};
     use crate::replication::create_replication_repo;
     use axum::body::Body;
     use axum::extract::Path;
@@ -373,6 +373,68 @@ mod tests {
             assert_eq!(
                 resp.headers().get("x-reduct-error").unwrap(),
                 HeaderValue::from_static("Unparsable message")
+            );
+        }
+    }
+
+    mod state_keeper {
+        use super::*;
+        use crate::auth::policy::FullAccessPolicy;
+        use axum::body::to_bytes;
+        use rstest::rstest;
+        use tokio;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_anonymous(#[future] keeper: Arc<StateKeeper>) {
+            let keeper = keeper.await;
+            let components = keeper.get_anonymous().await.unwrap();
+            assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_ok(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let components = keeper
+                .get_with_permissions(&headers, FullAccessPolicy {})
+                .await
+                .unwrap();
+            assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_error(#[future] keeper: Arc<StateKeeper>) {
+            let mut headers = HeaderMap::new();
+            headers.typed_insert(Authorization::bearer("bad-token").unwrap());
+
+            let keeper = keeper.await;
+            let err = keeper
+                .get_with_permissions(&headers, FullAccessPolicy {})
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                HttpError::new(ErrorCode::Unauthorized, "Invalid token")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_locked(#[future] waiting_keeper: Arc<StateKeeper>) {
+            let keeper = waiting_keeper.await;
+            let err = keeper.get_anonymous().await.err().unwrap();
+            assert_eq!(
+                err,
+                HttpError::new(
+                    ErrorCode::ServiceUnavailable,
+                    "The server is starting up, please try again later"
+                )
             );
         }
     }
@@ -475,6 +537,13 @@ mod tests {
     }
 
     #[fixture]
+    pub(crate) async fn waiting_keeper(#[future] keeper: Arc<StateKeeper>) -> Arc<StateKeeper> {
+        let mut keeper = Arc::try_unwrap(keeper.await).ok().unwrap();
+        keeper.lock_file = Arc::new(Box::new(WaitingLockFile {}));
+        Arc::new(keeper)
+    }
+
+    #[fixture]
     pub(crate) fn headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
@@ -493,5 +562,24 @@ mod tests {
     #[fixture]
     pub async fn empty_body() -> Body {
         Body::empty()
+    }
+
+    struct WaitingLockFile {}
+
+    #[async_trait::async_trait]
+    impl LockFile for WaitingLockFile {
+        async fn is_locked(&self) -> bool {
+            false
+        }
+
+        async fn is_failed(&self) -> bool {
+            false
+        }
+
+        async fn is_waiting(&self) -> bool {
+            true
+        }
+
+        fn release(&self) {}
     }
 }
